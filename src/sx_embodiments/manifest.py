@@ -4,9 +4,12 @@ Runtime kinematics, simulator adapters, network fetching, and serialization inte
 consumer boundaries. These records are the common vocabulary exchanged by those implementations.
 """
 
+import dataclasses
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import NewType
+from pathlib import Path
+from typing import NewType, Self
 from urllib.parse import urlparse
 
 EmbodimentId = NewType("EmbodimentId", str)
@@ -63,6 +66,45 @@ class AssetRef:
         if self.byte_size is not None and self.byte_size < 0:
             raise ValueError("asset byte_size must be non-negative")
 
+    @classmethod
+    def from_bytes(
+        cls,
+        content: bytes,
+        *,
+        uri: str,
+        format: AssetFormat,
+        role: AssetRole,
+        media_type: str | None = None,
+    ) -> Self:
+        """Create a canonical reference after hashing bytes at an ingest boundary."""
+        return cls(
+            uri=uri,
+            sha256=hashlib.sha256(content).hexdigest(),
+            format=format,
+            role=role,
+            media_type=media_type,
+            byte_size=len(content),
+        )
+
+    @classmethod
+    def from_path(
+        cls,
+        path: Path,
+        *,
+        format: AssetFormat,
+        role: AssetRole,
+        media_type: str | None = None,
+    ) -> Self:
+        """Hash a local asset and bind it to its absolute file URI."""
+        resolved = path.resolve(strict=True)
+        return cls.from_bytes(
+            resolved.read_bytes(),
+            uri=resolved.as_uri(),
+            format=format,
+            role=role,
+            media_type=media_type,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentManifest:
@@ -91,3 +133,83 @@ class EmbodimentManifest:
         identities = {(asset.uri, asset.sha256, asset.role) for asset in self.assets}
         if len(identities) != len(self.assets):
             raise ValueError("embodiment contains duplicate asset references")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the canonical JSON-compatible wire representation."""
+        return {
+            "schema_version": self.schema_version,
+            "embodiment_id": str(self.embodiment_id),
+            "name": self.name,
+            "dof": self.dof,
+            "link_count": self.link_count,
+            "assets": [
+                {
+                    "uri": asset.uri,
+                    "sha256": asset.sha256,
+                    "format": asset.format.value,
+                    "role": asset.role.value,
+                    "media_type": asset.media_type,
+                    "byte_size": asset.byte_size,
+                }
+                for asset in self.assets
+            ],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Embodiment:
+    """Validated robot-body invariants shared by real and simulated runtimes."""
+
+    embodiment_id: EmbodimentId
+    dof: int
+    joint_lower: tuple[float, ...]
+    joint_upper: tuple[float, ...]
+    home_joints: tuple[float, ...]
+    gripper_travel_m: tuple[float, float]
+    policy_hz: float
+    mobile_base: bool
+    assets: tuple[AssetRef, ...] = ()
+    urdf_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if not self.embodiment_id.strip():
+            raise ValueError("embodiment_id must not be empty")
+        if self.dof <= 0:
+            raise ValueError(f"{self.embodiment_id}: dof must be positive")
+        for name, values in (
+            ("joint_lower", self.joint_lower),
+            ("joint_upper", self.joint_upper),
+            ("home_joints", self.home_joints),
+        ):
+            if len(values) != self.dof:
+                raise ValueError(
+                    f"{self.embodiment_id}: {name} must have length {self.dof}, got {len(values)}"
+                )
+        if any(
+            lower >= upper for lower, upper in zip(self.joint_lower, self.joint_upper, strict=True)
+        ):
+            raise ValueError(f"{self.embodiment_id}: joint_lower must be < joint_upper")
+        if any(
+            home < lower or home > upper
+            for home, lower, upper in zip(
+                self.home_joints, self.joint_lower, self.joint_upper, strict=True
+            )
+        ):
+            raise ValueError(f"{self.embodiment_id}: home_joints must lie within the limits")
+        lo, hi = self.gripper_travel_m
+        if not 0.0 <= lo < hi:
+            raise ValueError(f"{self.embodiment_id}: gripper travel must satisfy 0 <= lo < hi")
+        if self.policy_hz <= 0.0:
+            raise ValueError(f"{self.embodiment_id}: policy_hz must be positive")
+        if self.urdf_path is not None and not self.urdf_path.is_file():
+            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {self.urdf_path}")
+
+    @property
+    def gripper_max_width_m(self) -> float:
+        return self.gripper_travel_m[1]
+
+    def with_urdf(self, path: Path) -> Self:
+        """Attach a validated local URDF at an explicit runtime wiring site."""
+        if not path.is_file():
+            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {path}")
+        return dataclasses.replace(self, urdf_path=path)

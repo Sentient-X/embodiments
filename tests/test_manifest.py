@@ -1,6 +1,15 @@
 import pytest
 
-from sx_embodiments import AssetFormat, AssetRef, AssetRole, EmbodimentId, EmbodimentManifest
+from sx_embodiments import (
+    PANDA_OMRON,
+    PIPER,
+    AssetFormat,
+    AssetRef,
+    AssetRole,
+    Embodiment,
+    EmbodimentId,
+    EmbodimentManifest,
+)
 
 _DIGEST = "a" * 64
 
@@ -58,4 +67,24 @@ def test_manifest_rejects_duplicate_asset_identity() -> None:
             embodiment_id=EmbodimentId("robot"),
             name="Robot",
             assets=(asset, asset),
+        )
+
+
+def test_known_embodiments_share_validated_runtime_facts() -> None:
+    assert PIPER.dof == 6
+    assert PANDA_OMRON.mobile_base
+    assert PIPER.gripper_max_width_m == 0.07
+
+
+def test_runtime_embodiment_validates_joint_lengths() -> None:
+    with pytest.raises(ValueError, match="joint_lower"):
+        Embodiment(
+            embodiment_id=EmbodimentId("bad"),
+            dof=2,
+            joint_lower=(-1.0,),
+            joint_upper=(1.0, 1.0),
+            home_joints=(0.0, 0.0),
+            gripper_travel_m=(0.0, 0.05),
+            policy_hz=10.0,
+            mobile_base=False,
         )
