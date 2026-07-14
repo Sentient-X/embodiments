@@ -116,6 +116,7 @@ class EmbodimentManifest:
     schema_version: int = 1
     dof: int | None = None
     link_count: int | None = None
+    policy_hz: float | None = None  # control-loop / policy-query rate; None when unbound
 
     def __post_init__(self) -> None:
         if not self.embodiment_id.strip():
@@ -130,6 +131,8 @@ class EmbodimentManifest:
             raise ValueError("embodiment dof must be non-negative")
         if self.link_count is not None and self.link_count <= 0:
             raise ValueError("embodiment link_count must be positive")
+        if self.policy_hz is not None and self.policy_hz <= 0.0:
+            raise ValueError("embodiment policy_hz must be positive")
         identities = {(asset.uri, asset.sha256, asset.role) for asset in self.assets}
         if len(identities) != len(self.assets):
             raise ValueError("embodiment contains duplicate asset references")
@@ -142,6 +145,7 @@ class EmbodimentManifest:
             "name": self.name,
             "dof": self.dof,
             "link_count": self.link_count,
+            "policy_hz": self.policy_hz,
             "assets": [
                 {
                     "uri": asset.uri,

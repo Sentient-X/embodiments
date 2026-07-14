@@ -34,6 +34,48 @@ def test_manifest_accepts_content_addressed_urdf() -> None:
     assert manifest.assets == (asset,)
 
 
+def test_manifest_carries_optional_policy_hz() -> None:
+    asset = AssetRef(
+        uri="s3://robotics-assets/sha256/aa/model.urdf",
+        sha256=_DIGEST,
+        format=AssetFormat.URDF,
+        role=AssetRole.DESCRIPTION,
+    )
+
+    bound = EmbodimentManifest(
+        embodiment_id=EmbodimentId("piper@sha256:aaaa"),
+        name="Piper",
+        assets=(asset,),
+        policy_hz=30.0,
+    )
+    assert bound.policy_hz == 30.0
+    assert bound.to_dict()["policy_hz"] == 30.0
+
+    unbound = EmbodimentManifest(
+        embodiment_id=EmbodimentId("piper@sha256:aaaa"),
+        name="Piper",
+        assets=(asset,),
+    )
+    assert unbound.policy_hz is None
+    assert unbound.to_dict()["policy_hz"] is None
+
+
+def test_manifest_rejects_nonpositive_policy_hz() -> None:
+    asset = AssetRef(
+        uri="s3://robotics-assets/sha256/aa/model.urdf",
+        sha256=_DIGEST,
+        format=AssetFormat.URDF,
+        role=AssetRole.DESCRIPTION,
+    )
+    with pytest.raises(ValueError, match="policy_hz"):
+        EmbodimentManifest(
+            embodiment_id=EmbodimentId("robot"),
+            name="Robot",
+            assets=(asset,),
+            policy_hz=0.0,
+        )
+
+
 @pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])
 def test_asset_rejects_noncanonical_digest(digest: str) -> None:
     with pytest.raises(ValueError, match="sha256"):
