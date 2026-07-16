@@ -172,7 +172,6 @@ class Embodiment:
     gripper_travel_m: tuple[float, float]
     policy_hz: float
     mobile_base: bool
-    assets: tuple[AssetRef, ...] = ()
     urdf_path: Path | None = None
 
     def __post_init__(self) -> None:
