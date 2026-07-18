@@ -21,10 +21,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/sx_embodiments"]
 
-[tool.hatch.build.targets.sdist]
-# Description assets (URDF/MJCF + meshes) are repo data resolved via
-# sx_embodiments.assets.asset_root(); they never ship in distributions.
-exclude = ["assets/"]
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "sx_embodiments/_assets"
 
 [tool.ruff]
 target-version = "py312"

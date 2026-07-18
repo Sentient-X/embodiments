@@ -2,6 +2,7 @@
 
 import hashlib
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +95,16 @@ def test_env_override_fails_closed_on_bad_path(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", "/nonexistent/assets")
     with pytest.raises(AssetsUnavailableError):
         asset_root()
+
+
+def test_installed_asset_tree_resolves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from sx_embodiments import assets
+
+    package = tmp_path / "sx_embodiments"
+    installed = package / "_assets"
+    installed.mkdir(parents=True)
+    monkeypatch.setattr(assets, "__file__", str(package / "assets.py"))
+    assert assets.asset_root() == installed
 
 
 def test_missing_packaged_asset_fails_closed() -> None:

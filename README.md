@@ -22,10 +22,10 @@ must hash bytes before producing an `AssetRef`.
 ## Assets
 
 Canonical robot/capture-hardware *description* assets (URDF/MJCF and their meshes) live under
-`assets/` at the repo root — see `THIRD_PARTY_NOTICES.md` for provenance and licensing. They are
-deliberately excluded from wheels and sdists; code resolves them through
-`sx_embodiments.assets.asset_root()`, which honors the `SX_EMBODIMENTS_ASSETS` environment
-variable, falls back to the repo-relative `assets/` directory for editable/workspace installs,
+`assets/` at the repo root — see `THIRD_PARTY_NOTICES.md` for provenance and licensing. Wheels
+and sdists include that tree under `sx_embodiments/_assets`, so an installed package is complete.
+`sx_embodiments.assets.asset_root()` honors the `SX_EMBODIMENTS_ASSETS` environment variable,
+then resolves the installed tree, then the repo-relative `assets/` directory for editable installs,
 and otherwise raises a typed error (no silent fallback).
 
 The registry includes Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient humanoid,

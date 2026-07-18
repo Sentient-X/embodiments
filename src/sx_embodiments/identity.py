@@ -28,6 +28,18 @@ class EmbodimentManifestDigest(str):
         return super().__new__(cls, value)
 
 
+@dataclass(frozen=True, slots=True)
+class EmbodimentRef:
+    """Exact deployable hardware identity: body name plus immutable manifest revision."""
+
+    embodiment_id: EmbodimentId
+    manifest_sha256: EmbodimentManifestDigest
+
+    def __post_init__(self) -> None:
+        if not str(self.embodiment_id).strip():
+            raise ManifestSchemaError("embodiment ref id must not be empty")
+
+
 class EmbodimentKind(StrEnum):
     """What role a piece of hardware plays in the data lifecycle."""
 

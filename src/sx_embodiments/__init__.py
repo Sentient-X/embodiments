@@ -30,7 +30,14 @@ from .errors import (
     PartValidationError,
     UnknownEmbodimentError,
 )
-from .identity import EmbodimentId, EmbodimentKind, EmbodimentManifestDigest, Lineage, PartId
+from .identity import (
+    EmbodimentId,
+    EmbodimentKind,
+    EmbodimentManifestDigest,
+    EmbodimentRef,
+    Lineage,
+    PartId,
+)
 from .kinematic import Embodiment
 from .known import (
     EMBODIMENTS,
@@ -84,6 +91,7 @@ __all__ = [
     "EmbodimentKind",
     "EmbodimentManifest",
     "EmbodimentManifestDigest",
+    "EmbodimentRef",
     "EmbodimentSpec",
     "FlatLayout",
     "ForceTorqueSpec",

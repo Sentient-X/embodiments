@@ -81,6 +81,8 @@ def test_manifest_digest_is_canonical_and_revision_sensitive() -> None:
         assets=manifest.assets,
     )
     assert changed.digest() != manifest.digest()
+    assert manifest.ref().embodiment_id == manifest.embodiment_id
+    assert manifest.ref().manifest_sha256 == manifest.digest()
 
 
 @pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])

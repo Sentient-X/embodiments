@@ -17,7 +17,14 @@ from typing import cast
 from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
 from .errors import ManifestSchemaError
-from .identity import EmbodimentId, EmbodimentKind, EmbodimentManifestDigest, Lineage, PartId
+from .identity import (
+    EmbodimentId,
+    EmbodimentKind,
+    EmbodimentManifestDigest,
+    EmbodimentRef,
+    Lineage,
+    PartId,
+)
 from .layout import ChannelKind, ChannelSlot, FlatLayout
 from .parts import (
     ArmSpec,
@@ -168,6 +175,10 @@ class EmbodimentManifest:
         return EmbodimentManifestDigest(
             hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
         )
+
+    def ref(self) -> EmbodimentRef:
+        """Return the body-and-revision reference consumers carry across lifecycle gates."""
+        return EmbodimentRef(self.embodiment_id, self.digest())
 
 
 def _require(document: Mapping[str, object], key: str) -> object:

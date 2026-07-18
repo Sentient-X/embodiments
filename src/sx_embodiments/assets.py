@@ -5,10 +5,10 @@ uploads, R2). ``PackagedAsset`` is the repo-local case: a description file shipp
 this repository's ``assets/`` tree, content-pinned in the registry source and re-hashed by
 ``tests/test_asset_integrity.py`` (the file is the truth; the pin is the guard).
 
-Assets deliberately ship in neither wheels nor sdists. Resolution is explicit and
-fail-closed: the ``SX_EMBODIMENTS_ASSETS`` environment variable wins (deployed workers,
-standalone checkouts), else the repo-relative ``assets/`` directory (editable/workspace
-installs — how every glued consumer gets this package), else
+Assets ship in wheels and sdists so ``package://sx-embodiments/...`` remains resolvable
+outside the glued checkout. Resolution is explicit and fail-closed: the
+``SX_EMBODIMENTS_ASSETS`` environment variable wins (deployed workers), then the installed
+asset tree, then the repo-relative ``assets/`` directory (editable/workspace installs), else
 :class:`~sx_embodiments.errors.AssetsUnavailableError`. This module is the package's one
 sanctioned environment read (see ``tests/test_purity.py``).
 """
@@ -125,12 +125,14 @@ def asset_root() -> Path:
         if not root.is_dir():
             raise AssetsUnavailableError(f"{_ASSETS_ENV}={override!r} is not a directory")
         return root
+    installed = Path(__file__).resolve().parent / "_assets"
+    if installed.is_dir():
+        return installed
     repo_relative = Path(__file__).resolve().parents[2] / "assets"
     if repo_relative.is_dir():
         return repo_relative
     raise AssetsUnavailableError(
-        f"description assets not found: set {_ASSETS_ENV} or install the package "
-        "as an editable/workspace checkout of Sentient-X/embodiments"
+        f"description assets not found: set {_ASSETS_ENV} or reinstall sx-embodiments"
     )
 
 
