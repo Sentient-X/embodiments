@@ -9,8 +9,9 @@ from sx_embodiments import AssetsUnavailableError, PackagedAsset, asset_root
 from sx_embodiments.known.das import DAS_GRIPPER_URDF
 from sx_embodiments.known.piper import PIPER_MJCF
 from sx_embodiments.known.so101 import SO101_URDF
+from sx_embodiments.known.sxd_arm import SXD_ARM_URDF
 
-PINNED: tuple[PackagedAsset, ...] = (SO101_URDF, DAS_GRIPPER_URDF, PIPER_MJCF)
+PINNED: tuple[PackagedAsset, ...] = (SO101_URDF, DAS_GRIPPER_URDF, PIPER_MJCF, SXD_ARM_URDF)
 
 
 @pytest.mark.parametrize("asset", PINNED, ids=lambda a: a.relpath)
