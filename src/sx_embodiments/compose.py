@@ -21,6 +21,7 @@ from .parts import (
     DeviceSpec,
     ForceTorqueSpec,
     GripperSpec,
+    JointGroupSpec,
     MobileBaseSpec,
     Part,
 )
@@ -49,7 +50,7 @@ class Attachment:
 
 
 _SENSOR_PARTS = (CameraSpec, ForceTorqueSpec)
-_BODY_PARTS = (ArmSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
+_BODY_PARTS = (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +131,8 @@ def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
         part = attachment.part
         if isinstance(part, ArmSpec):
             names, kind = part.joint_names, ChannelKind.ARM_JOINT
+        elif isinstance(part, JointGroupSpec):
+            names, kind = part.joint_names, ChannelKind.BODY_JOINT
         elif isinstance(part, GripperSpec):
             names, kind = part.joint_names, ChannelKind.GRIPPER
         elif isinstance(part, MobileBaseSpec):

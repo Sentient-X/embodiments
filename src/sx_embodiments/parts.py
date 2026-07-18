@@ -82,6 +82,40 @@ class ArmSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class JointGroupSpec:
+    """An articulated body group that is not an arm, gripper, or mobile base.
+
+    Legs, torso/head chains, and linear lifts use this atom. ``joint_names`` contains
+    executed action channels only; passive/mimic joints stay in the description asset.
+    """
+
+    part_id: PartId
+    joint_names: tuple[str, ...]
+    joint_lower: tuple[float, ...]
+    joint_upper: tuple[float, ...]
+    home_joints: tuple[float, ...]
+    assets: tuple[PackagedAsset, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.joint_names:
+            raise PartValidationError(self.part_id, "a joint group needs at least one joint")
+        _validate_joint_box(self.part_id, self.joint_names, self.joint_lower, self.joint_upper)
+        if len(self.home_joints) != len(self.joint_names):
+            raise PartValidationError(self.part_id, "home_joints must match the joint count")
+        if any(
+            home < lo or home > hi
+            for home, lo, hi in zip(
+                self.home_joints, self.joint_lower, self.joint_upper, strict=True
+            )
+        ):
+            raise PartValidationError(self.part_id, "home_joints must lie within the limits")
+
+    @property
+    def dof(self) -> int:
+        return len(self.joint_names)
+
+
+@dataclass(frozen=True, slots=True)
 class MimicJoint:
     """A passive joint driven by another joint's value (URDF ``<mimic>``)."""
 
@@ -203,4 +237,12 @@ class ControlRates:
             raise PartValidationError(PartId("rates"), "low_level_hz must be positive")
 
 
-Part = ArmSpec | GripperSpec | CameraSpec | MobileBaseSpec | ForceTorqueSpec | DeviceSpec
+Part = (
+    ArmSpec
+    | JointGroupSpec
+    | GripperSpec
+    | CameraSpec
+    | MobileBaseSpec
+    | ForceTorqueSpec
+    | DeviceSpec
+)

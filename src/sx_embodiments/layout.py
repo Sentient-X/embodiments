@@ -16,6 +16,7 @@ from .identity import EmbodimentId, PartId
 
 class ChannelKind(StrEnum):
     ARM_JOINT = "arm_joint"
+    BODY_JOINT = "body_joint"
     GRIPPER = "gripper"
     BASE = "base"
 
@@ -82,7 +83,9 @@ class FlatLayout:
         block = self.action_dim // grippers
         first = [slot.kind for slot in self.slots[:block]]
         gripper_positions = [i for i, kind in enumerate(first) if kind is ChannelKind.GRIPPER]
-        if len(gripper_positions) != 1 or any(k is ChannelKind.BASE for k in first):
+        if len(gripper_positions) != 1 or any(
+            kind not in (ChannelKind.ARM_JOINT, ChannelKind.GRIPPER) for kind in first
+        ):
             raise LayoutError(self.embodiment_id, "block is not [arm joints…, one gripper]")
         for arm in range(1, grippers):
             kinds = [slot.kind for slot in self.slots[arm * block : (arm + 1) * block]]

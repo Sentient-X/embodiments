@@ -86,3 +86,24 @@ def test_every_declared_registry_layout_derives() -> None:
         if spec.layout_declared():
             layout = flat_layout(spec)
             assert layout.action_dim > 0 or spec.kind.value != "robot"
+
+
+def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
+    expected = {
+        "aloha": 14,
+        "rby1": 28,
+        "unitree-g1": 29,
+        "ur10e": 6,
+        "ur5e": 6,
+        "yor": 22,
+        "sentient-humanoid": 25,
+    }
+    assert {
+        embodiment_id: layout_for(EmbodimentId(embodiment_id)).action_dim
+        for embodiment_id in expected
+    } == expected
+
+
+def test_whole_body_layout_is_not_misclassified_as_arm_blocks() -> None:
+    with pytest.raises(LayoutError):
+        layout_for(EmbodimentId("rby1")).uniform_arm_blocks()

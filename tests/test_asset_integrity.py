@@ -5,13 +5,32 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from sx_embodiments import AssetsUnavailableError, PackagedAsset, asset_root
+from sx_embodiments import AssetFormat, AssetsUnavailableError, PackagedAsset, asset_root
+from sx_embodiments.known.aloha import ALOHA_MJCF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF
+from sx_embodiments.known.g1 import UNITREE_G1_MJCF
+from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
 from sx_embodiments.known.piper import PIPER_MJCF
+from sx_embodiments.known.rby1 import RBY1_MJCF
 from sx_embodiments.known.so101 import SO101_URDF
 from sx_embodiments.known.sxd_arm import SXD_ARM_URDF
+from sx_embodiments.known.universal_robots import UR5E_MJCF, UR10E_MJCF
+from sx_embodiments.known.yor import YOR_MJCF
 
-PINNED: tuple[PackagedAsset, ...] = (SO101_URDF, DAS_GRIPPER_URDF, PIPER_MJCF, SXD_ARM_URDF)
+PINNED: tuple[PackagedAsset, ...] = (
+    SO101_URDF,
+    DAS_GRIPPER_URDF,
+    PIPER_MJCF,
+    ALOHA_MJCF,
+    RBY1_MJCF,
+    UNITREE_G1_MJCF,
+    UR10E_MJCF,
+    UR5E_MJCF,
+    YOR_MJCF,
+    SENTIENT_HUMANOID_URDF,
+    SENTIENT_HUMANOID_MJCF,
+    SXD_ARM_URDF,
+)
 
 
 @pytest.mark.parametrize("asset", PINNED, ids=lambda a: a.relpath)
@@ -35,6 +54,7 @@ def test_urdf_mesh_references_exist() -> None:
     for asset, mesh_base in (
         (SO101_URDF, root / "so101"),
         (DAS_GRIPPER_URDF, root / "das_gripper_with_vr"),
+        (SENTIENT_HUMANOID_URDF, root / "humanoid_pkg"),
     ):
         tree = ET.parse(asset.path())
         for mesh in tree.getroot().iter("mesh"):
@@ -46,6 +66,26 @@ def test_urdf_mesh_references_exist() -> None:
                 tail = filename
             candidates = [mesh_base / tail, asset.path().parent / tail]
             assert any(c.is_file() for c in candidates), f"{asset.relpath}: missing {filename}"
+
+
+@pytest.mark.parametrize(
+    "asset",
+    tuple(asset for asset in PINNED if asset.format is AssetFormat.MJCF),
+    ids=lambda asset: asset.relpath,
+)
+def test_mjcf_dependencies_exist(asset: PackagedAsset) -> None:
+    tree = ET.parse(asset.path())
+    root = tree.getroot()
+    compiler = root.find("compiler")
+    meshdir = compiler.get("meshdir", "") if compiler is not None else ""
+    for mesh in root.iter("mesh"):
+        filename = mesh.get("file")
+        if filename is not None:
+            assert (asset.path().parent / meshdir / filename).resolve().is_file(), filename
+    for include in root.iter("include"):
+        filename = include.get("file")
+        assert filename is not None
+        assert (asset.path().parent / filename).is_file(), filename
 
 
 def test_env_override_fails_closed_on_bad_path(monkeypatch: pytest.MonkeyPatch) -> None:

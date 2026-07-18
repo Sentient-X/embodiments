@@ -50,6 +50,13 @@ def test_registry_ids_are_byte_stable() -> None:
     """These strings are live wire data (DB rows, .rrd meta, exports). Renames break data."""
     assert {str(eid) for eid in EMBODIMENTS} == {
         "piper",
+        "aloha",
+        "rby1",
+        "unitree-g1",
+        "ur10e",
+        "ur5e",
+        "yor",
+        "sentient-humanoid",
         "panda_omron",
         "franka",
         "libero_panda",

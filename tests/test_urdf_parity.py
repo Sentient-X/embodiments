@@ -9,6 +9,14 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from sx_embodiments.known.das import DAS_JAW_V4
+from sx_embodiments.known.humanoid import (
+    SENTIENT_HUMANOID_LEFT_ARM,
+    SENTIENT_HUMANOID_LEFT_LEG,
+    SENTIENT_HUMANOID_RIGHT_ARM,
+    SENTIENT_HUMANOID_RIGHT_LEG,
+    SENTIENT_HUMANOID_TORSO,
+    SENTIENT_HUMANOID_URDF,
+)
 from sx_embodiments.known.so101 import SO101_ARM, SO101_JAW, SO101_URDF
 
 
@@ -61,3 +69,22 @@ def test_das_gap_curve_shape() -> None:
     # inverse round-trips through the measured region
     for q in (0.1, 0.42, 0.8):
         assert abs(curve.inverse_at(curve.at(q)) - q) < 1e-9
+
+
+def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
+    joints = _movable_joints(SENTIENT_HUMANOID_URDF.path())
+    parts = (
+        SENTIENT_HUMANOID_TORSO,
+        SENTIENT_HUMANOID_RIGHT_ARM,
+        SENTIENT_HUMANOID_LEFT_ARM,
+        SENTIENT_HUMANOID_RIGHT_LEG,
+        SENTIENT_HUMANOID_LEFT_LEG,
+    )
+    for part in parts:
+        for index, name in enumerate(part.joint_names):
+            lower, upper, _ = joints[name]
+            assert (lower, upper) == (part.joint_lower[index], part.joint_upper[index])
+
+    executed = {name for part in parts for name in part.joint_names}
+    assert "waist_rod_joint" not in executed  # feedback/passive, never an action row
+    assert {"neck_yaw_joint", "head_joint"}.isdisjoint(executed)  # no motor assignment

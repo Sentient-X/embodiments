@@ -16,7 +16,14 @@ from .compose import EmbodimentSpec, camera_bindings, flat_layout
 from .errors import ManifestSchemaError
 from .identity import EmbodimentId, EmbodimentKind, Lineage
 from .layout import FlatLayout
-from .parts import ArmSpec, CameraBinding, ControlRates, GripperSpec, MobileBaseSpec
+from .parts import (
+    ArmSpec,
+    CameraBinding,
+    ControlRates,
+    GripperSpec,
+    JointGroupSpec,
+    MobileBaseSpec,
+)
 
 SCHEMA_VERSION = 2
 
@@ -224,7 +231,7 @@ def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
     seen: set[tuple[str, str]] = set()
     packaged: list[PackagedAsset] = []
     for attachment in spec.attachments:
-        if isinstance(attachment.part, ArmSpec | GripperSpec | MobileBaseSpec):
+        if isinstance(attachment.part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
             packaged.extend(attachment.part.assets)
     packaged.extend(spec.extra_assets)
     for asset in packaged:
