@@ -19,5 +19,5 @@ Apache-2.0 like the rest of the repository.
 | `assets/yor/` | [YOR](https://github.com/YOR-robot/YOR) robot description, upstream commit pinned in `assets/yor/yor.commit`. | MIT — `LICENSE` in-dir |
 | `assets/humanoid_pkg/` | [Sentient-X humanoid_pkg](https://github.com/Sentient-X/humanoid_pkg), retained hardware URDF plus the 28-joint MJCF and their description meshes; upstream commit pinned in `assets/humanoid_pkg/humanoid_pkg.commit`. | BSD-3-Clause — declared by the copied `package.xml` |
 
-The `assets/` tree ships in neither wheels nor sdists (see `pyproject.toml` hatch excludes);
-consumers resolve it via `sx_embodiments.assets.asset_root()`.
+The `assets/` tree ships in wheels as `sx_embodiments/_assets/` and is retained in sdists.
+Consumers resolve the installed or editable tree via `sx_embodiments.assets.asset_root()`.

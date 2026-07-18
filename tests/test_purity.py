@@ -8,7 +8,7 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "sx_embodiments"
 _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_embodiments"}
 
 # The one sanctioned environment read: assets.py resolves SX_EMBODIMENTS_ASSETS because
-# description assets ship outside wheels (see the module docstring). Nothing else may.
+# Deployed workers may override the packaged description tree. Nothing else reads the environment.
 _ENV_ALLOWED = {"assets.py"}
 
 
