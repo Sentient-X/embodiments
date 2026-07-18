@@ -1,141 +1,64 @@
-"""Immutable, storage-neutral embodiment manifests.
+"""Immutable, storage-neutral embodiment manifests (wire schema_version 2).
 
-Runtime kinematics, simulator adapters, network fetching, and serialization intentionally live at
-consumer boundaries. These records are the common vocabulary exchanged by those implementations.
+Runtime kinematics, simulator adapters, network fetching, and serialization intentionally
+live at consumer boundaries. These records are the common vocabulary exchanged by those
+implementations. Version 2 adds the derived structure (kind, lineage, channel layout,
+cameras, rates) to the v1 identity + asset bundle; v1 is no longer emitted, and readers of
+either version fail closed on the other.
 """
 
-import dataclasses
-import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
-from pathlib import Path
-from typing import NewType, Self
-from urllib.parse import urlparse
+from typing import cast
 
-EmbodimentId = NewType("EmbodimentId", str)
+from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset
+from .compose import EmbodimentSpec, camera_bindings, flat_layout
+from .errors import ManifestSchemaError
+from .identity import EmbodimentId, EmbodimentKind, Lineage
+from .layout import FlatLayout
+from .parts import ArmSpec, CameraBinding, ControlRates, GripperSpec, MobileBaseSpec
 
-
-class AssetFormat(StrEnum):
-    """Portable formats understood by the robotics data platform."""
-
-    URDF = "urdf"
-    MJCF = "mjcf"
-    USD = "usd"
-    USDA = "usda"
-    USDC = "usdc"
-    USDZ = "usdz"
-    MESH = "mesh"
-    CALIBRATION = "calibration"
-    OTHER = "other"
-
-
-class AssetRole(StrEnum):
-    """How an asset participates in an embodiment bundle."""
-
-    DESCRIPTION = "description"
-    GEOMETRY = "geometry"
-    COLLISION = "collision"
-    CALIBRATION = "calibration"
-    TEXTURE = "texture"
-    CONTROLLER = "controller"
-    OTHER = "other"
-
-
-@dataclass(frozen=True, slots=True)
-class AssetRef:
-    """Content-addressed robotics asset at a catalog-resolvable URI."""
-
-    uri: str
-    sha256: str
-    format: AssetFormat
-    role: AssetRole
-    media_type: str | None = None
-    byte_size: int | None = None
-
-    def __post_init__(self) -> None:
-        parsed = urlparse(self.uri)
-        if not parsed.scheme:
-            raise ValueError("asset uri must be absolute and include a scheme")
-        digest = self.sha256.lower()
-        if (
-            self.sha256 != digest
-            or len(digest) != 64
-            or any(char not in "0123456789abcdef" for char in digest)
-        ):
-            raise ValueError("asset sha256 must be 64 lowercase hexadecimal characters")
-        if self.byte_size is not None and self.byte_size < 0:
-            raise ValueError("asset byte_size must be non-negative")
-
-    @classmethod
-    def from_bytes(
-        cls,
-        content: bytes,
-        *,
-        uri: str,
-        format: AssetFormat,
-        role: AssetRole,
-        media_type: str | None = None,
-    ) -> Self:
-        """Create a canonical reference after hashing bytes at an ingest boundary."""
-        return cls(
-            uri=uri,
-            sha256=hashlib.sha256(content).hexdigest(),
-            format=format,
-            role=role,
-            media_type=media_type,
-            byte_size=len(content),
-        )
-
-    @classmethod
-    def from_path(
-        cls,
-        path: Path,
-        *,
-        format: AssetFormat,
-        role: AssetRole,
-        media_type: str | None = None,
-    ) -> Self:
-        """Hash a local asset and bind it to its absolute file URI."""
-        resolved = path.resolve(strict=True)
-        return cls.from_bytes(
-            resolved.read_bytes(),
-            uri=resolved.as_uri(),
-            format=format,
-            role=role,
-            media_type=media_type,
-        )
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentManifest:
-    """Versioned identity and asset bundle for one robot embodiment revision."""
+    """Versioned identity, asset bundle, and derived structure for one embodiment."""
 
     embodiment_id: EmbodimentId
     name: str
     assets: tuple[AssetRef, ...]
-    schema_version: int = 1
+    schema_version: int = SCHEMA_VERSION
     dof: int | None = None
     link_count: int | None = None
     policy_hz: float | None = None  # control-loop / policy-query rate; None when unbound
+    kind: EmbodimentKind | None = None
+    lineage: Lineage | None = None
+    layout: FlatLayout | None = None
+    cameras: tuple[CameraBinding, ...] = ()
+    rates: ControlRates | None = None
 
     def __post_init__(self) -> None:
-        if not self.embodiment_id.strip():
-            raise ValueError("embodiment_id must not be empty")
+        eid = str(self.embodiment_id)
+        if not eid.strip():
+            raise ManifestSchemaError("embodiment_id must not be empty")
         if not self.name.strip():
-            raise ValueError("embodiment name must not be empty")
+            raise ManifestSchemaError("embodiment name must not be empty")
         if not self.assets:
-            raise ValueError("embodiment must reference at least one asset")
-        if self.schema_version != 1:
-            raise ValueError(f"unsupported embodiment schema_version: {self.schema_version}")
+            raise ManifestSchemaError("embodiment must reference at least one asset")
+        if self.schema_version != SCHEMA_VERSION:
+            raise ManifestSchemaError(
+                f"unsupported embodiment schema_version: {self.schema_version}"
+            )
         if self.dof is not None and self.dof < 0:
-            raise ValueError("embodiment dof must be non-negative")
+            raise ManifestSchemaError("embodiment dof must be non-negative")
         if self.link_count is not None and self.link_count <= 0:
-            raise ValueError("embodiment link_count must be positive")
+            raise ManifestSchemaError("embodiment link_count must be positive")
         if self.policy_hz is not None and self.policy_hz <= 0.0:
-            raise ValueError("embodiment policy_hz must be positive")
+            raise ManifestSchemaError("embodiment policy_hz must be positive")
         identities = {(asset.uri, asset.sha256, asset.role) for asset in self.assets}
         if len(identities) != len(self.assets):
-            raise ValueError("embodiment contains duplicate asset references")
+            raise ManifestSchemaError("embodiment contains duplicate asset references")
 
     def to_dict(self) -> dict[str, object]:
         """Return the canonical JSON-compatible wire representation."""
@@ -146,6 +69,44 @@ class EmbodimentManifest:
             "dof": self.dof,
             "link_count": self.link_count,
             "policy_hz": self.policy_hz,
+            "kind": self.kind.value if self.kind is not None else None,
+            "lineage": (
+                {
+                    "family": self.lineage.family,
+                    "variant": self.lineage.variant,
+                    "revision": self.lineage.revision,
+                }
+                if self.lineage is not None
+                else None
+            ),
+            "layout": (
+                [
+                    {
+                        "index": slot.index,
+                        "instance": slot.instance,
+                        "part_id": str(slot.part_id),
+                        "joint_name": slot.joint_name,
+                        "kind": slot.kind.value,
+                    }
+                    for slot in self.layout.slots
+                ]
+                if self.layout is not None
+                else None
+            ),
+            "cameras": [
+                {
+                    "name": binding.name,
+                    "model": binding.camera.model.value,
+                    "modality": binding.camera.modality.value,
+                    "fps": binding.camera.fps,
+                }
+                for binding in self.cameras
+            ],
+            "rates": (
+                {"policy_hz": self.rates.policy_hz, "low_level_hz": self.rates.low_level_hz}
+                if self.rates is not None
+                else None
+            ),
             "assets": [
                 {
                     "uri": asset.uri,
@@ -160,59 +121,128 @@ class EmbodimentManifest:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class Embodiment:
-    """Validated robot-body invariants shared by real and simulated runtimes."""
+def _require(document: Mapping[str, object], key: str) -> object:
+    if key not in document:
+        raise ManifestSchemaError(f"manifest document missing required key {key!r}")
+    return document[key]
 
-    embodiment_id: EmbodimentId
-    dof: int
-    joint_lower: tuple[float, ...]
-    joint_upper: tuple[float, ...]
-    home_joints: tuple[float, ...]
-    gripper_travel_m: tuple[float, float]
-    policy_hz: float
-    mobile_base: bool
-    urdf_path: Path | None = None
 
-    def __post_init__(self) -> None:
-        if not self.embodiment_id.strip():
-            raise ValueError("embodiment_id must not be empty")
-        if self.dof <= 0:
-            raise ValueError(f"{self.embodiment_id}: dof must be positive")
-        for name, values in (
-            ("joint_lower", self.joint_lower),
-            ("joint_upper", self.joint_upper),
-            ("home_joints", self.home_joints),
-        ):
-            if len(values) != self.dof:
-                raise ValueError(
-                    f"{self.embodiment_id}: {name} must have length {self.dof}, got {len(values)}"
-                )
-        if any(
-            lower >= upper for lower, upper in zip(self.joint_lower, self.joint_upper, strict=True)
-        ):
-            raise ValueError(f"{self.embodiment_id}: joint_lower must be < joint_upper")
-        if any(
-            home < lower or home > upper
-            for home, lower, upper in zip(
-                self.home_joints, self.joint_lower, self.joint_upper, strict=True
-            )
-        ):
-            raise ValueError(f"{self.embodiment_id}: home_joints must lie within the limits")
-        lo, hi = self.gripper_travel_m
-        if not 0.0 <= lo < hi:
-            raise ValueError(f"{self.embodiment_id}: gripper travel must satisfy 0 <= lo < hi")
-        if self.policy_hz <= 0.0:
-            raise ValueError(f"{self.embodiment_id}: policy_hz must be positive")
-        if self.urdf_path is not None and not self.urdf_path.is_file():
-            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {self.urdf_path}")
+def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
+    """Parse the v2 wire form, failing closed on any other version or malformed shape.
 
-    @property
-    def gripper_max_width_m(self) -> float:
-        return self.gripper_travel_m[1]
+    The derived sections (kind/lineage/layout/cameras/rates) are wire-emitted context for
+    non-Python consumers; the parsed record retains identity, descriptive facts, and the
+    asset bundle — consumers needing the derived structure resolve the id against the
+    registry, the single source.
+    """
+    version = _require(document, "schema_version")
+    if version != SCHEMA_VERSION:
+        raise ManifestSchemaError(f"unsupported embodiment schema_version: {version!r}")
+    embodiment_id = _require(document, "embodiment_id")
+    name = _require(document, "name")
+    raw_assets = _require(document, "assets")
+    if not isinstance(embodiment_id, str) or not isinstance(name, str):
+        raise ManifestSchemaError("embodiment_id and name must be strings")
+    if not isinstance(raw_assets, list):
+        raise ManifestSchemaError("assets must be a list")
+    assets = tuple(_parse_asset_entry(entry) for entry in cast(list[object], raw_assets))
+    return EmbodimentManifest(
+        embodiment_id=EmbodimentId(embodiment_id),
+        name=name,
+        assets=assets,
+        dof=_optional_int(document.get("dof"), "dof"),
+        link_count=_optional_int(document.get("link_count"), "link_count"),
+        policy_hz=_optional_float(document.get("policy_hz"), "policy_hz"),
+    )
 
-    def with_urdf(self, path: Path) -> Self:
-        """Attach a validated local URDF at an explicit runtime wiring site."""
-        if not path.is_file():
-            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {path}")
-        return dataclasses.replace(self, urdf_path=path)
+
+def _parse_asset_entry(raw: object) -> AssetRef:
+    if not isinstance(raw, Mapping):
+        raise ManifestSchemaError(f"asset entry must be a mapping, got {type(raw).__name__}")
+    entry = cast(Mapping[str, object], raw)
+    uri = entry.get("uri")
+    sha256 = entry.get("sha256")
+    fmt = entry.get("format")
+    role = entry.get("role")
+    if (
+        not isinstance(uri, str)
+        or not isinstance(sha256, str)
+        or not isinstance(fmt, str)
+        or not isinstance(role, str)
+    ):
+        raise ManifestSchemaError("asset entry needs string uri/sha256/format/role")
+    media_type = entry.get("media_type")
+    if media_type is not None and not isinstance(media_type, str):
+        raise ManifestSchemaError("asset media_type must be a string or null")
+    return AssetRef(
+        uri=uri,
+        sha256=sha256,
+        format=_parse_asset_format(fmt),
+        role=_parse_asset_role(role),
+        media_type=media_type,
+        byte_size=_optional_int(entry.get("byte_size"), "byte_size"),
+    )
+
+
+def _optional_int(value: object, key: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ManifestSchemaError(f"{key} must be an integer or null")
+    return value
+
+
+def _optional_float(value: object, key: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ManifestSchemaError(f"{key} must be a number or null")
+    return float(value)
+
+
+def _parse_asset_format(value: str) -> AssetFormat:
+    try:
+        return AssetFormat(value)
+    except ValueError as exc:
+        raise ManifestSchemaError(f"unknown asset format {value!r}") from exc
+
+
+def _parse_asset_role(value: str) -> AssetRole:
+    try:
+        return AssetRole(value)
+    except ValueError as exc:
+        raise ManifestSchemaError(f"unknown asset role {value!r}") from exc
+
+
+def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
+    """Derive the wire manifest from a spec at an explicit wiring site.
+
+    Resolves packaged assets on disk (fails closed when the asset tree is unavailable) and
+    dedups the parts' asset bundles.
+    """
+    refs: list[AssetRef] = []
+    seen: set[tuple[str, str]] = set()
+    packaged: list[PackagedAsset] = []
+    for attachment in spec.attachments:
+        if isinstance(attachment.part, ArmSpec | GripperSpec | MobileBaseSpec):
+            packaged.extend(attachment.part.assets)
+    packaged.extend(spec.extra_assets)
+    for asset in packaged:
+        key = (asset.relpath, asset.sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(asset.ref())
+    layout = flat_layout(spec) if spec.layout_declared() else None
+    return EmbodimentManifest(
+        embodiment_id=spec.embodiment_id,
+        name=spec.name,
+        assets=tuple(refs),
+        dof=layout.action_dim if layout is not None else None,
+        policy_hz=spec.rates.policy_hz if spec.rates is not None else None,
+        kind=spec.kind,
+        lineage=spec.lineage,
+        layout=layout,
+        cameras=camera_bindings(spec),
+        rates=spec.rates,
+    )

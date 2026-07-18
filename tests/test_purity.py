@@ -7,6 +7,10 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent.parent / "src" / "sx_embodiments"
 _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_embodiments"}
 
+# The one sanctioned environment read: assets.py resolves SX_EMBODIMENTS_ASSETS because
+# description assets ship outside wheels (see the module docstring). Nothing else may.
+_ENV_ALLOWED = {"assets.py"}
+
 
 def _modules() -> list[Path]:
     paths = sorted(SRC.rglob("*.py"))
@@ -28,11 +32,14 @@ def test_imports_stay_within_the_budget() -> None:
     assert not violations, "imports beyond the sx-embodiments budget:\n" + "\n".join(violations)
 
 
-def test_no_environment_reads() -> None:
+def test_no_environment_reads_outside_assets() -> None:
     for path in _modules():
+        if path.name in _ENV_ALLOWED and path.parent == SRC:
+            continue
         tree = ast.parse(path.read_text())
-        assert not [
+        offenders = [
             node
             for node in ast.walk(tree)
             if isinstance(node, ast.Attribute) and node.attr in {"environ", "getenv"}
         ]
+        assert not offenders, f"{path.relative_to(SRC)} reads the environment"
