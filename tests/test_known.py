@@ -53,6 +53,7 @@ def test_registry_ids_are_byte_stable() -> None:
         "panda_omron",
         "franka",
         "libero_panda",
+        "so101",
         "bimanual-so101",
         "das-umi-v4",
         "quest-ego",

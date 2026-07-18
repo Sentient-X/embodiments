@@ -50,6 +50,18 @@ def so101_side(side: str) -> tuple[Attachment, ...]:
     )
 
 
+SO101_SPEC: Final = EmbodimentSpec(
+    embodiment_id=EmbodimentId("so101"),
+    name="SO-101 (single arm)",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="so101"),
+    attachments=(
+        Attachment("arm", SO101_ARM, AttachmentRole.BODY),
+        Attachment("jaw", SO101_JAW, AttachmentRole.BODY, MountFrame("arm", "wrist_roll")),
+    ),
+    # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
+)
+
 BIMANUAL_SO101_SPEC: Final = EmbodimentSpec(
     embodiment_id=EmbodimentId("bimanual-so101"),
     name="Bimanual SO-101",

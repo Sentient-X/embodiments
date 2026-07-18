@@ -10,7 +10,6 @@ from sx_embodiments import (
     UnknownEmbodimentError,
     flat_layout,
     layout_for,
-    validate_action_widths,
 )
 from sx_embodiments.known.das import DAS_UMI_V4_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
@@ -65,19 +64,16 @@ def test_das_capture_rig_layout_is_two_jaw_channels() -> None:
     assert layout.uniform_arm_blocks() == (2, 1, 0)
 
 
-def test_undeclared_layout_fails_closed_but_widths_skip() -> None:
+def test_undeclared_layout_fails_closed() -> None:
     with pytest.raises(LayoutError):
         flat_layout(B601_DM_SPEC)  # DeviceSpec follower: channels unknown
-    # ...and the width validator therefore SKIPS rather than inventing a law.
-    validate_action_widths(B601_DM_SPEC.embodiment_id, joint_dim=99, gripper_dim=99)
 
 
 def test_width_validation_enforces_declared_layouts() -> None:
-    validate_action_widths(EmbodimentId("bimanual-so101"), joint_dim=10, gripper_dim=2)
+    layout = layout_for(EmbodimentId("bimanual-so101"))
+    layout.validate_widths(joint_dim=10, gripper_dim=2)
     with pytest.raises(LayoutError):
-        validate_action_widths(EmbodimentId("bimanual-so101"), joint_dim=12, gripper_dim=0)
-    # Unknown ids pass through: the registry cannot enforce a law it does not state.
-    validate_action_widths(EmbodimentId("not-a-robot"), joint_dim=1, gripper_dim=1)
+        layout.validate_widths(joint_dim=12, gripper_dim=0)
 
 
 def test_layout_for_unknown_id_fails_closed() -> None:

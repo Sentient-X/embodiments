@@ -9,15 +9,15 @@ runtimes bind — now DERIVED from their specs via ``kinematic_view`` and pinned
 from collections.abc import Mapping
 from typing import Final
 
-from ..compose import EmbodimentSpec, camera_names, flat_layout, kinematic_view
-from ..errors import LayoutError, UnknownEmbodimentError
+from ..compose import EmbodimentSpec, flat_layout, kinematic_view
+from ..errors import UnknownEmbodimentError
 from ..identity import EmbodimentId
 from ..kinematic import Embodiment
 from ..layout import FlatLayout
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .panda import FRANKA_SPEC, LIBERO_PANDA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
-from .so101 import BIMANUAL_SO101_SPEC
+from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
 from .stations import (
     B601_DM_SPEC,
     B601_RS_SPEC,
@@ -32,6 +32,7 @@ _ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
     LIBERO_PANDA_SPEC,
+    SO101_SPEC,
     BIMANUAL_SO101_SPEC,
     DAS_UMI_V4_SPEC,
     QUEST_EGO_SPEC,
@@ -61,43 +62,6 @@ def embodiment_spec(embodiment_id: EmbodimentId) -> EmbodimentSpec:
 def layout_for(embodiment_id: EmbodimentId) -> FlatLayout:
     """The declared flat-vector layout of a registered embodiment, or fail closed."""
     return flat_layout(embodiment_spec(embodiment_id))
-
-
-def validate_action_widths(
-    embodiment_id: EmbodimentId, *, joint_dim: int, gripper_dim: int
-) -> None:
-    """Enforce the declared action widths where the registry declares them.
-
-    Ids not in the registry — and registry entries whose layout is not yet declared (a
-    body part without a captured description) — pass through: the registry cannot enforce
-    a law it does not state. Registered, declared layouts enforce strictly (typed
-    ``LayoutError``).
-    """
-    spec = EMBODIMENTS.get(embodiment_id)
-    if spec is None or not spec.layout_declared():
-        return
-    flat_layout(spec).validate_widths(joint_dim=joint_dim, gripper_dim=gripper_dim)
-
-
-def validate_camera_keys(embodiment_id: EmbodimentId, keys: tuple[str, ...]) -> None:
-    """Enforce camera-key SUBSET semantics where the registry declares a camera set.
-
-    Any key present must be in the embodiment's declared set; absent cameras are fine
-    (partial capture is normal). Unknown ids and embodiments with no declared cameras
-    pass through — enforcement is never fictional.
-    """
-    spec = EMBODIMENTS.get(embodiment_id)
-    if spec is None:
-        return
-    declared = camera_names(spec)
-    if not declared:
-        return
-    unknown = [key for key in keys if key not in declared]
-    if unknown:
-        raise LayoutError(
-            str(embodiment_id),
-            f"camera keys {unknown!r} are not in the declared set {declared!r}",
-        )
 
 
 PIPER: Final[Embodiment] = kinematic_view(PIPER_SPEC)

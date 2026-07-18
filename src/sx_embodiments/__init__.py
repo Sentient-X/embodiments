@@ -38,8 +38,6 @@ from .known import (
     PIPER,
     embodiment_spec,
     layout_for,
-    validate_action_widths,
-    validate_camera_keys,
 )
 from .layout import ChannelKind, ChannelSlot, FlatLayout
 from .manifest import EmbodimentManifest, manifest_for, manifest_from_dict
@@ -110,6 +108,4 @@ __all__ = [
     "manifest_for",
     "manifest_from_dict",
     "total_dof",
-    "validate_action_widths",
-    "validate_camera_keys",
 ]
