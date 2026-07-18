@@ -9,6 +9,7 @@ Apache-2.0 like the rest of the repository.
 | `assets/sxd_arm/` | First-party (the reference 6-DOF arm previously seeded by the data-factory backend from `backend/app/assets/sxd_arm.urdf`). | Apache-2.0 |
 | `assets/menagerie/agilex_piper/` | [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie), Agilex Piper model, upstream commit pinned in `assets/menagerie/menagerie.commit`. | MIT (RosenYin, 2024) — `LICENSE` in-dir |
 | `assets/menagerie/aloha/` | MuJoCo Menagerie, ALOHA 2 model, same upstream pin. | BSD-3-Clause — `LICENSE` in-dir |
+| `assets/menagerie/franka_emika_panda/` | MuJoCo Menagerie, Franka Emika Panda model, same upstream pin. | Apache-2.0 — `LICENSE` in-dir |
 | `assets/menagerie/i2rt_yam/` | MuJoCo Menagerie, I2RT YAM model, same upstream pin. | MIT (i2rt robotics, 2025) — `LICENSE` in-dir |
 | `assets/menagerie/rainbow_robotics_rby1/` | MuJoCo Menagerie, Rainbow Robotics RBY1 model family, same upstream pin. | Apache-2.0 — `LICENSE` in-dir |
 | `assets/menagerie/unitree_g1/` | MuJoCo Menagerie, Unitree G1 model family, same upstream pin. | BSD-3-Clause — `LICENSE` in-dir |

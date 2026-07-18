@@ -11,8 +11,21 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType
 
+from .errors import ManifestSchemaError
+
 EmbodimentId = NewType("EmbodimentId", str)
 PartId = NewType("PartId", str)
+
+
+class EmbodimentManifestDigest(str):
+    """Validated lowercase SHA-256 identity of a complete manifest revision."""
+
+    def __new__(cls, value: str) -> "EmbodimentManifestDigest":
+        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+            raise ManifestSchemaError(
+                "embodiment manifest digest must be 64 lowercase hexadecimal characters"
+            )
+        return super().__new__(cls, value)
 
 
 class EmbodimentKind(StrEnum):

@@ -13,6 +13,7 @@ from sx_embodiments import (
     Embodiment,
     EmbodimentId,
     EmbodimentManifest,
+    EmbodimentManifestDigest,
     LayoutError,
     ManifestSchemaError,
     PartValidationError,
@@ -21,6 +22,7 @@ from sx_embodiments import (
     manifest_from_dict,
 )
 from sx_embodiments.known.das import DAS_UMI_V4_SPEC
+from sx_embodiments.known.panda import LIBERO_PANDA_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
 from sx_embodiments.known.so101 import BIMANUAL_SO101_SPEC
 
@@ -65,15 +67,36 @@ def test_manifest_v2_round_trips_identity_and_assets() -> None:
     layout = cast(list[dict[str, object]], wire["layout"])
     assert len(layout) == 7
     parsed = manifest_from_dict(wire)
-    assert parsed.embodiment_id == manifest.embodiment_id
-    assert parsed.assets == manifest.assets
+    assert parsed == manifest
     assert parsed.dof == 7
+
+
+def test_manifest_digest_is_canonical_and_revision_sensitive() -> None:
+    manifest = manifest_for(PIPER_SPEC)
+    assert len(manifest.digest()) == 64
+    assert manifest.canonical_json() == manifest.canonical_json()
+    changed = EmbodimentManifest(
+        embodiment_id=manifest.embodiment_id,
+        name=f"{manifest.name} revision",
+        assets=manifest.assets,
+    )
+    assert changed.digest() != manifest.digest()
+
+
+@pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])
+def test_manifest_digest_type_fails_closed(digest: str) -> None:
+    with pytest.raises(ManifestSchemaError):
+        EmbodimentManifestDigest(digest)
 
 
 def test_manifest_from_dict_fails_closed() -> None:
     good = manifest_for(PIPER_SPEC).to_dict()
     with pytest.raises(ManifestSchemaError):
         manifest_from_dict({**good, "schema_version": 1})
+    with pytest.raises(ManifestSchemaError):
+        manifest_from_dict({**good, "schema_version": 2.0})
+    with pytest.raises(ManifestSchemaError):
+        manifest_from_dict({**good, "policy_hz": float("nan")})
     with pytest.raises(ManifestSchemaError):
         manifest_from_dict({key: value for key, value in good.items() if key != "assets"})
     raw_assets = cast(list[dict[str, object]], good["assets"])
@@ -94,10 +117,20 @@ def test_manifest_rejects_duplicate_assets() -> None:
 
 
 def test_capture_rig_manifest_carries_cameras() -> None:
-    wire = manifest_for(DAS_UMI_V4_SPEC).to_dict()
+    manifest = manifest_for(DAS_UMI_V4_SPEC)
+    wire = manifest.to_dict()
     cameras = cast(list[dict[str, object]], wire["cameras"])
     assert [camera["name"] for camera in cameras] == ["left_wrist", "right_wrist", "base"]
+    assert manifest_from_dict(wire) == manifest
     assert wire["dof"] == 2  # two jaw channels
+
+
+def test_libero_panda_has_a_deployable_asset_manifest() -> None:
+    manifest = manifest_for(LIBERO_PANDA_SPEC)
+    assert manifest.embodiment_id == EmbodimentId("libero_panda")
+    assert [(asset.format, asset.role) for asset in manifest.assets] == [
+        (AssetFormat.MJCF, AssetRole.DESCRIPTION)
+    ]
 
 
 def test_kinematic_view_rejects_multi_arm_bodies() -> None:

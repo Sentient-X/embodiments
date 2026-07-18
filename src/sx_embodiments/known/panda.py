@@ -1,16 +1,24 @@
 """Franka Panda family: the mobile panda_omron sim body, plus the bare-arm variants
 (``franka``, ``libero_panda``) already used as ids by the data-catalog and train.
 
-No description asset is packaged here: the RoboCasa/robosuite scene owns the sim MJCF
-(engine-registry names like ``robot0_joint1`` stay consumer-local per the name boundary),
-and no first-party Panda URDF exists in the stack.
+The canonical Menagerie MJCF supplies the portable description asset. RoboCasa/robosuite
+scene names such as ``robot0_joint1`` remain consumer-local per the name boundary.
 """
 
 from typing import Final
 
+from ..assets import AssetFormat, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, MobileBaseSpec
+
+PANDA_MJCF: Final = PackagedAsset(
+    relpath="menagerie/franka_emika_panda/panda.xml",
+    sha256="96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273",
+    format=AssetFormat.MJCF,
+    role=AssetRole.DESCRIPTION,
+    media_type="application/xml",
+)
 
 PANDA_ARM: Final = ArmSpec(
     part_id=PartId("panda-arm"),
@@ -26,6 +34,7 @@ PANDA_ARM: Final = ArmSpec(
     joint_lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
     joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
+    assets=(PANDA_MJCF,),
 )
 
 PANDA_GRIPPER: Final = GripperSpec(

@@ -9,9 +9,12 @@ This is its own repository (`Sentient-X/embodiments`), consumed by the
 `packages/sx-embodiments` (a uv workspace member; the import path is `sx_embodiments`). Its CI is
 standalone — the package has zero runtime dependencies.
 
-An `EmbodimentManifest` can reference URDF, MJCF, USD, meshes, calibration bundles, and related
-assets by URI and SHA-256 digest. Consumers remain responsible for fetching assets and for their
-own adapters: forward kinematics, simulator loading, validation policy, and Rerun visualization.
+An `EmbodimentManifest` schema-v2 document carries identity, kind/lineage, exact flat channel
+layout, cameras, control rates, and content-addressed assets. Its canonical JSON SHA-256 is the
+portable revision pin used by Worlds, Autonomy, Fleet, and the catalog. Packaged assets use stable
+`package://sx-embodiments/...` URIs, so identical checkouts produce identical manifest digests.
+Consumers remain responsible for resolving bytes and for their own adapters: forward kinematics,
+simulator loading, validation policy, and Rerun visualization.
 
 The digest is mandatory. A mutable URL is a location, not an asset identity; catalog registration
 must hash bytes before producing an `AssetRef`.
@@ -24,3 +27,7 @@ deliberately excluded from wheels and sdists; code resolves them through
 `sx_embodiments.assets.asset_root()`, which honors the `SX_EMBODIMENTS_ASSETS` environment
 variable, falls back to the repo-relative `assets/` directory for editable/workspace installs,
 and otherwise raises a typed error (no silent fallback).
+
+The registry includes Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient humanoid,
+Franka/Panda variants, SO-101 variants, DAS/Quest/YUBI capture rigs, and the supported teleop
+stations. Declaration order is the wire action order and is pinned by layout-law tests.

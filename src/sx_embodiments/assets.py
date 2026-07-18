@@ -163,10 +163,15 @@ class PackagedAsset:
         return resolved
 
     def ref(self) -> AssetRef:
-        """Project to a portable :class:`AssetRef` at an explicit wiring site."""
+        """Project to a portable :class:`AssetRef` at an explicit wiring site.
+
+        The URI names the package-relative asset, not its checkout path. Consumers use
+        :meth:`path` when they need local bytes; the stable URI keeps manifest content
+        identity byte-equal across machines and deployment layouts.
+        """
         resolved = self.path()
         return AssetRef(
-            uri=resolved.as_uri(),
+            uri=f"package://sx-embodiments/{self.relpath}",
             sha256=self.sha256,
             format=self.format,
             role=self.role,

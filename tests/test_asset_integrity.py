@@ -10,6 +10,7 @@ from sx_embodiments.known.aloha import ALOHA_MJCF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
+from sx_embodiments.known.panda import PANDA_MJCF
 from sx_embodiments.known.piper import PIPER_MJCF
 from sx_embodiments.known.rby1 import RBY1_MJCF
 from sx_embodiments.known.so101 import SO101_URDF
@@ -21,6 +22,7 @@ PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
     DAS_GRIPPER_URDF,
     PIPER_MJCF,
+    PANDA_MJCF,
     ALOHA_MJCF,
     RBY1_MJCF,
     UNITREE_G1_MJCF,
@@ -44,7 +46,7 @@ def test_description_parses_and_ref_projects(asset: PackagedAsset) -> None:
     ET.parse(asset.path())  # well-formed XML
     ref = asset.ref()
     assert ref.sha256 == asset.sha256
-    assert ref.uri.startswith("file://")
+    assert ref.uri == f"package://sx-embodiments/{asset.relpath}"
     assert ref.byte_size == asset.path().stat().st_size
 
 

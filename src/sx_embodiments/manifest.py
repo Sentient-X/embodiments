@@ -7,6 +7,9 @@ cameras, rates) to the v1 identity + asset bundle; v1 is no longer emitted, and 
 either version fail closed on the other.
 """
 
+import hashlib
+import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
@@ -14,15 +17,18 @@ from typing import cast
 from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
 from .errors import ManifestSchemaError
-from .identity import EmbodimentId, EmbodimentKind, Lineage
-from .layout import FlatLayout
+from .identity import EmbodimentId, EmbodimentKind, EmbodimentManifestDigest, Lineage, PartId
+from .layout import ChannelKind, ChannelSlot, FlatLayout
 from .parts import (
     ArmSpec,
     CameraBinding,
+    CameraModality,
+    CameraSpec,
     ControlRates,
     GripperSpec,
     JointGroupSpec,
     MobileBaseSpec,
+    SensorModel,
 )
 
 SCHEMA_VERSION = 2
@@ -53,6 +59,8 @@ class EmbodimentManifest:
             raise ManifestSchemaError("embodiment name must not be empty")
         if not self.assets:
             raise ManifestSchemaError("embodiment must reference at least one asset")
+        if type(self.schema_version) is not int:
+            raise ManifestSchemaError("embodiment schema_version must be an integer")
         if self.schema_version != SCHEMA_VERSION:
             raise ManifestSchemaError(
                 f"unsupported embodiment schema_version: {self.schema_version}"
@@ -61,8 +69,31 @@ class EmbodimentManifest:
             raise ManifestSchemaError("embodiment dof must be non-negative")
         if self.link_count is not None and self.link_count <= 0:
             raise ManifestSchemaError("embodiment link_count must be positive")
-        if self.policy_hz is not None and self.policy_hz <= 0.0:
-            raise ManifestSchemaError("embodiment policy_hz must be positive")
+        if self.policy_hz is not None and (
+            not math.isfinite(self.policy_hz) or self.policy_hz <= 0.0
+        ):
+            raise ManifestSchemaError("embodiment policy_hz must be positive and finite")
+        if self.layout is not None:
+            if self.layout.embodiment_id != self.embodiment_id:
+                raise ManifestSchemaError("layout embodiment_id must match the manifest")
+            if self.dof is not None and self.dof != self.layout.action_dim:
+                raise ManifestSchemaError("embodiment dof must match the layout width")
+        if (
+            self.rates is not None
+            and self.policy_hz is not None
+            and self.policy_hz != self.rates.policy_hz
+        ):
+            raise ManifestSchemaError("policy_hz must match rates.policy_hz")
+        camera_names = [binding.name for binding in self.cameras]
+        if len(set(camera_names)) != len(camera_names):
+            raise ManifestSchemaError("embodiment camera names must be unique")
+        if any(not math.isfinite(binding.camera.fps) for binding in self.cameras):
+            raise ManifestSchemaError("embodiment camera fps must be finite")
+        if self.rates is not None and (
+            not math.isfinite(self.rates.policy_hz)
+            or (self.rates.low_level_hz is not None and not math.isfinite(self.rates.low_level_hz))
+        ):
+            raise ManifestSchemaError("embodiment control rates must be finite")
         identities = {(asset.uri, asset.sha256, asset.role) for asset in self.assets}
         if len(identities) != len(self.assets):
             raise ManifestSchemaError("embodiment contains duplicate asset references")
@@ -103,6 +134,7 @@ class EmbodimentManifest:
             "cameras": [
                 {
                     "name": binding.name,
+                    "part_id": str(binding.camera.part_id),
                     "model": binding.camera.model.value,
                     "modality": binding.camera.modality.value,
                     "fps": binding.camera.fps,
@@ -127,6 +159,16 @@ class EmbodimentManifest:
             ],
         }
 
+    def canonical_json(self) -> str:
+        """Return the deterministic UTF-8 JSON text whose digest identifies this revision."""
+        return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    def digest(self) -> EmbodimentManifestDigest:
+        """Content identity of the complete manifest, including every referenced asset digest."""
+        return EmbodimentManifestDigest(
+            hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+        )
+
 
 def _require(document: Mapping[str, object], key: str) -> object:
     if key not in document:
@@ -135,15 +177,9 @@ def _require(document: Mapping[str, object], key: str) -> object:
 
 
 def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
-    """Parse the v2 wire form, failing closed on any other version or malformed shape.
-
-    The derived sections (kind/lineage/layout/cameras/rates) are wire-emitted context for
-    non-Python consumers; the parsed record retains identity, descriptive facts, and the
-    asset bundle — consumers needing the derived structure resolve the id against the
-    registry, the single source.
-    """
+    """Parse the complete v2 wire form, failing closed on malformed structure."""
     version = _require(document, "schema_version")
-    if version != SCHEMA_VERSION:
+    if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
         raise ManifestSchemaError(f"unsupported embodiment schema_version: {version!r}")
     embodiment_id = _require(document, "embodiment_id")
     name = _require(document, "name")
@@ -153,13 +189,126 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
     if not isinstance(raw_assets, list):
         raise ManifestSchemaError("assets must be a list")
     assets = tuple(_parse_asset_entry(entry) for entry in cast(list[object], raw_assets))
+    parsed_id = EmbodimentId(embodiment_id)
     return EmbodimentManifest(
-        embodiment_id=EmbodimentId(embodiment_id),
+        embodiment_id=parsed_id,
         name=name,
         assets=assets,
         dof=_optional_int(document.get("dof"), "dof"),
         link_count=_optional_int(document.get("link_count"), "link_count"),
         policy_hz=_optional_float(document.get("policy_hz"), "policy_hz"),
+        kind=_parse_kind(_require(document, "kind")),
+        lineage=_parse_lineage(_require(document, "lineage")),
+        layout=_parse_layout(_require(document, "layout"), parsed_id),
+        cameras=_parse_cameras(_require(document, "cameras")),
+        rates=_parse_rates(_require(document, "rates")),
+    )
+
+
+def _mapping(raw: object, label: str) -> Mapping[str, object]:
+    if not isinstance(raw, Mapping):
+        raise ManifestSchemaError(f"{label} must be a mapping")
+    return cast(Mapping[str, object], raw)
+
+
+def _string(entry: Mapping[str, object], key: str, label: str) -> str:
+    value = _require(entry, key)
+    if not isinstance(value, str):
+        raise ManifestSchemaError(f"{label}.{key} must be a string")
+    return value
+
+
+def _parse_kind(raw: object) -> EmbodimentKind | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ManifestSchemaError("kind must be a string or null")
+    try:
+        return EmbodimentKind(raw)
+    except ValueError as exc:
+        raise ManifestSchemaError(f"unknown embodiment kind {raw!r}") from exc
+
+
+def _parse_lineage(raw: object) -> Lineage | None:
+    if raw is None:
+        return None
+    entry = _mapping(raw, "lineage")
+    return Lineage(
+        family=_string(entry, "family", "lineage"),
+        variant=_string(entry, "variant", "lineage"),
+        revision=_string(entry, "revision", "lineage"),
+    )
+
+
+def _parse_layout(raw: object, embodiment_id: EmbodimentId) -> FlatLayout | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ManifestSchemaError("layout must be a list or null")
+    slots: list[ChannelSlot] = []
+    for offset, item in enumerate(cast(list[object], raw)):
+        entry = _mapping(item, f"layout[{offset}]")
+        index = _require(entry, "index")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ManifestSchemaError(f"layout[{offset}].index must be an integer")
+        raw_kind = _string(entry, "kind", f"layout[{offset}]")
+        try:
+            kind = ChannelKind(raw_kind)
+        except ValueError as exc:
+            raise ManifestSchemaError(f"unknown channel kind {raw_kind!r}") from exc
+        slots.append(
+            ChannelSlot(
+                index=index,
+                instance=_string(entry, "instance", f"layout[{offset}]"),
+                part_id=PartId(_string(entry, "part_id", f"layout[{offset}]")),
+                joint_name=_string(entry, "joint_name", f"layout[{offset}]"),
+                kind=kind,
+            )
+        )
+    return FlatLayout(embodiment_id=embodiment_id, slots=tuple(slots))
+
+
+def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
+    if not isinstance(raw, list):
+        raise ManifestSchemaError("cameras must be a list")
+    cameras: list[CameraBinding] = []
+    for offset, item in enumerate(cast(list[object], raw)):
+        label = f"cameras[{offset}]"
+        entry = _mapping(item, label)
+        raw_model = _string(entry, "model", label)
+        raw_modality = _string(entry, "modality", label)
+        try:
+            model = SensorModel(raw_model)
+            modality = CameraModality(raw_modality)
+        except ValueError as exc:
+            raise ManifestSchemaError(f"unknown camera vocabulary in {label}") from exc
+        fps = _optional_float(_require(entry, "fps"), f"{label}.fps")
+        if fps is None:
+            raise ManifestSchemaError(f"{label}.fps must be a number")
+        cameras.append(
+            CameraBinding(
+                name=_string(entry, "name", label),
+                camera=CameraSpec(
+                    part_id=PartId(_string(entry, "part_id", label)),
+                    model=model,
+                    modality=modality,
+                    fps=fps,
+                ),
+            )
+        )
+    return tuple(cameras)
+
+
+def _parse_rates(raw: object) -> ControlRates | None:
+    if raw is None:
+        return None
+    entry = _mapping(raw, "rates")
+    policy_hz = _optional_float(_require(entry, "policy_hz"), "rates.policy_hz")
+    if policy_hz is None:
+        raise ManifestSchemaError("rates.policy_hz must be a number")
+    return ControlRates(
+        policy_hz=policy_hz,
+        low_level_hz=_optional_float(_require(entry, "low_level_hz"), "rates.low_level_hz"),
     )
 
 
@@ -204,7 +353,10 @@ def _optional_float(value: object, key: str) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ManifestSchemaError(f"{key} must be a number or null")
-    return float(value)
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ManifestSchemaError(f"{key} must be finite")
+    return parsed
 
 
 def _parse_asset_format(value: str) -> AssetFormat:
