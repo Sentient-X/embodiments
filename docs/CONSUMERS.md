@@ -76,3 +76,9 @@ Each item lands only with its consumer, one change per row:
   registry declares the channels, never the command semantics over them.
 - **Episode/recording facts** (speed bins, quality ratings, per-episode
   control_hz): recording metadata, not hardware.
+
+One migration norm rides on the registry: pre-convention episodes are never
+reinterpreted or edited — if genuinely-unreproducible data ever needs a
+convention migration, a derived successor is minted with `layout_for` as the
+sole split authority and `derived_from` lineage (train DECISIONS 2026-07-19;
+sim evals regenerate from checkpoints instead).
