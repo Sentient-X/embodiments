@@ -3,7 +3,7 @@
 import pytest
 
 from sx_embodiments import (
-    EMBODIMENTS,
+    DEVELOPMENT_EMBODIMENTS,
     CameraModality,
     CameraSpec,
     EmbodimentId,
@@ -66,7 +66,7 @@ def test_camera_resolution_rejects_nonpositive() -> None:
 
 def test_insta360_umi_entry() -> None:
     """The X5 rig: equidistant fisheye wire fact, undeclared jaw layout, wrist camera pair."""
-    spec = EMBODIMENTS[EmbodimentId("insta360-umi")]
+    spec = DEVELOPMENT_EMBODIMENTS[EmbodimentId("insta360-umi")].spec
     assert not spec.layout_declared()  # jaw kinematics uncaptured -> enforcement skips
     bindings = camera_bindings(spec)
     assert tuple(binding.name for binding in bindings) == ("left_wrist", "right_wrist")

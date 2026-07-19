@@ -3,7 +3,7 @@
 import pytest
 
 from sx_embodiments import (
-    EMBODIMENTS,
+    EPISODE_READY_EMBODIMENTS,
     ChannelKind,
     EmbodimentId,
     LayoutError,
@@ -32,7 +32,7 @@ def test_bimanual_so101_layout_is_the_supervisors_wire_convention() -> None:
         "right_arm/wrist_roll",
         "right_jaw/gripper",
     )
-    assert layout.action_dim == 12
+    assert layout.channel_count == 12
     assert layout.arm_joint_count == 10
     assert layout.gripper_count == 2
     # The supervisors ChannelLayout(arms=2, block=6, gripper_index=5), derived not declared.
@@ -76,10 +76,10 @@ def test_layout_for_unknown_id_fails_closed() -> None:
 
 
 def test_every_declared_registry_layout_derives() -> None:
-    for spec in EMBODIMENTS.values():
+    for spec in EPISODE_READY_EMBODIMENTS.values():
         if spec.layout_declared():
             layout = flat_layout(spec)
-            assert layout.action_dim > 0 or spec.kind.value != "robot"
+            assert layout.channel_count > 0 or spec.kind.value != "robot"
 
 
 def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
@@ -94,7 +94,7 @@ def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
         "sentient-humanoid": 25,
     }
     assert {
-        embodiment_id: layout_for(EmbodimentId(embodiment_id)).action_dim
+        embodiment_id: layout_for(EmbodimentId(embodiment_id)).channel_count
         for embodiment_id in expected
     } == expected
 
@@ -102,22 +102,3 @@ def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
 def test_whole_body_layout_is_not_misclassified_as_arm_blocks() -> None:
     with pytest.raises(LayoutError):
         layout_for(EmbodimentId("rby1")).uniform_arm_blocks()
-
-
-def test_explicit_layout_may_mint_controller_channels() -> None:
-    """The explicit-layout law: an ``action_layout`` override is a controller wire
-    declaration — its slots may name virtual instances/parts that exist in no
-    attachment (libero_panda's cartesian controller), and the derivation is bypassed
-    entirely rather than cross-validated against the composition."""
-    from sx_embodiments.known.panda import LIBERO_PANDA_SPEC
-
-    layout = flat_layout(LIBERO_PANDA_SPEC)
-    assert layout is LIBERO_PANDA_SPEC.action_layout  # override, not derivation
-    attachment_instances = {a.instance for a in LIBERO_PANDA_SPEC.attachments}
-    slot_instances = {slot.instance for slot in layout.slots}
-    # Virtual controller instances and declared attachments may MIX in one layout:
-    # the cartesian channels are minted ("eef"), the gripper channel is the real part.
-    assert "eef" in slot_instances and "eef" not in attachment_instances
-    assert "gripper" in slot_instances and "gripper" in attachment_instances
-    assert layout.channel_names()[:3] == ("eef/delta_x", "eef/delta_y", "eef/delta_z")
-    assert layout.indices(ChannelKind.GRIPPER) == (6,)

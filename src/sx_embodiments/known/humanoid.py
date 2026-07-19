@@ -2,7 +2,7 @@
 
 The retained hardware URDF and motor-assignment table define the 25 executed channels.
 ``waist_rod_joint`` is feedback/passive, while neck/head are not in the motor assignment;
-all three remain in the description assets but never enter the action layout. The attached
+all three remain in the description assets but never enter the physical body layout. The attached
 28-joint MJCF is a simulation description whose limits differ from the hardware URDF, so
 the hardware URDF limits below win at the execution boundary.
 """

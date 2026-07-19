@@ -62,7 +62,6 @@ class AssetRole(StrEnum):
     COLLISION = "collision"
     CALIBRATION = "calibration"
     TEXTURE = "texture"
-    CONTROLLER = "controller"
     LICENSE = "license"
     OTHER = "other"
 

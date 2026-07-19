@@ -11,14 +11,13 @@ in the same change (the glued surface-with-consumer rule). Last full audit:
 
 | Consumer | Registry surface it binds | Enforcement |
 |---|---|---|
-| **train** (serl loop) | `embodiment_spec` (identity, fail-closed), `flat_layout` (channel identity: env joint names matched per slot; records emit/seed split at the declared slots — the same scatter convention as the catalog), `camera_names` (declared-camera membership), `manifest_for` (full manifest into the export artifact, with the layout's channel names in metadata) | typed errors before training; round-trip law test over interleaved layouts; artifact dof+channels cross-checks at load |
-| **train** (pi0 export, serve) | `manifest_for`/`manifest_from_dict`, `EmbodimentRef`/`EmbodimentManifestDigest` | round-trip validation at export |
-| **supervisors** | `layout_for(id).uniform_arm_blocks()` → the bimanual channel split | registry/layout drift is a startup crash — the model consumer |
-| **data-catalog** | `layout_for` + `ChannelKind.indices` (flat-vector reconstruction at ingest), manifest wire + digest store, `SensorModel`/`CameraModality` in API schemas | fail-closed manifest parsing; layout validation at joint-space wires |
+| **train** | `embodiment_spec`/`manifest_for` for physical identity and `sx-actions` for dataset, simulator, artifact, and service controller semantics | exact interface/manifest refs at ingest, export, catalog publication, and load; no width-derived controller inference |
+| **supervisors** | physical layout for deploy-record joint splits; exact `ActionInterfaceRef` on releases, targets, and deployments | release/target body, manifest, controller, and Worlds evidence must all agree before motion |
+| **data-catalog** | schema-v4 manifest wire plus immutable `sx-actions` documents and refs | fail-closed parsing, tenant-local digest resolution, segment/checkpoint foreign keys and lineage |
 | **data-factory** | `camera_bindings`/`embodiment_spec` (built-in seeds), `EmbodimentRef` resolution against the catalog, `AssetRef` content-addressing of customer URDFs | wire-bridge correlation by asset sha256 |
-| **sim-envs** | `PIPER`/`PANDA_OMRON` kinematic views on `SceneSpec.embodiment_id` (the env↔robot binding), `AssetRef` for scene assets | env registry binds task → body |
+| **sim-envs** | kinematic views and `AssetRef` for scene assets; exact action interface on `SceneSpec`, stores, and evaluation evidence | task, world, checkpoint, and controller revisions must agree |
 | **real2sim** | `AssetRef`/`EmbodimentManifest`/`validate_logical_path` — the bundle ingest producer | fail-closed closure validator |
-| **sx-telemetry** | `manifest_from_dict` + `ref_from_dict`/`ref_to_dict` (the envelope's embodiment wire — the registry owns the ref's wire form), `ChannelKind`/`layout.slots` (URDF joint animation), `resolve_asset` (digest-verified scene geometry) | `manifest.ref() != embodiment` fails closed; per-entity corruption tests |
+| **sx-telemetry** | manifest/ref parsing, physical layout for URDF animation, and digest-verified scene geometry; `sx-actions` owns the episode command contract | manifest and interface refs must agree; joint episode tensors are checked against exact interface channel kinds/order |
 | **enpire** | `PIPER`/`PANDA_OMRON`/`Embodiment` for drivers, safety derivation (joint limits → constraints), grasp/station typing | safety constraints derive from registry limits |
 | **sxd** (contracts-by-format) | none at runtime (accepted asymmetry) — a **registry parity test** pins the insta360 converter's fisheye model/fps/camera names byte-equal to `insta360-umi` | the parity-test pattern IS the enforcement for standalone consumers |
 
@@ -30,7 +29,7 @@ inside those paths are this registry's fact; the path grammar is not.
 
 Each item lands only with its consumer, one change per row:
 
-1. **supervisors' half-adopted so101 body** — the action layout already derives
+1. **supervisors' half-adopted so101 body** — the physical layout already derives
    from the registry, but home joints, joint limits, and control rate are
    hand-copied in `sim/env.py`, and the UI's joint labels re-spell the channel
    vocabulary (`ui/src/lib/teleop.ts`). Absorb: read `home_joints`/limits/
@@ -39,9 +38,8 @@ Each item lands only with its consumer, one change per row:
    customer URDFs, `hands`/`mobile_base` capability re-declared. Absorb:
    customer intake mints a registry-shaped `EmbodimentManifest` (the catalog
    bundle path) instead of a bespoke row joined by URDF sha256.
-3. **enpire's camera instance set + RoboCasa action slices** — `CameraMount`
-   name/role/serial sets and the hand-declared robosuite action layout could
-   bind to `camera_bindings`/`flat_layout` views.
+3. **enpire's camera instance set** — `CameraMount` name/role/serial sets could
+   bind to `camera_bindings`; action semantics now belong to `sx-actions`.
 4. **sim-envs per-robot scene metadata** — `_PRIMITIVE_META`/`_PANDA_META`
    re-state `ArmSpec.joint_names` and gripper travel for bodies the registry
    declares.
@@ -49,33 +47,21 @@ Each item lands only with its consumer, one change per row:
    task profiles, data-factory's `HandCount`, and the registry's part
    decomposition encode the same body-capability facts three ways; one derived
    view should serve all three.
-6. **the BC-family suffix split** — `train/data/lerobot_ingest.py` splits
-   actions by suffix and `loops/{bc,ki,ttt_bc,lap,a2a}.py` + `data/clap.py`
-   re-concatenate; internally consistent for LeRobot suffix data, divergent
-   from the layout scatter convention on interleaved bodies. Migrates to
-   `FlatLayout.indices` when a BC loop first consumes an interleaved catalog
-   dataset (the serl records boundary is the template).
-7. **train action-encoding vocabulary** — `ActionSpace`/`ActionMode`/
-   `ActionEncoding` live in `train.sim` today (env-declared, artifact-carried);
-   they promote here when a second repo consumes encodings (the record
-   vocabulary in sx-episodes is the likely trigger: emitted episodes currently
-   ride env-encoded actions on `joint_targets` without saying so).
-8. **the flat-vector split/join transform** — the wire↔(joints, grippers)
+6. **the flat-vector split/join transform** — the wire↔(joints, grippers)
    isomorphism is re-expressed in three consumers (train's
    `data/embodiment_actions.py` split/join, supervisors' `ChannelLayout`
    uniform-block re-encoding, sx-telemetry's scene column walk), each correct,
    each its own loop over `FlatLayout`. The shared owner is **sx-episodes**
    (it owns `JointAction` and carries numpy); it lands there when a second
-   consumer migrates off its local copy — the 2026-07-19 design-rigor audit's
-   finding 3, deferred exactly because a shared surface lands only with its
-   consumer.
-9. **the distortion-model vocabulary** — `sx_telemetry.DistortionModel` and
+   consumer migrates off its local copy. Controller vectors are deliberately
+   excluded: they remain flat and are governed by `sx-actions`.
+7. **the distortion-model vocabulary** — `sx_telemetry.DistortionModel` and
    data-pipeline's hardcoded allow-set in `embodiment_projection.py` spell the
    same string set twice (the sxd copy is forced by the contracts-by-format
    asymmetry — standalone workers cannot import workspace packages). Converges
    when sx-embodiments/sx-telemetry publish wheels; until then the sxd parity
    tests are the guard.
-10. **`EmbodimentRef` pydantic wrappers** — catalog/factory/sim-envs each keep
+8. **`EmbodimentRef` pydantic wrappers** — catalog/factory/sim-envs each keep
     a 2-field OpenAPI model (mandated by FastAPI codegen; each converts through
     the registry's validating types). The registry's `ref_to_dict`/
     `ref_from_dict` (first consumer: sx-telemetry's envelope wire) is the
@@ -94,9 +80,9 @@ Each item lands only with its consumer, one change per row:
   ManiSkill sensor names): properties of a *scene*, not a *body*. A robot entry
   deliberately declares no cameras — eyes arrive by composing the body into a
   rig or station (the character laws in `tests/test_known.py`).
-- **Controller-owned action encodings**: which encoding an env/controller uses
-  is the env's declaration (train's door derives it per control mode); the
-  registry declares the channels, never the command semantics over them.
+- **Controller-owned action interfaces**: the registry declares physical body channels,
+  never command semantics. `sx-actions` is the shared owner of controller space, mode,
+  normalization, bounds, frame, rate, and wire order.
 - **Episode/recording facts** (speed bins, quality ratings, per-episode
   control_hz): recording metadata, not hardware.
 

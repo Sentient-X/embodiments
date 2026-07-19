@@ -1,4 +1,4 @@
-"""Asset references, the v3 wire manifest, and the kinematic record's invariants."""
+"""Asset references, the v4 wire manifest, and the kinematic record's invariants."""
 
 from dataclasses import replace
 from pathlib import PurePosixPath
@@ -34,7 +34,7 @@ from sx_embodiments import (
     manifest_from_dict,
 )
 from sx_embodiments.known.das import DAS_UMI_V4_SPEC
-from sx_embodiments.known.panda import LIBERO_PANDA_SPEC
+from sx_embodiments.known.panda import FRANKA_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
 from sx_embodiments.known.so101 import BIMANUAL_SO101_SPEC
 
@@ -81,10 +81,10 @@ def test_from_bytes_hashes_content() -> None:
     assert len(ref.sha256) == 64
 
 
-def test_manifest_v3_round_trips_identity_and_assets() -> None:
+def test_manifest_v4_round_trips_identity_and_assets() -> None:
     manifest = manifest_for(PIPER_SPEC)
     wire = manifest.to_dict()
-    assert wire["schema_version"] == 3
+    assert wire["schema_version"] == 4
     assert wire["embodiment_id"] == "piper"
     assert wire["kind"] == "robot"
     layout = cast(list[dict[str, object]], wire["layout"])
@@ -163,10 +163,15 @@ def test_manifest_from_dict_fails_closed() -> None:
     bad_assets: list[dict[str, object]] = [{**entry, "format": "hologram"} for entry in raw_assets]
     with pytest.raises(ManifestSchemaError):
         manifest_from_dict({**good, "assets": bad_assets})
+    with pytest.raises(ManifestSchemaError, match="unknown"):
+        manifest_from_dict({**good, "future_semantic": True})
+    lineage = cast(dict[str, object], good["lineage"])
+    with pytest.raises(ManifestSchemaError, match="unknown"):
+        manifest_from_dict({**good, "lineage": {**lineage, "future": True}})
 
 
 def _minimal_manifest(assets: tuple[AssetRef, ...]) -> EmbodimentManifest:
-    """A structurally complete v3 manifest around the given asset bundle."""
+    """A structurally complete v4 manifest around the given asset bundle."""
     eid = EmbodimentId("x")
     return EmbodimentManifest(
         embodiment_id=eid,
@@ -221,9 +226,9 @@ def test_non_default_camera_optics_round_trip_and_keep_the_digest() -> None:
         manifest_from_dict(bad)
 
 
-def test_libero_panda_has_a_deployable_asset_manifest() -> None:
-    manifest = manifest_for(LIBERO_PANDA_SPEC)
-    assert manifest.embodiment_id == EmbodimentId("libero_panda")
+def test_franka_has_a_deployable_asset_manifest() -> None:
+    manifest = manifest_for(FRANKA_SPEC)
+    assert manifest.embodiment_id == EmbodimentId("franka")
     assert [(asset.format, asset.role) for asset in manifest.assets] == [
         (AssetFormat.URDF, AssetRole.DESCRIPTION),
         (AssetFormat.MJCF, AssetRole.DESCRIPTION),

@@ -1,8 +1,8 @@
-"""Immutable, storage-neutral episode-ready embodiment manifests (wire version 3).
+"""Immutable, storage-neutral episode-ready embodiment manifests (wire version 4).
 
 Runtime kinematics, simulator adapters, network fetching, and serialization intentionally
-live at consumer boundaries. Version 3 makes the authoritative URDF, action layout, asset
-provenance, and camera mounts mandatory. Historical v2 documents remain catalog legacy rows;
+live at consumer boundaries. Version 4 makes the authoritative URDF, physical layout, asset
+provenance, and camera mounts mandatory. Historical v2/v3 documents remain catalog legacy rows;
 this package neither emits nor silently upgrades records missing those facts.
 """
 
@@ -45,7 +45,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +66,7 @@ class ExecutionCapabilities:
 class EmbodimentManifest:
     """Versioned identity, asset bundle, and derived structure for one embodiment.
 
-    The v3-mandatory facts (``kind``/``lineage``/``layout``/``capabilities``/``link_count``)
+    The v4-mandatory facts (``kind``/``lineage``/``layout``/``capabilities``/``link_count``)
     are mandatory in the type, not just the runtime law — a constructed manifest never
     carries ``None`` there, so consumers never narrow. ``dof`` is a derived view of the
     layout (one representation per fact); the wire document still carries the key and the
@@ -89,8 +89,8 @@ class EmbodimentManifest:
 
     @property
     def dof(self) -> int:
-        """The action-vector width — always the layout's width, never a second spelling."""
-        return self.layout.action_dim
+        """The physical body-channel width, derived from the layout exactly once."""
+        return self.layout.channel_count
 
     def __post_init__(self) -> None:
         eid = str(self.embodiment_id)
@@ -256,11 +256,50 @@ def _require(document: Mapping[str, object], key: str) -> object:
     return document[key]
 
 
+def _exact_keys(document: Mapping[str, object], expected: set[str], label: str) -> None:
+    actual = set(document)
+    if actual != expected:
+        raise ManifestSchemaError(
+            f"{label} keys differ: missing={sorted(expected - actual)}, "
+            f"unknown={sorted(actual - expected)}"
+        )
+
+
+def _allowed_keys(
+    document: Mapping[str, object], required: set[str], allowed: set[str], label: str
+) -> None:
+    actual = set(document)
+    if not required <= actual or not actual <= allowed:
+        raise ManifestSchemaError(
+            f"{label} keys differ: missing={sorted(required - actual)}, "
+            f"unknown={sorted(actual - allowed)}"
+        )
+
+
 def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
-    """Parse the complete v3 wire form, failing closed on malformed structure."""
+    """Parse the complete v4 wire form, rejecting every unrepresented field."""
     version = _require(document, "schema_version")
     if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
         raise ManifestSchemaError(f"unsupported embodiment schema_version: {version!r}")
+    _exact_keys(
+        document,
+        {
+            "schema_version",
+            "embodiment_id",
+            "name",
+            "dof",
+            "link_count",
+            "policy_hz",
+            "kind",
+            "lineage",
+            "layout",
+            "capabilities",
+            "cameras",
+            "rates",
+            "assets",
+        },
+        "manifest",
+    )
     embodiment_id = _require(document, "embodiment_id")
     name = _require(document, "name")
     raw_assets = _require(document, "assets")
@@ -276,9 +315,9 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
         raise ManifestSchemaError("embodiment link_count is mandatory")
     # ``dof`` is derived from the layout; the wire key must agree, never diverge.
     dof = _optional_int(_require(document, "dof"), "dof")
-    if dof != layout.action_dim:
+    if dof != layout.channel_count:
         raise ManifestSchemaError(
-            f"embodiment dof {dof!r} does not match the layout width {layout.action_dim}"
+            f"embodiment dof {dof!r} does not match the layout width {layout.channel_count}"
         )
     return EmbodimentManifest(
         embodiment_id=parsed_id,
@@ -319,6 +358,7 @@ def _parse_kind(raw: object) -> EmbodimentKind:
 
 def _parse_lineage(raw: object) -> Lineage:
     entry = _mapping(raw, "lineage")
+    _exact_keys(entry, {"family", "variant", "revision"}, "lineage")
     return Lineage(
         family=_string(entry, "family", "lineage"),
         variant=_string(entry, "variant", "lineage"),
@@ -332,6 +372,11 @@ def _parse_layout(raw: object, embodiment_id: EmbodimentId) -> FlatLayout:
     slots: list[ChannelSlot] = []
     for offset, item in enumerate(cast(list[object], raw)):
         entry = _mapping(item, f"layout[{offset}]")
+        _exact_keys(
+            entry,
+            {"index", "instance", "part_id", "joint_name", "kind"},
+            f"layout[{offset}]",
+        )
         index = _require(entry, "index")
         if isinstance(index, bool) or not isinstance(index, int):
             raise ManifestSchemaError(f"layout[{offset}].index must be an integer")
@@ -359,6 +404,21 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
     for offset, item in enumerate(cast(list[object], raw)):
         label = f"cameras[{offset}]"
         entry = _mapping(item, label)
+        _exact_keys(
+            entry,
+            {
+                "name",
+                "part_id",
+                "model",
+                "modality",
+                "fps",
+                "projection",
+                "resolution",
+                "parent_instance",
+                "frame",
+            },
+            label,
+        )
         raw_model = _string(entry, "model", label)
         raw_modality = _string(entry, "modality", label)
         try:
@@ -390,6 +450,7 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
 
 def _parse_capabilities(raw: object) -> ExecutionCapabilities:
     entry = _mapping(raw, "capabilities")
+    _exact_keys(entry, {"manipulator_count", "mobile_base"}, "capabilities")
     manipulator_count = _require(entry, "manipulator_count")
     mobile_base = _require(entry, "mobile_base")
     if isinstance(manipulator_count, bool) or not isinstance(manipulator_count, int):
@@ -406,6 +467,7 @@ def _parse_rates(raw: object) -> ControlRates | None:
     if raw is None:
         return None
     entry = _mapping(raw, "rates")
+    _exact_keys(entry, {"policy_hz", "low_level_hz"}, "rates")
     policy_hz = _optional_float(_require(entry, "policy_hz"), "rates.policy_hz")
     if policy_hz is None:
         raise ManifestSchemaError("rates.policy_hz must be a number")
@@ -419,6 +481,8 @@ def _parse_asset_entry(raw: object) -> AssetRef:
     if not isinstance(raw, Mapping):
         raise ManifestSchemaError(f"asset entry must be a mapping, got {type(raw).__name__}")
     entry = cast(Mapping[str, object], raw)
+    required = {"uri", "sha256", "format", "role", "media_type", "byte_size", "provenance"}
+    _allowed_keys(entry, required, required | {"logical_path"}, "asset")
     uri = entry.get("uri")
     sha256 = entry.get("sha256")
     fmt = entry.get("format")
@@ -454,6 +518,11 @@ def _parse_asset_entry(raw: object) -> AssetRef:
 
 def _parse_provenance(raw: object) -> AssetProvenance:
     entry = _mapping(raw, "provenance")
+    _exact_keys(
+        entry,
+        {"repository", "revision", "path", "license_id", "generator"},
+        "provenance",
+    )
     generator = _require(entry, "generator")
     if generator is not None and not isinstance(generator, str):
         raise ManifestSchemaError("provenance.generator must be a string or null")
@@ -530,6 +599,7 @@ def ref_to_dict(ref: EmbodimentRef) -> dict[str, str]:
 
 def ref_from_dict(document: Mapping[str, object]) -> EmbodimentRef:
     """Parse the exact-hardware reference from its wire form, failing closed."""
+    _exact_keys(document, {"embodiment_id", "manifest_sha256"}, "embodiment ref")
     embodiment_id = _require(document, "embodiment_id")
     digest = _require(document, "manifest_sha256")
     if not isinstance(embodiment_id, str) or not isinstance(digest, str):
@@ -570,7 +640,7 @@ def manifest_for_assets(
 
     External-corpus ingest may observe a licensed description bundle whose bytes are not
     packaged in this repository. The caller owns hashing those bytes into :class:`AssetRef`
-    records; this package remains the only owner of the embodiment's identity, action layout,
+    records; this package remains the only owner of the embodiment's identity, physical layout,
     capabilities, camera mounts, rates, and manifest construction law.
     """
     urdfs = tuple(
@@ -597,7 +667,7 @@ def manifest_for_assets(
         raise ManifestSchemaError(
             f"{spec.embodiment_id}: authoritative URDF root must be a named <robot>"
         )
-    # A v3 manifest always carries the layout; an undeclared layout fails closed here
+    # A v4 manifest always carries the physical layout; an undeclared layout fails closed here
     # (flat_layout raises LayoutError) instead of minting an incomplete manifest.
     layout = flat_layout(spec)
     body = spec.body_attachments()

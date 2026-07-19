@@ -9,14 +9,19 @@ This is its own repository (`Sentient-X/embodiments`), consumed by the
 `packages/sx-embodiments` (a uv workspace member; the import path is `sx_embodiments`). Its CI is
 standalone — the package has zero runtime dependencies.
 
-An `EmbodimentManifest` schema-v3 document carries identity, kind/lineage, exact flat channel
-layout, cameras and their mounting frames, nominal projection/resolution, control rates, and
-content-addressed assets with pinned source provenance. Every v3 manifest contains exactly one
+An `EmbodimentManifest` schema-v4 document carries identity, kind/lineage, exact physical
+body-channel layout, cameras and their mounting frames, nominal projection/resolution, control rates, and
+content-addressed assets with pinned source provenance. Every v4 manifest contains exactly one
 authoritative URDF description. Its canonical JSON SHA-256 is the portable revision pin used by Worlds,
 Autonomy, Fleet, RRD recordings, and the catalog. Packaged assets use stable
 `package://sx-embodiments/...` URIs, so identical checkouts produce identical manifest digests.
 Consumers remain responsible for resolving bytes and for runtime adapters such as forward
 kinematics and simulator loading; they do not redefine embodiment facts.
+
+Controller semantics do not live in the manifest. `sx-actions` binds a joint or Cartesian
+interface—including command frame, normalization, bounds, rate, and exact channel order—to one
+immutable manifest revision. This keeps a physical Franka body identical across LIBERO Cartesian
+control, joint control, and future controllers.
 
 External-corpus boundaries use `manifest_for_assets(...)`: callers provide only observed,
 content-addressed asset references and the exact authoritative URDF bytes. The package re-hashes
@@ -38,5 +43,5 @@ and otherwise raises a typed error (no silent fallback).
 The episode-ready registry includes Piper, NERO, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient
 humanoid, Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop
 stations. Entries without authoritative kinematics are deliberately not advertised as
-episode-ready. Declaration order is the wire action order and is pinned against the URDF joint set
+episode-ready. Declaration order is the physical body-channel order and is pinned against the URDF joint set
 by layout-law tests.

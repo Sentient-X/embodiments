@@ -1,10 +1,9 @@
-"""The flat action-vector channel layout of an embodiment, and its exactness laws.
+"""The flat physical body-channel layout of an embodiment, and its exactness laws.
 
-THE ORDERING LAW: the flat joint-space vector of an embodiment is the concatenation, over
+THE ORDERING LAW: the flat body-state vector of an embodiment is the concatenation, over
 its attachments in declared tuple order, restricted to body-role attachments, of each
-part's joint/channel names in the part's declared order unless an explicit controller
-layout is declared. Nothing reorders; declaration order IS wire order. Mount frames are
-informational and never affect channel order.
+part's joint/channel names in the part's declared order. Nothing reorders; declaration
+order IS wire order. Mount frames are informational and never affect channel order.
 ``tests/test_layout_laws.py`` pins exact index tuples for every registry entry.
 """
 
@@ -20,19 +19,16 @@ class ChannelKind(StrEnum):
     BODY_JOINT = "body_joint"
     GRIPPER = "gripper"
     BASE = "base"
-    EEF_TRANSLATION = "eef_translation"
-    EEF_ROTATION = "eef_rotation"
 
 
 @dataclass(frozen=True, slots=True)
 class ChannelSlot:
-    """One position in the flat vector."""
+    """One position in the physical body-state vector."""
 
     index: int
-    instance: str  # attachment instance ("left_arm") — or a virtual controller
-    # instance ("eef") when the layout is an explicit controller declaration
+    instance: str  # attachment instance, such as "left_arm"
     part_id: PartId
-    joint_name: str  # description joint or explicitly declared controller channel
+    joint_name: str  # description joint or physical base channel
     kind: ChannelKind
 
 
@@ -48,7 +44,8 @@ class FlatLayout:
             raise LayoutError(self.embodiment_id, "slot indices must be 0..n-1 in order")
 
     @property
-    def action_dim(self) -> int:
+    def channel_count(self) -> int:
+        """Number of physical state channels; this says nothing about a controller."""
         return len(self.slots)
 
     @property
@@ -61,8 +58,8 @@ class FlatLayout:
 
     @property
     def joint_count(self) -> int:
-        """All controlled non-gripper channels in the episode joint-target vector."""
-        return self.action_dim - self.gripper_count
+        """All non-gripper channels in the episode joint-state vector."""
+        return self.channel_count - self.gripper_count
 
     def indices(self, kind: ChannelKind) -> tuple[int, ...]:
         return tuple(slot.index for slot in self.slots if slot.kind is kind)
@@ -72,11 +69,11 @@ class FlatLayout:
         return tuple(f"{slot.instance}/{slot.joint_name}" for slot in self.slots)
 
     def validate_widths(self, *, joint_dim: int, gripper_dim: int) -> None:
-        """Fail closed unless the split (joint, gripper) widths match this layout."""
+        """Fail closed unless an episode's joint/gripper widths match this body."""
         if joint_dim != self.joint_count or gripper_dim != self.gripper_count:
             raise LayoutError(
                 self.embodiment_id,
-                f"action widths (joints={joint_dim}, grippers={gripper_dim}) do not match "
+                f"episode widths (joints={joint_dim}, grippers={gripper_dim}) do not match "
                 f"the declared layout (joints={self.joint_count}, "
                 f"grippers={self.gripper_count})",
             )
@@ -87,9 +84,9 @@ class FlatLayout:
         grippers = self.gripper_count
         if grippers == 0:
             raise LayoutError(self.embodiment_id, "no gripper channels; not an arm-block layout")
-        if self.action_dim % grippers != 0:
+        if self.channel_count % grippers != 0:
             raise LayoutError(self.embodiment_id, "channels do not divide into equal arm blocks")
-        block = self.action_dim // grippers
+        block = self.channel_count // grippers
         first = [slot.kind for slot in self.slots[:block]]
         gripper_positions = [i for i, kind in enumerate(first) if kind is ChannelKind.GRIPPER]
         if len(gripper_positions) != 1 or any(

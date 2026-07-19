@@ -1,5 +1,4 @@
-"""Franka Panda family: the mobile panda_omron sim body, plus the bare-arm variants
-(``franka``, ``libero_panda``) already used as ids by the data-catalog and train.
+"""Franka Panda family: the mobile panda_omron body and fixed-base Franka.
 
 The canonical Menagerie MJCF supplies the portable description asset. RoboCasa/robosuite
 scene names such as ``robot0_joint1`` remain consumer-local per the name boundary.
@@ -10,7 +9,6 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
-from ..layout import ChannelKind, ChannelSlot, FlatLayout
 from ..parts import (
     ArmSpec,
     ControlRates,
@@ -95,66 +93,5 @@ FRANKA_SPEC: Final = EmbodimentSpec(
     attachments=(
         Attachment("arm", PANDA_ARM, AttachmentRole.BODY),
         Attachment("gripper", PANDA_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "panda_link8")),
-    ),
-)
-
-LIBERO_PANDA_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("libero_panda"),
-    name="Franka Panda (LIBERO benchmark)",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="panda", variant="libero"),
-    attachments=(
-        Attachment("arm", PANDA_ARM, AttachmentRole.BODY),
-        Attachment("gripper", PANDA_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "panda_link8")),
-    ),
-    action_layout=FlatLayout(
-        embodiment_id=EmbodimentId("libero_panda"),
-        slots=(
-            ChannelSlot(
-                0,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_x",
-                ChannelKind.EEF_TRANSLATION,
-            ),
-            ChannelSlot(
-                1,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_y",
-                ChannelKind.EEF_TRANSLATION,
-            ),
-            ChannelSlot(
-                2,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_z",
-                ChannelKind.EEF_TRANSLATION,
-            ),
-            ChannelSlot(
-                3,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_roll",
-                ChannelKind.EEF_ROTATION,
-            ),
-            ChannelSlot(
-                4,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_pitch",
-                ChannelKind.EEF_ROTATION,
-            ),
-            ChannelSlot(
-                5,
-                "eef",
-                PartId("libero-cartesian-controller"),
-                "delta_yaw",
-                ChannelKind.EEF_ROTATION,
-            ),
-            ChannelSlot(
-                6, "gripper", PANDA_GRIPPER.part_id, "panda_finger_joint1", ChannelKind.GRIPPER
-            ),
-        ),
     ),
 )

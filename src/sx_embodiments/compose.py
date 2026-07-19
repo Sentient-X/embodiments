@@ -28,7 +28,7 @@ from .parts import (
 
 
 class AttachmentRole(StrEnum):
-    BODY = "body"  # contributes channels to the flat action vector
+    BODY = "body"  # contributes channels to the physical body-state vector
     LEADER = "leader"  # teleop input device: identity + assets, zero channels
     SENSOR = "sensor"  # cameras/FT: zero channels; cameras define the camera-name set
 
@@ -64,14 +64,6 @@ class EmbodimentSpec:
     attachments: tuple[Attachment, ...]
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
-    # THE EXPLICIT-LAYOUT LAW: ``action_layout`` overrides derivation when the wire order
-    # is a controller's, not the description's. Its slots may mix declared attachment
-    # instances with minted virtual controller channels (libero_panda: virtual
-    # ``eef``/``libero-cartesian-controller`` deltas + the real ``gripper``) — so slots
-    # are deliberately NOT cross-validated against attachments; only the embodiment_id
-    # must match. Pinned by
-    # ``tests/test_layout_laws.py::test_explicit_layout_may_mint_controller_channels``.
-    action_layout: FlatLayout | None = None
 
     def __post_init__(self) -> None:
         eid = str(self.embodiment_id)
@@ -81,11 +73,6 @@ class EmbodimentSpec:
             raise CompositionError(eid, "name must not be empty")
         if not self.attachments:
             raise CompositionError(eid, "an embodiment needs at least one attachment")
-        if (
-            self.action_layout is not None
-            and self.action_layout.embodiment_id != self.embodiment_id
-        ):
-            raise CompositionError(eid, "action layout embodiment_id must match the spec")
         seen: set[str] = set()
         for attachment in self.attachments:
             if not attachment.instance.strip():
@@ -133,9 +120,7 @@ class EmbodimentSpec:
 
 
 def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
-    """Derive the flat-vector layout per the ordering law, or fail closed."""
-    if spec.action_layout is not None:
-        return spec.action_layout
+    """Derive the physical body-channel layout per the ordering law, or fail closed."""
     if not spec.layout_declared():
         raise LayoutError(
             str(spec.embodiment_id),
@@ -169,7 +154,7 @@ def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
 
 
 def total_dof(spec: EmbodimentSpec) -> int:
-    return flat_layout(spec).action_dim
+    return flat_layout(spec).channel_count
 
 
 def camera_bindings(spec: EmbodimentSpec) -> tuple[CameraBinding, ...]:

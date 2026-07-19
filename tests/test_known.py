@@ -1,14 +1,13 @@
 """Registry pins: derived constants can never drift from the deployed values."""
 
-import pytest
-
 from sx_embodiments import (
-    EMBODIMENTS,
+    DEVELOPMENT_EMBODIMENTS,
+    EPISODE_READY_EMBODIMENTS,
     PANDA_OMRON,
     PIPER,
+    DevelopmentReason,
     EmbodimentId,
     EmbodimentKind,
-    MissingUrdfError,
     camera_names,
     kinematic_view,
     manifest_for,
@@ -52,7 +51,7 @@ def test_panda_omron_kinematic_view_is_the_deployed_constant() -> None:
 
 def test_registry_ids_are_byte_stable() -> None:
     """These strings are live wire data (DB rows, .rrd meta, exports). Renames break data."""
-    assert {str(eid) for eid in EMBODIMENTS} == {
+    assert {str(eid) for eid in EPISODE_READY_EMBODIMENTS} == {
         "piper",
         "nero",
         "aloha",
@@ -64,12 +63,10 @@ def test_registry_ids_are_byte_stable() -> None:
         "sentient-humanoid",
         "panda_omron",
         "franka",
-        "libero_panda",
         "so101",
         "bimanual-so101",
         "das-umi-v4",
         "quest-ego",
-        "insta360-umi",
         "yubi-mono",
         "yubi-depth",
         "yubi-widejaw",
@@ -78,13 +75,16 @@ def test_registry_ids_are_byte_stable() -> None:
 
 
 def test_camera_name_sets() -> None:
-    assert camera_names(EMBODIMENTS[EmbodimentId("das-umi-v4")]) == (
+    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("das-umi-v4")]) == (
         "left_wrist",
         "right_wrist",
         "base",
     )
-    assert camera_names(EMBODIMENTS[EmbodimentId("yubi-mono")]) == ("wrist_left", "wrist_right")
-    assert camera_names(EMBODIMENTS[EmbodimentId("piper")]) == ()
+    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("yubi-mono")]) == (
+        "wrist_left",
+        "wrist_right",
+    )
+    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("piper")]) == ()
 
 
 def test_every_entry_validates_and_kinds_are_coherent() -> None:
@@ -95,15 +95,11 @@ def test_every_entry_validates_and_kinds_are_coherent() -> None:
     Robots deliberately carry no cameras of their own — eyes arrive by composing
     the body into a rig or station (piperx-station's `front` over piper's none).
     """
-    for eid, spec in EMBODIMENTS.items():
+    for eid, spec in EPISODE_READY_EMBODIMENTS.items():
         assert spec.embodiment_id == eid
         assert spec.kind is not None, f"{eid} does not declare its character"
-        if eid == EmbodimentId("insta360-umi"):
-            with pytest.raises(MissingUrdfError):
-                manifest_for(spec)
-            continue
         manifest = manifest_for(spec)
-        assert manifest.schema_version == 3
+        assert manifest.schema_version == 4
         assert (
             sum(
                 asset.format.value == "urdf" and asset.role.value == "description"
@@ -116,3 +112,9 @@ def test_every_entry_validates_and_kinds_are_coherent() -> None:
             assert camera_names(spec), f"teleop station {eid} declares no camera"
         if spec.kind is EmbodimentKind.CAPTURE_RIG:
             assert camera_names(spec), f"capture rig {eid} declares no camera"
+
+
+def test_development_registry_exposes_typed_non_readiness() -> None:
+    entry = DEVELOPMENT_EMBODIMENTS[EmbodimentId("insta360-umi")]
+    assert entry.reason is DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION
+    assert entry.spec.embodiment_id == EmbodimentId("insta360-umi")

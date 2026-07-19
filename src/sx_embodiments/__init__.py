@@ -52,9 +52,12 @@ from .identity import (
 )
 from .kinematic import Embodiment
 from .known import (
-    EMBODIMENTS,
+    DEVELOPMENT_EMBODIMENTS,
+    EPISODE_READY_EMBODIMENTS,
     PANDA_OMRON,
     PIPER,
+    DevelopmentEmbodiment,
+    DevelopmentReason,
     embodiment_spec,
     layout_for,
 )
@@ -88,7 +91,8 @@ from .parts import (
 )
 
 __all__ = [
-    "EMBODIMENTS",
+    "DEVELOPMENT_EMBODIMENTS",
+    "EPISODE_READY_EMBODIMENTS",
     "PANDA_OMRON",
     "PIPER",
     "ArmSpec",
@@ -109,6 +113,8 @@ __all__ = [
     "CompositionError",
     "ControlRates",
     "Curve1D",
+    "DevelopmentEmbodiment",
+    "DevelopmentReason",
     "DeviceSpec",
     "Embodiment",
     "EmbodimentError",

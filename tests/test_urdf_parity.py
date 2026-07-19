@@ -8,14 +8,9 @@ Piper spec deliberately diverges from its menagerie MJCF (deployed limits win; s
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-import pytest
-
 from sx_embodiments import (
-    EMBODIMENTS,
+    EPISODE_READY_EMBODIMENTS,
     AssetFormat,
-    ChannelKind,
-    EmbodimentId,
-    MissingUrdfError,
     asset_root,
     manifest_for,
 )
@@ -102,11 +97,7 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
 
 
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
-    for spec in EMBODIMENTS.values():
-        if spec.embodiment_id == EmbodimentId("insta360-umi"):
-            with pytest.raises(MissingUrdfError):
-                manifest_for(spec)
-            continue
+    for spec in EPISODE_READY_EMBODIMENTS.values():
         manifest = manifest_for(spec)
         urdf = next(asset for asset in manifest.assets if asset.format is AssetFormat.URDF)
         relpath = urdf.uri.removeprefix("package://sx-embodiments/")
@@ -115,11 +106,6 @@ def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> N
             for joint in ET.parse(asset_root() / relpath).getroot().iter("joint")
             if joint.get("type") not in (None, "fixed")
         }
-        assert manifest.layout is not None
-        description_channels = {
-            slot.joint_name
-            for slot in manifest.layout.slots
-            if slot.kind not in (ChannelKind.EEF_TRANSLATION, ChannelKind.EEF_ROTATION)
-        }
+        description_channels = {slot.joint_name for slot in manifest.layout.slots}
         assert description_channels <= movable
         assert all(asset.provenance is not None for asset in manifest.assets)

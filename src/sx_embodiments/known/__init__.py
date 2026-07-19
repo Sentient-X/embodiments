@@ -1,12 +1,14 @@
-"""The canonical embodiment registry, one module per hardware family.
+"""The canonical episode-ready and development registries, one module per family.
 
-``EMBODIMENTS`` maps every canonical id to its :class:`~sx_embodiments.compose.EmbodimentSpec`.
+Episode-ready enumeration is total: every listed spec produces a complete manifest.
 ``PIPER`` and ``PANDA_OMRON`` remain the flat kinematic :class:`Embodiment` constants
 runtimes bind — now DERIVED from their specs via ``kinematic_view`` and pinned by
 ``tests/test_known.py`` so the derivation can never drift from the deployed values.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final
 
 from ..compose import EmbodimentSpec, flat_layout, kinematic_view
@@ -20,7 +22,7 @@ from .g1 import UNITREE_G1_SPEC
 from .humanoid import SENTIENT_HUMANOID_SPEC
 from .insta360 import INSTA360_UMI_SPEC
 from .nero import NERO_SPEC
-from .panda import FRANKA_SPEC, LIBERO_PANDA_SPEC, PANDA_OMRON_SPEC
+from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
@@ -41,26 +43,42 @@ _ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
     SENTIENT_HUMANOID_SPEC,
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
-    LIBERO_PANDA_SPEC,
     SO101_SPEC,
     BIMANUAL_SO101_SPEC,
     DAS_UMI_V4_SPEC,
     QUEST_EGO_SPEC,
-    INSTA360_UMI_SPEC,
     YUBI_MONO_SPEC,
     YUBI_DEPTH_SPEC,
     YUBI_WIDEJAW_SPEC,
     PIPERX_STATION_SPEC,
 )
 
-EMBODIMENTS: Final[Mapping[EmbodimentId, EmbodimentSpec]] = {
+EPISODE_READY_EMBODIMENTS: Final[Mapping[EmbodimentId, EmbodimentSpec]] = {
     spec.embodiment_id: spec for spec in _ALL_SPECS
+}
+
+
+class DevelopmentReason(StrEnum):
+    MISSING_AUTHORITATIVE_DESCRIPTION = "missing_authoritative_description"
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentEmbodiment:
+    spec: EmbodimentSpec
+    reason: DevelopmentReason
+
+
+DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentId, DevelopmentEmbodiment]] = {
+    INSTA360_UMI_SPEC.embodiment_id: DevelopmentEmbodiment(
+        spec=INSTA360_UMI_SPEC,
+        reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
+    )
 }
 
 
 def embodiment_spec(embodiment_id: EmbodimentId) -> EmbodimentSpec:
     """Resolve a registry entry, or fail closed."""
-    spec = EMBODIMENTS.get(embodiment_id)
+    spec = EPISODE_READY_EMBODIMENTS.get(embodiment_id)
     if spec is None:
         raise UnknownEmbodimentError(str(embodiment_id))
     return spec
