@@ -23,13 +23,7 @@ from .panda import FRANKA_SPEC, LIBERO_PANDA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
-from .stations import (
-    B601_DM_SPEC,
-    B601_RS_SPEC,
-    PIPERX_STATION_SPEC,
-    SENTIENT_A1_SPEC,
-    SENTIENT_A2_SPEC,
-)
+from .stations import PIPERX_STATION_SPEC
 from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
 from .yubi import YUBI_DEPTH_SPEC, YUBI_MONO_SPEC, YUBI_WIDEJAW_SPEC
@@ -54,11 +48,7 @@ _ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
     YUBI_MONO_SPEC,
     YUBI_DEPTH_SPEC,
     YUBI_WIDEJAW_SPEC,
-    B601_DM_SPEC,
-    B601_RS_SPEC,
     PIPERX_STATION_SPEC,
-    SENTIENT_A1_SPEC,
-    SENTIENT_A2_SPEC,
 )
 
 EMBODIMENTS: Final[Mapping[EmbodimentId, EmbodimentSpec]] = {

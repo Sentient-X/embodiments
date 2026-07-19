@@ -1,23 +1,23 @@
-"""Immutable, storage-neutral embodiment manifests (wire schema_version 2).
+"""Immutable, storage-neutral episode-ready embodiment manifests (wire version 3).
 
 Runtime kinematics, simulator adapters, network fetching, and serialization intentionally
-live at consumer boundaries. These records are the common vocabulary exchanged by those
-implementations. Version 2 adds the derived structure (kind, lineage, channel layout,
-cameras, rates) to the v1 identity + asset bundle; v1 is no longer emitted, and readers of
-either version fail closed on the other.
+live at consumer boundaries. Version 3 makes the authoritative URDF, action layout, asset
+provenance, and camera mounts mandatory. Historical v2 documents remain catalog legacy rows;
+this package neither emits nor silently upgrades records missing those facts.
 """
 
 import hashlib
 import json
 import math
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import cast
 
-from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset
+from .assets import AssetFormat, AssetProvenance, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
-from .errors import AssetIntegrityError, ManifestSchemaError
+from .errors import AssetIntegrityError, ManifestSchemaError, MissingUrdfError
 from .identity import (
     EmbodimentId,
     EmbodimentKind,
@@ -35,11 +35,26 @@ from .parts import (
     ControlRates,
     GripperSpec,
     JointGroupSpec,
+    LensProjection,
     MobileBaseSpec,
     SensorModel,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionCapabilities:
+    """Task-admission facts derived from the physical composition."""
+
+    manipulator_count: int
+    mobile_base: bool
+
+    def __post_init__(self) -> None:
+        if isinstance(self.manipulator_count, bool) or self.manipulator_count < 0:
+            raise ManifestSchemaError("manipulator_count must be a non-negative integer")
+        if type(self.mobile_base) is not bool:
+            raise ManifestSchemaError("mobile_base must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +71,7 @@ class EmbodimentManifest:
     kind: EmbodimentKind | None = None
     lineage: Lineage | None = None
     layout: FlatLayout | None = None
+    capabilities: ExecutionCapabilities | None = None
     cameras: tuple[CameraBinding, ...] = ()
     rates: ControlRates | None = None
 
@@ -73,19 +89,42 @@ class EmbodimentManifest:
             raise ManifestSchemaError(
                 f"unsupported embodiment schema_version: {self.schema_version}"
             )
-        if self.dof is not None and self.dof < 0:
-            raise ManifestSchemaError("embodiment dof must be non-negative")
-        if self.link_count is not None and self.link_count <= 0:
-            raise ManifestSchemaError("embodiment link_count must be positive")
+        # One blob may intentionally occur at multiple logical bundle paths.
+        identities = {
+            (asset.uri, asset.sha256, asset.role, asset.logical_path) for asset in self.assets
+        }
+        if len(identities) != len(self.assets):
+            raise ManifestSchemaError("embodiment contains duplicate asset references")
+        urdfs = [
+            asset
+            for asset in self.assets
+            if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
+        ]
+        if len(urdfs) != 1:
+            raise MissingUrdfError(eid, len(urdfs))
+        if any(asset.provenance is None for asset in self.assets):
+            raise ManifestSchemaError("every manifest asset must carry provenance")
+        if (
+            self.kind is None
+            or self.lineage is None
+            or self.layout is None
+            or self.capabilities is None
+        ):
+            raise ManifestSchemaError(
+                "manifest kind, lineage, action layout, and capabilities are mandatory"
+            )
+        if self.dof is None or self.dof < 0:
+            raise ManifestSchemaError("embodiment dof is mandatory and must be non-negative")
+        if self.link_count is None or self.link_count <= 0:
+            raise ManifestSchemaError("embodiment link_count is mandatory and must be positive")
         if self.policy_hz is not None and (
             not math.isfinite(self.policy_hz) or self.policy_hz <= 0.0
         ):
             raise ManifestSchemaError("embodiment policy_hz must be positive and finite")
-        if self.layout is not None:
-            if self.layout.embodiment_id != self.embodiment_id:
-                raise ManifestSchemaError("layout embodiment_id must match the manifest")
-            if self.dof is not None and self.dof != self.layout.action_dim:
-                raise ManifestSchemaError("embodiment dof must match the layout width")
+        if self.layout.embodiment_id != self.embodiment_id:
+            raise ManifestSchemaError("layout embodiment_id must match the manifest")
+        if self.dof != self.layout.action_dim:
+            raise ManifestSchemaError("embodiment dof must match the layout width")
         if (
             self.rates is not None
             and self.policy_hz is not None
@@ -95,6 +134,8 @@ class EmbodimentManifest:
         camera_names = [binding.name for binding in self.cameras]
         if len(set(camera_names)) != len(camera_names):
             raise ManifestSchemaError("embodiment camera names must be unique")
+        if any(not binding.frame.strip() for binding in self.cameras):
+            raise ManifestSchemaError("every embodiment camera needs an explicit mount frame")
         if any(not math.isfinite(binding.camera.fps) for binding in self.cameras):
             raise ManifestSchemaError("embodiment camera fps must be finite")
         if self.rates is not None and (
@@ -102,13 +143,6 @@ class EmbodimentManifest:
             or (self.rates.low_level_hz is not None and not math.isfinite(self.rates.low_level_hz))
         ):
             raise ManifestSchemaError("embodiment control rates must be finite")
-        # The same content blob may appear at multiple logical paths inside one bundle;
-        # a duplicate is only a member with the SAME (uri, sha256, role, logical_path).
-        identities = {
-            (asset.uri, asset.sha256, asset.role, asset.logical_path) for asset in self.assets
-        }
-        if len(identities) != len(self.assets):
-            raise ManifestSchemaError("embodiment contains duplicate asset references")
 
     def to_dict(self) -> dict[str, object]:
         """Return the canonical JSON-compatible wire representation."""
@@ -143,6 +177,14 @@ class EmbodimentManifest:
                 if self.layout is not None
                 else None
             ),
+            "capabilities": (
+                {
+                    "manipulator_count": self.capabilities.manipulator_count,
+                    "mobile_base": self.capabilities.mobile_base,
+                }
+                if self.capabilities is not None
+                else None
+            ),
             "cameras": [
                 {
                     "name": binding.name,
@@ -156,6 +198,8 @@ class EmbodimentManifest:
                         if binding.camera.resolution is not None
                         else None
                     ),
+                    "parent_instance": binding.parent_instance,
+                    "frame": binding.frame,
                 }
                 for binding in self.cameras
             ],
@@ -179,6 +223,17 @@ class EmbodimentManifest:
                         {"logical_path": str(asset.logical_path)}
                         if asset.logical_path is not None
                         else {}
+                    ),
+                    "provenance": (
+                        {
+                            "repository": asset.provenance.repository,
+                            "revision": asset.provenance.revision,
+                            "path": asset.provenance.path,
+                            "license_id": asset.provenance.license_id,
+                            "generator": asset.provenance.generator,
+                        }
+                        if asset.provenance is not None
+                        else None
                     ),
                 }
                 for asset in self.assets
@@ -207,7 +262,7 @@ def _require(document: Mapping[str, object], key: str) -> object:
 
 
 def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
-    """Parse the complete v2 wire form, failing closed on malformed structure."""
+    """Parse the complete v3 wire form, failing closed on malformed structure."""
     version = _require(document, "schema_version")
     if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
         raise ManifestSchemaError(f"unsupported embodiment schema_version: {version!r}")
@@ -230,6 +285,7 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
         kind=_parse_kind(_require(document, "kind")),
         lineage=_parse_lineage(_require(document, "lineage")),
         layout=_parse_layout(_require(document, "layout"), parsed_id),
+        capabilities=_parse_capabilities(_require(document, "capabilities")),
         cameras=_parse_cameras(_require(document, "cameras")),
         rates=_parse_rates(_require(document, "rates")),
     )
@@ -310,6 +366,7 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
         try:
             model = SensorModel(raw_model)
             modality = CameraModality(raw_modality)
+            projection = LensProjection(_string(entry, "projection", label))
         except ValueError as exc:
             raise ManifestSchemaError(f"unknown camera vocabulary in {label}") from exc
         fps = _optional_float(_require(entry, "fps"), f"{label}.fps")
@@ -323,10 +380,30 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
                     model=model,
                     modality=modality,
                     fps=fps,
+                    projection=projection,
+                    resolution=_parse_resolution(_require(entry, "resolution"), label),
                 ),
+                parent_instance=_string(entry, "parent_instance", label),
+                frame=_string(entry, "frame", label),
             )
         )
     return tuple(cameras)
+
+
+def _parse_capabilities(raw: object) -> ExecutionCapabilities | None:
+    if raw is None:
+        return None
+    entry = _mapping(raw, "capabilities")
+    manipulator_count = _require(entry, "manipulator_count")
+    mobile_base = _require(entry, "mobile_base")
+    if isinstance(manipulator_count, bool) or not isinstance(manipulator_count, int):
+        raise ManifestSchemaError("capabilities.manipulator_count must be an integer")
+    if type(mobile_base) is not bool:
+        raise ManifestSchemaError("capabilities.mobile_base must be a boolean")
+    return ExecutionCapabilities(
+        manipulator_count=manipulator_count,
+        mobile_base=mobile_base,
+    )
 
 
 def _parse_rates(raw: object) -> ControlRates | None:
@@ -363,6 +440,7 @@ def _parse_asset_entry(raw: object) -> AssetRef:
     logical_path = entry.get("logical_path")
     if logical_path is not None and not isinstance(logical_path, str):
         raise ManifestSchemaError("asset logical_path must be a string or null")
+    provenance = _parse_provenance(_require(entry, "provenance"))
     try:
         return AssetRef(
             uri=uri,
@@ -372,9 +450,45 @@ def _parse_asset_entry(raw: object) -> AssetRef:
             media_type=media_type,
             byte_size=_optional_int(entry.get("byte_size"), "byte_size"),
             logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
+            provenance=provenance,
         )
     except AssetIntegrityError as exc:
         raise ManifestSchemaError(f"invalid asset entry: {exc}") from exc
+
+
+def _parse_provenance(raw: object) -> AssetProvenance:
+    entry = _mapping(raw, "provenance")
+    generator = _require(entry, "generator")
+    if generator is not None and not isinstance(generator, str):
+        raise ManifestSchemaError("provenance.generator must be a string or null")
+    return AssetProvenance(
+        repository=_string(entry, "repository", "provenance"),
+        revision=_string(entry, "revision", "provenance"),
+        path=_string(entry, "path", "provenance"),
+        license_id=_string(entry, "license_id", "provenance"),
+        generator=generator,
+    )
+
+
+def _parse_resolution(raw: object, label: str) -> tuple[int, int] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ManifestSchemaError(f"{label}.resolution must be [width, height] or null")
+    dimensions = cast(list[object], raw)
+    if len(dimensions) != 2:
+        raise ManifestSchemaError(f"{label}.resolution must be [width, height] or null")
+    width, height = dimensions
+    if (
+        isinstance(width, bool)
+        or not isinstance(width, int)
+        or isinstance(height, bool)
+        or not isinstance(height, int)
+        or width <= 0
+        or height <= 0
+    ):
+        raise ManifestSchemaError(f"{label}.resolution dimensions must be positive integers")
+    return width, height
 
 
 def _optional_int(value: object, key: str) -> int | None:
@@ -418,11 +532,7 @@ def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
     """
     refs: list[AssetRef] = []
     seen: set[tuple[str, str]] = set()
-    packaged: list[PackagedAsset] = []
-    for attachment in spec.attachments:
-        if isinstance(attachment.part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
-            packaged.extend(attachment.part.assets)
-    packaged.extend(spec.extra_assets)
+    packaged = _packaged_assets(spec)
     for asset in packaged:
         key = (asset.relpath, asset.sha256)
         if key in seen:
@@ -430,15 +540,52 @@ def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
         seen.add(key)
         refs.append(asset.ref())
     layout = flat_layout(spec) if spec.layout_declared() else None
+    urdf = authoritative_urdf(spec)
+    try:
+        urdf_root = ET.fromstring(urdf.path().read_bytes())
+    except ET.ParseError as exc:
+        raise ManifestSchemaError(
+            f"{spec.embodiment_id}: authoritative URDF is invalid XML"
+        ) from exc
+    link_count = sum(1 for _ in urdf_root.iter("link"))
+    body = spec.body_attachments()
     return EmbodimentManifest(
         embodiment_id=spec.embodiment_id,
         name=spec.name,
         assets=tuple(refs),
         dof=layout.action_dim if layout is not None else None,
+        link_count=link_count,
         policy_hz=spec.rates.policy_hz if spec.rates is not None else None,
         kind=spec.kind,
         lineage=spec.lineage,
         layout=layout,
+        capabilities=ExecutionCapabilities(
+            manipulator_count=sum(isinstance(item.part, GripperSpec) for item in body),
+            mobile_base=any(isinstance(item.part, MobileBaseSpec) for item in body),
+        ),
         cameras=camera_bindings(spec),
         rates=spec.rates,
     )
+
+
+def authoritative_urdf(spec: EmbodimentSpec) -> PackagedAsset:
+    """Return the one packaged URDF description for an episode-ready embodiment."""
+    matches = tuple(
+        {
+            (asset.relpath, asset.sha256): asset
+            for asset in _packaged_assets(spec)
+            if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
+        }.values()
+    )
+    if len(matches) != 1:
+        raise MissingUrdfError(str(spec.embodiment_id), len(matches))
+    return matches[0]
+
+
+def _packaged_assets(spec: EmbodimentSpec) -> list[PackagedAsset]:
+    packaged: list[PackagedAsset] = []
+    for attachment in spec.attachments:
+        if isinstance(attachment.part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
+            packaged.extend(attachment.part.assets)
+    packaged.extend(spec.extra_assets)
+    return packaged

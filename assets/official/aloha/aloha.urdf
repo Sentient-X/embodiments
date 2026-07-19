@@ -1,0 +1,846 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="aloha">
+  <link name="world" />
+  <link name="left/base_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_1_base.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_1_base.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0534774000 -0.0005625750 0.0205961000" />
+      <mass value="0.969034" />
+      <inertia ixx="0.0060240000" ixy="0.0000471300" ixz="0.0000038510" iyy="0.0017000000" iyz="-0.0000841500" izz="0.0071620000" />
+    </inertial>
+  </link>
+  <joint name="left/waist" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0 0 0.079" />
+    <parent link="left/base_link" />
+    <child link="left/shoulder_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_waist">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/waist">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/waist_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/shoulder_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 -0.003" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_2_shoulder.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 -0.003" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_2_shoulder.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0002592330 -0.0000033552 0.0116129000" />
+      <mass value="0.798614" />
+      <inertia ixx="0.0009388000" ixy="-0.0000000010" ixz="-0.0000000191" iyy="0.0011380000" iyz="0.0000059568" izz="0.0012010000" />
+    </inertial>
+  </link>
+  <joint name="left/shoulder" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="20" lower="-1.8500490071139892" upper="1.2566370614359172" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0 0 0.04805" />
+    <parent link="left/shoulder_link" />
+    <child link="left/upper_arm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_shoulder">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/shoulder">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/shoulder_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/upper_arm_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_3_upper_arm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_3_upper_arm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0206949000 0.0000000004 0.2264590000" />
+      <mass value="0.792592" />
+      <inertia ixx="0.0089250000" ixy="0.0000000000" ixz="0.0000000000" iyy="0.0089370000" iyz="0.0012010000" izz="0.0009357000" />
+    </inertial>
+  </link>
+  <joint name="left/elbow" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-1.7627825445142729" upper="1.6057029118347832" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.05955 0 0.3" />
+    <parent link="left/upper_arm_link" />
+    <child link="left/upper_forearm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_elbow">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/elbow">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/elbow_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/upper_forearm_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_4_upper_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_4_upper_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.105723 0 0" />
+      <mass value="0.322228" />
+      <inertia ixx="0.0001524000" ixy="-0.0000188300" ixz="-0.0000084064" iyy="0.0013420000" iyz="0.0000012564" izz="0.0014410000" />
+    </inertial>
+  </link>
+  <joint name="left/forearm_roll" type="revolute">
+    <axis xyz="1 0 0" />
+    <limit effort="2" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.2 0 0" />
+    <parent link="left/upper_forearm_link" />
+    <child link="left/lower_forearm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_forearm_roll">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/forearm_roll">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/forearm_roll_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/lower_forearm_link">
+    <visual>
+      <origin rpy="3.141592653589793 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_5_lower_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="3.141592653589793 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_5_lower_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="3.141592653589793 0 0" xyz="0.0513477000 0.0068046200 0" />
+      <mass value="0.414823" />
+      <inertia ixx="0.0001753000" ixy="-0.0000852800" ixz="0" iyy="0.0005269000" iyz="0" izz="0.0005911000" />
+    </inertial>
+  </link>
+  <joint name="left/wrist_angle" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="-1.8675022996339325" upper="2.234021442552742" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.1 0 0" />
+    <parent link="left/lower_forearm_link" />
+    <child link="left/wrist_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_wrist_angle">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/wrist_angle">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/wrist_angle_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/wrist_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_6_wrist.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_6_wrist.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0467430000 -0.0000076652 0.0105650000" />
+      <mass value="0.115395" />
+      <inertia ixx="0.0000463100" ixy="0.0000000195" ixz="0.0000000023" iyy="0.0000451400" iyz="0.0000042002" izz="0.0000527000" />
+    </inertial>
+  </link>
+  <joint name="left/wrist_rotate" type="revolute">
+    <axis xyz="1 0 0" />
+    <limit effort="1" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.069744 0 0" />
+    <parent link="left/wrist_link" />
+    <child link="left/gripper_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_wrist_rotate">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/wrist_rotate">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/wrist_rotate_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/gripper_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.02 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_7_gripper.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.02 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_7_gripper.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0230010000 0.0000000000 0.0115230000" />
+      <mass value="0.097666" />
+      <inertia ixx="0.0000326800" ixy="0.0000000000" ixz="0.0000000000" iyy="0.0000243600" iyz="0.0000002785" izz="0.0000211900" />
+    </inertial>
+  </link>
+  <joint name="left/ee_arm" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.042825 0 0" />
+    <parent link="left/gripper_link" />
+    <child link="left/ee_arm_link" />
+  </joint>
+  <link name="left/ee_arm_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="left/gripper" type="continuous">
+    <axis xyz="1 0 0" />
+    <limit effort="1" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.005675 0 0" />
+    <parent link="left/ee_arm_link" />
+    <child link="left/gripper_prop_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_gripper">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/gripper">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/gripper_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/gripper_prop_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0023780000 0.0000000285 0.0000000000" />
+      <mass value="0.008009" />
+      <inertia ixx="0.0000020386" ixy="0.0000000000" ixz="0.0000006559" iyy="0.0000042979" iyz="0.0000000000" izz="0.0000023796" />
+    </inertial>
+  </link>
+  <joint name="left/gripper_bar" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="left/ee_arm_link" />
+    <child link="left/gripper_bar_link" />
+  </joint>
+  <link name="left/gripper_bar_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0067940000 -0.0000004272 -0.0007760000" />
+      <mass value="0.150986" />
+      <inertia ixx="0.0000789500" ixy="-0.0000000012" ixz="0.0000001341" iyy="0.0003283000" iyz="0.0000017465" izz="0.0003095000" />
+    </inertial>
+  </link>
+  <joint name="left/ee_bar" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.025875 0 0" />
+    <parent link="left/gripper_bar_link" />
+    <child link="left/fingers_link" />
+  </joint>
+  <link name="left/fingers_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="left/left_finger" type="prismatic">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="0.021" upper="0.057" velocity="1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="left/fingers_link" />
+    <child link="left/left_finger_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="left/trans_left_finger">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/left_finger">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/left_finger_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/left_finger_link">
+    <visual>
+      <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="3.141592653589793 3.141592653589793 1.5707963267948966" xyz="0.0173440000 -0.0060692000 0.0000000000" />
+      <mass value="0.034796" />
+      <inertia ixx="0.0000243300" ixy="-0.0000024004" ixz="0.0000000000" iyy="0.0000125500" iyz="0.0000000000" izz="0.0000141700" />
+    </inertial>
+  </link>
+  <joint name="left/right_finger" type="prismatic">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="-0.057" upper="-0.021" velocity="1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="left/fingers_link" />
+    <child link="left/right_finger_link" />
+    <dynamics friction="0.1" />
+    <mimic joint="left/left_finger" multiplier="-1" offset="0" />
+  </joint>
+  <transmission name="left/trans_right_finger">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="left/right_finger">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="left/right_finger_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="left/right_finger_link">
+    <visual>
+      <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 3.141592653589793 1.5707963267948966" xyz="0.0173440000 0.0060692000  0.0000000000" />
+      <mass value="0.034796" />
+      <inertia ixx="0.0000243300" ixy="0.0000024001" ixz="0.0000000000" iyy="0.0000125500" iyz="0.0000000000" izz="0.0000141700" />
+    </inertial>
+  </link>
+  <joint name="left/ee_gripper" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.0385 0 0" />
+    <parent link="left/fingers_link" />
+    <child link="left/ee_gripper_link" />
+  </joint>
+  <link name="left/ee_gripper_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="world_to_left" type="fixed">
+    <parent link="world" />
+    <child link="left/base_link" />
+    <origin xyz="0 0.46 0" rpy="0 0 0" />
+  </joint>
+  <link name="right/base_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_1_base.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_1_base.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0534774000 -0.0005625750 0.0205961000" />
+      <mass value="0.969034" />
+      <inertia ixx="0.0060240000" ixy="0.0000471300" ixz="0.0000038510" iyy="0.0017000000" iyz="-0.0000841500" izz="0.0071620000" />
+    </inertial>
+  </link>
+  <joint name="right/waist" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0 0 0.079" />
+    <parent link="right/base_link" />
+    <child link="right/shoulder_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_waist">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/waist">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/waist_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/shoulder_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 -0.003" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_2_shoulder.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 -0.003" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_2_shoulder.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0002592330 -0.0000033552 0.0116129000" />
+      <mass value="0.798614" />
+      <inertia ixx="0.0009388000" ixy="-0.0000000010" ixz="-0.0000000191" iyy="0.0011380000" iyz="0.0000059568" izz="0.0012010000" />
+    </inertial>
+  </link>
+  <joint name="right/shoulder" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="20" lower="-1.8500490071139892" upper="1.2566370614359172" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0 0 0.04805" />
+    <parent link="right/shoulder_link" />
+    <child link="right/upper_arm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_shoulder">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/shoulder">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/shoulder_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/upper_arm_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_3_upper_arm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_3_upper_arm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0206949000 0.0000000004 0.2264590000" />
+      <mass value="0.792592" />
+      <inertia ixx="0.0089250000" ixy="0.0000000000" ixz="0.0000000000" iyy="0.0089370000" iyz="0.0012010000" izz="0.0009357000" />
+    </inertial>
+  </link>
+  <joint name="right/elbow" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-1.7627825445142729" upper="1.6057029118347832" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.05955 0 0.3" />
+    <parent link="right/upper_arm_link" />
+    <child link="right/upper_forearm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_elbow">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/elbow">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/elbow_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/upper_forearm_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_4_upper_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_4_upper_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.105723 0 0" />
+      <mass value="0.322228" />
+      <inertia ixx="0.0001524000" ixy="-0.0000188300" ixz="-0.0000084064" iyy="0.0013420000" iyz="0.0000012564" izz="0.0014410000" />
+    </inertial>
+  </link>
+  <joint name="right/forearm_roll" type="revolute">
+    <axis xyz="1 0 0" />
+    <limit effort="2" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.2 0 0" />
+    <parent link="right/upper_forearm_link" />
+    <child link="right/lower_forearm_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_forearm_roll">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/forearm_roll">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/forearm_roll_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/lower_forearm_link">
+    <visual>
+      <origin rpy="3.141592653589793 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_5_lower_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="3.141592653589793 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_5_lower_forearm.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="3.141592653589793 0 0" xyz="0.0513477000 0.0068046200 0" />
+      <mass value="0.414823" />
+      <inertia ixx="0.0001753000" ixy="-0.0000852800" ixz="0" iyy="0.0005269000" iyz="0" izz="0.0005911000" />
+    </inertial>
+  </link>
+  <joint name="right/wrist_angle" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="-1.8675022996339325" upper="2.234021442552742" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.1 0 0" />
+    <parent link="right/lower_forearm_link" />
+    <child link="right/wrist_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_wrist_angle">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/wrist_angle">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/wrist_angle_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/wrist_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_6_wrist.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_6_wrist.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0467430000 -0.0000076652 0.0105650000" />
+      <mass value="0.115395" />
+      <inertia ixx="0.0000463100" ixy="0.0000000195" ixz="0.0000000023" iyy="0.0000451400" iyz="0.0000042002" izz="0.0000527000" />
+    </inertial>
+  </link>
+  <joint name="right/wrist_rotate" type="revolute">
+    <axis xyz="1 0 0" />
+    <limit effort="1" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.069744 0 0" />
+    <parent link="right/wrist_link" />
+    <child link="right/gripper_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_wrist_rotate">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/wrist_rotate">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/wrist_rotate_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/gripper_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.02 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_7_gripper.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.02 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_7_gripper.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0230010000 0.0000000000 0.0115230000" />
+      <mass value="0.097666" />
+      <inertia ixx="0.0000326800" ixy="0.0000000000" ixz="0.0000000000" iyy="0.0000243600" iyz="0.0000002785" izz="0.0000211900" />
+    </inertial>
+  </link>
+  <joint name="right/ee_arm" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.042825 0 0" />
+    <parent link="right/gripper_link" />
+    <child link="right/ee_arm_link" />
+  </joint>
+  <link name="right/ee_arm_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="right/gripper" type="continuous">
+    <axis xyz="1 0 0" />
+    <limit effort="1" velocity="3.141592653589793" />
+    <origin rpy="0 0 0" xyz="0.005675 0 0" />
+    <parent link="right/ee_arm_link" />
+    <child link="right/gripper_prop_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_gripper">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/gripper">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/gripper_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/gripper_prop_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0023780000 0.0000000285 0.0000000000" />
+      <mass value="0.008009" />
+      <inertia ixx="0.0000020386" ixy="0.0000000000" ixz="0.0000006559" iyy="0.0000042979" iyz="0.0000000000" izz="0.0000023796" />
+    </inertial>
+  </link>
+  <joint name="right/gripper_bar" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="right/ee_arm_link" />
+    <child link="right/gripper_bar_link" />
+  </joint>
+  <link name="right/gripper_bar_link">
+    <visual>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 1.5707963267948966" xyz="0.0067940000 -0.0000004272 -0.0007760000" />
+      <mass value="0.150986" />
+      <inertia ixx="0.0000789500" ixy="-0.0000000012" ixz="0.0000001341" iyy="0.0003283000" iyz="0.0000017465" izz="0.0003095000" />
+    </inertial>
+  </link>
+  <joint name="right/ee_bar" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.025875 0 0" />
+    <parent link="right/gripper_bar_link" />
+    <child link="right/fingers_link" />
+  </joint>
+  <link name="right/fingers_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="right/left_finger" type="prismatic">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="0.021" upper="0.057" velocity="1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="right/fingers_link" />
+    <child link="right/left_finger_link" />
+    <dynamics friction="0.1" />
+  </joint>
+  <transmission name="right/trans_left_finger">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/left_finger">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/left_finger_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/left_finger_link">
+    <visual>
+      <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="3.141592653589793 3.141592653589793 1.5707963267948966" xyz="0.0173440000 -0.0060692000 0.0000000000" />
+      <mass value="0.034796" />
+      <inertia ixx="0.0000243300" ixy="-0.0000024004" ixz="0.0000000000" iyy="0.0000125500" iyz="0.0000000000" izz="0.0000141700" />
+    </inertial>
+  </link>
+  <joint name="right/right_finger" type="prismatic">
+    <axis xyz="0 1 0" />
+    <limit effort="5" lower="-0.057" upper="-0.021" velocity="1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="right/fingers_link" />
+    <child link="right/right_finger_link" />
+    <dynamics friction="0.1" />
+    <mimic joint="right/left_finger" multiplier="-1" offset="0" />
+  </joint>
+  <transmission name="right/trans_right_finger">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="right/right_finger">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="right/right_finger_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <link name="right/right_finger_link">
+    <visual>
+      <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="interbotix_black" />
+    </visual>
+    <collision>
+      <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
+      <geometry>
+        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 3.141592653589793 1.5707963267948966" xyz="0.0173440000 0.0060692000  0.0000000000" />
+      <mass value="0.034796" />
+      <inertia ixx="0.0000243300" ixy="0.0000024001" ixz="0.0000000000" iyy="0.0000125500" iyz="0.0000000000" izz="0.0000141700" />
+    </inertial>
+  </link>
+  <joint name="right/ee_gripper" type="fixed">
+    <axis xyz="1 0 0" />
+    <origin rpy="0 0 0" xyz="0.0385 0 0" />
+    <parent link="right/fingers_link" />
+    <child link="right/ee_gripper_link" />
+  </joint>
+  <link name="right/ee_gripper_link">
+    <inertial>
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  <joint name="world_to_right" type="fixed">
+    <parent link="world" />
+    <child link="right/base_link" />
+    <origin xyz="0 -0.46 0" rpy="0 0 0" />
+  </joint>
+</robot>

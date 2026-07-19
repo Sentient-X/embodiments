@@ -16,6 +16,27 @@ class AssetIntegrityError(EmbodimentError):
     """An asset reference is malformed: bad URI, digest, or size."""
 
 
+class MissingUrdfError(EmbodimentError):
+    """An episode-ready embodiment has no single authoritative URDF description."""
+
+    def __init__(self, embodiment_id: str, count: int) -> None:
+        super().__init__(
+            f"{embodiment_id}: expected exactly one URDF description asset, found {count}"
+        )
+        self.embodiment_id = embodiment_id
+        self.count = count
+
+
+class AssetDigestMismatchError(AssetIntegrityError):
+    """Packaged asset bytes do not match their declared content digest."""
+
+    def __init__(self, relpath: str, expected: str, actual: str) -> None:
+        super().__init__(f"{relpath}: expected sha256 {expected}, got {actual}")
+        self.relpath = relpath
+        self.expected = expected
+        self.actual = actual
+
+
 class AssetsUnavailableError(EmbodimentError):
     """The description-asset tree cannot be located on this host.
 
@@ -47,6 +68,14 @@ class LayoutError(EmbodimentError):
     def __init__(self, embodiment_id: str, message: str) -> None:
         super().__init__(f"{embodiment_id}: {message}")
         self.embodiment_id = embodiment_id
+
+
+class JointLayoutMismatchError(LayoutError):
+    """An authoritative robot description disagrees with the declared action layout."""
+
+
+class InvalidCameraMountError(CompositionError):
+    """A camera attachment has no resolvable parent frame."""
 
 
 class UnknownEmbodimentError(EmbodimentError):

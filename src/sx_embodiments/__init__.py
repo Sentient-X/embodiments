@@ -9,6 +9,7 @@ facts and derives views; it never executes.
 
 from .assets import (
     AssetFormat,
+    AssetProvenance,
     AssetRef,
     AssetRole,
     PackagedAsset,
@@ -28,12 +29,16 @@ from .compose import (
 )
 from .curves import Curve1D
 from .errors import (
+    AssetDigestMismatchError,
     AssetIntegrityError,
     AssetsUnavailableError,
     CompositionError,
     EmbodimentError,
+    InvalidCameraMountError,
+    JointLayoutMismatchError,
     LayoutError,
     ManifestSchemaError,
+    MissingUrdfError,
     PartValidationError,
     UnknownEmbodimentError,
 )
@@ -54,7 +59,13 @@ from .known import (
     layout_for,
 )
 from .layout import ChannelKind, ChannelSlot, FlatLayout
-from .manifest import EmbodimentManifest, manifest_for, manifest_from_dict
+from .manifest import (
+    EmbodimentManifest,
+    ExecutionCapabilities,
+    authoritative_urdf,
+    manifest_for,
+    manifest_from_dict,
+)
 from .parts import (
     ArmSpec,
     CameraBinding,
@@ -78,8 +89,10 @@ __all__ = [
     "PANDA_OMRON",
     "PIPER",
     "ArmSpec",
+    "AssetDigestMismatchError",
     "AssetFormat",
     "AssetIntegrityError",
+    "AssetProvenance",
     "AssetRef",
     "AssetRole",
     "AssetsUnavailableError",
@@ -102,15 +115,19 @@ __all__ = [
     "EmbodimentManifestDigest",
     "EmbodimentRef",
     "EmbodimentSpec",
+    "ExecutionCapabilities",
     "FlatLayout",
     "ForceTorqueSpec",
     "GripperSpec",
+    "InvalidCameraMountError",
     "JointGroupSpec",
+    "JointLayoutMismatchError",
     "LayoutError",
     "LensProjection",
     "Lineage",
     "ManifestSchemaError",
     "MimicJoint",
+    "MissingUrdfError",
     "MobileBaseSpec",
     "MountFrame",
     "PackagedAsset",
@@ -121,6 +138,7 @@ __all__ = [
     "SensorModel",
     "UnknownEmbodimentError",
     "asset_root",
+    "authoritative_urdf",
     "camera_bindings",
     "camera_names",
     "embodiment_spec",

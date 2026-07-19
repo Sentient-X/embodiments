@@ -267,6 +267,8 @@ class CameraBinding:
 
     name: str
     camera: CameraSpec
+    parent_instance: str = ""
+    frame: str = ""
 
 
 @dataclass(frozen=True, slots=True)

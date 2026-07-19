@@ -2,23 +2,38 @@
 
 from typing import Final, Literal
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint, MobileBaseSpec
+from .sources import menagerie
 
 RBY1_MJCF: Final = PackagedAsset(
     relpath="menagerie/rainbow_robotics_rby1/rby1m_1.3.xml",
     sha256="fa6d736f76e27de5aba22b96e0c98655ae6a0ad36f6ece52a915bf71b460c66c",
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
+    provenance=menagerie("rainbow_robotics_rby1/rby1m_1.3.xml", "Apache-2.0"),
+    media_type="application/xml",
+)
+RBY1_URDF: Final = PackagedAsset(
+    relpath="official/rby1/rby1m_v1.3.urdf",
+    sha256="66f4ad14779793e94df87b59356321190c9882766b2ed9cbeba6624c0880f11d",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/RainbowRobotics/rby1-sdk",
+        revision="38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+        path="models/rby1m/urdf/model_v1.3.urdf",
+        license_id="Apache-2.0",
+    ),
     media_type="application/xml",
 )
 
 RBY1_BASE: Final = MobileBaseSpec(
     part_id=PartId("rby1m-base"),
     channel_names=("wheel_fr", "wheel_fl", "wheel_rr", "wheel_rl"),
-    assets=(RBY1_MJCF,),
+    assets=(RBY1_URDF, RBY1_MJCF),
 )
 
 RBY1_TORSO: Final = JointGroupSpec(

@@ -14,7 +14,7 @@ from typing import Final
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
-from .das import DAS_JAW_V4, UVC_MONO_60
+from .das import DAS_JAW_V4, DAS_UMI_V4_URDF, UVC_MONO_60
 
 YUBI_JAW_FINRAY: Final = DAS_JAW_V4  # the standard fin-ray jaw is the DAS V4 jaw
 
@@ -51,15 +51,19 @@ def _yubi(
             Attachment("left_jaw", jaw, AttachmentRole.BODY),
             Attachment("right_jaw", jaw, AttachmentRole.BODY),
             Attachment(
-                "wrist_left", wrist_camera, AttachmentRole.SENSOR, MountFrame("left_jaw", "handle")
+                "wrist_left",
+                wrist_camera,
+                AttachmentRole.SENSOR,
+                MountFrame("left_jaw", "link_ca2"),
             ),
             Attachment(
                 "wrist_right",
                 wrist_camera,
                 AttachmentRole.SENSOR,
-                MountFrame("right_jaw", "handle"),
+                MountFrame("right_jaw", "link_ca2"),
             ),
         ),
+        extra_assets=(DAS_UMI_V4_URDF,),
     )
 
 

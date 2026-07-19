@@ -8,6 +8,17 @@ Piper spec deliberately diverges from its menagerie MJCF (deployed limits win; s
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
+
+from sx_embodiments import (
+    EMBODIMENTS,
+    AssetFormat,
+    ChannelKind,
+    EmbodimentId,
+    MissingUrdfError,
+    asset_root,
+    manifest_for,
+)
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
     SENTIENT_HUMANOID_LEFT_ARM,
@@ -88,3 +99,27 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
     executed = {name for part in parts for name in part.joint_names}
     assert "waist_rod_joint" not in executed  # feedback/passive, never an action row
     assert {"neck_yaw_joint", "head_joint"}.isdisjoint(executed)  # no motor assignment
+
+
+def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
+    for spec in EMBODIMENTS.values():
+        if spec.embodiment_id == EmbodimentId("insta360-umi"):
+            with pytest.raises(MissingUrdfError):
+                manifest_for(spec)
+            continue
+        manifest = manifest_for(spec)
+        urdf = next(asset for asset in manifest.assets if asset.format is AssetFormat.URDF)
+        relpath = urdf.uri.removeprefix("package://sx-embodiments/")
+        movable = {
+            joint.get("name")
+            for joint in ET.parse(asset_root() / relpath).getroot().iter("joint")
+            if joint.get("type") not in (None, "fixed")
+        }
+        assert manifest.layout is not None
+        description_channels = {
+            slot.joint_name
+            for slot in manifest.layout.slots
+            if slot.kind not in (ChannelKind.EEF_TRANSLATION, ChannelKind.EEF_ROTATION)
+        }
+        assert description_channels <= movable
+        assert all(asset.provenance is not None for asset in manifest.assets)

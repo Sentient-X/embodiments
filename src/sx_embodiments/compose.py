@@ -64,6 +64,7 @@ class EmbodimentSpec:
     attachments: tuple[Attachment, ...]
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
+    action_layout: FlatLayout | None = None
 
     def __post_init__(self) -> None:
         eid = str(self.embodiment_id)
@@ -73,6 +74,11 @@ class EmbodimentSpec:
             raise CompositionError(eid, "name must not be empty")
         if not self.attachments:
             raise CompositionError(eid, "an embodiment needs at least one attachment")
+        if (
+            self.action_layout is not None
+            and self.action_layout.embodiment_id != self.embodiment_id
+        ):
+            raise CompositionError(eid, "action layout embodiment_id must match the spec")
         seen: set[str] = set()
         for attachment in self.attachments:
             if not attachment.instance.strip():
@@ -121,6 +127,8 @@ class EmbodimentSpec:
 
 def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
     """Derive the flat-vector layout per the ordering law, or fail closed."""
+    if spec.action_layout is not None:
+        return spec.action_layout
     if not spec.layout_declared():
         raise LayoutError(
             str(spec.embodiment_id),
@@ -160,7 +168,12 @@ def total_dof(spec: EmbodimentSpec) -> int:
 def camera_bindings(spec: EmbodimentSpec) -> tuple[CameraBinding, ...]:
     """Camera instances in declared order: the embodiment's canonical stream-name set."""
     return tuple(
-        CameraBinding(name=a.instance, camera=a.part)
+        CameraBinding(
+            name=a.instance,
+            camera=a.part,
+            parent_instance=a.mount.parent_instance,
+            frame=a.mount.frame,
+        )
         for a in spec.attachments
         if isinstance(a.part, CameraSpec)
     )

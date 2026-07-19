@@ -1,0 +1,652 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="cone-e">
+  <link name="base" />
+  <joint name="base_to_base_profile_short" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="base" />
+    <child link="base_profile_short" />
+  </joint>
+  <link name="base_profile_short">
+    <inertial>
+      <origin xyz="-0.104952 -0.210077 0.000819" rpy="0 0 0" />
+      <mass value="20.612589" />
+      <inertia ixx="0.321576" iyy="0.487585" izz="0.4515" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/base_profile_short.stl" />
+      </geometry>
+      <material name="base_profile_short_material">
+        <color rgba="0.701961 0.701961 0.701961 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="front_left_steer" type="continuous">
+    <axis xyz="0 0 1" />
+    <origin xyz="-0.028575 -0.053975 0.104775" rpy="-1.570796 0 1.570796" />
+    <parent link="base_profile_short" />
+    <child link="Part_2" />
+  </joint>
+  <link name="Part_2">
+    <inertial>
+      <origin xyz="0.000006 0 -0.020456" rpy="0 0 0" />
+      <mass value="0.671221" />
+      <inertia ixx="0.000668" iyy="0.000705" izz="0.000812" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Part_2.stl" />
+      </geometry>
+      <material name="Part_2_material">
+        <color rgba="0.615686 0.811765 0.929412 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="drive_front_left" type="continuous">
+    <axis xyz="0 0 -1" />
+    <origin xyz="0.021272 0 -0.075425" rpy="-1.570796 0 1.570796" />
+    <parent link="Part_2" />
+    <child link="MK4_Colson_Hub_4_X_1.5" />
+  </joint>
+  <link name="MK4_Colson_Hub_4_X_1.5">
+    <inertial>
+      <origin xyz="0 0 0.019800" rpy="0 0 0" />
+      <mass value="0.507297" />
+      <inertia ixx="0.000352" iyy="0.000352" izz="0.000615" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/MK4_Colson_Hub_4_X_1.5.stl" />
+      </geometry>
+      <material name="MK4_Colson_Hub_4_X_1.5_material">
+        <color rgba="0.666667 0.698039 0.768627 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="back_left_steer" type="continuous">
+    <axis xyz="0 0 1" />
+    <origin xyz="-0.028575 -0.053975 -0.104775" rpy="-1.570796 0 1.570796" />
+    <parent link="base_profile_short" />
+    <child link="Part_2_2" />
+  </joint>
+  <link name="Part_2_2">
+    <inertial>
+      <origin xyz="0.000006 0 -0.020456" rpy="0 0 0" />
+      <mass value="0.671221" />
+      <inertia ixx="0.000668" iyy="0.000705" izz="0.000812" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Part_2_2.stl" />
+      </geometry>
+      <material name="Part_2_material">
+        <color rgba="0.615686 0.811765 0.929412 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="drive_back_left" type="continuous">
+    <axis xyz="0 0 -1" />
+    <origin xyz="0.021272 0 -0.075425" rpy="-1.570796 0 1.570796" />
+    <parent link="Part_2_2" />
+    <child link="MK4_Colson_Hub_4_X_1.5_2" />
+  </joint>
+  <link name="MK4_Colson_Hub_4_X_1.5_2">
+    <inertial>
+      <origin xyz="0 0 0.019800" rpy="0 0 0" />
+      <mass value="0.507297" />
+      <inertia ixx="0.000352" iyy="0.000352" izz="0.000615" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/MK4_Colson_Hub_4_X_1.5_2.stl" />
+      </geometry>
+      <material name="MK4_Colson_Hub_4_X_1.5_material">
+        <color rgba="0.666667 0.698039 0.768627 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="front_right_steer" type="continuous">
+    <axis xyz="0 0 1" />
+    <origin xyz="-0.028575 -0.365125 0.104775" rpy="-1.570796 0 1.570796" />
+    <parent link="base_profile_short" />
+    <child link="Part_2_3" />
+  </joint>
+  <link name="Part_2_3">
+    <inertial>
+      <origin xyz="0.000006 0 -0.020456" rpy="0 0 0" />
+      <mass value="0.671221" />
+      <inertia ixx="0.000668" iyy="0.000705" izz="0.000812" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Part_2_3.stl" />
+      </geometry>
+      <material name="Part_2_material">
+        <color rgba="0.615686 0.811765 0.929412 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="drive_front_right" type="continuous">
+    <axis xyz="0 0 -1" />
+    <origin xyz="0.021272 0 -0.075425" rpy="-1.570796 0 1.570796" />
+    <parent link="Part_2_3" />
+    <child link="MK4_Colson_Hub_4_X_1.5_3" />
+  </joint>
+  <link name="MK4_Colson_Hub_4_X_1.5_3">
+    <inertial>
+      <origin xyz="0 0 0.019800" rpy="0 0 0" />
+      <mass value="0.507297" />
+      <inertia ixx="0.000352" iyy="0.000352" izz="0.000615" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/MK4_Colson_Hub_4_X_1.5_3.stl" />
+      </geometry>
+      <material name="MK4_Colson_Hub_4_X_1.5_material">
+        <color rgba="0.666667 0.698039 0.768627 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="back_right_steer" type="continuous">
+    <axis xyz="0 0 1" />
+    <origin xyz="-0.028575 -0.365125 -0.104775" rpy="-1.570796 0 1.570796" />
+    <parent link="base_profile_short" />
+    <child link="Part_2_4" />
+  </joint>
+  <link name="Part_2_4">
+    <inertial>
+      <origin xyz="0.000006 0 -0.020456" rpy="0 0 0" />
+      <mass value="0.671221" />
+      <inertia ixx="0.000668" iyy="0.000705" izz="0.000812" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Part_2_4.stl" />
+      </geometry>
+      <material name="Part_2_material">
+        <color rgba="0.615686 0.811765 0.929412 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="drive_back_right" type="continuous">
+    <axis xyz="0 0 -1" />
+    <origin xyz="0.021272 0 -0.075425" rpy="-1.570796 0 1.570796" />
+    <parent link="Part_2_4" />
+    <child link="MK4_Colson_Hub_4_X_1.5_4" />
+  </joint>
+  <link name="MK4_Colson_Hub_4_X_1.5_4">
+    <inertial>
+      <origin xyz="0 0 0.019800" rpy="0 0 0" />
+      <mass value="0.507297" />
+      <inertia ixx="0.000352" iyy="0.000352" izz="0.000615" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/MK4_Colson_Hub_4_X_1.5_4.stl" />
+      </geometry>
+      <material name="MK4_Colson_Hub_4_X_1.5_material">
+        <color rgba="0.666667 0.698039 0.768627 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Slider_1" type="prismatic">
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.208000" effort="100" velocity="10" />
+    <origin xyz="-0.509400 -0.209550 0.000317" rpy="3.14159230718 1.57079600033 0" />
+    <parent link="base_profile_short" />
+    <child link="Lift_Middle" />
+  </joint>
+  <link name="Lift_Middle">
+    <inertial>
+      <origin xyz="0 0 -0.104000" rpy="0 0 0" />
+      <mass value="1.460741" />
+      <inertia ixx="0.007792" iyy="0.007792" izz="0.005051" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Lift_Middle.stl" />
+      </geometry>
+      <material name="Lift_Middle_material">
+        <color rgba="0.901961 0.901961 0.901961 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Slider_2" type="prismatic">
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.208000" effort="100" velocity="10" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="Lift_Middle" />
+    <child link="Lift_Top" />
+  </joint>
+  <link name="Lift_Top">
+    <inertial>
+      <origin xyz="0.000005 -0.000004 -0.024234" rpy="0 0 0" />
+      <mass value="4.435110" />
+      <inertia ixx="0.042873" iyy="0.040894" izz="0.045651" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/Lift_Top.stl" />
+      </geometry>
+      <material name="Lift_Middle_material">
+        <color rgba="0.901961 0.901961 0.901961 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="Lift_Top_to_left_arm_link0" type="fixed">
+    <origin xyz="-0.005 -0.0925 0.0575" rpy="0.7854 0 3.14" />
+    <parent link="Lift_Top" />
+    <child link="left_arm_link0" />
+  </joint>
+  <link name="left_arm_link0">
+    <inertial>
+      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965751904985 -0.000714269628734 1.5764233274" />
+      <mass value="1.02" />
+      <inertia ixx="0.00282612" iyy="0.00269117" izz="0.000879394" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link0.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint1" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-2.61" upper="2.61" effort="100" velocity="10" />
+    <origin xyz="0 0 0.123" rpy="0 0 0" />
+    <parent link="left_arm_link0" />
+    <child link="left_arm_link1" />
+  </joint>
+  <link name="left_arm_link1">
+    <inertial>
+      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975743905 0.0451293629087 -0.00296542943264" />
+      <mass value="0.71" />
+      <inertia ixx="0.000489262" iyy="0.000439887" izz="0.000404551" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link1.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint2" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="3.13" effort="100" velocity="10" />
+    <origin xyz="0 0 0" rpy="1.57079970425 -0.135899890111 3.14158533936" />
+    <parent link="left_arm_link1" />
+    <child link="left_arm_link2" />
+  </joint>
+  <link name="left_arm_link2">
+    <inertial>
+      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457578972 0.0718617599512 1.59803864256" />
+      <mass value="1.17" />
+      <inertia ixx="0.0679032" iyy="0.067745" izz="0.00111966" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link2.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint3" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-2.965" upper="0" effort="100" velocity="10" />
+    <origin xyz="0.28503 0 0" rpy="0 0 -1.7938990818" />
+    <parent link="left_arm_link2" />
+    <child link="left_arm_link3" />
+  </joint>
+  <link name="left_arm_link3">
+    <inertial>
+      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.5708241612 0.0273181067184 0.123352501639" />
+      <mass value="0.5" />
+      <inertia ixx="0.0138227" iyy="0.0138032" izz="0.000244685" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link3.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint4" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-1.74" upper="1.74" effort="100" velocity="10" />
+    <origin xyz="-0.021984 -0.25075 0" rpy="1.57079977413 0 0" />
+    <parent link="left_arm_link3" />
+    <child link="left_arm_link4" />
+  </joint>
+  <link name="left_arm_link4">
+    <inertial>
+      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476492845 0.22355782891 1.53022260235" />
+      <mass value="0.38" />
+      <inertia ixx="0.000191586" iyy="0.000185052" izz="0.000152863" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link4.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint5" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-1.2" upper="1.2" effort="100" velocity="10" />
+    <origin xyz="0 0 0" rpy="-1.57079977413 0 0" />
+    <parent link="left_arm_link4" />
+    <child link="left_arm_link5" />
+  </joint>
+  <link name="left_arm_link5">
+    <inertial>
+      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.5637616277 0.00377983257731 1.43794226806e-05" />
+      <mass value="0.383" />
+      <inertia ixx="0.00166169" iyy="0.00164328" izz="0.000185028" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link5.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_joint6" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-3" upper="3" effort="100" velocity="10" />
+    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57079977413 0 0" />
+    <parent link="left_arm_link5" />
+    <child link="left_arm_link6" />
+  </joint>
+  <link name="left_arm_link6">
+    <inertial>
+      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 0" />
+      <mass value="0.0069909" />
+      <inertia ixx="1.06739e-06" iyy="5.73016e-07" izz="5.73016e-07" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link6.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_link6_to_left_arm_gripper_base" type="fixed">
+    <origin xyz="0.0275 0.01875 0.0798" rpy="3.14 -1.57 0" />
+    <parent link="left_arm_link6" />
+    <child link="left_arm_gripper_base" />
+  </joint>
+  <link name="left_arm_gripper_base">
+    <inertial>
+      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578689204 0.0137929430409 0.00157838995994" />
+      <mass value="0.45" />
+      <inertia ixx="0.000929442" iyy="0.000714469" izz="0.000394318" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/gripper_body.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_gripper_base_to_left_arm_iphone_body" type="fixed">
+    <origin xyz="-0.0075 0.015 0.017" rpy="0 0 1.57" />
+    <parent link="left_arm_gripper_base" />
+    <child link="left_arm_iphone_body" />
+  </joint>
+  <link name="left_arm_iphone_body">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/iphone.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="gray">
+        <color rgba="0.15 0.15 0.15 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_arm_iphone_body_to_left_arm_camera_body" type="fixed">
+    <origin xyz="0.0 -0.036 0.1" rpy="-0.2617993878 3.14159265359 0.0" />
+    <parent link="left_arm_iphone_body" />
+    <child link="left_arm_camera_body" />
+  </joint>
+  <link name="left_arm_camera_body" />
+  <joint name="Lift_Top_to_right_arm_link0" type="fixed">
+    <origin xyz="-0.005 0.0925 0.0575" rpy="-0.7854 0 3.14" />
+    <parent link="Lift_Top" />
+    <child link="right_arm_link0" />
+  </joint>
+  <link name="right_arm_link0">
+    <inertial>
+      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965751904985 -0.000714269628734 1.5764233274" />
+      <mass value="1.02" />
+      <inertia ixx="0.00282612" iyy="0.00269117" izz="0.000879394" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link0.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint1" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-2.61" upper="2.61" effort="100" velocity="10" />
+    <origin xyz="0 0 0.123" rpy="0 0 0" />
+    <parent link="right_arm_link0" />
+    <child link="right_arm_link1" />
+  </joint>
+  <link name="right_arm_link1">
+    <inertial>
+      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975743905 0.0451293629087 -0.00296542943264" />
+      <mass value="0.71" />
+      <inertia ixx="0.000489262" iyy="0.000439887" izz="0.000404551" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link1.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint2" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="3.13" effort="100" velocity="10" />
+    <origin xyz="0 0 0" rpy="1.57079970425 -0.135899890111 3.14158533936" />
+    <parent link="right_arm_link1" />
+    <child link="right_arm_link2" />
+  </joint>
+  <link name="right_arm_link2">
+    <inertial>
+      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457578972 0.0718617599512 1.59803864256" />
+      <mass value="1.17" />
+      <inertia ixx="0.0679032" iyy="0.067745" izz="0.00111966" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link2.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint3" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-2.965" upper="0" effort="100" velocity="10" />
+    <origin xyz="0.28503 0 0" rpy="0 0 -1.7938990818" />
+    <parent link="right_arm_link2" />
+    <child link="right_arm_link3" />
+  </joint>
+  <link name="right_arm_link3">
+    <inertial>
+      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.5708241612 0.0273181067184 0.123352501639" />
+      <mass value="0.5" />
+      <inertia ixx="0.0138227" iyy="0.0138032" izz="0.000244685" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link3.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint4" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-1.74" upper="1.74" effort="100" velocity="10" />
+    <origin xyz="-0.021984 -0.25075 0" rpy="1.57079977413 0 0" />
+    <parent link="right_arm_link3" />
+    <child link="right_arm_link4" />
+  </joint>
+  <link name="right_arm_link4">
+    <inertial>
+      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476492845 0.22355782891 1.53022260235" />
+      <mass value="0.38" />
+      <inertia ixx="0.000191586" iyy="0.000185052" izz="0.000152863" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link4.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint5" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-1.2" upper="1.2" effort="100" velocity="10" />
+    <origin xyz="0 0 0" rpy="-1.57079977413 0 0" />
+    <parent link="right_arm_link4" />
+    <child link="right_arm_link5" />
+  </joint>
+  <link name="right_arm_link5">
+    <inertial>
+      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.5637616277 0.00377983257731 1.43794226806e-05" />
+      <mass value="0.383" />
+      <inertia ixx="0.00166169" iyy="0.00164328" izz="0.000185028" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link5.stl" />
+      </geometry>
+      <material name="gray_mat">
+        <color rgba="0.59 0.59 0.59 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_joint6" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit lower="-3" upper="3" effort="100" velocity="10" />
+    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57079977413 0 0" />
+    <parent link="right_arm_link5" />
+    <child link="right_arm_link6" />
+  </joint>
+  <link name="right_arm_link6">
+    <inertial>
+      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 0" />
+      <mass value="0.0069909" />
+      <inertia ixx="1.06739e-06" iyy="5.73016e-07" izz="5.73016e-07" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/link6.stl" />
+      </geometry>
+      <material name="light_medium_gray_mat">
+        <color rgba="0.85 0.85 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_link6_to_right_arm_gripper_base" type="fixed">
+    <origin xyz="0.0275 0.01875 0.0798" rpy="3.14 -1.57 0" />
+    <parent link="right_arm_link6" />
+    <child link="right_arm_gripper_base" />
+  </joint>
+  <link name="right_arm_gripper_base">
+    <inertial>
+      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578689204 0.0137929430409 0.00157838995994" />
+      <mass value="0.45" />
+      <inertia ixx="0.000929442" iyy="0.000714469" izz="0.000394318" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/gripper_body.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_gripper_base_to_right_arm_iphone_body" type="fixed">
+    <origin xyz="-0.0075 0.015 0.017" rpy="0 0 1.57" />
+    <parent link="right_arm_gripper_base" />
+    <child link="right_arm_iphone_body" />
+  </joint>
+  <link name="right_arm_iphone_body">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/yor/meshes/piper/iphone.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="gray">
+        <color rgba="0.15 0.15 0.15 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_arm_iphone_body_to_right_arm_camera_body" type="fixed">
+    <origin xyz="0.0 -0.036 0.1" rpy="-0.2617993878 3.14159265359 0.0" />
+    <parent link="right_arm_iphone_body" />
+    <child link="right_arm_camera_body" />
+  </joint>
+  <link name="right_arm_camera_body" />
+</robot>
+

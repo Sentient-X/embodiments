@@ -13,7 +13,7 @@ Camera instance names are the sxd pipeline's canonical stream keys for the
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..curves import Curve1D
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
@@ -23,7 +23,43 @@ DAS_GRIPPER_URDF: Final = PackagedAsset(
     relpath="das_gripper_with_vr/urdf/DAS_Gripper_urdf.urdf",
     sha256="cea619914abc6539be8f608b3e68f9e70681ee25e583639723f9f285cc6410f9",
     format=AssetFormat.URDF,
+    role=AssetRole.OTHER,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/sxd",
+        revision="470b4ba5c3943796fb3840e45f835471eaed96d8",
+        path="urdf/DAS_Gripper_with_VR/urdf/DAS_Gripper_urdf.urdf",
+        license_id="Apache-2.0",
+    ),
+    media_type="application/xml",
+)
+
+DAS_UMI_V4_URDF: Final = PackagedAsset(
+    relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
+    sha256="02898860917342c97851116616125021b34a3c4b03a0b709e3f8106888fe635b",
+    format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/sxd",
+        revision="470b4ba5c3943796fb3840e45f835471eaed96d8",
+        path="urdf/DAS_Gripper_with_VR/urdf/DAS_Gripper_urdf.urdf",
+        license_id="Apache-2.0",
+        generator="sx-embodiments/tools/compose_das_urdf.py",
+    ),
+    media_type="application/xml",
+)
+
+QUEST_EGO_URDF: Final = PackagedAsset(
+    relpath="quest_ego/urdf/quest_ego.urdf",
+    sha256="c09c2ac0965b11eb26afb199b6efc1d39fc78b36663e5a6b3a6b7596d30b02a1",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/sx-embodiments",
+        revision="manifest-v3",
+        path="assets/quest_ego/urdf/quest_ego.urdf",
+        license_id="Apache-2.0",
+        generator="canonical two-frame Quest capture-rig description",
+    ),
     media_type="application/xml",
 )
 
@@ -104,13 +140,17 @@ DAS_UMI_V4_SPEC: Final = EmbodimentSpec(
         Attachment("left_jaw", DAS_JAW_V4, AttachmentRole.BODY),
         Attachment("right_jaw", DAS_JAW_V4, AttachmentRole.BODY),
         Attachment(
-            "left_wrist", UVC_MONO_60, AttachmentRole.SENSOR, MountFrame("left_jaw", "handle")
+            "left_wrist", UVC_MONO_60, AttachmentRole.SENSOR, MountFrame("left_jaw", "link_ca2")
         ),
         Attachment(
-            "right_wrist", UVC_MONO_60, AttachmentRole.SENSOR, MountFrame("right_jaw", "handle")
+            "right_wrist",
+            UVC_MONO_60,
+            AttachmentRole.SENSOR,
+            MountFrame("right_jaw", "link_ca2"),
         ),
-        Attachment("base", QUEST3_HEAD, AttachmentRole.SENSOR),
+        Attachment("base", QUEST3_HEAD, AttachmentRole.SENSOR, MountFrame(frame="quest3s_head")),
     ),
+    extra_assets=(DAS_UMI_V4_URDF,),
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentSpec(
@@ -118,5 +158,13 @@ QUEST_EGO_SPEC: Final = EmbodimentSpec(
     name="Quest 3 egocentric capture (no gripper)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
-    attachments=(Attachment("head_left", QUEST3_HEAD, AttachmentRole.SENSOR),),
+    attachments=(
+        Attachment(
+            "head_left",
+            QUEST3_HEAD,
+            AttachmentRole.SENSOR,
+            MountFrame(frame="quest3s_head"),
+        ),
+    ),
+    extra_assets=(QUEST_EGO_URDF,),
 )

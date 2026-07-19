@@ -7,9 +7,10 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..layout import ChannelKind, ChannelSlot, FlatLayout
 from ..parts import (
     ArmSpec,
     ControlRates,
@@ -18,12 +19,28 @@ from ..parts import (
     MobileBaseSpec,
     PhysicalSpec,
 )
+from .sources import menagerie
 
 PANDA_MJCF: Final = PackagedAsset(
     relpath="menagerie/franka_emika_panda/panda.xml",
     sha256="96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273",
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
+    provenance=menagerie("franka_emika_panda/panda.xml", "Apache-2.0"),
+    media_type="application/xml",
+)
+PANDA_URDF: Final = PackagedAsset(
+    relpath="official/franka_panda/panda.urdf",
+    sha256="668d8398e32164587fc2e9886b37d1a17a20d889cafe192f28ba245a3e82c24a",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/frankarobotics/franka_ros",
+        revision="ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+        path="franka_description/robots/panda/panda.urdf.xacro",
+        license_id="Apache-2.0",
+        generator="xacro 2.1.1 hand=true",
+    ),
     media_type="application/xml",
 )
 
@@ -41,7 +58,7 @@ PANDA_ARM: Final = ArmSpec(
     joint_lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
     joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
-    assets=(PANDA_MJCF,),
+    assets=(PANDA_URDF, PANDA_MJCF),
     # Franka Emika Panda datasheet (download.franka.de/Datasheet-EN.pdf).
     physical=PhysicalSpec(payload_kg=3.0, reach_m=0.855, mass_kg=18.0),
 )
@@ -89,5 +106,55 @@ LIBERO_PANDA_SPEC: Final = EmbodimentSpec(
     attachments=(
         Attachment("arm", PANDA_ARM, AttachmentRole.BODY),
         Attachment("gripper", PANDA_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "panda_link8")),
+    ),
+    action_layout=FlatLayout(
+        embodiment_id=EmbodimentId("libero_panda"),
+        slots=(
+            ChannelSlot(
+                0,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_x",
+                ChannelKind.EEF_TRANSLATION,
+            ),
+            ChannelSlot(
+                1,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_y",
+                ChannelKind.EEF_TRANSLATION,
+            ),
+            ChannelSlot(
+                2,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_z",
+                ChannelKind.EEF_TRANSLATION,
+            ),
+            ChannelSlot(
+                3,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_roll",
+                ChannelKind.EEF_ROTATION,
+            ),
+            ChannelSlot(
+                4,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_pitch",
+                ChannelKind.EEF_ROTATION,
+            ),
+            ChannelSlot(
+                5,
+                "eef",
+                PartId("libero-cartesian-controller"),
+                "delta_yaw",
+                ChannelKind.EEF_ROTATION,
+            ),
+            ChannelSlot(
+                6, "gripper", PANDA_GRIPPER.part_id, "panda_finger_joint1", ChannelKind.GRIPPER
+            ),
+        ),
     ),
 )

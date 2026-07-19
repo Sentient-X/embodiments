@@ -2,16 +2,31 @@
 
 from typing import Final, Literal
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, JointGroupSpec
+from .sources import menagerie
 
 UNITREE_G1_MJCF: Final = PackagedAsset(
     relpath="menagerie/unitree_g1/g1.xml",
     sha256="3c2616550a31f33e84d3c80b8e913ac5618c8888019b0c9490dae93493e647f3",
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
+    provenance=menagerie("unitree_g1/g1.xml", "BSD-3-Clause"),
+    media_type="application/xml",
+)
+UNITREE_G1_URDF: Final = PackagedAsset(
+    relpath="official/unitree_g1/g1_29dof_rev_1_0.urdf",
+    sha256="f751dbd8a0cdb653dc705cc8aaa36de6658054d0fb98faf18c0462a6707d20e5",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/unitreerobotics/unitree_ros",
+        revision="d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+        path="robots/g1_description/g1_29dof_rev_1_0.urdf",
+        license_id="BSD-3-Clause",
+    ),
     media_type="application/xml",
 )
 
@@ -27,7 +42,7 @@ def _g1_leg(side: Literal["left", "right"]) -> JointGroupSpec:
         joint_lower=(-2.5307, roll[0], -2.7576, -0.087267, -0.87267, -0.2618),
         joint_upper=(2.8798, roll[1], 2.7576, 2.8798, 0.5236, 0.2618),
         home_joints=(0.0,) * 6,
-        assets=(UNITREE_G1_MJCF,) if side == "left" else (),
+        assets=(UNITREE_G1_URDF, UNITREE_G1_MJCF) if side == "left" else (),
     )
 
 

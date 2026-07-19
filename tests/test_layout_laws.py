@@ -14,7 +14,6 @@ from sx_embodiments import (
 from sx_embodiments.known.das import DAS_UMI_V4_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
 from sx_embodiments.known.so101 import BIMANUAL_SO101_SPEC
-from sx_embodiments.known.stations import B601_DM_SPEC
 
 
 def test_bimanual_so101_layout_is_the_supervisors_wire_convention() -> None:
@@ -62,11 +61,6 @@ def test_das_capture_rig_layout_is_two_jaw_channels() -> None:
     assert layout.gripper_count == 2
     # Degenerate-but-coherent: two one-channel jaw "blocks".
     assert layout.uniform_arm_blocks() == (2, 1, 0)
-
-
-def test_undeclared_layout_fails_closed() -> None:
-    with pytest.raises(LayoutError):
-        flat_layout(B601_DM_SPEC)  # DeviceSpec follower: channels unknown
 
 
 def test_width_validation_enforces_declared_layouts() -> None:

@@ -9,7 +9,7 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec
@@ -19,6 +19,12 @@ SO101_URDF: Final = PackagedAsset(
     sha256="dd7f789c1aa4b9f82174dd49f6c4d62f5338f0956ec8e59c37576ee161903279",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/AbdulazizAlmuzairee/Squint",
+        revision="d8ca2fbfb4cef6b6097c71f9ec172c76125a572f",
+        path="envs/robot/so101.urdf",
+        license_id="MIT",
+    ),
     media_type="application/xml",
 )
 

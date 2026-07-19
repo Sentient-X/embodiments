@@ -1,13 +1,17 @@
 """Registry pins: derived constants can never drift from the deployed values."""
 
+import pytest
+
 from sx_embodiments import (
     EMBODIMENTS,
     PANDA_OMRON,
     PIPER,
     EmbodimentId,
     EmbodimentKind,
+    MissingUrdfError,
     camera_names,
     kinematic_view,
+    manifest_for,
 )
 from sx_embodiments.known.panda import PANDA_OMRON_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
@@ -68,11 +72,7 @@ def test_registry_ids_are_byte_stable() -> None:
         "yubi-mono",
         "yubi-depth",
         "yubi-widejaw",
-        "b601-dm",
-        "b601-rs",
         "piperx-station",
-        "sentient-a1",
-        "sentient-a2",
     }
 
 
@@ -97,6 +97,19 @@ def test_every_entry_validates_and_kinds_are_coherent() -> None:
     for eid, spec in EMBODIMENTS.items():
         assert spec.embodiment_id == eid
         assert spec.kind is not None, f"{eid} does not declare its character"
+        if eid == EmbodimentId("insta360-umi"):
+            with pytest.raises(MissingUrdfError):
+                manifest_for(spec)
+            continue
+        manifest = manifest_for(spec)
+        assert manifest.schema_version == 3
+        assert (
+            sum(
+                asset.format.value == "urdf" and asset.role.value == "description"
+                for asset in manifest.assets
+            )
+            == 1
+        )
         if spec.kind is EmbodimentKind.TELEOP_STATION:
             assert any(a.role.value == "leader" for a in spec.attachments)
             assert camera_names(spec), f"teleop station {eid} declares no camera"

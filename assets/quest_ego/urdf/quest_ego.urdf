@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="quest_ego">
+  <link name="quest3s_head"/>
+  <link name="quest3s_camera_optical"/>
+  <joint name="quest3s_head_to_camera_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="quest3s_head"/>
+    <child link="quest3s_camera_optical"/>
+  </joint>
+</robot>

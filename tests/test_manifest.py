@@ -1,5 +1,6 @@
-"""Asset references, the v2 wire manifest, and the kinematic record's invariants."""
+"""Asset references, the v3 wire manifest, and the kinematic record's invariants."""
 
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from sx_embodiments import (
     AssetFormat,
     AssetIntegrityError,
+    AssetProvenance,
     AssetRef,
     AssetRole,
     Curve1D,
@@ -17,6 +19,7 @@ from sx_embodiments import (
     LayoutError,
     ManifestSchemaError,
     PartValidationError,
+    authoritative_urdf,
     kinematic_view,
     manifest_for,
     manifest_from_dict,
@@ -33,7 +36,18 @@ def _ref(
     uri: str = "https://assets.example/arm.urdf",
     sha256: str = _DIGEST,
 ) -> AssetRef:
-    return AssetRef(uri=uri, sha256=sha256, format=AssetFormat.URDF, role=AssetRole.DESCRIPTION)
+    return AssetRef(
+        uri=uri,
+        sha256=sha256,
+        format=AssetFormat.URDF,
+        role=AssetRole.DESCRIPTION,
+        provenance=AssetProvenance(
+            repository="https://assets.example/source",
+            revision="fixture",
+            path="arm.urdf",
+            license_id="Apache-2.0",
+        ),
+    )
 
 
 @pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])
@@ -58,10 +72,10 @@ def test_from_bytes_hashes_content() -> None:
     assert len(ref.sha256) == 64
 
 
-def test_manifest_v2_round_trips_identity_and_assets() -> None:
+def test_manifest_v3_round_trips_identity_and_assets() -> None:
     manifest = manifest_for(PIPER_SPEC)
     wire = manifest.to_dict()
-    assert wire["schema_version"] == 2
+    assert wire["schema_version"] == 3
     assert wire["embodiment_id"] == "piper"
     assert wire["kind"] == "robot"
     layout = cast(list[dict[str, object]], wire["layout"])
@@ -71,15 +85,18 @@ def test_manifest_v2_round_trips_identity_and_assets() -> None:
     assert parsed.dof == 7
 
 
+def test_authoritative_urdf_is_the_manifest_urdf() -> None:
+    urdf = authoritative_urdf(PIPER_SPEC)
+    manifest = manifest_for(PIPER_SPEC)
+    assert urdf.ref() in manifest.assets
+    assert urdf.path().read_bytes().lstrip().startswith(b"<?xml")
+
+
 def test_manifest_digest_is_canonical_and_revision_sensitive() -> None:
     manifest = manifest_for(PIPER_SPEC)
     assert len(manifest.digest()) == 64
     assert manifest.canonical_json() == manifest.canonical_json()
-    changed = EmbodimentManifest(
-        embodiment_id=manifest.embodiment_id,
-        name=f"{manifest.name} revision",
-        assets=manifest.assets,
-    )
+    changed = replace(manifest, name=f"{manifest.name} revision")
     assert changed.digest() != manifest.digest()
     assert manifest.ref().embodiment_id == manifest.embodiment_id
     assert manifest.ref().manifest_sha256 == manifest.digest()
@@ -131,7 +148,8 @@ def test_libero_panda_has_a_deployable_asset_manifest() -> None:
     manifest = manifest_for(LIBERO_PANDA_SPEC)
     assert manifest.embodiment_id == EmbodimentId("libero_panda")
     assert [(asset.format, asset.role) for asset in manifest.assets] == [
-        (AssetFormat.MJCF, AssetRole.DESCRIPTION)
+        (AssetFormat.URDF, AssetRole.DESCRIPTION),
+        (AssetFormat.MJCF, AssetRole.DESCRIPTION),
     ]
 
 

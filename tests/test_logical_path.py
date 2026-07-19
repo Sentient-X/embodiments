@@ -1,5 +1,6 @@
 """Bundle-member paths: relative, forward-slash, no escape — validated fail-closed."""
 
+from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import cast
 
@@ -8,14 +9,15 @@ import pytest
 from sx_embodiments import (
     AssetFormat,
     AssetIntegrityError,
+    AssetProvenance,
     AssetRef,
     AssetRole,
-    EmbodimentId,
-    EmbodimentManifest,
     ManifestSchemaError,
+    manifest_for,
     manifest_from_dict,
     validate_logical_path,
 )
+from sx_embodiments.known.panda import FRANKA_SPEC
 
 _SHA = "a" * 64
 
@@ -24,9 +26,15 @@ def _ref(logical_path: str | None) -> AssetRef:
     return AssetRef(
         uri="https://example.invalid/bundle",
         sha256=_SHA,
-        format=AssetFormat.URDF,
-        role=AssetRole.DESCRIPTION,
+        format=AssetFormat.MESH,
+        role=AssetRole.GEOMETRY,
         logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
+        provenance=AssetProvenance(
+            repository="https://example.invalid/source",
+            revision="fixture",
+            path="mesh.dae",
+            license_id="Apache-2.0",
+        ),
     )
 
 
@@ -48,37 +56,26 @@ def test_srdf_is_a_first_class_format() -> None:
 
 
 def test_same_blob_at_two_logical_paths_is_legal() -> None:
-    manifest = EmbodimentManifest(
-        embodiment_id=EmbodimentId("franka"),
-        name="Franka Panda",
-        assets=(_ref("meshes/a.dae"), _ref("meshes/b.dae")),
-    )
-    assert len(manifest.assets) == 2
+    base = manifest_for(FRANKA_SPEC)
+    manifest = replace(base, assets=(*base.assets, _ref("meshes/a.dae"), _ref("meshes/b.dae")))
+    assert len(manifest.assets) == len(base.assets) + 2
     with pytest.raises(ManifestSchemaError):
-        EmbodimentManifest(
-            embodiment_id=EmbodimentId("franka"),
-            name="Franka Panda",
-            assets=(_ref("meshes/a.dae"), _ref("meshes/a.dae")),
+        replace(
+            base,
+            assets=(*base.assets, _ref("meshes/a.dae"), _ref("meshes/a.dae")),
         )
 
 
 def test_wire_round_trip_carries_logical_path() -> None:
-    manifest = EmbodimentManifest(
-        embodiment_id=EmbodimentId("franka"),
-        name="Franka Panda",
-        assets=(_ref("urdf/panda.urdf"), _ref(None)),
-    )
+    base = manifest_for(FRANKA_SPEC)
+    manifest = replace(base, assets=(*base.assets, _ref(None)))
     parsed = manifest_from_dict(manifest.to_dict())
-    assert parsed.assets[0].logical_path == PurePosixPath("urdf/panda.urdf")
-    assert parsed.assets[1].logical_path is None
+    assert parsed.assets[0].logical_path is not None
+    assert parsed.assets[-1].logical_path is None
 
 
 def test_wire_rejects_malformed_logical_path() -> None:
-    manifest = EmbodimentManifest(
-        embodiment_id=EmbodimentId("franka"),
-        name="Franka Panda",
-        assets=(_ref("urdf/panda.urdf"),),
-    )
+    manifest = manifest_for(FRANKA_SPEC)
     document = manifest.to_dict()
     assets = document["assets"]
     assert isinstance(assets, list)

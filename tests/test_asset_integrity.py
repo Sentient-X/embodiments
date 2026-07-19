@@ -7,28 +7,43 @@ from pathlib import Path
 import pytest
 
 from sx_embodiments import AssetFormat, AssetsUnavailableError, PackagedAsset, asset_root
-from sx_embodiments.known.aloha import ALOHA_MJCF
-from sx_embodiments.known.das import DAS_GRIPPER_URDF
-from sx_embodiments.known.g1 import UNITREE_G1_MJCF
+from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
+from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
+from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
-from sx_embodiments.known.panda import PANDA_MJCF
-from sx_embodiments.known.piper import PIPER_MJCF
-from sx_embodiments.known.rby1 import RBY1_MJCF
+from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
+from sx_embodiments.known.piper import PIPER_MJCF, PIPER_URDF
+from sx_embodiments.known.rby1 import RBY1_MJCF, RBY1_URDF
 from sx_embodiments.known.so101 import SO101_URDF
 from sx_embodiments.known.sxd_arm import SXD_ARM_URDF
-from sx_embodiments.known.universal_robots import UR5E_MJCF, UR10E_MJCF
-from sx_embodiments.known.yor import YOR_MJCF
+from sx_embodiments.known.universal_robots import (
+    UR5E_MJCF,
+    UR5E_URDF,
+    UR10E_MJCF,
+    UR10E_URDF,
+)
+from sx_embodiments.known.yor import YOR_MJCF, YOR_URDF
 
 PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
     DAS_GRIPPER_URDF,
+    DAS_UMI_V4_URDF,
+    QUEST_EGO_URDF,
+    PIPER_URDF,
     PIPER_MJCF,
+    PANDA_URDF,
     PANDA_MJCF,
+    ALOHA_URDF,
     ALOHA_MJCF,
+    RBY1_URDF,
     RBY1_MJCF,
+    UNITREE_G1_URDF,
     UNITREE_G1_MJCF,
+    UR10E_URDF,
     UR10E_MJCF,
+    UR5E_URDF,
     UR5E_MJCF,
+    YOR_URDF,
     YOR_MJCF,
     SENTIENT_HUMANOID_URDF,
     SENTIENT_HUMANOID_MJCF,
@@ -113,6 +128,7 @@ def test_missing_packaged_asset_fails_closed() -> None:
         sha256=SO101_URDF.sha256,
         format=SO101_URDF.format,
         role=SO101_URDF.role,
+        provenance=SO101_URDF.provenance,
     )
     with pytest.raises(AssetsUnavailableError):
         ghost.path()

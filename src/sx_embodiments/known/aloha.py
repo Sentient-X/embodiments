@@ -2,16 +2,32 @@
 
 from typing import Final, Literal
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec, MimicJoint
+from .sources import menagerie
 
 ALOHA_MJCF: Final = PackagedAsset(
     relpath="menagerie/aloha/aloha.xml",
     sha256="68430b29719bda1b75e63f540953f81991bc3fd136bdf0a43bbe3e04393b78d3",
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
+    provenance=menagerie("aloha/aloha.xml", "BSD-3-Clause"),
+    media_type="application/xml",
+)
+ALOHA_URDF: Final = PackagedAsset(
+    relpath="official/aloha/aloha.urdf",
+    sha256="16dc0e1a2c84dac010ae629120afce5621e7201c87966ba2a91ff0e069de09a1",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Interbotix/interbotix_ros_manipulators",
+        revision="0bb2b0e6d0e619bff02cf74dbd5af5681dcf80c9",
+        path="interbotix_ros_xsarms/interbotix_xsarm_descriptions/urdf/vx300s.urdf.xacro",
+        license_id="BSD-3-Clause",
+        generator="xacro 2.1.1 + sx dual-arm composition v1",
+    ),
     media_type="application/xml",
 )
 
@@ -37,7 +53,7 @@ def _aloha_arm(side: Literal["left", "right"]) -> ArmSpec:
         joint_lower=_ARM_LOWER,
         joint_upper=_ARM_UPPER,
         home_joints=_ARM_HOME,
-        assets=(ALOHA_MJCF,),
+        assets=(ALOHA_URDF, ALOHA_MJCF),
     )
 
 

@@ -9,7 +9,7 @@ the hardware URDF limits below win at the execution boundary.
 
 from typing import Final, Literal
 
-from ..assets import AssetFormat, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
 from ..parts import ArmSpec, JointGroupSpec
@@ -19,6 +19,12 @@ SENTIENT_HUMANOID_URDF: Final = PackagedAsset(
     sha256="e79678962ede3c9c6def69ac3e40f1ac67e59d41e5205f6356dd294bb88017a6",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/humanoid_pkg",
+        revision="666bc6b5e00c76b8388a70fcc40a6987e0f1da7a",
+        path="urdf/urdf_robot_acc.urdf",
+        license_id="BSD-3-Clause",
+    ),
     media_type="application/xml",
 )
 SENTIENT_HUMANOID_MJCF: Final = PackagedAsset(
@@ -26,6 +32,12 @@ SENTIENT_HUMANOID_MJCF: Final = PackagedAsset(
     sha256="1276bbfd8731401160abe1698c988a6807fdb95f001c2ad9755f18e856b4c6a4",
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/humanoid_pkg",
+        revision="666bc6b5e00c76b8388a70fcc40a6987e0f1da7a",
+        path="mjcf/humanoid_28dof.xml",
+        license_id="BSD-3-Clause",
+    ),
     media_type="application/xml",
 )
 

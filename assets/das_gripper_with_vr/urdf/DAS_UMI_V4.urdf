@@ -1,0 +1,870 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="das_umi_v4">
+  <link name="quest3s_head" />
+  <link name="quest3s_camera_optical" />
+  <joint name="quest3s_head_to_camera_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="quest3s_head" />
+    <child link="quest3s_camera_optical" />
+  </joint>
+  <link name="left_world" />
+  <joint name="left_world_to_base_link" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="left_world" />
+    <child link="left_base_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_base_link">
+    <inertial>
+      <origin xyz="0.00278250139212545 0.000187287188802259 -0.0649448918101039" rpy="0 0 0" />
+      <mass value="0.25052255434884" />
+      <inertia ixx="0.000374515124376323" ixy="-1.21209822740659E-06" ixz="-2.11003310406758E-05" iyy="0.000247069320910642" iyz="7.40581205023416E-07" izz="0.000192267594278956" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="left_link_1">
+    <inertial>
+      <origin xyz="0.0111698775926259 0.0130382366045426 -0.00922442279841571" rpy="0 0 0" />
+      <mass value="0.0188480149790177" />
+      <inertia ixx="5.8988875536545E-06" ixy="-3.40544976622782E-06" ixz="-1.92363256596422E-07" iyy="4.53830689550564E-06" iyz="-2.42162765665262E-07" izz="1.00981852554242E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_1" type="revolute">
+    <origin xyz="0.022418 0.043372 -0.059758" rpy="0 -0.2618 0" />
+    <parent link="left_base_link" />
+    <child link="left_link_1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+  </joint>
+  <link name="left_link_left">
+    <inertial>
+      <origin xyz="0.0254691723532261 -0.0272561853154572 -0.00924899427397418" rpy="0 0 0" />
+      <mass value="0.0143347096511438" />
+      <inertia ixx="7.22292488587969E-07" ixy="4.11143118077403E-07" ixz="-1.88580449727449E-11" iyy="3.49297541582351E-06" iyz="-9.39153494024212E-13" izz="3.62513456981631E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.745098039215686 0.529411764705882 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_3" type="revolute">
+    <origin xyz="0.04262 0.046314 0" rpy="0 0 0" />
+    <parent link="left_link_1" />
+    <child link="left_link_left" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="left_joint_1" multiplier="-1" offset="0" />
+  </joint>
+  <link name="left_link_2">
+    <inertial>
+      <origin xyz="0.0105638233920196 -0.0123745523543532 -0.0092370035944179" rpy="0 0 0" />
+      <mass value="0.0271957000411005" />
+      <inertia ixx="8.6863243448814E-06" ixy="5.01073867385604E-06" ixz="-2.82582783157405E-07" iyy="6.65930369337175E-06" iyz="3.55977281809514E-07" izz="1.48713183868901E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_2" type="revolute">
+    <origin xyz="0.022418 -0.042627 -0.059758" rpy="0 -0.2618 0" />
+    <parent link="left_base_link" />
+    <child link="left_link_2" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="left_joint_1" multiplier="-1" offset="0" />
+  </joint>
+  <link name="left_link_right">
+    <inertial>
+      <origin xyz="0.0254683509489325 0.0272540370820665 -0.00924889874088622" rpy="0 0 0" />
+      <mass value="0.0143347096588342" />
+      <inertia ixx="7.22208874040906E-07" ixy="-4.10861273247096E-07" ixz="1.88579340276013E-11" iyy="3.49305903213778E-06" iyz="-9.41095772881307E-13" izz="3.62513457065684E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_4.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.745098039215686 0.529411764705882 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_4" type="revolute">
+    <origin xyz="0.04262 -0.046314 0" rpy="0 0 0" />
+    <parent link="left_link_2" />
+    <child link="left_link_right" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+    <mimic joint="left_joint_2" multiplier="-1" offset="0" />
+  </joint>
+  <link name="left_link_5">
+    <inertial>
+      <origin xyz="0.0173669874644275 0.0227176239384365 -0.0094255781507463" rpy="0 0 0" />
+      <mass value="0.0109821462117077" />
+      <inertia ixx="2.44733705337546E-06" ixy="-1.50008041263207E-06" ixz="-1.03406909427736E-11" iyy="1.79539771632725E-06" iyz="-1.44155092041614E-11" izz="3.25065506297382E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_5.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_5" type="revolute">
+    <origin xyz="0.037102 0.01989 -0.055622" rpy="0 -0.2618 0" />
+    <parent link="left_base_link" />
+    <child link="left_link_5" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+    <mimic joint="left_joint_1" multiplier="1" offset="0" />
+  </joint>
+  <link name="left_link_6">
+    <inertial>
+      <origin xyz="0.0173663962799268 -0.0227180758554502 -0.00942545135918245" rpy="0 0 0" />
+      <mass value="0.0109821462005777" />
+      <inertia ixx="2.4474151242897E-06" ixy="1.50006344510183E-06" ixz="1.03404518608018E-11" iyy="1.79531964444768E-06" iyz="-1.44160025035364E-11" izz="3.25065506215873E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_6.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_6" type="revolute">
+    <origin xyz="0.037102 -0.019145 -0.055622" rpy="0 -0.2618 0" />
+    <parent link="left_base_link" />
+    <child link="left_link_6" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="left_joint_2" multiplier="1" offset="0" />
+  </joint>
+  <link name="left_link_imu">
+    <inertial>
+      <origin xyz="0.00862216042223432 -0.0138222723020212 -0.00384400864237492" rpy="0 0 0" />
+      <mass value="1.41794811721163" />
+      <inertia ixx="0.00625603016959313" ixy="-2.30162842690393E-05" ixz="8.60601322410442E-05" iyy="0.00359313750875759" iyz="-0.000609859640446212" izz="0.00526886654405653" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_imu.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_imu.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_imu" type="fixed">
+    <origin xyz="0.002742 0.0075232 -0.049069" rpy="1.5708 0 -1.5708" />
+    <parent link="left_base_link" />
+    <child link="left_link_imu" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_ca1">
+    <inertial>
+      <origin xyz="-0.000411296805630016 0.000285191199263957 0.0106419007919078" rpy="0 0 0" />
+      <mass value="0.00358753776891076" />
+      <inertia ixx="2.04174474708491E-07" ixy="-1.62935647881402E-17" ixz="4.3742568811687E-17" iyy="2.13252204716397E-07" iyz="-5.94511249854112E-20" izz="1.13222316395875E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_ca1" type="fixed">
+    <origin xyz="0 -0.027 0" rpy="-1.5708 0 -1.5708" />
+    <parent link="left_base_link" />
+    <child link="left_link_ca1" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_ca2">
+    <inertial>
+      <origin xyz="-0.000411300000511884 0.000285191199261743 0.0124180352434537" rpy="0 0 0" />
+      <mass value="0.00434913936285486" />
+      <inertia ixx="2.97803076590816E-07" ixy="-1.6293574246449E-17" ixz="6.79944603020297E-23" iyy="3.06880806598721E-07" iyz="-3.30872245021211E-23" izz="1.68401927113963E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_ca2" type="fixed">
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708" />
+    <parent link="left_base_link" />
+    <child link="left_link_ca2" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_ca3">
+    <inertial>
+      <origin xyz="-0.000411404800511883 0.000285191199263755 0.0106419007921056" rpy="0 0 0" />
+      <mass value="0.00358753776891076" />
+      <inertia ixx="2.04174474708491E-07" ixy="-1.62935823619779E-17" ixz="-4.98344306902776E-24" iyy="2.13252204716397E-07" iyz="-5.94527793466363E-20" izz="1.13222316395875E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_joint_ca3" type="fixed">
+    <origin xyz="0 0.0269998952 0" rpy="-1.57079632858979 0 -1.5707963267949" />
+    <parent link="left_base_link" />
+    <child link="left_link_ca3" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_base_right">
+    <inertial>
+      <origin xyz="0.0585616308853042 0.0292266810510748 0.0155607315963588" rpy="0 0 0" />
+      <mass value="0.0286834699102514" />
+      <inertia ixx="3.63241251743929E-06" ixy="1.07899939768015E-06" ixz="2.16284282875813E-06" iyy="2.51828241236572E-05" iyz="2.6868718185999E-07" izz="2.65463378038774E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_right.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_right.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_base_right" type="fixed">
+    <origin xyz="0.0150 0.025 -0.015" rpy="1.309 0 -1.5" />
+    <parent link="left_base_link" />
+    <child link="left_base_right" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_vr_controller_imu">
+    <inertial>
+      <origin xyz="0.00105442913106146 0.00854962149636618 0.0169187971891807" rpy="0 0 0" />
+      <mass value="0.137812034154997" />
+      <inertia ixx="0.000148050641954279" ixy="-1.26640373387406E-06" ixz="1.30728265698385E-05" iyy="0.000143745553925036" iyz="-4.51072518674908E-06" izz="3.63436636584035E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/controller_right.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/controller_right.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_vr_controller_imu" type="fixed">
+    <origin xyz="0.1073691131477 0.00519008100640672 0.0240804942781214" rpy="-1.5707963267949 1.5707963267949 0" />
+    <parent link="left_base_right" />
+    <child link="left_vr_controller_imu" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_quest3s_left_controller_anchor" />
+  <joint name="left_quest3s_left_controller_anchor" type="fixed">
+    <origin xyz="0.000723 -0.083623 -0.003753" rpy="1.119887 -0.047317 -1.685469" />
+    <parent link="left_base_link" />
+    <child link="left_quest3s_left_controller_anchor" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_quest3s_right_controller_anchor" />
+  <joint name="left_quest3s_right_controller_anchor" type="fixed">
+    <origin xyz="0.000723 -0.083623 -0.003753" rpy="1.085034 0.072538 -1.513269" />
+    <parent link="left_base_link" />
+    <child link="left_quest3s_right_controller_anchor" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_handle" />
+  <joint name="left_handle" type="fixed">
+    <origin xyz="-0.002 0.000 -0.147" rpy="0 0 0" />
+    <parent link="left_base_link" />
+    <child link="left_handle" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_left_tip" />
+  <joint name="left_link_left_tip" type="fixed">
+    <origin xyz="0.064 -0.037 -0.010" rpy="0 0 0" />
+    <parent link="left_link_left" />
+    <child link="left_link_left_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_mid_left_finger" />
+  <joint name="left_link_mid_left_finger" type="fixed">
+    <origin xyz="0.032 -0.037 -0.010" rpy="0 0 0" />
+    <parent link="left_link_left" />
+    <child link="left_link_mid_left_finger" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_right_tip" />
+  <joint name="left_link_right_tip" type="fixed">
+    <origin xyz="0.064 0.037 -0.010" rpy="0 0 0" />
+    <parent link="left_link_right" />
+    <child link="left_link_right_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="left_link_mid_right_finger" />
+  <joint name="left_link_mid_right_finger" type="fixed">
+    <origin xyz="0.032 0.037 -0.010" rpy="0 0 0" />
+    <parent link="left_link_right" />
+    <child link="left_link_mid_right_finger" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <joint name="head_to_left_rig" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="quest3s_head" />
+    <child link="left_world" />
+  </joint>
+  <link name="right_world" />
+  <joint name="right_world_to_base_link" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="right_world" />
+    <child link="right_base_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_base_link">
+    <inertial>
+      <origin xyz="0.00278250139212545 0.000187287188802259 -0.0649448918101039" rpy="0 0 0" />
+      <mass value="0.25052255434884" />
+      <inertia ixx="0.000374515124376323" ixy="-1.21209822740659E-06" ixz="-2.11003310406758E-05" iyy="0.000247069320910642" iyz="7.40581205023416E-07" izz="0.000192267594278956" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="right_link_1">
+    <inertial>
+      <origin xyz="0.0111698775926259 0.0130382366045426 -0.00922442279841571" rpy="0 0 0" />
+      <mass value="0.0188480149790177" />
+      <inertia ixx="5.8988875536545E-06" ixy="-3.40544976622782E-06" ixz="-1.92363256596422E-07" iyy="4.53830689550564E-06" iyz="-2.42162765665262E-07" izz="1.00981852554242E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_1" type="revolute">
+    <origin xyz="0.022418 0.043372 -0.059758" rpy="0 -0.2618 0" />
+    <parent link="right_base_link" />
+    <child link="right_link_1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+  </joint>
+  <link name="right_link_left">
+    <inertial>
+      <origin xyz="0.0254691723532261 -0.0272561853154572 -0.00924899427397418" rpy="0 0 0" />
+      <mass value="0.0143347096511438" />
+      <inertia ixx="7.22292488587969E-07" ixy="4.11143118077403E-07" ixz="-1.88580449727449E-11" iyy="3.49297541582351E-06" iyz="-9.39153494024212E-13" izz="3.62513456981631E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.745098039215686 0.529411764705882 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_3" type="revolute">
+    <origin xyz="0.04262 0.046314 0" rpy="0 0 0" />
+    <parent link="right_link_1" />
+    <child link="right_link_left" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="right_joint_1" multiplier="-1" offset="0" />
+  </joint>
+  <link name="right_link_2">
+    <inertial>
+      <origin xyz="0.0105638233920196 -0.0123745523543532 -0.0092370035944179" rpy="0 0 0" />
+      <mass value="0.0271957000411005" />
+      <inertia ixx="8.6863243448814E-06" ixy="5.01073867385604E-06" ixz="-2.82582783157405E-07" iyy="6.65930369337175E-06" iyz="3.55977281809514E-07" izz="1.48713183868901E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_2" type="revolute">
+    <origin xyz="0.022418 -0.042627 -0.059758" rpy="0 -0.2618 0" />
+    <parent link="right_base_link" />
+    <child link="right_link_2" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="right_joint_1" multiplier="-1" offset="0" />
+  </joint>
+  <link name="right_link_right">
+    <inertial>
+      <origin xyz="0.0254683509489325 0.0272540370820665 -0.00924889874088622" rpy="0 0 0" />
+      <mass value="0.0143347096588342" />
+      <inertia ixx="7.22208874040906E-07" ixy="-4.10861273247096E-07" ixz="1.88579340276013E-11" iyy="3.49305903213778E-06" iyz="-9.41095772881307E-13" izz="3.62513457065684E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_4.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.745098039215686 0.529411764705882 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_4" type="revolute">
+    <origin xyz="0.04262 -0.046314 0" rpy="0 0 0" />
+    <parent link="right_link_2" />
+    <child link="right_link_right" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+    <mimic joint="right_joint_2" multiplier="-1" offset="0" />
+  </joint>
+  <link name="right_link_5">
+    <inertial>
+      <origin xyz="0.0173669874644275 0.0227176239384365 -0.0094255781507463" rpy="0 0 0" />
+      <mass value="0.0109821462117077" />
+      <inertia ixx="2.44733705337546E-06" ixy="-1.50008041263207E-06" ixz="-1.03406909427736E-11" iyy="1.79539771632725E-06" iyz="-1.44155092041614E-11" izz="3.25065506297382E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_5.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_5" type="revolute">
+    <origin xyz="0.037102 0.01989 -0.055622" rpy="0 -0.2618 0" />
+    <parent link="right_base_link" />
+    <child link="right_link_5" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0.925" effort="0" velocity="0" />
+    <mimic joint="right_joint_1" multiplier="1" offset="0" />
+  </joint>
+  <link name="right_link_6">
+    <inertial>
+      <origin xyz="0.0173663962799268 -0.0227180758554502 -0.00942545135918245" rpy="0 0 0" />
+      <mass value="0.0109821462005777" />
+      <inertia ixx="2.4474151242897E-06" ixy="1.50006344510183E-06" ixz="1.03404518608018E-11" iyy="1.79531964444768E-06" iyz="-1.44160025035364E-11" izz="3.25065506215873E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_6.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_6" type="revolute">
+    <origin xyz="0.037102 -0.019145 -0.055622" rpy="0 -0.2618 0" />
+    <parent link="right_base_link" />
+    <child link="right_link_6" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-0.925" upper="0" effort="0" velocity="0" />
+    <mimic joint="right_joint_2" multiplier="1" offset="0" />
+  </joint>
+  <link name="right_link_imu">
+    <inertial>
+      <origin xyz="0.00862216042223432 -0.0138222723020212 -0.00384400864237492" rpy="0 0 0" />
+      <mass value="1.41794811721163" />
+      <inertia ixx="0.00625603016959313" ixy="-2.30162842690393E-05" ixz="8.60601322410442E-05" iyy="0.00359313750875759" iyz="-0.000609859640446212" izz="0.00526886654405653" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_imu.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_imu.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_imu" type="fixed">
+    <origin xyz="0.002742 0.0075232 -0.049069" rpy="1.5708 0 -1.5708" />
+    <parent link="right_base_link" />
+    <child link="right_link_imu" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_ca1">
+    <inertial>
+      <origin xyz="-0.000411296805630016 0.000285191199263957 0.0106419007919078" rpy="0 0 0" />
+      <mass value="0.00358753776891076" />
+      <inertia ixx="2.04174474708491E-07" ixy="-1.62935647881402E-17" ixz="4.3742568811687E-17" iyy="2.13252204716397E-07" iyz="-5.94511249854112E-20" izz="1.13222316395875E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_ca1" type="fixed">
+    <origin xyz="0 -0.027 0" rpy="-1.5708 0 -1.5708" />
+    <parent link="right_base_link" />
+    <child link="right_link_ca1" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_ca2">
+    <inertial>
+      <origin xyz="-0.000411300000511884 0.000285191199261743 0.0124180352434537" rpy="0 0 0" />
+      <mass value="0.00434913936285486" />
+      <inertia ixx="2.97803076590816E-07" ixy="-1.6293574246449E-17" ixz="6.79944603020297E-23" iyy="3.06880806598721E-07" iyz="-3.30872245021211E-23" izz="1.68401927113963E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_ca2" type="fixed">
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708" />
+    <parent link="right_base_link" />
+    <child link="right_link_ca2" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_ca3">
+    <inertial>
+      <origin xyz="-0.000411404800511883 0.000285191199263755 0.0106419007921056" rpy="0 0 0" />
+      <mass value="0.00358753776891076" />
+      <inertia ixx="2.04174474708491E-07" ixy="-1.62935823619779E-17" ixz="-4.98344306902776E-24" iyy="2.13252204716397E-07" iyz="-5.94527793466363E-20" izz="1.13222316395875E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/link_ca3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_joint_ca3" type="fixed">
+    <origin xyz="0 0.0269998952 0" rpy="-1.57079632858979 0 -1.5707963267949" />
+    <parent link="right_base_link" />
+    <child link="right_link_ca3" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_base_right">
+    <inertial>
+      <origin xyz="0.0585616308853042 0.0292266810510748 0.0155607315963588" rpy="0 0 0" />
+      <mass value="0.0286834699102514" />
+      <inertia ixx="3.63241251743929E-06" ixy="1.07899939768015E-06" ixz="2.16284282875813E-06" iyy="2.51828241236572E-05" iyz="2.6868718185999E-07" izz="2.65463378038774E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_right.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/base_right.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_base_right" type="fixed">
+    <origin xyz="0.0150 0.025 -0.015" rpy="1.309 0 -1.5" />
+    <parent link="right_base_link" />
+    <child link="right_base_right" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_vr_controller_imu">
+    <inertial>
+      <origin xyz="0.00105442913106146 0.00854962149636618 0.0169187971891807" rpy="0 0 0" />
+      <mass value="0.137812034154997" />
+      <inertia ixx="0.000148050641954279" ixy="-1.26640373387406E-06" ixz="1.30728265698385E-05" iyy="0.000143745553925036" iyz="-4.51072518674908E-06" izz="3.63436636584035E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/controller_right.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://DAS_Gripper_urdf/meshes/controller_right.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_vr_controller_imu" type="fixed">
+    <origin xyz="0.1073691131477 0.00519008100640672 0.0240804942781214" rpy="-1.5707963267949 1.5707963267949 0" />
+    <parent link="right_base_right" />
+    <child link="right_vr_controller_imu" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_quest3s_left_controller_anchor" />
+  <joint name="right_quest3s_left_controller_anchor" type="fixed">
+    <origin xyz="0.000723 -0.083623 -0.003753" rpy="1.119887 -0.047317 -1.685469" />
+    <parent link="right_base_link" />
+    <child link="right_quest3s_left_controller_anchor" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_quest3s_right_controller_anchor" />
+  <joint name="right_quest3s_right_controller_anchor" type="fixed">
+    <origin xyz="0.000723 -0.083623 -0.003753" rpy="1.085034 0.072538 -1.513269" />
+    <parent link="right_base_link" />
+    <child link="right_quest3s_right_controller_anchor" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_handle" />
+  <joint name="right_handle" type="fixed">
+    <origin xyz="-0.002 0.000 -0.147" rpy="0 0 0" />
+    <parent link="right_base_link" />
+    <child link="right_handle" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_left_tip" />
+  <joint name="right_link_left_tip" type="fixed">
+    <origin xyz="0.064 -0.037 -0.010" rpy="0 0 0" />
+    <parent link="right_link_left" />
+    <child link="right_link_left_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_mid_left_finger" />
+  <joint name="right_link_mid_left_finger" type="fixed">
+    <origin xyz="0.032 -0.037 -0.010" rpy="0 0 0" />
+    <parent link="right_link_left" />
+    <child link="right_link_mid_left_finger" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_right_tip" />
+  <joint name="right_link_right_tip" type="fixed">
+    <origin xyz="0.064 0.037 -0.010" rpy="0 0 0" />
+    <parent link="right_link_right" />
+    <child link="right_link_right_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_link_mid_right_finger" />
+  <joint name="right_link_mid_right_finger" type="fixed">
+    <origin xyz="0.032 0.037 -0.010" rpy="0 0 0" />
+    <parent link="right_link_right" />
+    <child link="right_link_mid_right_finger" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <joint name="head_to_right_rig" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="quest3s_head" />
+    <child link="right_world" />
+  </joint>
+</robot>

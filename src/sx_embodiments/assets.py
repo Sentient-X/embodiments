@@ -21,7 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Self
 from urllib.parse import urlparse
 
-from .errors import AssetIntegrityError, AssetsUnavailableError
+from .errors import AssetDigestMismatchError, AssetIntegrityError, AssetsUnavailableError
 
 _ASSETS_ENV = "SX_EMBODIMENTS_ASSETS"
 
@@ -68,6 +68,28 @@ class AssetRole(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class AssetProvenance:
+    """Immutable origin of packaged asset bytes."""
+
+    repository: str
+    revision: str
+    path: str
+    license_id: str
+    generator: str | None = None
+
+    def __post_init__(self) -> None:
+        parsed = urlparse(self.repository)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AssetIntegrityError("asset provenance repository must be an HTTP(S) URL")
+        if not self.revision.strip():
+            raise AssetIntegrityError("asset provenance revision must not be empty")
+        if not self.path or self.path.startswith(("/", ".")):
+            raise AssetIntegrityError("asset provenance path must be repository-relative")
+        if not self.license_id.strip():
+            raise AssetIntegrityError("asset provenance license_id must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class AssetRef:
     """Content-addressed robotics asset at a catalog-resolvable URI.
 
@@ -84,6 +106,7 @@ class AssetRef:
     media_type: str | None = None
     byte_size: int | None = None
     logical_path: PurePosixPath | None = None
+    provenance: AssetProvenance | None = None
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.uri)
@@ -168,6 +191,7 @@ class PackagedAsset:
     sha256: str
     format: AssetFormat
     role: AssetRole
+    provenance: AssetProvenance
     media_type: str | None = None
 
     def __post_init__(self) -> None:
@@ -196,6 +220,9 @@ class PackagedAsset:
         identity byte-equal across machines and deployment layouts.
         """
         resolved = self.path()
+        actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        if actual != self.sha256:
+            raise AssetDigestMismatchError(self.relpath, self.sha256, actual)
         return AssetRef(
             uri=f"package://sx-embodiments/{self.relpath}",
             sha256=self.sha256,
@@ -203,4 +230,6 @@ class PackagedAsset:
             role=self.role,
             media_type=self.media_type,
             byte_size=resolved.stat().st_size,
+            logical_path=PurePosixPath(self.relpath),
+            provenance=self.provenance,
         )
