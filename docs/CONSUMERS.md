@@ -11,7 +11,7 @@ in the same change (the glued surface-with-consumer rule). Last full audit:
 
 | Consumer | Registry surface it binds | Enforcement |
 |---|---|---|
-| **train** (serl loop) | `embodiment_spec` (identity, fail-closed), `flat_layout` (action width + channel names), `camera_names` (declared-camera membership), `manifest_for` (full manifest into the export artifact) | typed errors before training; artifact dof cross-check at load |
+| **train** (serl loop) | `embodiment_spec` (identity, fail-closed), `flat_layout` (channel identity: env joint names matched per slot; records emit/seed split at the declared slots — the same scatter convention as the catalog), `camera_names` (declared-camera membership), `manifest_for` (full manifest into the export artifact, with the layout's channel names in metadata) | typed errors before training; round-trip law test over interleaved layouts; artifact dof+channels cross-checks at load |
 | **train** (pi0 export, serve) | `manifest_for`/`manifest_from_dict`, `EmbodimentRef`/`EmbodimentManifestDigest` | round-trip validation at export |
 | **supervisors** | `layout_for(id).uniform_arm_blocks()` → the bimanual channel split | registry/layout drift is a startup crash — the model consumer |
 | **data-catalog** | `layout_for` + `ChannelKind.indices` (flat-vector reconstruction at ingest), manifest wire + digest store, `SensorModel`/`CameraModality` in API schemas | fail-closed manifest parsing; layout validation at joint-space wires |
@@ -48,7 +48,13 @@ Each item lands only with its consumer, one change per row:
    task profiles, data-factory's `HandCount`, and the registry's part
    decomposition encode the same body-capability facts three ways; one derived
    view should serve all three.
-6. **train action-encoding vocabulary** — `ActionSpace`/`ActionMode`/
+6. **the BC-family suffix split** — `train/data/lerobot_ingest.py` splits
+   actions by suffix and `loops/{bc,ki,ttt_bc,lap,a2a}.py` + `data/clap.py`
+   re-concatenate; internally consistent for LeRobot suffix data, divergent
+   from the layout scatter convention on interleaved bodies. Migrates to
+   `FlatLayout.indices` when a BC loop first consumes an interleaved catalog
+   dataset (the serl records boundary is the template).
+7. **train action-encoding vocabulary** — `ActionSpace`/`ActionMode`/
    `ActionEncoding` live in `train.sim` today (env-declared, artifact-carried);
    they promote here when a second repo consumes encodings (the record
    vocabulary in sx-episodes is the likely trigger: emitted episodes currently
