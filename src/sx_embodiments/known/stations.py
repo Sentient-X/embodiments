@@ -21,6 +21,8 @@ D435_30: Final = CameraSpec(
     model=SensorModel.REALSENSE_D435,
     modality=CameraModality.RGBD,
     fps=30.0,
+    # resolution stays None: depth (1280x720) and RGB (1920x1080) streams differ — no
+    # single per-product figure until a consumer needs per-stream resolutions.
 )
 
 B601_LEADER: Final = DeviceSpec(PartId("b601-leader"), "Seedstudio B601 leader pair")

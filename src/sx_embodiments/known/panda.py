@@ -10,7 +10,14 @@ from typing import Final
 from ..assets import AssetFormat, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
-from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, MobileBaseSpec
+from ..parts import (
+    ArmSpec,
+    ControlRates,
+    GripperSpec,
+    MimicJoint,
+    MobileBaseSpec,
+    PhysicalSpec,
+)
 
 PANDA_MJCF: Final = PackagedAsset(
     relpath="menagerie/franka_emika_panda/panda.xml",
@@ -35,6 +42,8 @@ PANDA_ARM: Final = ArmSpec(
     joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
     assets=(PANDA_MJCF,),
+    # Franka Emika Panda datasheet (download.franka.de/Datasheet-EN.pdf).
+    physical=PhysicalSpec(payload_kg=3.0, reach_m=0.855, mass_kg=18.0),
 )
 
 PANDA_GRIPPER: Final = GripperSpec(

@@ -17,7 +17,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Self
 from urllib.parse import urlparse
 
@@ -26,10 +26,24 @@ from .errors import AssetIntegrityError, AssetsUnavailableError
 _ASSETS_ENV = "SX_EMBODIMENTS_ASSETS"
 
 
+def validate_logical_path(path: PurePosixPath) -> None:
+    """Reject bundle-member paths that could escape or alias a materialization root."""
+    text = str(path)
+    if path.is_absolute():
+        raise AssetIntegrityError(f"logical_path must be relative: {text!r}")
+    if not path.parts:
+        raise AssetIntegrityError("logical_path must not be empty")
+    if any(part in (".", "..") for part in path.parts):
+        raise AssetIntegrityError(f"logical_path must not contain '.' or '..' segments: {text!r}")
+    if "\\" in text:
+        raise AssetIntegrityError(f"logical_path must use forward slashes: {text!r}")
+
+
 class AssetFormat(StrEnum):
     """Portable formats understood by the robotics data platform."""
 
     URDF = "urdf"
+    SRDF = "srdf"
     MJCF = "mjcf"
     USD = "usd"
     USDA = "usda"
@@ -49,12 +63,19 @@ class AssetRole(StrEnum):
     CALIBRATION = "calibration"
     TEXTURE = "texture"
     CONTROLLER = "controller"
+    LICENSE = "license"
     OTHER = "other"
 
 
 @dataclass(frozen=True, slots=True)
 class AssetRef:
-    """Content-addressed robotics asset at a catalog-resolvable URI."""
+    """Content-addressed robotics asset at a catalog-resolvable URI.
+
+    ``logical_path`` is the member's path inside a multi-file bundle (URDF + SRDF + mesh
+    closure), validated fail-closed: relative, forward-slash, no ``..``. Single-file
+    producers keep ``None``; bundle ingest requires it. The same content blob may appear at
+    multiple logical paths within one bundle.
+    """
 
     uri: str
     sha256: str
@@ -62,6 +83,7 @@ class AssetRef:
     role: AssetRole
     media_type: str | None = None
     byte_size: int | None = None
+    logical_path: PurePosixPath | None = None
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.uri)
@@ -76,6 +98,8 @@ class AssetRef:
             raise AssetIntegrityError("asset sha256 must be 64 lowercase hexadecimal characters")
         if self.byte_size is not None and self.byte_size < 0:
             raise AssetIntegrityError("asset byte_size must be non-negative")
+        if self.logical_path is not None:
+            validate_logical_path(self.logical_path)
 
     @classmethod
     def from_bytes(

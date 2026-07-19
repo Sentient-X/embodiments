@@ -12,7 +12,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetRole, PackagedAsset
 from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
 from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
-from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint
+from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
 
 PIPER_MJCF: Final = PackagedAsset(
     relpath="menagerie/agilex_piper/piper.xml",
@@ -29,6 +29,8 @@ PIPER_ARM: Final = ArmSpec(
     joint_upper=(2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439),
     home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
     assets=(PIPER_MJCF,),
+    # AgileX PiPER datasheet (global.agilex.ai/products/piper).
+    physical=PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2),
 )
 
 PIPER_GRIPPER: Final = GripperSpec(

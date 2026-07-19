@@ -29,12 +29,45 @@ class SensorModel(StrEnum):
     REALSENSE_D405 = "realsense_d405"
     REALSENSE_D435 = "realsense_d435"
     QUEST3_RGB = "quest3_rgb"
+    INSTA360_X5 = "insta360_x5"
 
 
 class CameraModality(StrEnum):
     RGB = "rgb"
     DEPTH = "depth"
     RGBD = "rgbd"
+
+
+class LensProjection(StrEnum):
+    """The lens's nominal projection family — the calibration MODEL, never a calibration.
+
+    Per-unit calibrated intrinsics (K/D matrices) are capture data and travel with the
+    recording (MCAP ``camera_info``, Quest characteristics JSONs); the registry states only
+    which projection family the optics follow. ``EQUIDISTANT`` is byte-equal to the
+    Foxglove/OpenCV fisheye ``distortion_model`` wire string.
+    """
+
+    PINHOLE = "pinhole"
+    EQUIDISTANT = "equidistant"
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalSpec:
+    """Verified datasheet facts — the registry as spec-sheet-of-record.
+
+    Every field is optional; a populated value MUST come from a manufacturer datasheet and
+    is pinned by tests. An unverifiable fact stays ``None`` — never estimated.
+    """
+
+    payload_kg: float | None = None
+    reach_m: float | None = None
+    mass_kg: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("payload_kg", "reach_m", "mass_kg"):
+            value: float | None = getattr(self, name)
+            if value is not None and value <= 0.0:
+                raise PartValidationError(PartId("physical"), f"{name} must be positive")
 
 
 def _validate_joint_box(
@@ -61,6 +94,7 @@ class ArmSpec:
     joint_upper: tuple[float, ...]
     home_joints: tuple[float, ...]
     assets: tuple[PackagedAsset, ...] = ()
+    physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
         if not self.joint_names:
@@ -141,6 +175,7 @@ class GripperSpec:
     mimic_joints: tuple[MimicJoint, ...] = ()
     gap_curve: Curve1D | None = None
     assets: tuple[PackagedAsset, ...] = ()
+    physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
         if not self.joint_names:
@@ -171,16 +206,27 @@ class GripperSpec:
 
 @dataclass(frozen=True, slots=True)
 class CameraSpec:
-    """A camera product; per-instance name and mount live on the Attachment."""
+    """A camera product; per-instance name and mount live on the Attachment.
+
+    ``resolution`` is the product's native ``(width, height)`` in pixels, set only when one
+    unambiguous per-product figure exists (a D435's depth and RGB streams differ — it stays
+    ``None`` there until a consumer needs per-stream resolutions).
+    """
 
     part_id: PartId
     model: SensorModel
     modality: CameraModality
     fps: float
+    projection: LensProjection = LensProjection.PINHOLE
+    resolution: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         if self.fps <= 0.0:
             raise PartValidationError(self.part_id, "fps must be positive")
+        if self.resolution is not None:
+            width, height = self.resolution
+            if width <= 0 or height <= 0:
+                raise PartValidationError(self.part_id, "resolution must be positive")
 
 
 @dataclass(frozen=True, slots=True)

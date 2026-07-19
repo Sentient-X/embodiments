@@ -7,7 +7,14 @@ emission, drivers, and asset hosting stay at consumer boundaries — this packag
 facts and derives views; it never executes.
 """
 
-from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset, asset_root
+from .assets import (
+    AssetFormat,
+    AssetRef,
+    AssetRole,
+    PackagedAsset,
+    asset_root,
+    validate_logical_path,
+)
 from .compose import (
     Attachment,
     AttachmentRole,
@@ -58,9 +65,11 @@ from .parts import (
     ForceTorqueSpec,
     GripperSpec,
     JointGroupSpec,
+    LensProjection,
     MimicJoint,
     MobileBaseSpec,
     Part,
+    PhysicalSpec,
     SensorModel,
 )
 
@@ -98,6 +107,7 @@ __all__ = [
     "GripperSpec",
     "JointGroupSpec",
     "LayoutError",
+    "LensProjection",
     "Lineage",
     "ManifestSchemaError",
     "MimicJoint",
@@ -107,6 +117,7 @@ __all__ = [
     "Part",
     "PartId",
     "PartValidationError",
+    "PhysicalSpec",
     "SensorModel",
     "UnknownEmbodimentError",
     "asset_root",
@@ -119,4 +130,5 @@ __all__ = [
     "manifest_for",
     "manifest_from_dict",
     "total_dof",
+    "validate_logical_path",
 ]

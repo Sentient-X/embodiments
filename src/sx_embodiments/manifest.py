@@ -12,11 +12,12 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import cast
 
 from .assets import AssetFormat, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
-from .errors import ManifestSchemaError
+from .errors import AssetIntegrityError, ManifestSchemaError
 from .identity import (
     EmbodimentId,
     EmbodimentKind,
@@ -101,7 +102,11 @@ class EmbodimentManifest:
             or (self.rates.low_level_hz is not None and not math.isfinite(self.rates.low_level_hz))
         ):
             raise ManifestSchemaError("embodiment control rates must be finite")
-        identities = {(asset.uri, asset.sha256, asset.role) for asset in self.assets}
+        # The same content blob may appear at multiple logical paths inside one bundle;
+        # a duplicate is only a member with the SAME (uri, sha256, role, logical_path).
+        identities = {
+            (asset.uri, asset.sha256, asset.role, asset.logical_path) for asset in self.assets
+        }
         if len(identities) != len(self.assets):
             raise ManifestSchemaError("embodiment contains duplicate asset references")
 
@@ -145,6 +150,12 @@ class EmbodimentManifest:
                     "model": binding.camera.model.value,
                     "modality": binding.camera.modality.value,
                     "fps": binding.camera.fps,
+                    "projection": binding.camera.projection.value,
+                    "resolution": (
+                        list(binding.camera.resolution)
+                        if binding.camera.resolution is not None
+                        else None
+                    ),
                 }
                 for binding in self.cameras
             ],
@@ -161,6 +172,14 @@ class EmbodimentManifest:
                     "role": asset.role.value,
                     "media_type": asset.media_type,
                     "byte_size": asset.byte_size,
+                    # Omitted (not null) when unset: single-file manifests keep the
+                    # byte-identical canonical JSON their registered digests were
+                    # minted from; only multi-file bundle members carry the key.
+                    **(
+                        {"logical_path": str(asset.logical_path)}
+                        if asset.logical_path is not None
+                        else {}
+                    ),
                 }
                 for asset in self.assets
             ],
@@ -341,14 +360,21 @@ def _parse_asset_entry(raw: object) -> AssetRef:
     media_type = entry.get("media_type")
     if media_type is not None and not isinstance(media_type, str):
         raise ManifestSchemaError("asset media_type must be a string or null")
-    return AssetRef(
-        uri=uri,
-        sha256=sha256,
-        format=_parse_asset_format(fmt),
-        role=_parse_asset_role(role),
-        media_type=media_type,
-        byte_size=_optional_int(entry.get("byte_size"), "byte_size"),
-    )
+    logical_path = entry.get("logical_path")
+    if logical_path is not None and not isinstance(logical_path, str):
+        raise ManifestSchemaError("asset logical_path must be a string or null")
+    try:
+        return AssetRef(
+            uri=uri,
+            sha256=sha256,
+            format=_parse_asset_format(fmt),
+            role=_parse_asset_role(role),
+            media_type=media_type,
+            byte_size=_optional_int(entry.get("byte_size"), "byte_size"),
+            logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
+        )
+    except AssetIntegrityError as exc:
+        raise ManifestSchemaError(f"invalid asset entry: {exc}") from exc
 
 
 def _optional_int(value: object, key: str) -> int | None:

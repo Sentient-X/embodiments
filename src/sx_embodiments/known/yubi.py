@@ -30,6 +30,7 @@ D405_30: Final = CameraSpec(
     model=SensorModel.REALSENSE_D405,
     modality=CameraModality.RGBD,
     fps=30.0,
+    resolution=(1280, 720),  # Intel spec: depth and RGB share the 1280x720 imager pair
 )
 
 

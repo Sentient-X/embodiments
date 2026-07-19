@@ -18,6 +18,7 @@ from .aloha import ALOHA_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .g1 import UNITREE_G1_SPEC
 from .humanoid import SENTIENT_HUMANOID_SPEC
+from .insta360 import INSTA360_UMI_SPEC
 from .panda import FRANKA_SPEC, LIBERO_PANDA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
@@ -49,6 +50,7 @@ _ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
     BIMANUAL_SO101_SPEC,
     DAS_UMI_V4_SPEC,
     QUEST_EGO_SPEC,
+    INSTA360_UMI_SPEC,
     YUBI_MONO_SPEC,
     YUBI_DEPTH_SPEC,
     YUBI_WIDEJAW_SPEC,

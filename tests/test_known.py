@@ -64,6 +64,7 @@ def test_registry_ids_are_byte_stable() -> None:
         "bimanual-so101",
         "das-umi-v4",
         "quest-ego",
+        "insta360-umi",
         "yubi-mono",
         "yubi-depth",
         "yubi-widejaw",
