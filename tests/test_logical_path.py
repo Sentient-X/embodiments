@@ -1,6 +1,7 @@
 """Bundle-member paths: relative, forward-slash, no escape — validated fail-closed."""
 
 from pathlib import PurePosixPath
+from typing import cast
 
 import pytest
 
@@ -81,7 +82,7 @@ def test_wire_rejects_malformed_logical_path() -> None:
     document = manifest.to_dict()
     assets = document["assets"]
     assert isinstance(assets, list)
-    entry = assets[0]
+    entry = cast("dict[str, object]", assets[0])
     assert isinstance(entry, dict)
     entry["logical_path"] = "../escape"
     with pytest.raises(ManifestSchemaError):

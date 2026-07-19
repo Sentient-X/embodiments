@@ -87,7 +87,18 @@ def test_camera_name_sets() -> None:
 
 
 def test_every_entry_validates_and_kinds_are_coherent() -> None:
+    """Character laws: every entry knows what it is, and what it is implies what it has.
+
+    A data-collection device without a camera cannot collect; a teleop station
+    without a leader cannot be driven and without a camera cannot be supervised.
+    Robots deliberately carry no cameras of their own — eyes arrive by composing
+    the body into a rig or station (piperx-station's `front` over piper's none).
+    """
     for eid, spec in EMBODIMENTS.items():
         assert spec.embodiment_id == eid
+        assert spec.kind is not None, f"{eid} does not declare its character"
         if spec.kind is EmbodimentKind.TELEOP_STATION:
             assert any(a.role.value == "leader" for a in spec.attachments)
+            assert camera_names(spec), f"teleop station {eid} declares no camera"
+        if spec.kind is EmbodimentKind.CAPTURE_RIG:
+            assert camera_names(spec), f"capture rig {eid} declares no camera"
