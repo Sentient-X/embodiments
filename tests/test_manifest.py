@@ -178,6 +178,24 @@ def test_capture_rig_manifest_carries_cameras() -> None:
     assert wire["dof"] == 2  # two jaw channels
 
 
+def test_non_default_camera_optics_round_trip_and_keep_the_digest() -> None:
+    # The writer emits projection/resolution; the parser must carry them back or a
+    # reparse re-serializes to different bytes and every digest verification breaks.
+    from sx_embodiments.known.yubi import YUBI_DEPTH_SPEC
+
+    manifest = manifest_for(YUBI_DEPTH_SPEC)  # D405 wrist cameras: resolution (1280, 720)
+    wire = manifest.to_dict()
+    cameras = cast(list[dict[str, object]], wire["cameras"])
+    assert any(camera["resolution"] == [1280, 720] for camera in cameras)
+    parsed = manifest_from_dict(wire)
+    assert parsed == manifest
+    assert parsed.digest() == manifest.digest()
+    bad = manifest.to_dict()
+    cast(list[dict[str, object]], bad["cameras"])[0]["projection"] = "orthographic"
+    with pytest.raises(ManifestSchemaError):
+        manifest_from_dict(bad)
+
+
 def test_libero_panda_has_a_deployable_asset_manifest() -> None:
     manifest = manifest_for(LIBERO_PANDA_SPEC)
     assert manifest.embodiment_id == EmbodimentId("libero_panda")
