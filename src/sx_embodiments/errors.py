@@ -70,12 +70,8 @@ class LayoutError(EmbodimentError):
         self.embodiment_id = embodiment_id
 
 
-class JointLayoutMismatchError(LayoutError):
-    """An authoritative robot description disagrees with the declared action layout."""
-
-
 class InvalidCameraMountError(CompositionError):
-    """A camera attachment has no resolvable parent frame."""
+    """An embodiment camera has no explicit mount frame; raised at manifest construction."""
 
 
 class UnknownEmbodimentError(EmbodimentError):

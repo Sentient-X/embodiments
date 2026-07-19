@@ -19,6 +19,7 @@ from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
+from sx_embodiments.known.nero import NERO_URDF
 from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
 from sx_embodiments.known.piper import PIPER_MJCF, PIPER_URDF
 from sx_embodiments.known.rby1 import RBY1_MJCF, RBY1_URDF
@@ -39,6 +40,7 @@ PINNED: tuple[PackagedAsset, ...] = (
     QUEST_EGO_URDF,
     PIPER_URDF,
     PIPER_MJCF,
+    NERO_URDF,
     PANDA_URDF,
     PANDA_MJCF,
     ALOHA_URDF,

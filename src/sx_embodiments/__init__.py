@@ -36,7 +36,6 @@ from .errors import (
     CompositionError,
     EmbodimentError,
     InvalidCameraMountError,
-    JointLayoutMismatchError,
     LayoutError,
     ManifestSchemaError,
     MissingUrdfError,
@@ -67,6 +66,8 @@ from .manifest import (
     manifest_for,
     manifest_for_assets,
     manifest_from_dict,
+    ref_from_dict,
+    ref_to_dict,
 )
 from .parts import (
     ArmSpec,
@@ -123,7 +124,6 @@ __all__ = [
     "GripperSpec",
     "InvalidCameraMountError",
     "JointGroupSpec",
-    "JointLayoutMismatchError",
     "LayoutError",
     "LensProjection",
     "Lineage",
@@ -150,6 +150,8 @@ __all__ = [
     "manifest_for",
     "manifest_for_assets",
     "manifest_from_dict",
+    "ref_from_dict",
+    "ref_to_dict",
     "resolve_asset",
     "total_dof",
     "validate_logical_path",

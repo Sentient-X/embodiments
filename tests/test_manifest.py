@@ -12,13 +12,20 @@ from sx_embodiments import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    ChannelKind,
+    ChannelSlot,
     Curve1D,
     Embodiment,
     EmbodimentId,
+    EmbodimentKind,
     EmbodimentManifest,
     EmbodimentManifestDigest,
+    ExecutionCapabilities,
+    FlatLayout,
     LayoutError,
+    Lineage,
     ManifestSchemaError,
+    PartId,
     PartValidationError,
     authoritative_urdf,
     kinematic_view,
@@ -158,15 +165,33 @@ def test_manifest_from_dict_fails_closed() -> None:
         manifest_from_dict({**good, "assets": bad_assets})
 
 
+def _minimal_manifest(assets: tuple[AssetRef, ...]) -> EmbodimentManifest:
+    """A structurally complete v3 manifest around the given asset bundle."""
+    eid = EmbodimentId("x")
+    return EmbodimentManifest(
+        embodiment_id=eid,
+        name="X",
+        assets=assets,
+        kind=EmbodimentKind.ROBOT,
+        lineage=Lineage(family="fixture"),
+        layout=FlatLayout(
+            embodiment_id=eid,
+            slots=(ChannelSlot(0, "arm", PartId("fixture-arm"), "joint_1", ChannelKind.ARM_JOINT),),
+        ),
+        capabilities=ExecutionCapabilities(manipulator_count=0, mobile_base=False),
+        link_count=2,
+    )
+
+
 def test_manifest_requires_assets() -> None:
     with pytest.raises(ManifestSchemaError):
-        EmbodimentManifest(embodiment_id=EmbodimentId("x"), name="X", assets=())
+        _minimal_manifest(())
 
 
 def test_manifest_rejects_duplicate_assets() -> None:
     ref = _ref()
     with pytest.raises(ManifestSchemaError):
-        EmbodimentManifest(embodiment_id=EmbodimentId("x"), name="X", assets=(ref, ref))
+        _minimal_manifest((ref, ref))
 
 
 def test_capture_rig_manifest_carries_cameras() -> None:

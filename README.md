@@ -35,7 +35,7 @@ and sdists include that tree under `sx_embodiments/_assets`, so an installed pac
 then resolves the installed tree, then the repo-relative `assets/` directory for editable installs,
 and otherwise raises a typed error (no silent fallback).
 
-The episode-ready registry includes Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient
+The episode-ready registry includes Piper, NERO, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient
 humanoid, Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop
 stations. Entries without authoritative kinematics are deliberately not advertised as
 episode-ready. Declaration order is the wire action order and is pinned against the URDF joint set

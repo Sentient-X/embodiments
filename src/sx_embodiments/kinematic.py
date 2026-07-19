@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from .errors import PartValidationError
+from .errors import AssetsUnavailableError, PartValidationError
 from .identity import EmbodimentId
 
 
@@ -63,8 +63,8 @@ class Embodiment:
             )
         if self.policy_hz <= 0.0:
             raise PartValidationError(str(self.embodiment_id), "policy_hz must be positive")
-        if self.urdf_path is not None and not self.urdf_path.is_file():
-            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {self.urdf_path}")
+        # No filesystem checks here: a record is valid independent of the host it is
+        # constructed on. Existence is verified at the explicit wiring site (with_urdf).
 
     @property
     def gripper_max_width_m(self) -> float:
@@ -73,5 +73,5 @@ class Embodiment:
     def with_urdf(self, path: Path) -> Self:
         """Attach a validated local URDF at an explicit runtime wiring site."""
         if not path.is_file():
-            raise FileNotFoundError(f"{self.embodiment_id}: URDF not found at {path}")
+            raise AssetsUnavailableError(f"{self.embodiment_id}: URDF not found at {path}")
         return dataclasses.replace(self, urdf_path=path)

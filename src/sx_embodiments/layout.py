@@ -29,7 +29,8 @@ class ChannelSlot:
     """One position in the flat vector."""
 
     index: int
-    instance: str  # attachment instance ("left_arm")
+    instance: str  # attachment instance ("left_arm") — or a virtual controller
+    # instance ("eef") when the layout is an explicit controller declaration
     part_id: PartId
     joint_name: str  # description joint or explicitly declared controller channel
     kind: ChannelKind

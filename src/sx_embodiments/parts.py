@@ -84,6 +84,24 @@ def _validate_joint_box(
         raise PartValidationError(part_id, "joint lower limits must be < upper limits")
 
 
+def _validate_joint_part(
+    part_id: PartId,
+    noun: str,
+    joint_names: tuple[str, ...],
+    lower: tuple[float, ...],
+    upper: tuple[float, ...],
+    home_joints: tuple[float, ...],
+) -> None:
+    """The shared invariants of any actuated joint chain (arm, group, gripper homes)."""
+    if not joint_names:
+        raise PartValidationError(part_id, f"{noun} needs at least one joint")
+    _validate_joint_box(part_id, joint_names, lower, upper)
+    if len(home_joints) != len(joint_names):
+        raise PartValidationError(part_id, "home_joints must match the joint count")
+    if any(home < lo or home > hi for home, lo, hi in zip(home_joints, lower, upper, strict=True)):
+        raise PartValidationError(part_id, "home_joints must lie within the limits")
+
+
 @dataclass(frozen=True, slots=True)
 class ArmSpec:
     """A serial arm; ``joint_names`` order defines this part's channel order."""
@@ -97,18 +115,14 @@ class ArmSpec:
     physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
-        if not self.joint_names:
-            raise PartValidationError(self.part_id, "an arm needs at least one joint")
-        _validate_joint_box(self.part_id, self.joint_names, self.joint_lower, self.joint_upper)
-        if len(self.home_joints) != len(self.joint_names):
-            raise PartValidationError(self.part_id, "home_joints must match the joint count")
-        if any(
-            home < lo or home > hi
-            for home, lo, hi in zip(
-                self.home_joints, self.joint_lower, self.joint_upper, strict=True
-            )
-        ):
-            raise PartValidationError(self.part_id, "home_joints must lie within the limits")
+        _validate_joint_part(
+            self.part_id,
+            "an arm",
+            self.joint_names,
+            self.joint_lower,
+            self.joint_upper,
+            self.home_joints,
+        )
 
     @property
     def dof(self) -> int:
@@ -131,18 +145,14 @@ class JointGroupSpec:
     assets: tuple[PackagedAsset, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.joint_names:
-            raise PartValidationError(self.part_id, "a joint group needs at least one joint")
-        _validate_joint_box(self.part_id, self.joint_names, self.joint_lower, self.joint_upper)
-        if len(self.home_joints) != len(self.joint_names):
-            raise PartValidationError(self.part_id, "home_joints must match the joint count")
-        if any(
-            home < lo or home > hi
-            for home, lo, hi in zip(
-                self.home_joints, self.joint_lower, self.joint_upper, strict=True
-            )
-        ):
-            raise PartValidationError(self.part_id, "home_joints must lie within the limits")
+        _validate_joint_part(
+            self.part_id,
+            "a joint group",
+            self.joint_names,
+            self.joint_lower,
+            self.joint_upper,
+            self.home_joints,
+        )
 
     @property
     def dof(self) -> int:

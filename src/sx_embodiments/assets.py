@@ -218,8 +218,11 @@ class PackagedAsset:
     media_type: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.relpath or self.relpath.startswith(("/", ".")):
-            raise AssetIntegrityError(f"packaged asset relpath must be relative: {self.relpath!r}")
+        if not self.relpath:
+            raise AssetIntegrityError("packaged asset relpath must not be empty")
+        # The same fail-closed law as bundle logical paths: relative, forward-slash,
+        # no '.'/'..' segments anywhere (not just the first character).
+        validate_logical_path(PurePosixPath(self.relpath))
         digest = self.sha256.lower()
         if (
             self.sha256 != digest

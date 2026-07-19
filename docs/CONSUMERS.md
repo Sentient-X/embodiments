@@ -18,6 +18,7 @@ in the same change (the glued surface-with-consumer rule). Last full audit:
 | **data-factory** | `camera_bindings`/`embodiment_spec` (built-in seeds), `EmbodimentRef` resolution against the catalog, `AssetRef` content-addressing of customer URDFs | wire-bridge correlation by asset sha256 |
 | **sim-envs** | `PIPER`/`PANDA_OMRON` kinematic views on `SceneSpec.embodiment_id` (the env↔robot binding), `AssetRef` for scene assets | env registry binds task → body |
 | **real2sim** | `AssetRef`/`EmbodimentManifest`/`validate_logical_path` — the bundle ingest producer | fail-closed closure validator |
+| **sx-telemetry** | `manifest_from_dict` + `ref_from_dict`/`ref_to_dict` (the envelope's embodiment wire — the registry owns the ref's wire form), `ChannelKind`/`layout.slots` (URDF joint animation), `resolve_asset` (digest-verified scene geometry) | `manifest.ref() != embodiment` fails closed; per-entity corruption tests |
 | **enpire** | `PIPER`/`PANDA_OMRON`/`Embodiment` for drivers, safety derivation (joint limits → constraints), grasp/station typing | safety constraints derive from registry limits |
 | **sxd** (contracts-by-format) | none at runtime (accepted asymmetry) — a **registry parity test** pins the insta360 converter's fisheye model/fps/camera names byte-equal to `insta360-umi` | the parity-test pattern IS the enforcement for standalone consumers |
 
@@ -59,6 +60,28 @@ Each item lands only with its consumer, one change per row:
    they promote here when a second repo consumes encodings (the record
    vocabulary in sx-episodes is the likely trigger: emitted episodes currently
    ride env-encoded actions on `joint_targets` without saying so).
+8. **the flat-vector split/join transform** — the wire↔(joints, grippers)
+   isomorphism is re-expressed in three consumers (train's
+   `data/embodiment_actions.py` split/join, supervisors' `ChannelLayout`
+   uniform-block re-encoding, sx-telemetry's scene column walk), each correct,
+   each its own loop over `FlatLayout`. The shared owner is **sx-episodes**
+   (it owns `JointAction` and carries numpy); it lands there when a second
+   consumer migrates off its local copy — the 2026-07-19 design-rigor audit's
+   finding 3, deferred exactly because a shared surface lands only with its
+   consumer.
+9. **the distortion-model vocabulary** — `sx_telemetry.DistortionModel` and
+   data-pipeline's hardcoded allow-set in `embodiment_projection.py` spell the
+   same string set twice (the sxd copy is forced by the contracts-by-format
+   asymmetry — standalone workers cannot import workspace packages). Converges
+   when sx-embodiments/sx-telemetry publish wheels; until then the sxd parity
+   tests are the guard.
+10. **`EmbodimentRef` pydantic wrappers** — catalog/factory/sim-envs each keep
+    a 2-field OpenAPI model (mandated by FastAPI codegen; each converts through
+    the registry's validating types). The registry's `ref_to_dict`/
+    `ref_from_dict` (first consumer: sx-telemetry's envelope wire) is the
+    canonical wire form those wrappers must stay byte-aligned with; sim-envs'
+    scene-store flattening (`embodiment_manifest` key) is versioned store
+    metadata — realigning it is a `_METADATA_VERSION` bump, not a drive-by.
 
 ## Deliberate boundaries (what the registry will NOT absorb)
 

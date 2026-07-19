@@ -64,6 +64,13 @@ class EmbodimentSpec:
     attachments: tuple[Attachment, ...]
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
+    # THE EXPLICIT-LAYOUT LAW: ``action_layout`` overrides derivation when the wire order
+    # is a controller's, not the description's. Its slots may mix declared attachment
+    # instances with minted virtual controller channels (libero_panda: virtual
+    # ``eef``/``libero-cartesian-controller`` deltas + the real ``gripper``) — so slots
+    # are deliberately NOT cross-validated against attachments; only the embodiment_id
+    # must match. Pinned by
+    # ``tests/test_layout_laws.py::test_explicit_layout_may_mint_controller_channels``.
     action_layout: FlatLayout | None = None
 
     def __post_init__(self) -> None:

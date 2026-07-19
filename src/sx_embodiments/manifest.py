@@ -17,7 +17,12 @@ from typing import cast
 
 from .assets import AssetFormat, AssetProvenance, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
-from .errors import AssetIntegrityError, ManifestSchemaError, MissingUrdfError
+from .errors import (
+    AssetIntegrityError,
+    InvalidCameraMountError,
+    ManifestSchemaError,
+    MissingUrdfError,
+)
 from .identity import (
     EmbodimentId,
     EmbodimentKind,
@@ -59,21 +64,33 @@ class ExecutionCapabilities:
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentManifest:
-    """Versioned identity, asset bundle, and derived structure for one embodiment."""
+    """Versioned identity, asset bundle, and derived structure for one embodiment.
+
+    The v3-mandatory facts (``kind``/``lineage``/``layout``/``capabilities``/``link_count``)
+    are mandatory in the type, not just the runtime law — a constructed manifest never
+    carries ``None`` there, so consumers never narrow. ``dof`` is a derived view of the
+    layout (one representation per fact); the wire document still carries the key and the
+    parser rejects a disagreeing value. ``policy_hz`` stays optional: hardware without a
+    declared control loop is a legal manifest state, checked coherent with ``rates``.
+    """
 
     embodiment_id: EmbodimentId
     name: str
     assets: tuple[AssetRef, ...]
+    kind: EmbodimentKind
+    lineage: Lineage
+    layout: FlatLayout
+    capabilities: ExecutionCapabilities
+    link_count: int
     schema_version: int = SCHEMA_VERSION
-    dof: int | None = None
-    link_count: int | None = None
     policy_hz: float | None = None  # control-loop / policy-query rate; None when unbound
-    kind: EmbodimentKind | None = None
-    lineage: Lineage | None = None
-    layout: FlatLayout | None = None
-    capabilities: ExecutionCapabilities | None = None
     cameras: tuple[CameraBinding, ...] = ()
     rates: ControlRates | None = None
+
+    @property
+    def dof(self) -> int:
+        """The action-vector width — always the layout's width, never a second spelling."""
+        return self.layout.action_dim
 
     def __post_init__(self) -> None:
         eid = str(self.embodiment_id)
@@ -104,27 +121,14 @@ class EmbodimentManifest:
             raise MissingUrdfError(eid, len(urdfs))
         if any(asset.provenance is None for asset in self.assets):
             raise ManifestSchemaError("every manifest asset must carry provenance")
-        if (
-            self.kind is None
-            or self.lineage is None
-            or self.layout is None
-            or self.capabilities is None
-        ):
-            raise ManifestSchemaError(
-                "manifest kind, lineage, action layout, and capabilities are mandatory"
-            )
-        if self.dof is None or self.dof < 0:
-            raise ManifestSchemaError("embodiment dof is mandatory and must be non-negative")
-        if self.link_count is None or self.link_count <= 0:
-            raise ManifestSchemaError("embodiment link_count is mandatory and must be positive")
+        if self.link_count <= 0:
+            raise ManifestSchemaError("embodiment link_count must be positive")
         if self.policy_hz is not None and (
             not math.isfinite(self.policy_hz) or self.policy_hz <= 0.0
         ):
             raise ManifestSchemaError("embodiment policy_hz must be positive and finite")
         if self.layout.embodiment_id != self.embodiment_id:
             raise ManifestSchemaError("layout embodiment_id must match the manifest")
-        if self.dof != self.layout.action_dim:
-            raise ManifestSchemaError("embodiment dof must match the layout width")
         if (
             self.rates is not None
             and self.policy_hz is not None
@@ -134,8 +138,11 @@ class EmbodimentManifest:
         camera_names = [binding.name for binding in self.cameras]
         if len(set(camera_names)) != len(camera_names):
             raise ManifestSchemaError("embodiment camera names must be unique")
-        if any(not binding.frame.strip() for binding in self.cameras):
-            raise ManifestSchemaError("every embodiment camera needs an explicit mount frame")
+        for binding in self.cameras:
+            if not binding.frame.strip():
+                raise InvalidCameraMountError(
+                    eid, f"camera {binding.name!r} needs an explicit mount frame"
+                )
         if any(not math.isfinite(binding.camera.fps) for binding in self.cameras):
             raise ManifestSchemaError("embodiment camera fps must be finite")
         if self.rates is not None and (
@@ -153,38 +160,26 @@ class EmbodimentManifest:
             "dof": self.dof,
             "link_count": self.link_count,
             "policy_hz": self.policy_hz,
-            "kind": self.kind.value if self.kind is not None else None,
-            "lineage": (
+            "kind": self.kind.value,
+            "lineage": {
+                "family": self.lineage.family,
+                "variant": self.lineage.variant,
+                "revision": self.lineage.revision,
+            },
+            "layout": [
                 {
-                    "family": self.lineage.family,
-                    "variant": self.lineage.variant,
-                    "revision": self.lineage.revision,
+                    "index": slot.index,
+                    "instance": slot.instance,
+                    "part_id": str(slot.part_id),
+                    "joint_name": slot.joint_name,
+                    "kind": slot.kind.value,
                 }
-                if self.lineage is not None
-                else None
-            ),
-            "layout": (
-                [
-                    {
-                        "index": slot.index,
-                        "instance": slot.instance,
-                        "part_id": str(slot.part_id),
-                        "joint_name": slot.joint_name,
-                        "kind": slot.kind.value,
-                    }
-                    for slot in self.layout.slots
-                ]
-                if self.layout is not None
-                else None
-            ),
-            "capabilities": (
-                {
-                    "manipulator_count": self.capabilities.manipulator_count,
-                    "mobile_base": self.capabilities.mobile_base,
-                }
-                if self.capabilities is not None
-                else None
-            ),
+                for slot in self.layout.slots
+            ],
+            "capabilities": {
+                "manipulator_count": self.capabilities.manipulator_count,
+                "mobile_base": self.capabilities.mobile_base,
+            },
             "cameras": [
                 {
                     "name": binding.name,
@@ -275,16 +270,25 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
         raise ManifestSchemaError("assets must be a list")
     assets = tuple(_parse_asset_entry(entry) for entry in cast(list[object], raw_assets))
     parsed_id = EmbodimentId(embodiment_id)
+    layout = _parse_layout(_require(document, "layout"), parsed_id)
+    link_count = _optional_int(_require(document, "link_count"), "link_count")
+    if link_count is None:
+        raise ManifestSchemaError("embodiment link_count is mandatory")
+    # ``dof`` is derived from the layout; the wire key must agree, never diverge.
+    dof = _optional_int(_require(document, "dof"), "dof")
+    if dof != layout.action_dim:
+        raise ManifestSchemaError(
+            f"embodiment dof {dof!r} does not match the layout width {layout.action_dim}"
+        )
     return EmbodimentManifest(
         embodiment_id=parsed_id,
         name=name,
         assets=assets,
-        dof=_optional_int(document.get("dof"), "dof"),
-        link_count=_optional_int(document.get("link_count"), "link_count"),
+        link_count=link_count,
         policy_hz=_optional_float(document.get("policy_hz"), "policy_hz"),
         kind=_parse_kind(_require(document, "kind")),
         lineage=_parse_lineage(_require(document, "lineage")),
-        layout=_parse_layout(_require(document, "layout"), parsed_id),
+        layout=layout,
         capabilities=_parse_capabilities(_require(document, "capabilities")),
         cameras=_parse_cameras(_require(document, "cameras")),
         rates=_parse_rates(_require(document, "rates")),
@@ -304,20 +308,16 @@ def _string(entry: Mapping[str, object], key: str, label: str) -> str:
     return value
 
 
-def _parse_kind(raw: object) -> EmbodimentKind | None:
-    if raw is None:
-        return None
+def _parse_kind(raw: object) -> EmbodimentKind:
     if not isinstance(raw, str):
-        raise ManifestSchemaError("kind must be a string or null")
+        raise ManifestSchemaError("kind is mandatory and must be a string")
     try:
         return EmbodimentKind(raw)
     except ValueError as exc:
         raise ManifestSchemaError(f"unknown embodiment kind {raw!r}") from exc
 
 
-def _parse_lineage(raw: object) -> Lineage | None:
-    if raw is None:
-        return None
+def _parse_lineage(raw: object) -> Lineage:
     entry = _mapping(raw, "lineage")
     return Lineage(
         family=_string(entry, "family", "lineage"),
@@ -326,11 +326,9 @@ def _parse_lineage(raw: object) -> Lineage | None:
     )
 
 
-def _parse_layout(raw: object, embodiment_id: EmbodimentId) -> FlatLayout | None:
-    if raw is None:
-        return None
+def _parse_layout(raw: object, embodiment_id: EmbodimentId) -> FlatLayout:
     if not isinstance(raw, list):
-        raise ManifestSchemaError("layout must be a list or null")
+        raise ManifestSchemaError("layout is mandatory and must be a list")
     slots: list[ChannelSlot] = []
     for offset, item in enumerate(cast(list[object], raw)):
         entry = _mapping(item, f"layout[{offset}]")
@@ -390,9 +388,7 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
     return tuple(cameras)
 
 
-def _parse_capabilities(raw: object) -> ExecutionCapabilities | None:
-    if raw is None:
-        return None
+def _parse_capabilities(raw: object) -> ExecutionCapabilities:
     entry = _mapping(raw, "capabilities")
     manipulator_count = _require(entry, "manipulator_count")
     mobile_base = _require(entry, "mobile_base")
@@ -524,6 +520,23 @@ def _parse_asset_role(value: str) -> AssetRole:
         raise ManifestSchemaError(f"unknown asset role {value!r}") from exc
 
 
+def ref_to_dict(ref: EmbodimentRef) -> dict[str, str]:
+    """The canonical wire form of an :class:`EmbodimentRef` — one owner, no per-app twins."""
+    return {
+        "embodiment_id": str(ref.embodiment_id),
+        "manifest_sha256": str(ref.manifest_sha256),
+    }
+
+
+def ref_from_dict(document: Mapping[str, object]) -> EmbodimentRef:
+    """Parse the exact-hardware reference from its wire form, failing closed."""
+    embodiment_id = _require(document, "embodiment_id")
+    digest = _require(document, "manifest_sha256")
+    if not isinstance(embodiment_id, str) or not isinstance(digest, str):
+        raise ManifestSchemaError("embodiment ref needs string embodiment_id and manifest_sha256")
+    return EmbodimentRef(EmbodimentId(embodiment_id), EmbodimentManifestDigest(digest))
+
+
 def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
     """Derive the wire manifest from a spec at an explicit wiring site.
 
@@ -584,13 +597,14 @@ def manifest_for_assets(
         raise ManifestSchemaError(
             f"{spec.embodiment_id}: authoritative URDF root must be a named <robot>"
         )
-    layout = flat_layout(spec) if spec.layout_declared() else None
+    # A v3 manifest always carries the layout; an undeclared layout fails closed here
+    # (flat_layout raises LayoutError) instead of minting an incomplete manifest.
+    layout = flat_layout(spec)
     body = spec.body_attachments()
     return EmbodimentManifest(
         embodiment_id=spec.embodiment_id,
         name=spec.name,
         assets=assets,
-        dof=layout.action_dim if layout is not None else None,
         link_count=link_count,
         policy_hz=spec.rates.policy_hz if spec.rates is not None else None,
         kind=spec.kind,

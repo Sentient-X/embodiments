@@ -52,6 +52,6 @@ class EmbodimentKind(StrEnum):
 class Lineage:
     """Structured ancestry carried inside the record, never encoded in the id string."""
 
-    family: str  # "so101", "das-umi", "yubi", "b601", "piper", "panda"
+    family: str  # "so101", "das-umi", "yubi", "piper", "panda"
     variant: str = ""  # "bimanual", "widejaw", "dm"
     revision: str = ""  # hardware revision when it does NOT change data semantics
