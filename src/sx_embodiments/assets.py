@@ -183,6 +183,29 @@ def asset_root() -> Path:
     )
 
 
+_PACKAGE_URI_PREFIX = "package://sx-embodiments/"
+
+
+def resolve_asset(ref: AssetRef) -> Path:
+    """Resolve a ``package://sx-embodiments/...`` reference to its verified on-disk file.
+
+    The inverse of :meth:`PackagedAsset.ref` for consumers that hold only the portable
+    wire reference (an embodiment manifest's assets). Fail-closed on every step: a foreign
+    URI scheme, a missing file, or bytes whose digest disagrees with the reference.
+    """
+    if not ref.uri.startswith(_PACKAGE_URI_PREFIX):
+        raise AssetsUnavailableError(f"asset uri is not a packaged sx-embodiments asset: {ref.uri}")
+    relpath = ref.uri.removeprefix(_PACKAGE_URI_PREFIX)
+    validate_logical_path(PurePosixPath(relpath))
+    resolved = asset_root() / relpath
+    if not resolved.is_file():
+        raise AssetsUnavailableError(f"packaged asset missing on disk: {relpath}")
+    actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    if actual != ref.sha256:
+        raise AssetDigestMismatchError(relpath, ref.sha256, actual)
+    return resolved
+
+
 @dataclass(frozen=True, slots=True)
 class PackagedAsset:
     """A description file shipped under this repo's ``assets/`` tree, content-pinned."""

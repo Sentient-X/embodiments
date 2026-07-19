@@ -2,11 +2,19 @@
 
 import hashlib
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from sx_embodiments import AssetFormat, AssetsUnavailableError, PackagedAsset, asset_root
+from sx_embodiments import (
+    AssetDigestMismatchError,
+    AssetFormat,
+    AssetsUnavailableError,
+    PackagedAsset,
+    asset_root,
+    resolve_asset,
+)
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
@@ -132,3 +140,20 @@ def test_missing_packaged_asset_fails_closed() -> None:
     )
     with pytest.raises(AssetsUnavailableError):
         ghost.path()
+
+
+def test_resolve_asset_inverts_ref_and_verifies_bytes() -> None:
+    ref = SO101_URDF.ref()
+    resolved = resolve_asset(ref)
+    assert resolved == SO101_URDF.path()
+    assert hashlib.sha256(resolved.read_bytes()).hexdigest() == ref.sha256
+
+
+def test_resolve_asset_fails_closed() -> None:
+    ref = SO101_URDF.ref()
+    with pytest.raises(AssetsUnavailableError, match="not a packaged"):
+        resolve_asset(replace(ref, uri="https://example.com/so101.urdf"))
+    with pytest.raises(AssetsUnavailableError, match="missing on disk"):
+        resolve_asset(replace(ref, uri="package://sx-embodiments/so101/ghost.urdf"))
+    with pytest.raises(AssetDigestMismatchError):
+        resolve_asset(replace(ref, sha256="0" * 64))

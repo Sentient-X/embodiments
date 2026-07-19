@@ -14,6 +14,7 @@ from .assets import (
     AssetRole,
     PackagedAsset,
     asset_root,
+    resolve_asset,
     validate_logical_path,
 )
 from .compose import (
@@ -149,6 +150,7 @@ __all__ = [
     "manifest_for",
     "manifest_for_assets",
     "manifest_from_dict",
+    "resolve_asset",
     "total_dof",
     "validate_logical_path",
 ]
