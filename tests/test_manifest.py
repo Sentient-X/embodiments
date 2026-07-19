@@ -1,6 +1,7 @@
 """Asset references, the v3 wire manifest, and the kinematic record's invariants."""
 
 from dataclasses import replace
+from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
@@ -22,6 +23,7 @@ from sx_embodiments import (
     authoritative_urdf,
     kinematic_view,
     manifest_for,
+    manifest_for_assets,
     manifest_from_dict,
 )
 from sx_embodiments.known.das import DAS_UMI_V4_SPEC
@@ -90,6 +92,38 @@ def test_authoritative_urdf_is_the_manifest_urdf() -> None:
     manifest = manifest_for(PIPER_SPEC)
     assert urdf.ref() in manifest.assets
     assert urdf.path().read_bytes().lstrip().startswith(b"<?xml")
+
+
+def test_external_asset_manifest_still_derives_all_body_facts_from_registry() -> None:
+    canonical = manifest_for(PIPER_SPEC)
+    urdf = authoritative_urdf(PIPER_SPEC)
+    external_ref = replace(
+        urdf.ref(),
+        uri="bundle://piper/urdf/piper.urdf",
+        logical_path=PurePosixPath("urdf/piper.urdf"),
+    )
+    external = manifest_for_assets(
+        PIPER_SPEC,
+        assets=(external_ref,),
+        authoritative_urdf_bytes=urdf.path().read_bytes(),
+    )
+
+    assert external.layout == canonical.layout
+    assert external.capabilities == canonical.capabilities
+    assert external.cameras == canonical.cameras
+    assert external.rates == canonical.rates
+    assert external.link_count == canonical.link_count
+    assert external.assets == (external_ref,)
+
+
+def test_external_asset_manifest_rehashes_the_authoritative_urdf() -> None:
+    urdf = authoritative_urdf(PIPER_SPEC)
+    with pytest.raises(AssetIntegrityError, match="authoritative URDF bytes"):
+        manifest_for_assets(
+            PIPER_SPEC,
+            assets=(urdf.ref(),),
+            authoritative_urdf_bytes=b"<robot name='tampered'/>",
+        )
 
 
 def test_manifest_digest_is_canonical_and_revision_sensitive() -> None:

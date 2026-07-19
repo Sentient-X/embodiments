@@ -539,20 +539,57 @@ def manifest_for(spec: EmbodimentSpec) -> EmbodimentManifest:
             continue
         seen.add(key)
         refs.append(asset.ref())
-    layout = flat_layout(spec) if spec.layout_declared() else None
     urdf = authoritative_urdf(spec)
+    return manifest_for_assets(
+        spec,
+        assets=tuple(refs),
+        authoritative_urdf_bytes=urdf.path().read_bytes(),
+    )
+
+
+def manifest_for_assets(
+    spec: EmbodimentSpec,
+    *,
+    assets: tuple[AssetRef, ...],
+    authoritative_urdf_bytes: bytes,
+) -> EmbodimentManifest:
+    """Derive a complete manifest for an observed, content-addressed asset bundle.
+
+    External-corpus ingest may observe a licensed description bundle whose bytes are not
+    packaged in this repository. The caller owns hashing those bytes into :class:`AssetRef`
+    records; this package remains the only owner of the embodiment's identity, action layout,
+    capabilities, camera mounts, rates, and manifest construction law.
+    """
+    urdfs = tuple(
+        asset
+        for asset in assets
+        if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
+    )
+    if len(urdfs) != 1:
+        raise MissingUrdfError(str(spec.embodiment_id), len(urdfs))
+    actual = hashlib.sha256(authoritative_urdf_bytes).hexdigest()
+    if actual != urdfs[0].sha256:
+        raise AssetIntegrityError(
+            f"{urdfs[0].uri}: authoritative URDF bytes have sha256 {actual}, "
+            f"expected {urdfs[0].sha256}"
+        )
     try:
-        urdf_root = ET.fromstring(urdf.path().read_bytes())
+        urdf_root = ET.fromstring(authoritative_urdf_bytes)
     except ET.ParseError as exc:
         raise ManifestSchemaError(
             f"{spec.embodiment_id}: authoritative URDF is invalid XML"
         ) from exc
     link_count = sum(1 for _ in urdf_root.iter("link"))
+    if urdf_root.tag != "robot" or not urdf_root.attrib.get("name", "").strip():
+        raise ManifestSchemaError(
+            f"{spec.embodiment_id}: authoritative URDF root must be a named <robot>"
+        )
+    layout = flat_layout(spec) if spec.layout_declared() else None
     body = spec.body_attachments()
     return EmbodimentManifest(
         embodiment_id=spec.embodiment_id,
         name=spec.name,
-        assets=tuple(refs),
+        assets=assets,
         dof=layout.action_dim if layout is not None else None,
         link_count=link_count,
         policy_hz=spec.rates.policy_hz if spec.rates is not None else None,

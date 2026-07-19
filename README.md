@@ -18,6 +18,11 @@ Autonomy, Fleet, RRD recordings, and the catalog. Packaged assets use stable
 Consumers remain responsible for resolving bytes and for runtime adapters such as forward
 kinematics and simulator loading; they do not redefine embodiment facts.
 
+External-corpus boundaries use `manifest_for_assets(...)`: callers provide only observed,
+content-addressed asset references and the exact authoritative URDF bytes. The package re-hashes
+the URDF and derives identity, layout, capabilities, cameras, rates, DoF, and link count from the
+registered `EmbodimentSpec`; consumers cannot construct a parallel body description.
+
 The digest is mandatory. A mutable URL is a location, not an asset identity; catalog registration
 must hash bytes before producing an `AssetRef`.
 

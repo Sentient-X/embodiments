@@ -64,6 +64,7 @@ from .manifest import (
     ExecutionCapabilities,
     authoritative_urdf,
     manifest_for,
+    manifest_for_assets,
     manifest_from_dict,
 )
 from .parts import (
@@ -146,6 +147,7 @@ __all__ = [
     "kinematic_view",
     "layout_for",
     "manifest_for",
+    "manifest_for_assets",
     "manifest_from_dict",
     "total_dof",
     "validate_logical_path",
