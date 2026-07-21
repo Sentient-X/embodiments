@@ -17,7 +17,6 @@ from .assets import (
     resolve_asset,
     validate_logical_path,
 )
-from .capabilities import capability_profile
 from .compose import (
     Attachment,
     AttachmentRole,
@@ -163,7 +162,6 @@ __all__ = [
     "authoritative_urdf",
     "camera_bindings",
     "camera_names",
-    "capability_profile",
     "component_graph",
     "embodiment_spec",
     "flat_layout",

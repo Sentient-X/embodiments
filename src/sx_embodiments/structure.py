@@ -5,12 +5,12 @@ from enum import StrEnum
 
 from sx_capabilities import Capability, ComponentId
 
-from .capabilities import capabilities_for_part
 from .compose import EmbodimentSpec
 from .errors import ComponentGraphError
 from .identity import PartId
 from .parts import (
     ArmSpec,
+    CameraModality,
     CameraSpec,
     DeviceSpec,
     ForceTorqueSpec,
@@ -73,7 +73,7 @@ def component_graph(spec: EmbodimentSpec) -> tuple[Component, ...]:
         frame_id = FrameId(attachment.mount.frame or attachment.instance)
         part_id = attachment.part.part_id
         kind = _component_kind(attachment.part)
-        capabilities = capabilities_for_part(attachment.part)
+        capabilities = _capabilities_for_part(attachment.part)
         if attachment.mount.parent_instance:
             parent = ComponentId(attachment.mount.parent_instance)
             if parent not in seen:
@@ -102,6 +102,28 @@ def component_graph(spec: EmbodimentSpec) -> tuple[Component, ...]:
             )
         seen.add(component_id)
     return tuple(result)
+
+
+def _capabilities_for_part(part: object) -> tuple[Capability, ...]:
+    if isinstance(part, ArmSpec):
+        return (Capability.SPATIAL_MOTION_SE3,)
+    if isinstance(part, GripperSpec):
+        return (
+            Capability.SPATIAL_MOTION_SE3,
+            Capability.GRASP,
+            Capability.GRASP_PARALLEL,
+        )
+    if isinstance(part, MobileBaseSpec):
+        return (Capability.PLANAR_MOTION_SE2, Capability.LOCOMOTION_PLANAR)
+    if isinstance(part, CameraSpec):
+        if part.modality is CameraModality.RGB:
+            return (Capability.SENSING_RGB,)
+        if part.modality is CameraModality.DEPTH:
+            return (Capability.SENSING_DEPTH,)
+        return (Capability.SENSING_RGB, Capability.SENSING_DEPTH)
+    if isinstance(part, ForceTorqueSpec):
+        return (Capability.SENSING_FORCE_TORQUE,)
+    return ()
 
 
 def _component_kind(part: object) -> ComponentKind:
