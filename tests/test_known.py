@@ -99,7 +99,7 @@ def test_every_entry_validates_and_kinds_are_coherent() -> None:
         assert spec.embodiment_id == eid
         assert spec.kind is not None, f"{eid} does not declare its character"
         manifest = manifest_for(spec)
-        assert manifest.schema_version == 4
+        assert manifest.schema_version == 5
         assert (
             sum(
                 asset.format.value == "urdf" and asset.role.value == "description"

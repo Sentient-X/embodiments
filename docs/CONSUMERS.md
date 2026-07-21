@@ -5,7 +5,7 @@ reads what, which embodiment facts still live as local copies in consumer repos,
 and the deliberate boundaries that keep some facts out. Re-audit and update it
 when a consumer's usage changes shape; every absorption lands with its consumer
 in the same change (the glued surface-with-consumer rule). Last full audit:
-2026-07-19, all nine repos + three frontends.
+2026-07-21, component-capability migration.
 
 ## The consumer contracts (who reads what, today)
 
@@ -13,7 +13,7 @@ in the same change (the glued surface-with-consumer rule). Last full audit:
 |---|---|---|
 | **train** | `embodiment_spec`/`manifest_for` for physical identity and `sx-actions` for dataset, simulator, artifact, and service controller semantics | exact interface/manifest refs at ingest, export, catalog publication, and load; no width-derived controller inference |
 | **supervisors** | physical layout for deploy-record joint splits; exact `ActionInterfaceRef` on releases, targets, and deployments | release/target body, manifest, controller, and Worlds evidence must all agree before motion |
-| **data-catalog** | schema-v4 manifest wire plus immutable `sx-actions` documents and refs | fail-closed parsing, tenant-local digest resolution, segment/checkpoint foreign keys and lineage |
+| **data-catalog** | schema-v5 component-graph manifest wire plus immutable `sx-actions` documents and refs | fail-closed parsing, tenant-local digest resolution, segment/checkpoint foreign keys and lineage |
 | **data-factory** | `camera_bindings`/`embodiment_spec` (built-in seeds), `EmbodimentRef` resolution against the catalog, `AssetRef` content-addressing of customer URDFs | wire-bridge correlation by asset sha256 |
 | **sim-envs** | kinematic views and `AssetRef` for scene assets; exact action interface on `SceneSpec`, stores, and evaluation evidence | task, world, checkpoint, and controller revisions must agree |
 | **real2sim** | `AssetRef`/`EmbodimentManifest`/`validate_logical_path` — the bundle ingest producer | fail-closed closure validator |
@@ -34,19 +34,18 @@ Each item lands only with its consumer, one change per row:
    hand-copied in `sim/env.py`, and the UI's joint labels re-spell the channel
    vocabulary (`ui/src/lib/teleop.ts`). Absorb: read `home_joints`/limits/
    `ControlRates` from the spec; derive UI labels from `flat_layout.channel_names()`.
-2. **data-factory's parallel `Embodiment` DB** — dof/link_count re-parsed from
-   customer URDFs, `hands`/`mobile_base` capability re-declared. Absorb:
-   customer intake mints a registry-shaped `EmbodimentManifest` (the catalog
-   bundle path) instead of a bespoke row joined by URDF sha256.
+2. ~~**data-factory's parallel capability columns**~~ — resolved 2026-07-21:
+   task admission matches schema-v5 manifest component profiles directly; the
+   hand-count/mobile-base columns and response fields are no longer read.
 3. **enpire's camera instance set** — `CameraMount` name/role/serial sets could
    bind to `camera_bindings`; action semantics now belong to `sx-actions`.
 4. **sim-envs per-robot scene metadata** — `_PRIMITIVE_META`/`_PANDA_META`
    re-state `ArmSpec.joint_names` and gripper travel for bodies the registry
    declares.
-5. **the three-way capability vocabulary** — taskpedia's `arms=N mobile_base=…`
-   task profiles, data-factory's `HandCount`, and the registry's part
-   decomposition encode the same body-capability facts three ways; one derived
-   view should serve all three.
+5. ~~**the three-way capability vocabulary**~~ — resolved 2026-07-21 by
+   `sx-capabilities`: Taskpedia authors typed role requirements, schema-v5 manifests
+   attach capabilities to exact component nodes, and the factory returns the resulting
+   `TaskEmbodimentBinding`.
 6. **the flat-vector split/join transform** — the wire↔(joints, grippers)
    isomorphism is re-expressed in three consumers (train's
    `data/embodiment_actions.py` split/join, supervisors' `ChannelLayout`

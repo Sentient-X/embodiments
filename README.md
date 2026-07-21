@@ -1,17 +1,18 @@
 # sx-embodiments
 
-The canonical Sentient-X hardware registry: shared, dependency-free records for identifying a
+The canonical Sentient-X hardware registry: shared, dependency-light records for identifying a
 robot or capture-hardware embodiment and the immutable assets that describe it. The package owns
 portable facts, not runtime behavior.
 
 This is its own repository (`Sentient-X/embodiments`), consumed by the
 [`glued`](https://github.com/Sentient-X/glued) superproject as a git submodule mounted at
 `packages/sx-embodiments` (a uv workspace member; the import path is `sx_embodiments`). Its CI is
-standalone — the package has zero runtime dependencies.
+standalone — its only runtime dependency is the dependency-free `sx-capabilities` algebra.
 
-An `EmbodimentManifest` schema-v4 document carries identity, kind/lineage, exact physical
+An `EmbodimentManifest` schema-v5 document carries identity, kind/lineage, a topologically
+ordered component/frame graph with component-local capabilities, the exact native physical
 body-channel layout, cameras and their mounting frames, nominal projection/resolution, control rates, and
-content-addressed assets with pinned source provenance. Every v4 manifest contains exactly one
+content-addressed assets with pinned source provenance. Every v5 manifest contains exactly one
 authoritative URDF description. Its canonical JSON SHA-256 is the portable revision pin used by Worlds,
 Autonomy, Fleet, RRD recordings, and the catalog. Packaged assets use stable
 `package://sx-embodiments/...` URIs, so identical checkouts produce identical manifest digests.
@@ -25,7 +26,7 @@ control, joint control, and future controllers.
 
 External-corpus boundaries use `manifest_for_assets(...)`: callers provide only observed,
 content-addressed asset references and the exact authoritative URDF bytes. The package re-hashes
-the URDF and derives identity, layout, capabilities, cameras, rates, DoF, and link count from the
+the URDF and derives identity, components, capabilities, layout, cameras, rates, DoF, and link count from the
 registered `EmbodimentSpec`; consumers cannot construct a parallel body description.
 
 The digest is mandatory. A mutable URL is a location, not an asset identity; catalog registration

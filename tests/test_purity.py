@@ -1,11 +1,11 @@
-"""sx-embodiments is a dependency-free contract package."""
+"""sx-embodiments depends only on the lower sx-capabilities contract kernel."""
 
 import ast
 import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "sx_embodiments"
-_ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_embodiments"}
+_ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_capabilities", "sx_embodiments"}
 
 # The one sanctioned environment read: assets.py resolves SX_EMBODIMENTS_ASSETS because
 # Deployed workers may override the packaged description tree. Nothing else reads the environment.

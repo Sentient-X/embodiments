@@ -62,6 +62,10 @@ class CompositionError(EmbodimentError):
         self.embodiment_id = embodiment_id
 
 
+class ComponentGraphError(EmbodimentError):
+    """A component id, frame, parent relation, or capability fact is invalid."""
+
+
 class LayoutError(EmbodimentError):
     """A flat-vector layout cannot be derived or does not match the requested shape."""
 

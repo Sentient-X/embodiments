@@ -1,10 +1,11 @@
-"""Asset references, the v4 wire manifest, and the kinematic record's invariants."""
+"""Asset references, the v5 wire manifest, and the kinematic record's invariants."""
 
 from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
+from sx_capabilities import ComponentId
 
 from sx_embodiments import (
     AssetFormat,
@@ -14,19 +15,21 @@ from sx_embodiments import (
     AssetRole,
     ChannelKind,
     ChannelSlot,
+    ComponentKind,
     Curve1D,
     Embodiment,
     EmbodimentId,
     EmbodimentKind,
     EmbodimentManifest,
     EmbodimentManifestDigest,
-    ExecutionCapabilities,
     FlatLayout,
+    FrameId,
     LayoutError,
     Lineage,
     ManifestSchemaError,
     PartId,
     PartValidationError,
+    RootComponent,
     authoritative_urdf,
     kinematic_view,
     manifest_for,
@@ -81,10 +84,10 @@ def test_from_bytes_hashes_content() -> None:
     assert len(ref.sha256) == 64
 
 
-def test_manifest_v4_round_trips_identity_and_assets() -> None:
+def test_manifest_v5_round_trips_identity_and_assets() -> None:
     manifest = manifest_for(PIPER_SPEC)
     wire = manifest.to_dict()
-    assert wire["schema_version"] == 4
+    assert wire["schema_version"] == 5
     assert wire["embodiment_id"] == "piper"
     assert wire["kind"] == "robot"
     layout = cast(list[dict[str, object]], wire["layout"])
@@ -116,7 +119,8 @@ def test_external_asset_manifest_still_derives_all_body_facts_from_registry() ->
     )
 
     assert external.layout == canonical.layout
-    assert external.capabilities == canonical.capabilities
+    assert external.components == canonical.components
+    assert external.capability_profile == canonical.capability_profile
     assert external.cameras == canonical.cameras
     assert external.rates == canonical.rates
     assert external.link_count == canonical.link_count
@@ -171,7 +175,7 @@ def test_manifest_from_dict_fails_closed() -> None:
 
 
 def _minimal_manifest(assets: tuple[AssetRef, ...]) -> EmbodimentManifest:
-    """A structurally complete v4 manifest around the given asset bundle."""
+    """A structurally complete v5 manifest around the given asset bundle."""
     eid = EmbodimentId("x")
     return EmbodimentManifest(
         embodiment_id=eid,
@@ -179,11 +183,19 @@ def _minimal_manifest(assets: tuple[AssetRef, ...]) -> EmbodimentManifest:
         assets=assets,
         kind=EmbodimentKind.ROBOT,
         lineage=Lineage(family="fixture"),
+        components=(
+            RootComponent(
+                component_id=ComponentId("arm"),
+                part_id=PartId("fixture-arm"),
+                kind=ComponentKind.MANIPULATOR,
+                frame_id=FrameId("arm"),
+                capabilities=(),
+            ),
+        ),
         layout=FlatLayout(
             embodiment_id=eid,
             slots=(ChannelSlot(0, "arm", PartId("fixture-arm"), "joint_1", ChannelKind.ARM_JOINT),),
         ),
-        capabilities=ExecutionCapabilities(manipulator_count=0, mobile_base=False),
         link_count=2,
     )
 

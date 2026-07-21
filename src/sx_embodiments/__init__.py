@@ -17,6 +17,7 @@ from .assets import (
     resolve_asset,
     validate_logical_path,
 )
+from .capabilities import capability_profile
 from .compose import (
     Attachment,
     AttachmentRole,
@@ -33,6 +34,7 @@ from .errors import (
     AssetDigestMismatchError,
     AssetIntegrityError,
     AssetsUnavailableError,
+    ComponentGraphError,
     CompositionError,
     EmbodimentError,
     InvalidCameraMountError,
@@ -64,7 +66,6 @@ from .known import (
 from .layout import ChannelKind, ChannelSlot, FlatLayout
 from .manifest import (
     EmbodimentManifest,
-    ExecutionCapabilities,
     authoritative_urdf,
     manifest_for,
     manifest_for_assets,
@@ -89,6 +90,14 @@ from .parts import (
     PhysicalSpec,
     SensorModel,
 )
+from .structure import (
+    Component,
+    ComponentKind,
+    FrameId,
+    MountedComponent,
+    RootComponent,
+    component_graph,
+)
 
 __all__ = [
     "DEVELOPMENT_EMBODIMENTS",
@@ -110,6 +119,9 @@ __all__ = [
     "CameraSpec",
     "ChannelKind",
     "ChannelSlot",
+    "Component",
+    "ComponentGraphError",
+    "ComponentKind",
     "CompositionError",
     "ControlRates",
     "Curve1D",
@@ -124,9 +136,9 @@ __all__ = [
     "EmbodimentManifestDigest",
     "EmbodimentRef",
     "EmbodimentSpec",
-    "ExecutionCapabilities",
     "FlatLayout",
     "ForceTorqueSpec",
+    "FrameId",
     "GripperSpec",
     "InvalidCameraMountError",
     "JointGroupSpec",
@@ -138,17 +150,21 @@ __all__ = [
     "MissingUrdfError",
     "MobileBaseSpec",
     "MountFrame",
+    "MountedComponent",
     "PackagedAsset",
     "Part",
     "PartId",
     "PartValidationError",
     "PhysicalSpec",
+    "RootComponent",
     "SensorModel",
     "UnknownEmbodimentError",
     "asset_root",
     "authoritative_urdf",
     "camera_bindings",
     "camera_names",
+    "capability_profile",
+    "component_graph",
     "embodiment_spec",
     "flat_layout",
     "kinematic_view",

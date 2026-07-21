@@ -1,8 +1,9 @@
-"""Immutable, storage-neutral episode-ready embodiment manifests (wire version 4).
+"""Immutable, storage-neutral episode-ready embodiment manifests (wire version 5).
 
 Runtime kinematics, simulator adapters, network fetching, and serialization intentionally
-live at consumer boundaries. Version 4 makes the authoritative URDF, physical layout, asset
-provenance, and camera mounts mandatory. Historical v2/v3 documents remain catalog legacy rows;
+live at consumer boundaries. Version 5 makes the component graph and its derived capabilities
+authoritative instead of storing hand-count/mobile-base summaries. Historical documents remain
+catalog legacy rows;
 this package neither emits nor silently upgrades records missing those facts.
 """
 
@@ -14,6 +15,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import cast
+
+from sx_capabilities import Capability, CapabilityProfile, ComponentCapabilities, ComponentId
 
 from .assets import AssetFormat, AssetProvenance, AssetRef, AssetRole, PackagedAsset
 from .compose import EmbodimentSpec, camera_bindings, flat_layout
@@ -44,29 +47,23 @@ from .parts import (
     MobileBaseSpec,
     SensorModel,
 )
+from .structure import (
+    Component,
+    ComponentKind,
+    FrameId,
+    MountedComponent,
+    RootComponent,
+    component_graph,
+)
 
-SCHEMA_VERSION = 4
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionCapabilities:
-    """Task-admission facts derived from the physical composition."""
-
-    manipulator_count: int
-    mobile_base: bool
-
-    def __post_init__(self) -> None:
-        if isinstance(self.manipulator_count, bool) or self.manipulator_count < 0:
-            raise ManifestSchemaError("manipulator_count must be a non-negative integer")
-        if type(self.mobile_base) is not bool:
-            raise ManifestSchemaError("mobile_base must be a boolean")
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentManifest:
     """Versioned identity, asset bundle, and derived structure for one embodiment.
 
-    The v4-mandatory facts (``kind``/``lineage``/``layout``/``capabilities``/``link_count``)
+    The v5-mandatory facts (``kind``/``lineage``/``components``/``layout``/``link_count``)
     are mandatory in the type, not just the runtime law — a constructed manifest never
     carries ``None`` there, so consumers never narrow. ``dof`` is a derived view of the
     layout (one representation per fact); the wire document still carries the key and the
@@ -79,8 +76,8 @@ class EmbodimentManifest:
     assets: tuple[AssetRef, ...]
     kind: EmbodimentKind
     lineage: Lineage
+    components: tuple[Component, ...]
     layout: FlatLayout
-    capabilities: ExecutionCapabilities
     link_count: int
     schema_version: int = SCHEMA_VERSION
     policy_hz: float | None = None  # control-loop / policy-query rate; None when unbound
@@ -91,6 +88,18 @@ class EmbodimentManifest:
     def dof(self) -> int:
         """The physical body-channel width, derived from the layout exactly once."""
         return self.layout.channel_count
+
+    @property
+    def capability_profile(self) -> CapabilityProfile:
+        """Derive task-admission facts from exact component nodes."""
+
+        return CapabilityProfile(
+            tuple(
+                ComponentCapabilities(component.component_id, component.capabilities)
+                for component in self.components
+                if component.capabilities
+            )
+        )
 
     def __post_init__(self) -> None:
         eid = str(self.embodiment_id)
@@ -129,6 +138,22 @@ class EmbodimentManifest:
             raise ManifestSchemaError("embodiment policy_hz must be positive and finite")
         if self.layout.embodiment_id != self.embodiment_id:
             raise ManifestSchemaError("layout embodiment_id must match the manifest")
+        component_ids = tuple(component.component_id for component in self.components)
+        if not component_ids:
+            raise ManifestSchemaError("embodiment component graph must not be empty")
+        if len(set(component_ids)) != len(component_ids):
+            raise ManifestSchemaError("embodiment component graph repeats a component id")
+        seen: set[ComponentId] = set()
+        for component in self.components:
+            if (
+                isinstance(component, MountedComponent)
+                and component.parent_component_id not in seen
+            ):
+                raise ManifestSchemaError(
+                    f"component {component.component_id!r} names undeclared parent "
+                    f"{component.parent_component_id!r}"
+                )
+            seen.add(component.component_id)
         if (
             self.rates is not None
             and self.policy_hz is not None
@@ -166,6 +191,7 @@ class EmbodimentManifest:
                 "variant": self.lineage.variant,
                 "revision": self.lineage.revision,
             },
+            "components": [_component_to_dict(component) for component in self.components],
             "layout": [
                 {
                     "index": slot.index,
@@ -176,10 +202,6 @@ class EmbodimentManifest:
                 }
                 for slot in self.layout.slots
             ],
-            "capabilities": {
-                "manipulator_count": self.capabilities.manipulator_count,
-                "mobile_base": self.capabilities.mobile_base,
-            },
             "cameras": [
                 {
                     "name": binding.name,
@@ -277,7 +299,7 @@ def _allowed_keys(
 
 
 def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
-    """Parse the complete v4 wire form, rejecting every unrepresented field."""
+    """Parse the complete v5 wire form, rejecting every unrepresented field."""
     version = _require(document, "schema_version")
     if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
         raise ManifestSchemaError(f"unsupported embodiment schema_version: {version!r}")
@@ -292,8 +314,8 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
             "policy_hz",
             "kind",
             "lineage",
+            "components",
             "layout",
-            "capabilities",
             "cameras",
             "rates",
             "assets",
@@ -327,8 +349,8 @@ def manifest_from_dict(document: Mapping[str, object]) -> EmbodimentManifest:
         policy_hz=_optional_float(document.get("policy_hz"), "policy_hz"),
         kind=_parse_kind(_require(document, "kind")),
         lineage=_parse_lineage(_require(document, "lineage")),
+        components=_parse_components(_require(document, "components")),
         layout=layout,
-        capabilities=_parse_capabilities(_require(document, "capabilities")),
         cameras=_parse_cameras(_require(document, "cameras")),
         rates=_parse_rates(_require(document, "rates")),
     )
@@ -364,6 +386,85 @@ def _parse_lineage(raw: object) -> Lineage:
         variant=_string(entry, "variant", "lineage"),
         revision=_string(entry, "revision", "lineage"),
     )
+
+
+def _component_to_dict(component: Component) -> dict[str, object]:
+    common: dict[str, object] = {
+        "component_id": str(component.component_id),
+        "part_id": str(component.part_id),
+        "kind": component.kind.value,
+        "frame_id": str(component.frame_id),
+        "capabilities": [capability.value for capability in component.capabilities],
+    }
+    if isinstance(component, RootComponent):
+        return {**common, "relation": "root"}
+    return {
+        **common,
+        "relation": "mounted",
+        "parent_component_id": str(component.parent_component_id),
+    }
+
+
+def _parse_components(raw: object) -> tuple[Component, ...]:
+    if not isinstance(raw, list):
+        raise ManifestSchemaError("components must be a list")
+    components: list[Component] = []
+    for offset, item in enumerate(cast(list[object], raw)):
+        label = f"components[{offset}]"
+        entry = _mapping(item, label)
+        relation = _string(entry, "relation", label)
+        common_keys = {
+            "component_id",
+            "part_id",
+            "kind",
+            "frame_id",
+            "capabilities",
+            "relation",
+        }
+        expected = common_keys if relation == "root" else common_keys | {"parent_component_id"}
+        _exact_keys(entry, expected, label)
+        raw_capabilities = _require(entry, "capabilities")
+        if not isinstance(raw_capabilities, list):
+            raise ManifestSchemaError(f"{label}.capabilities must be a list")
+        capability_values = cast(list[object], raw_capabilities)
+        try:
+            capabilities = tuple(
+                Capability(raw) for raw in capability_values if isinstance(raw, str)
+            )
+            if len(capabilities) != len(capability_values):
+                raise ManifestSchemaError(f"{label}.capabilities must contain strings")
+            component_id = ComponentId(_string(entry, "component_id", label))
+            part_id = PartId(_string(entry, "part_id", label))
+            kind = ComponentKind(_string(entry, "kind", label))
+            frame_id = FrameId(_string(entry, "frame_id", label))
+            if relation == "root":
+                components.append(
+                    RootComponent(
+                        component_id=component_id,
+                        part_id=part_id,
+                        kind=kind,
+                        frame_id=frame_id,
+                        capabilities=capabilities,
+                    )
+                )
+            elif relation == "mounted":
+                components.append(
+                    MountedComponent(
+                        component_id=component_id,
+                        part_id=part_id,
+                        kind=kind,
+                        frame_id=frame_id,
+                        capabilities=capabilities,
+                        parent_component_id=ComponentId(
+                            _string(entry, "parent_component_id", label)
+                        ),
+                    )
+                )
+            else:
+                raise ManifestSchemaError(f"{label}.relation is unknown: {relation!r}")
+        except ValueError as exc:
+            raise ManifestSchemaError(f"invalid component vocabulary in {label}") from exc
+    return tuple(components)
 
 
 def _parse_layout(raw: object, embodiment_id: EmbodimentId) -> FlatLayout:
@@ -446,21 +547,6 @@ def _parse_cameras(raw: object) -> tuple[CameraBinding, ...]:
             )
         )
     return tuple(cameras)
-
-
-def _parse_capabilities(raw: object) -> ExecutionCapabilities:
-    entry = _mapping(raw, "capabilities")
-    _exact_keys(entry, {"manipulator_count", "mobile_base"}, "capabilities")
-    manipulator_count = _require(entry, "manipulator_count")
-    mobile_base = _require(entry, "mobile_base")
-    if isinstance(manipulator_count, bool) or not isinstance(manipulator_count, int):
-        raise ManifestSchemaError("capabilities.manipulator_count must be an integer")
-    if type(mobile_base) is not bool:
-        raise ManifestSchemaError("capabilities.mobile_base must be a boolean")
-    return ExecutionCapabilities(
-        manipulator_count=manipulator_count,
-        mobile_base=mobile_base,
-    )
 
 
 def _parse_rates(raw: object) -> ControlRates | None:
@@ -667,10 +753,9 @@ def manifest_for_assets(
         raise ManifestSchemaError(
             f"{spec.embodiment_id}: authoritative URDF root must be a named <robot>"
         )
-    # A v4 manifest always carries the physical layout; an undeclared layout fails closed here
+    # A v5 manifest always carries the physical layout; an undeclared layout fails closed here
     # (flat_layout raises LayoutError) instead of minting an incomplete manifest.
     layout = flat_layout(spec)
-    body = spec.body_attachments()
     return EmbodimentManifest(
         embodiment_id=spec.embodiment_id,
         name=spec.name,
@@ -679,11 +764,8 @@ def manifest_for_assets(
         policy_hz=spec.rates.policy_hz if spec.rates is not None else None,
         kind=spec.kind,
         lineage=spec.lineage,
+        components=component_graph(spec),
         layout=layout,
-        capabilities=ExecutionCapabilities(
-            manipulator_count=sum(isinstance(item.part, GripperSpec) for item in body),
-            mobile_base=any(isinstance(item.part, MobileBaseSpec) for item in body),
-        ),
         cameras=camera_bindings(spec),
         rates=spec.rates,
     )

@@ -5,7 +5,10 @@ description = "Dependency-free embodiment and robotics asset manifests shared ac
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
-dependencies = []
+dependencies = ["sx-capabilities>=0.1.0"]
+
+[tool.uv.sources]
+sx-capabilities = { workspace = true }
 
 [dependency-groups]
 dev = [
