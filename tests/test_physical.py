@@ -2,23 +2,19 @@
 
 import pytest
 
-from sx_embodiments import (
-    DEVELOPMENT_EMBODIMENTS,
-    CameraModality,
-    CameraSpec,
-    EmbodimentId,
-    LensProjection,
-    PartId,
-    PartValidationError,
-    PhysicalSpec,
-    SensorModel,
-    camera_bindings,
-)
+from sx_embodiments import CameraModality, EmbodimentName, LensProjection, PartId, SensorModel
+from sx_embodiments.compose import camera_bindings
+from sx_embodiments.errors import PartValidationError
+from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
 from sx_embodiments.known.nero import NERO_ARM
 from sx_embodiments.known.panda import PANDA_ARM
 from sx_embodiments.known.piper import PIPER_ARM
 from sx_embodiments.known.so101 import SO101_ARM
 from sx_embodiments.known.yubi import D405_30
+from sx_embodiments.parts import (
+    CameraSpec,
+    PhysicalSpec,
+)
 
 
 def test_piper_datasheet_facts() -> None:
@@ -66,9 +62,9 @@ def test_camera_resolution_rejects_nonpositive() -> None:
 
 def test_insta360_umi_entry() -> None:
     """The X5 rig: equidistant fisheye wire fact, undeclared jaw layout, wrist camera pair."""
-    spec = DEVELOPMENT_EMBODIMENTS[EmbodimentId("insta360-umi")].spec
+    spec = DEVELOPMENT_EMBODIMENTS[EmbodimentName("insta360-umi")].spec
     assert not spec.layout_declared()  # jaw kinematics uncaptured -> enforcement skips
-    bindings = camera_bindings(spec)
+    bindings = camera_bindings(spec.attachments)
     assert tuple(binding.name for binding in bindings) == ("left_wrist", "right_wrist")
     assert all(binding.camera.projection is LensProjection.EQUIDISTANT for binding in bindings)
     assert all(binding.camera.fps == 30.0 for binding in bindings)

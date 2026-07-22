@@ -1,34 +1,14 @@
-"""Portable embodiment contracts: identity, parts, composition, assets, and the registry.
-
-The compositional :class:`EmbodimentSpec` is the single source; the kinematic
-:class:`Embodiment`, channel :class:`FlatLayout`, camera-name sets, and wire
-:class:`EmbodimentManifest` are derived views. FK solving, simulator loading, Rerun
-emission, drivers, and asset hosting stay at consumer boundaries — this package states
-facts and derives views; it never executes.
-"""
+"""One content-addressed embodiment object and a friendly-name registry."""
 
 from .assets import (
     AssetFormat,
     AssetProvenance,
     AssetRef,
     AssetRole,
-    PackagedAsset,
-    asset_root,
-    resolve_asset,
     validate_logical_path,
 )
-from .compose import (
-    Attachment,
-    AttachmentRole,
-    EmbodimentSpec,
-    MountFrame,
-    camera_bindings,
-    camera_names,
-    flat_layout,
-    kinematic_view,
-    total_dof,
-)
-from .curves import Curve1D
+from .compose import Component, ComponentKind, ComponentRole
+from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
     AssetIntegrityError,
@@ -36,74 +16,19 @@ from .errors import (
     ComponentGraphError,
     CompositionError,
     EmbodimentError,
+    EmbodimentSchemaError,
     InvalidCameraMountError,
     LayoutError,
-    ManifestSchemaError,
     MissingUrdfError,
     PartValidationError,
     UnknownEmbodimentError,
 )
-from .identity import (
-    EmbodimentId,
-    EmbodimentKind,
-    EmbodimentManifestDigest,
-    EmbodimentRef,
-    Lineage,
-    PartId,
-)
-from .kinematic import Embodiment
-from .known import (
-    DEVELOPMENT_EMBODIMENTS,
-    EPISODE_READY_EMBODIMENTS,
-    PANDA_OMRON,
-    PIPER,
-    DevelopmentEmbodiment,
-    DevelopmentReason,
-    embodiment_spec,
-    layout_for,
-)
-from .layout import ChannelKind, ChannelSlot, FlatLayout
-from .manifest import (
-    EmbodimentManifest,
-    authoritative_urdf,
-    manifest_for,
-    manifest_for_assets,
-    manifest_from_dict,
-    ref_from_dict,
-    ref_to_dict,
-)
-from .parts import (
-    ArmSpec,
-    CameraBinding,
-    CameraModality,
-    CameraSpec,
-    ControlRates,
-    DeviceSpec,
-    ForceTorqueSpec,
-    GripperSpec,
-    JointGroupSpec,
-    LensProjection,
-    MimicJoint,
-    MobileBaseSpec,
-    Part,
-    PhysicalSpec,
-    SensorModel,
-)
-from .structure import (
-    Component,
-    ComponentKind,
-    FrameId,
-    MountedComponent,
-    RootComponent,
-    component_graph,
-)
+from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, PartId
+from .known import EmbodimentRegistry, embodiments
+from .layout import ChannelKind, StateSpace
+from .parts import CameraModality, LensProjection, SensorModel
 
 __all__ = [
-    "DEVELOPMENT_EMBODIMENTS",
-    "EPISODE_READY_EMBODIMENTS",
-    "PANDA_OMRON",
-    "PIPER",
-    "ArmSpec",
     "AssetDigestMismatchError",
     "AssetFormat",
     "AssetIntegrityError",
@@ -111,68 +36,29 @@ __all__ = [
     "AssetRef",
     "AssetRole",
     "AssetsUnavailableError",
-    "Attachment",
-    "AttachmentRole",
-    "CameraBinding",
     "CameraModality",
-    "CameraSpec",
     "ChannelKind",
-    "ChannelSlot",
     "Component",
     "ComponentGraphError",
     "ComponentKind",
+    "ComponentRole",
     "CompositionError",
-    "ControlRates",
-    "Curve1D",
-    "DevelopmentEmbodiment",
-    "DevelopmentReason",
-    "DeviceSpec",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
     "EmbodimentKind",
-    "EmbodimentManifest",
-    "EmbodimentManifestDigest",
-    "EmbodimentRef",
-    "EmbodimentSpec",
-    "FlatLayout",
-    "ForceTorqueSpec",
-    "FrameId",
-    "GripperSpec",
+    "EmbodimentName",
+    "EmbodimentRegistry",
+    "EmbodimentSchemaError",
     "InvalidCameraMountError",
-    "JointGroupSpec",
     "LayoutError",
     "LensProjection",
-    "Lineage",
-    "ManifestSchemaError",
-    "MimicJoint",
     "MissingUrdfError",
-    "MobileBaseSpec",
-    "MountFrame",
-    "MountedComponent",
-    "PackagedAsset",
-    "Part",
     "PartId",
     "PartValidationError",
-    "PhysicalSpec",
-    "RootComponent",
     "SensorModel",
+    "StateSpace",
     "UnknownEmbodimentError",
-    "asset_root",
-    "authoritative_urdf",
-    "camera_bindings",
-    "camera_names",
-    "component_graph",
-    "embodiment_spec",
-    "flat_layout",
-    "kinematic_view",
-    "layout_for",
-    "manifest_for",
-    "manifest_for_assets",
-    "manifest_from_dict",
-    "ref_from_dict",
-    "ref_to_dict",
-    "resolve_asset",
-    "total_dof",
+    "embodiments",
     "validate_logical_path",
 ]

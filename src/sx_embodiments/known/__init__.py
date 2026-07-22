@@ -1,21 +1,14 @@
-"""The canonical episode-ready and development registries, one module per family.
+"""The lazy built-in embodiment registry, one source module per hardware family."""
 
-Episode-ready enumeration is total: every listed spec produces a complete manifest.
-``PIPER`` and ``PANDA_OMRON`` remain the flat kinematic :class:`Embodiment` constants
-runtimes bind — now DERIVED from their specs via ``kinematic_view`` and pinned by
-``tests/test_known.py`` so the derivation can never drift from the deployed values.
-"""
-
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from ..compose import EmbodimentSpec, flat_layout, kinematic_view
+from ..compose import _EmbodimentDefinition
+from ..embodiment import Embodiment, embodiment_from_definition
 from ..errors import UnknownEmbodimentError
-from ..identity import EmbodimentId
-from ..kinematic import Embodiment
-from ..layout import FlatLayout
+from ..identity import EmbodimentId, EmbodimentName
 from .aloha import ALOHA_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .g1 import UNITREE_G1_SPEC
@@ -31,7 +24,7 @@ from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
 from .yubi import YUBI_DEPTH_SPEC, YUBI_MONO_SPEC, YUBI_WIDEJAW_SPEC
 
-_ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
+_ALL_SPECS: Final[tuple[_EmbodimentDefinition, ...]] = (
     PIPER_SPEC,
     NERO_SPEC,
     ALOHA_SPEC,
@@ -53,7 +46,7 @@ _ALL_SPECS: Final[tuple[EmbodimentSpec, ...]] = (
     PIPERX_STATION_SPEC,
 )
 
-EPISODE_READY_EMBODIMENTS: Final[Mapping[EmbodimentId, EmbodimentSpec]] = {
+_DEFINITIONS: Final[Mapping[EmbodimentName, _EmbodimentDefinition]] = {
     spec.embodiment_id: spec for spec in _ALL_SPECS
 }
 
@@ -64,11 +57,11 @@ class DevelopmentReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DevelopmentEmbodiment:
-    spec: EmbodimentSpec
+    spec: _EmbodimentDefinition
     reason: DevelopmentReason
 
 
-DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentId, DevelopmentEmbodiment]] = {
+DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] = {
     INSTA360_UMI_SPEC.embodiment_id: DevelopmentEmbodiment(
         spec=INSTA360_UMI_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
@@ -76,18 +69,32 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentId, DevelopmentEmbodiment]] = {
 }
 
 
-def embodiment_spec(embodiment_id: EmbodimentId) -> EmbodimentSpec:
-    """Resolve a registry entry, or fail closed."""
-    spec = EPISODE_READY_EMBODIMENTS.get(embodiment_id)
-    if spec is None:
-        raise UnknownEmbodimentError(str(embodiment_id))
-    return spec
+class EmbodimentRegistry(Mapping[str, Embodiment]):
+    """Read-only, lazy registry with ordinary mapping semantics."""
+
+    def __init__(self, definitions: Mapping[EmbodimentName, _EmbodimentDefinition]) -> None:
+        self._definitions = dict(definitions)
+        self._cache: dict[EmbodimentName, Embodiment] = {}
+
+    def __getitem__(self, key: str | EmbodimentId | EmbodimentName) -> Embodiment:
+        name = EmbodimentName(str(key))
+        definition = self._definitions.get(name)
+        if definition is None:
+            for candidate in self.values():
+                if candidate.id == key:
+                    return candidate
+            raise UnknownEmbodimentError(str(key))
+        cached = self._cache.get(name)
+        if cached is None:
+            cached = embodiment_from_definition(definition)
+            self._cache[name] = cached
+        return cached
+
+    def __iter__(self) -> Iterator[str]:
+        return (str(name) for name in self._definitions)
+
+    def __len__(self) -> int:
+        return len(self._definitions)
 
 
-def layout_for(embodiment_id: EmbodimentId) -> FlatLayout:
-    """The declared flat-vector layout of a registered embodiment, or fail closed."""
-    return flat_layout(embodiment_spec(embodiment_id))
-
-
-PIPER: Final[Embodiment] = kinematic_view(PIPER_SPEC)
-PANDA_OMRON: Final[Embodiment] = kinematic_view(PANDA_OMRON_SPEC)
+embodiments: Final = EmbodimentRegistry(_DEFINITIONS)

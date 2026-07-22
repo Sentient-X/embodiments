@@ -162,6 +162,10 @@ class AssetRef:
             media_type=media_type,
         )
 
+    def local_path(self) -> Path:
+        """Resolve and verify a packaged asset when its bytes are installed locally."""
+        return resolve_asset(self)
+
 
 def asset_root() -> Path:
     """Locate the canonical ``assets/`` tree, or fail closed."""
@@ -189,7 +193,7 @@ def resolve_asset(ref: AssetRef) -> Path:
     """Resolve a ``package://sx-embodiments/...`` reference to its verified on-disk file.
 
     The inverse of :meth:`PackagedAsset.ref` for consumers that hold only the portable
-    wire reference (an embodiment manifest's assets). Fail-closed on every step: a foreign
+    asset fact from an embodiment. Fail-closed on every step: a foreign
     URI scheme, a missing file, or bytes whose digest disagrees with the reference.
     """
     if not ref.uri.startswith(_PACKAGE_URI_PREFIX):
@@ -241,7 +245,7 @@ class PackagedAsset:
         """Project to a portable :class:`AssetRef` at an explicit wiring site.
 
         The URI names the package-relative asset, not its checkout path. Consumers use
-        :meth:`path` when they need local bytes; the stable URI keeps manifest content
+        :meth:`path` when they need local bytes; the stable URI keeps embodiment content
         identity byte-equal across machines and deployment layouts.
         """
         resolved = self.path()

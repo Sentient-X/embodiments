@@ -7,8 +7,8 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import (
     ArmSpec,
     ControlRates,
@@ -72,26 +72,26 @@ PANDA_GRIPPER: Final = GripperSpec(
 
 OMRON_BASE: Final = MobileBaseSpec(part_id=PartId("omron-ld"))  # commanded outside joint space
 
-PANDA_OMRON_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("panda_omron"),
+PANDA_OMRON_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("panda_omron"),
     name="Franka Panda on Omron LD mobile base",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda", variant="omron"),
     attachments=(
-        Attachment("base", OMRON_BASE, AttachmentRole.BODY),
-        Attachment("arm", PANDA_ARM, AttachmentRole.BODY, MountFrame("base", "top_plate")),
-        Attachment("gripper", PANDA_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "panda_link8")),
+        Component("base", OMRON_BASE, ComponentRole.BODY),
+        Component("arm", PANDA_ARM, ComponentRole.BODY, MountFrame("base", "top_plate")),
+        Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
     ),
     rates=ControlRates(policy_hz=20.0),
 )
 
-FRANKA_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("franka"),
+FRANKA_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("franka"),
     name="Franka Panda (fixed base)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda"),
     attachments=(
-        Attachment("arm", PANDA_ARM, AttachmentRole.BODY),
-        Attachment("gripper", PANDA_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "panda_link8")),
+        Component("arm", PANDA_ARM, ComponentRole.BODY),
+        Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
     ),
 )

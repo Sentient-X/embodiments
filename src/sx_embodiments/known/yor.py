@@ -3,8 +3,8 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, JointGroupSpec, MobileBaseSpec
 
 YOR_MJCF: Final = PackagedAsset(
@@ -72,29 +72,29 @@ def _yor_arm(side: Literal["left", "right"]) -> ArmSpec:
 YOR_LEFT_ARM: Final = _yor_arm("left")
 YOR_RIGHT_ARM: Final = _yor_arm("right")
 
-YOR_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("yor"),
+YOR_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("yor"),
     name="YOR bimanual mobile robot",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="yor"),
     attachments=(
-        Attachment("base", YOR_BASE, AttachmentRole.BODY),
-        Attachment(
+        Component("base", YOR_BASE, ComponentRole.BODY),
+        Component(
             "lift",
             YOR_LIFT,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("base", "base_profile_short"),
         ),
-        Attachment(
+        Component(
             "left_arm",
             YOR_LEFT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("lift", "Lift_Top"),
         ),
-        Attachment(
+        Component(
             "right_arm",
             YOR_RIGHT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("lift", "Lift_Top"),
         ),
     ),

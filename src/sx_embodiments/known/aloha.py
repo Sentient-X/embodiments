@@ -3,8 +3,8 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec, MimicJoint
 from .sources import menagerie
 
@@ -74,24 +74,24 @@ ALOHA_RIGHT_ARM: Final = _aloha_arm("right")
 ALOHA_LEFT_GRIPPER: Final = _aloha_gripper("left")
 ALOHA_RIGHT_GRIPPER: Final = _aloha_gripper("right")
 
-ALOHA_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("aloha"),
+ALOHA_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("aloha"),
     name="ALOHA 2",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
     attachments=(
-        Attachment("left_arm", ALOHA_LEFT_ARM, AttachmentRole.BODY),
-        Attachment(
+        Component("left_arm", ALOHA_LEFT_ARM, ComponentRole.BODY),
+        Component(
             "left_gripper",
             ALOHA_LEFT_GRIPPER,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("left_arm", "left/gripper_link"),
         ),
-        Attachment("right_arm", ALOHA_RIGHT_ARM, AttachmentRole.BODY),
-        Attachment(
+        Component("right_arm", ALOHA_RIGHT_ARM, ComponentRole.BODY),
+        Component(
             "right_gripper",
             ALOHA_RIGHT_GRIPPER,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("right_arm", "right/gripper_link"),
         ),
     ),

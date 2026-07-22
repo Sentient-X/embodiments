@@ -10,8 +10,8 @@ the hardware URDF limits below win at the execution boundary.
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, JointGroupSpec
 
 SENTIENT_HUMANOID_URDF: Final = PackagedAsset(
@@ -116,27 +116,27 @@ SENTIENT_HUMANOID_LEFT_ARM: Final = _humanoid_arm("left")
 SENTIENT_HUMANOID_RIGHT_LEG: Final = _humanoid_leg("right")
 SENTIENT_HUMANOID_LEFT_LEG: Final = _humanoid_leg("left")
 
-SENTIENT_HUMANOID_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("sentient-humanoid"),
+SENTIENT_HUMANOID_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("sentient-humanoid"),
     name="Sentient humanoid",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),
     attachments=(
-        Attachment("torso", SENTIENT_HUMANOID_TORSO, AttachmentRole.BODY),
-        Attachment(
+        Component("torso", SENTIENT_HUMANOID_TORSO, ComponentRole.BODY),
+        Component(
             "right_arm",
             SENTIENT_HUMANOID_RIGHT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "chest_link"),
         ),
-        Attachment(
+        Component(
             "left_arm",
             SENTIENT_HUMANOID_LEFT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "chest_link"),
         ),
-        Attachment("right_leg", SENTIENT_HUMANOID_RIGHT_LEG, AttachmentRole.BODY),
-        Attachment("left_leg", SENTIENT_HUMANOID_LEFT_LEG, AttachmentRole.BODY),
+        Component("right_leg", SENTIENT_HUMANOID_RIGHT_LEG, ComponentRole.BODY),
+        Component("left_leg", SENTIENT_HUMANOID_LEFT_LEG, ComponentRole.BODY),
     ),
     extra_assets=(SENTIENT_HUMANOID_URDF, SENTIENT_HUMANOID_MJCF),
 )

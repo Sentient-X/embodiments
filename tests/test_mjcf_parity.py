@@ -2,7 +2,7 @@
 
 import xml.etree.ElementTree as ET
 
-from sx_embodiments import ArmSpec, GripperSpec, JointGroupSpec, PackagedAsset
+from sx_embodiments.assets import PackagedAsset
 from sx_embodiments.known.aloha import (
     ALOHA_LEFT_ARM,
     ALOHA_LEFT_GRIPPER,
@@ -34,6 +34,7 @@ from sx_embodiments.known.universal_robots import (
     UR10E_MJCF,
 )
 from sx_embodiments.known.yor import YOR_LEFT_ARM, YOR_LIFT, YOR_MJCF, YOR_RIGHT_ARM
+from sx_embodiments.parts import ArmSpec, GripperSpec, JointGroupSpec
 
 JointPart = ArmSpec | JointGroupSpec | GripperSpec
 

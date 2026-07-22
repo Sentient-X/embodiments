@@ -67,7 +67,7 @@ class ComponentGraphError(EmbodimentError):
 
 
 class LayoutError(EmbodimentError):
-    """A flat-vector layout cannot be derived or does not match the requested shape."""
+    """A native state space cannot be derived or does not match the requested shape."""
 
     def __init__(self, embodiment_id: str, message: str) -> None:
         super().__init__(f"{embodiment_id}: {message}")
@@ -75,7 +75,7 @@ class LayoutError(EmbodimentError):
 
 
 class InvalidCameraMountError(CompositionError):
-    """An embodiment camera has no explicit mount frame; raised at manifest construction."""
+    """An embodiment camera has no explicit mount frame."""
 
 
 class UnknownEmbodimentError(EmbodimentError):
@@ -86,5 +86,5 @@ class UnknownEmbodimentError(EmbodimentError):
         self.embodiment_id = embodiment_id
 
 
-class ManifestSchemaError(EmbodimentError):
-    """A manifest document does not conform to the supported wire schema."""
+class EmbodimentSchemaError(EmbodimentError):
+    """An embodiment document does not conform to the supported wire schema."""

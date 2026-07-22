@@ -3,8 +3,8 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, JointGroupSpec
 from .sources import menagerie
 
@@ -97,25 +97,25 @@ UNITREE_G1_TORSO: Final = JointGroupSpec(
 UNITREE_G1_LEFT_ARM: Final = _g1_arm("left")
 UNITREE_G1_RIGHT_ARM: Final = _g1_arm("right")
 
-UNITREE_G1_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("unitree-g1"),
+UNITREE_G1_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("unitree-g1"),
     name="Unitree G1 (29 DOF)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="unitree-g1", variant="29dof"),
     attachments=(
-        Attachment("left_leg", UNITREE_G1_LEFT_LEG, AttachmentRole.BODY),
-        Attachment("right_leg", UNITREE_G1_RIGHT_LEG, AttachmentRole.BODY),
-        Attachment("torso", UNITREE_G1_TORSO, AttachmentRole.BODY),
-        Attachment(
+        Component("left_leg", UNITREE_G1_LEFT_LEG, ComponentRole.BODY),
+        Component("right_leg", UNITREE_G1_RIGHT_LEG, ComponentRole.BODY),
+        Component("torso", UNITREE_G1_TORSO, ComponentRole.BODY),
+        Component(
             "left_arm",
             UNITREE_G1_LEFT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "torso_link"),
         ),
-        Attachment(
+        Component(
             "right_arm",
             UNITREE_G1_RIGHT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "torso_link"),
         ),
     ),

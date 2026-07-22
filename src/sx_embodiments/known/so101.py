@@ -4,14 +4,14 @@ Joint names and limits mirror ``assets/so101/so101.urdf`` (pinned by
 ``tests/test_urdf_parity.py``). The bimanual flat convention ``[left 0..5 | right 0..5]``
 with the jaw at index 5 of each block is exactly the declared attachment order — the
 supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
-``flat_layout(...).uniform_arm_blocks()``.
+``embodiments[...].state.uniform_arm_blocks()``.
 """
 
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec
 
 SO101_URDF: Final = PackagedAsset(
@@ -46,30 +46,30 @@ SO101_JAW: Final = GripperSpec(
 )
 
 
-def so101_side(side: str) -> tuple[Attachment, ...]:
+def so101_side(side: str) -> tuple[Component, ...]:
     """One SO-101 arm+jaw block; composing two sides IS the bimanual body."""
     return (
-        Attachment(f"{side}_arm", SO101_ARM, AttachmentRole.BODY),
-        Attachment(
-            f"{side}_jaw", SO101_JAW, AttachmentRole.BODY, MountFrame(f"{side}_arm", "wrist_roll")
+        Component(f"{side}_arm", SO101_ARM, ComponentRole.BODY),
+        Component(
+            f"{side}_jaw", SO101_JAW, ComponentRole.BODY, MountFrame(f"{side}_arm", "wrist_roll")
         ),
     )
 
 
-SO101_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("so101"),
+SO101_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("so101"),
     name="SO-101 (single arm)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
     attachments=(
-        Attachment("arm", SO101_ARM, AttachmentRole.BODY),
-        Attachment("jaw", SO101_JAW, AttachmentRole.BODY, MountFrame("arm", "wrist_roll")),
+        Component("arm", SO101_ARM, ComponentRole.BODY),
+        Component("jaw", SO101_JAW, ComponentRole.BODY, MountFrame("arm", "wrist_roll")),
     ),
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )
 
-BIMANUAL_SO101_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("bimanual-so101"),
+BIMANUAL_SO101_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("bimanual-so101"),
     name="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101", variant="bimanual"),

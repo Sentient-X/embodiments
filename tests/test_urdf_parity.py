@@ -9,10 +9,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from sx_embodiments import (
-    EPISODE_READY_EMBODIMENTS,
     AssetFormat,
-    asset_root,
-    manifest_for,
+    embodiments,
 )
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
@@ -97,15 +95,15 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
 
 
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
-    for spec in EPISODE_READY_EMBODIMENTS.values():
-        manifest = manifest_for(spec)
-        urdf = next(asset for asset in manifest.assets if asset.format is AssetFormat.URDF)
-        relpath = urdf.uri.removeprefix("package://sx-embodiments/")
+    for embodiment in embodiments.values():
+        urdf = next(asset for asset in embodiment.assets if asset.format is AssetFormat.URDF)
         movable = {
             joint.get("name")
-            for joint in ET.parse(asset_root() / relpath).getroot().iter("joint")
+            for joint in ET.parse(urdf.local_path()).getroot().iter("joint")
             if joint.get("type") not in (None, "fixed")
         }
-        description_channels = {slot.joint_name for slot in manifest.layout.slots}
+        description_channels = {
+            coordinate.joint_name for coordinate in embodiment.state.coordinates
+        }
         assert description_channels <= movable
-        assert all(asset.provenance is not None for asset in manifest.assets)
+        assert all(asset.provenance is not None for asset in embodiment.assets)

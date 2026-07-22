@@ -11,8 +11,8 @@ are mapped at adoption, not silently merged.
 import dataclasses
 from typing import Final
 
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
 from .das import DAS_JAW_V4, DAS_UMI_V4_URDF, UVC_MONO_60
 
@@ -41,25 +41,25 @@ def _yubi(
     revision: str,
     jaw: GripperSpec,
     wrist_camera: CameraSpec,
-) -> EmbodimentSpec:
-    return EmbodimentSpec(
-        embodiment_id=EmbodimentId(embodiment_id),
+) -> _EmbodimentDefinition:
+    return _EmbodimentDefinition(
+        embodiment_id=EmbodimentName(embodiment_id),
         name=name,
         kind=EmbodimentKind.CAPTURE_RIG,
         lineage=Lineage(family="yubi", variant=variant, revision=revision),
         attachments=(
-            Attachment("left_jaw", jaw, AttachmentRole.BODY),
-            Attachment("right_jaw", jaw, AttachmentRole.BODY),
-            Attachment(
+            Component("left_jaw", jaw, ComponentRole.BODY),
+            Component("right_jaw", jaw, ComponentRole.BODY),
+            Component(
                 "wrist_left",
                 wrist_camera,
-                AttachmentRole.SENSOR,
+                ComponentRole.SENSOR,
                 MountFrame("left_jaw", "link_ca2"),
             ),
-            Attachment(
+            Component(
                 "wrist_right",
                 wrist_camera,
-                AttachmentRole.SENSOR,
+                ComponentRole.SENSOR,
                 MountFrame("right_jaw", "link_ca2"),
             ),
         ),

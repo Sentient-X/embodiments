@@ -1,48 +1,53 @@
 # sx-embodiments
 
-The canonical Sentient-X hardware registry: shared, dependency-light records for identifying a
-robot or capture-hardware embodiment and the immutable assets that describe it. The package owns
-portable facts, not runtime behavior.
+The canonical Sentient-X hardware registry. The normal API is ordinary Python:
 
-This is its own repository (`Sentient-X/embodiments`), consumed by the
-[`glued`](https://github.com/Sentient-X/glued) superproject as a git submodule mounted at
-`packages/sx-embodiments` (a uv workspace member; the import path is `sx_embodiments`). Its CI is
-standalone — its only runtime dependency is the dependency-free `sx-capabilities` algebra.
+```python
+from sx_embodiments import embodiments
 
-An `EmbodimentManifest` schema-v5 document carries identity, kind/lineage, a topologically
-ordered component/frame graph with component-local capabilities, the exact native physical
-body-channel layout, cameras and their mounting frames, nominal projection/resolution, control rates, and
-content-addressed assets with pinned source provenance. Every v5 manifest contains exactly one
-authoritative URDF description. Its canonical JSON SHA-256 is the portable revision pin used by Worlds,
-Autonomy, Fleet, RRD recordings, and the catalog. Packaged assets use stable
-`package://sx-embodiments/...` URIs, so identical checkouts produce identical manifest digests.
-Consumers remain responsible for resolving bytes and for runtime adapters such as forward
-kinematics and simulator loading; they do not redefine embodiment facts.
+robot = embodiments["franka"]
 
-Controller semantics do not live in the manifest. `sx-actions` binds a joint or Cartesian
-interface—including command frame, normalization, bounds, rate, and exact channel order—to one
-immutable manifest revision. This keeps a physical Franka body identical across LIBERO Cartesian
-control, joint control, and future controllers.
+robot.id            # content identity for compact boundaries
+robot.components    # the physical component graph
+robot.state         # derived ordered, named native coordinates
+robot.cameras       # derived nominal camera bindings
+robot.capabilities  # derived component capabilities
+robot.urdf          # authoritative content-addressed description
+```
 
-External-corpus boundaries use `manifest_for_assets(...)`: callers provide only observed,
-content-addressed asset references and the exact authoritative URDF bytes. The package re-hashes
-the URDF and derives identity, components, capabilities, layout, cameras, rates, DoF, and link count from the
-registered `EmbodimentSpec`; consumers cannot construct a parallel body description.
+`Embodiment` is one complete immutable hardware revision. There is no public manifest,
+reference, digest, structure, or kinematics wrapper to assemble. Code that needs hardware facts
+receives the object. Storage and service boundaries that need only identity carry `robot.id`, a
+64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
+friendly registry name or that content ID.
 
-The digest is mandatory. A mutable URL is a location, not an asset identity; catalog registration
-must hash bytes before producing an `AssetRef`.
+Schema v7 stores one topologically ordered component graph plus nominal rates and
+content-addressed assets. State order, camera bindings, capabilities, arm/gripper convenience
+views, and the ID are derived from those facts. This keeps one source for morphology while
+remaining ergonomic for drivers, simulation, training, and task admission.
+
+Controller semantics stay in `sx-actions`; one embodiment can expose several action interfaces
+without changing hardware identity. Per-unit calibration and runtime status belong to episodes
+or sessions, not the nominal embodiment.
+
+External-corpus ingest starts from a registered object and replaces only its verified asset
+bundle:
+
+```python
+robot = embodiments["franka"].with_assets(assets, urdf=urdf_bytes)
+```
+
+The caller supplies content-addressed assets and exact URDF bytes; the registered component
+semantics remain authoritative. A mutable URL is a location, not asset identity, so ingest
+boundaries hash bytes before producing an `AssetRef`.
 
 ## Assets
 
-Canonical robot/capture-hardware *description* assets (URDF/MJCF and their meshes) live under
-`assets/` at the repo root — see `THIRD_PARTY_NOTICES.md` for provenance and licensing. Wheels
-and sdists include that tree under `sx_embodiments/_assets`, so an installed package is complete.
-`sx_embodiments.assets.asset_root()` honors the `SX_EMBODIMENTS_ASSETS` environment variable,
-then resolves the installed tree, then the repo-relative `assets/` directory for editable installs,
-and otherwise raises a typed error (no silent fallback).
+Canonical robot and capture-hardware descriptions live under `assets/`; provenance and licensing
+are recorded in `THIRD_PARTY_NOTICES.md`. Wheels and sdists include the tree under
+`sx_embodiments/_assets`. `sx_embodiments.assets.asset_root()` resolves the environment override,
+installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailableError`.
 
-The episode-ready registry includes Piper, NERO, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient
-humanoid, Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop
-stations. Entries without authoritative kinematics are deliberately not advertised as
-episode-ready. Declaration order is the physical body-channel order and is pinned against the URDF joint set
-by layout-law tests.
+The registry covers Piper, NERO, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
+Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.
+Declaration order is the native physical coordinate order and is pinned against each URDF.

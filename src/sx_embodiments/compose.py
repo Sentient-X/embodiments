@@ -8,14 +8,16 @@ declared attachment order is the wire order (see :mod:`sx_embodiments.layout`).
 from dataclasses import dataclass
 from enum import StrEnum
 
+from sx_capabilities import Capability, ComponentId
+
 from .assets import PackagedAsset
-from .errors import CompositionError, LayoutError
-from .identity import EmbodimentId, EmbodimentKind, Lineage
-from .kinematic import Embodiment
-from .layout import ChannelKind, ChannelSlot, FlatLayout
+from .errors import ComponentGraphError, CompositionError, LayoutError
+from .identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from .layout import ChannelKind, StateCoordinate, StateSpace
 from .parts import (
     ArmSpec,
     CameraBinding,
+    CameraModality,
     CameraSpec,
     ControlRates,
     DeviceSpec,
@@ -27,10 +29,20 @@ from .parts import (
 )
 
 
-class AttachmentRole(StrEnum):
+class ComponentRole(StrEnum):
     BODY = "body"  # contributes channels to the physical body-state vector
     LEADER = "leader"  # teleop input device: identity + assets, zero channels
     SENSOR = "sensor"  # cameras/FT: zero channels; cameras define the camera-name set
+
+
+class ComponentKind(StrEnum):
+    MANIPULATOR = "manipulator"
+    JOINT_GROUP = "joint_group"
+    EFFECTOR = "effector"
+    MOBILE_BASE = "mobile_base"
+    CAMERA = "camera"
+    FORCE_TORQUE_SENSOR = "force_torque_sensor"
+    DEVICE = "device"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +54,29 @@ class MountFrame:
 
 
 @dataclass(frozen=True, slots=True)
-class Attachment:
-    instance: str  # unique within the spec: "left_arm", "wrist_left"
+class Component:
+    """One named node in the embodiment graph, carrying its complete hardware facts."""
+
+    instance: str
     part: Part
-    role: AttachmentRole
+    role: ComponentRole
     mount: MountFrame = MountFrame()
+
+    @property
+    def component_id(self) -> ComponentId:
+        return ComponentId(self.instance)
+
+    @property
+    def part_id(self) -> PartId:
+        return self.part.part_id
+
+    @property
+    def kind(self) -> ComponentKind:
+        return component_kind(self.part)
+
+    @property
+    def capabilities(self) -> tuple[Capability, ...]:
+        return capabilities_for_part(self.part)
 
 
 _SENSOR_PARTS = (CameraSpec, ForceTorqueSpec)
@@ -54,80 +84,88 @@ _BODY_PARTS = (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 
 
 @dataclass(frozen=True, slots=True)
-class EmbodimentSpec:
-    """THE canonical hardware record. Everything else is a derived view."""
+class _EmbodimentDefinition:
+    """Internal source record used to construct one public ``Embodiment``."""
 
-    embodiment_id: EmbodimentId
+    embodiment_id: EmbodimentName
     name: str
     kind: EmbodimentKind
     lineage: Lineage
-    attachments: tuple[Attachment, ...]
+    attachments: tuple[Component, ...]
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
 
     def __post_init__(self) -> None:
-        eid = str(self.embodiment_id)
-        if not eid.strip():
-            raise CompositionError(eid, "embodiment_id must not be empty")
+        name = str(self.embodiment_id)
+        if not name.strip():
+            raise CompositionError(name, "embodiment name must not be empty")
         if not self.name.strip():
-            raise CompositionError(eid, "name must not be empty")
-        if not self.attachments:
-            raise CompositionError(eid, "an embodiment needs at least one attachment")
-        seen: set[str] = set()
-        for attachment in self.attachments:
-            if not attachment.instance.strip():
-                raise CompositionError(eid, "attachment instance names must not be empty")
-            if attachment.instance in seen:
-                raise CompositionError(
-                    eid, f"duplicate attachment instance {attachment.instance!r}"
-                )
-            parent = attachment.mount.parent_instance
-            if parent and parent not in seen:
-                raise CompositionError(
-                    eid,
-                    f"{attachment.instance!r} mounts on {parent!r}, which is not declared "
-                    "before it (attachments are topologically ordered by declaration)",
-                )
-            seen.add(attachment.instance)
-            if isinstance(attachment.part, _SENSOR_PARTS):
-                if attachment.role is not AttachmentRole.SENSOR:
-                    raise CompositionError(
-                        eid, f"{attachment.instance!r}: sensor parts must use role SENSOR"
-                    )
-            elif attachment.role is AttachmentRole.SENSOR:
-                raise CompositionError(
-                    eid, f"{attachment.instance!r}: body parts cannot use role SENSOR"
-                )
-        leaders = [a for a in self.attachments if a.role is AttachmentRole.LEADER]
-        if self.kind is not EmbodimentKind.TELEOP_STATION and leaders:
-            raise CompositionError(eid, f"{self.kind.value} embodiments cannot have leaders")
-        if self.kind is EmbodimentKind.TELEOP_STATION:
-            if not leaders:
-                raise CompositionError(eid, "a teleop station needs at least one leader")
-            if not any(a.role is AttachmentRole.BODY for a in self.attachments):
-                raise CompositionError(eid, "a teleop station needs a follower body")
-        if self.kind is EmbodimentKind.ROBOT and not any(
-            a.role is AttachmentRole.BODY for a in self.attachments
-        ):
-            raise CompositionError(eid, "a robot needs at least one body attachment")
+            raise CompositionError(name, "label must not be empty")
+        if not self.lineage.family.strip():
+            raise CompositionError(name, "family must not be empty")
+        validate_components(name, self.kind, self.attachments)
 
-    def body_attachments(self) -> tuple[Attachment, ...]:
-        return tuple(a for a in self.attachments if a.role is AttachmentRole.BODY)
+    def body_attachments(self) -> tuple[Component, ...]:
+        return tuple(a for a in self.attachments if a.role is ComponentRole.BODY)
 
     def layout_declared(self) -> bool:
         """False when any body part's channel contribution is unknown (a DeviceSpec)."""
         return not any(isinstance(a.part, DeviceSpec) for a in self.body_attachments())
 
 
-def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
-    """Derive the physical body-channel layout per the ordering law, or fail closed."""
-    if not spec.layout_declared():
+def validate_components(
+    name: str, kind: EmbodimentKind, components: tuple[Component, ...]
+) -> None:
+    """Validate one topologically ordered component graph."""
+    if not components:
+        raise CompositionError(name, "an embodiment needs at least one component")
+    seen: set[str] = set()
+    for component in components:
+        if not component.instance.strip():
+            raise CompositionError(name, "component names must not be empty")
+        if component.instance in seen:
+            raise CompositionError(name, f"duplicate component name {component.instance!r}")
+        parent = component.mount.parent_instance
+        if parent and parent not in seen:
+            raise CompositionError(
+                name,
+                f"{component.instance!r} mounts on {parent!r}, which is not declared "
+                "before it (components are topologically ordered by declaration)",
+            )
+        seen.add(component.instance)
+        if isinstance(component.part, _SENSOR_PARTS):
+            if component.role is not ComponentRole.SENSOR:
+                raise CompositionError(
+                    name, f"{component.instance!r}: sensor parts must use role SENSOR"
+                )
+        elif component.role is ComponentRole.SENSOR:
+            raise CompositionError(
+                name, f"{component.instance!r}: body parts cannot use role SENSOR"
+            )
+    leaders = [component for component in components if component.role is ComponentRole.LEADER]
+    if kind is not EmbodimentKind.TELEOP_STATION and leaders:
+        raise CompositionError(name, f"{kind.value} embodiments cannot have leaders")
+    if kind is EmbodimentKind.TELEOP_STATION:
+        if not leaders:
+            raise CompositionError(name, "a teleop station needs at least one leader")
+        if not any(component.role is ComponentRole.BODY for component in components):
+            raise CompositionError(name, "a teleop station needs a follower body")
+    if kind is EmbodimentKind.ROBOT and not any(
+        component.role is ComponentRole.BODY for component in components
+    ):
+        raise CompositionError(name, "a robot needs at least one body component")
+
+
+def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
+    """Derive the ordered native body-state space, or fail closed."""
+    body = tuple(component for component in components if component.role is ComponentRole.BODY)
+    if any(isinstance(component.part, DeviceSpec) for component in body):
         raise LayoutError(
-            str(spec.embodiment_id),
+            name,
             "channel layout is not declared (a body part has no captured description)",
         )
-    slots: list[ChannelSlot] = []
-    for attachment in spec.body_attachments():
+    coordinates: list[StateCoordinate] = []
+    for attachment in body:
         part = attachment.part
         if isinstance(part, ArmSpec):
             names, kind = part.joint_names, ChannelKind.ARM_JOINT
@@ -138,10 +176,10 @@ def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
         elif isinstance(part, MobileBaseSpec):
             names, kind = part.channel_names, ChannelKind.BASE
         else:  # pragma: no cover - excluded by layout_declared()
-            raise LayoutError(str(spec.embodiment_id), f"unlayoutable part {part!r}")
-        base = len(slots)
-        slots.extend(
-            ChannelSlot(
+            raise LayoutError(name, f"unlayoutable part {part!r}")
+        base = len(coordinates)
+        coordinates.extend(
+            StateCoordinate(
                 index=base + offset,
                 instance=attachment.instance,
                 part_id=part.part_id,
@@ -150,14 +188,10 @@ def flat_layout(spec: EmbodimentSpec) -> FlatLayout:
             )
             for offset, name in enumerate(names)
         )
-    return FlatLayout(embodiment_id=spec.embodiment_id, slots=tuple(slots))
+    return StateSpace(coordinates=tuple(coordinates))
 
 
-def total_dof(spec: EmbodimentSpec) -> int:
-    return flat_layout(spec).channel_count
-
-
-def camera_bindings(spec: EmbodimentSpec) -> tuple[CameraBinding, ...]:
+def camera_bindings(components: tuple[Component, ...]) -> tuple[CameraBinding, ...]:
     """Camera instances in declared order: the embodiment's canonical stream-name set."""
     return tuple(
         CameraBinding(
@@ -166,42 +200,46 @@ def camera_bindings(spec: EmbodimentSpec) -> tuple[CameraBinding, ...]:
             parent_instance=a.mount.parent_instance,
             frame=a.mount.frame,
         )
-        for a in spec.attachments
+        for a in components
         if isinstance(a.part, CameraSpec)
     )
 
 
-def camera_names(spec: EmbodimentSpec) -> tuple[str, ...]:
-    return tuple(binding.name for binding in camera_bindings(spec))
+def capabilities_for_part(part: object) -> tuple[Capability, ...]:
+    if isinstance(part, ArmSpec):
+        return (Capability.SPATIAL_MOTION_SE3,)
+    if isinstance(part, GripperSpec):
+        return (
+            Capability.SPATIAL_MOTION_SE3,
+            Capability.GRASP,
+            Capability.GRASP_PARALLEL,
+        )
+    if isinstance(part, MobileBaseSpec):
+        return (Capability.PLANAR_MOTION_SE2, Capability.LOCOMOTION_PLANAR)
+    if isinstance(part, CameraSpec):
+        if part.modality is CameraModality.RGB:
+            return (Capability.SENSING_RGB,)
+        if part.modality is CameraModality.DEPTH:
+            return (Capability.SENSING_DEPTH,)
+        return (Capability.SENSING_RGB, Capability.SENSING_DEPTH)
+    if isinstance(part, ForceTorqueSpec):
+        return (Capability.SENSING_FORCE_TORQUE,)
+    return ()
 
 
-def kinematic_view(spec: EmbodimentSpec) -> Embodiment:
-    """Project the flat single-arm :class:`Embodiment` runtimes bind, or fail closed.
-
-    Defined exactly for bodies with one arm + one single-joint gripper with known travel
-    (plus optional channel-less base); ``dof`` is the ARM dof, matching how enpire drivers
-    and safety have always read the record.
-    """
-    eid = str(spec.embodiment_id)
-    arms = [a.part for a in spec.body_attachments() if isinstance(a.part, ArmSpec)]
-    grippers = [a.part for a in spec.body_attachments() if isinstance(a.part, GripperSpec)]
-    bases = [a.part for a in spec.body_attachments() if isinstance(a.part, MobileBaseSpec)]
-    if len(arms) != 1 or len(grippers) != 1:
-        raise LayoutError(eid, "kinematic view requires exactly one arm and one gripper")
-    arm, gripper = arms[0], grippers[0]
-    if gripper.travel_m is None:
-        raise LayoutError(eid, "kinematic view requires a known gripper travel")
-    if any(base.channel_names for base in bases):
-        raise LayoutError(eid, "kinematic view excludes bases with joint-space channels")
-    if spec.rates is None:
-        raise LayoutError(eid, "kinematic view requires declared control rates")
-    return Embodiment(
-        embodiment_id=spec.embodiment_id,
-        dof=arm.dof,
-        joint_lower=arm.joint_lower,
-        joint_upper=arm.joint_upper,
-        home_joints=arm.home_joints,
-        gripper_travel_m=gripper.travel_m,
-        policy_hz=spec.rates.policy_hz,
-        mobile_base=bool(bases),
-    )
+def component_kind(part: object) -> ComponentKind:
+    if isinstance(part, ArmSpec):
+        return ComponentKind.MANIPULATOR
+    if isinstance(part, JointGroupSpec):
+        return ComponentKind.JOINT_GROUP
+    if isinstance(part, GripperSpec):
+        return ComponentKind.EFFECTOR
+    if isinstance(part, MobileBaseSpec):
+        return ComponentKind.MOBILE_BASE
+    if isinstance(part, CameraSpec):
+        return ComponentKind.CAMERA
+    if isinstance(part, ForceTorqueSpec):
+        return ComponentKind.FORCE_TORQUE_SENSOR
+    if isinstance(part, DeviceSpec):
+        return ComponentKind.DEVICE
+    raise ComponentGraphError(f"unsupported embodiment part {part!r}")

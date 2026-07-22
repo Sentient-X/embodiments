@@ -10,8 +10,8 @@ deployed limits win on conflict because live safety constraints are derived from
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
 from .sources import menagerie
 
@@ -57,14 +57,14 @@ PIPER_GRIPPER: Final = GripperSpec(
     mimic_joints=(MimicJoint("joint8", of="joint7", multiplier=-1.0),),
 )
 
-PIPER_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("piper"),
+PIPER_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("piper"),
     name="Agilex Piper",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
     attachments=(
-        Attachment("arm", PIPER_ARM, AttachmentRole.BODY),
-        Attachment("gripper", PIPER_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "joint6")),
+        Component("arm", PIPER_ARM, ComponentRole.BODY),
+        Component("gripper", PIPER_GRIPPER, ComponentRole.BODY, MountFrame("arm", "joint6")),
     ),
     rates=ControlRates(policy_hz=30.0),
 )

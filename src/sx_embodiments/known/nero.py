@@ -12,8 +12,8 @@ xacro compositions with no plain URDF and no gripper datasheet, so no
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, PhysicalSpec
 
 NERO_URDF: Final = PackagedAsset(
@@ -41,10 +41,10 @@ NERO_ARM: Final = ArmSpec(
     physical=PhysicalSpec(payload_kg=3.0, reach_m=0.58, mass_kg=4.8),
 )
 
-NERO_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("nero"),
+NERO_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("nero"),
     name="Agilex NERO",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="nero"),
-    attachments=(Attachment("arm", NERO_ARM, AttachmentRole.BODY),),
+    attachments=(Component("arm", NERO_ARM, ComponentRole.BODY),),
 )

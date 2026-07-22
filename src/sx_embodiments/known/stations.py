@@ -2,25 +2,25 @@
 
 from typing import Final
 
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
 from .das import UVC_MONO_60
 from .piper import PIPER_ARM, PIPER_GRIPPER
 
-PIPERX_STATION_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("piperx-station"),
+PIPERX_STATION_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("piperx-station"),
     name="PiperX single-arm teleop station",
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="piper", variant="piperx"),
     attachments=(
-        Attachment(
+        Component(
             "leader",
             DeviceSpec(PartId("piperx-leader"), "PiperX leader arm"),
-            AttachmentRole.LEADER,
+            ComponentRole.LEADER,
         ),
-        Attachment("arm", PIPER_ARM, AttachmentRole.BODY),
-        Attachment("gripper", PIPER_GRIPPER, AttachmentRole.BODY, MountFrame("arm", "joint6")),
-        Attachment("front", UVC_MONO_60, AttachmentRole.SENSOR, MountFrame(frame="world")),
+        Component("arm", PIPER_ARM, ComponentRole.BODY),
+        Component("gripper", PIPER_GRIPPER, ComponentRole.BODY, MountFrame("arm", "joint6")),
+        Component("front", UVC_MONO_60, ComponentRole.SENSOR, MountFrame(frame="world")),
     ),
 )

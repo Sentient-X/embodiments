@@ -14,8 +14,8 @@ the das-umi-v4 shape); the converter's MCAP namespace keys (``left``/``right`` i
 
 from typing import Final
 
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, DeviceSpec, LensProjection, SensorModel
 
 X5_FISHEYE_30: Final = CameraSpec(
@@ -34,19 +34,19 @@ INSTA360_UMI_JAW: Final = DeviceSpec(
     "bench aperture widths not yet measured",
 )
 
-INSTA360_UMI_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("insta360-umi"),
+INSTA360_UMI_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("insta360-umi"),
     name="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="insta360-umi"),
     attachments=(
-        Attachment("left_jaw", INSTA360_UMI_JAW, AttachmentRole.BODY),
-        Attachment("right_jaw", INSTA360_UMI_JAW, AttachmentRole.BODY),
-        Attachment(
-            "left_wrist", X5_FISHEYE_30, AttachmentRole.SENSOR, MountFrame("left_jaw", "handle")
+        Component("left_jaw", INSTA360_UMI_JAW, ComponentRole.BODY),
+        Component("right_jaw", INSTA360_UMI_JAW, ComponentRole.BODY),
+        Component(
+            "left_wrist", X5_FISHEYE_30, ComponentRole.SENSOR, MountFrame("left_jaw", "handle")
         ),
-        Attachment(
-            "right_wrist", X5_FISHEYE_30, AttachmentRole.SENSOR, MountFrame("right_jaw", "handle")
+        Component(
+            "right_wrist", X5_FISHEYE_30, ComponentRole.SENSOR, MountFrame("right_jaw", "handle")
         ),
     ),
 )

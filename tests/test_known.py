@@ -1,39 +1,23 @@
-"""Registry pins: derived constants can never drift from the deployed values."""
+"""The public registry is the only route from a name to a complete embodiment."""
 
-from sx_embodiments import (
-    DEVELOPMENT_EMBODIMENTS,
-    EPISODE_READY_EMBODIMENTS,
-    PANDA_OMRON,
-    PIPER,
-    DevelopmentReason,
-    EmbodimentId,
-    EmbodimentKind,
-    camera_names,
-    kinematic_view,
-    manifest_for,
-)
-from sx_embodiments.known.panda import PANDA_OMRON_SPEC
-from sx_embodiments.known.piper import PIPER_SPEC
+from sx_embodiments import ComponentRole, Embodiment, EmbodimentKind, embodiments
 
 
-def test_piper_kinematic_view_is_the_deployed_constant() -> None:
-    assert kinematic_view(PIPER_SPEC) == PIPER
-    assert PIPER.embodiment_id == "piper"
-    assert PIPER.dof == 6
-    assert PIPER.joint_lower == (-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439)
-    assert PIPER.joint_upper == (2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439)
-    assert PIPER.home_joints == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    assert PIPER.gripper_travel_m == (0.0, 0.07)
-    assert PIPER.gripper_max_width_m == 0.07
-    assert PIPER.policy_hz == 30.0
-    assert PIPER.mobile_base is False
+def test_piper_kinematics_are_derived_from_the_registry() -> None:
+    piper = embodiments["piper"]
+    assert piper.single_arm.dof == 6
+    assert piper.single_arm.joint_lower == (-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439)
+    assert piper.single_arm.joint_upper == (2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439)
+    assert piper.single_arm.home_joints == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    assert piper.single_gripper.travel_m == (0.0, 0.07)
+    assert piper.policy_hz == 30.0
+    assert piper.has_mobile_base is False
 
 
-def test_panda_omron_kinematic_view_is_the_deployed_constant() -> None:
-    assert kinematic_view(PANDA_OMRON_SPEC) == PANDA_OMRON
-    assert PANDA_OMRON.embodiment_id == "panda_omron"
-    assert PANDA_OMRON.dof == 7
-    assert PANDA_OMRON.joint_lower == (
+def test_panda_omron_kinematics_are_derived_from_the_registry() -> None:
+    panda = embodiments["panda_omron"]
+    assert panda.single_arm.dof == 7
+    assert panda.single_arm.joint_lower == (
         -2.8973,
         -1.7628,
         -2.8973,
@@ -42,16 +26,15 @@ def test_panda_omron_kinematic_view_is_the_deployed_constant() -> None:
         -0.0175,
         -2.8973,
     )
-    assert PANDA_OMRON.joint_upper == (2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973)
-    assert PANDA_OMRON.home_joints == (0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785)
-    assert PANDA_OMRON.gripper_travel_m == (0.0, 0.08)
-    assert PANDA_OMRON.policy_hz == 20.0
-    assert PANDA_OMRON.mobile_base is True
+    assert panda.single_arm.joint_upper == (2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973)
+    assert panda.single_arm.home_joints == (0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785)
+    assert panda.single_gripper.travel_m == (0.0, 0.08)
+    assert panda.policy_hz == 20.0
+    assert panda.has_mobile_base is True
 
 
 def test_registry_ids_are_byte_stable() -> None:
-    """These strings are live wire data (DB rows, .rrd meta, exports). Renames break data."""
-    assert {str(eid) for eid in EPISODE_READY_EMBODIMENTS} == {
+    assert set(embodiments) == {
         "piper",
         "nero",
         "aloha",
@@ -74,47 +57,32 @@ def test_registry_ids_are_byte_stable() -> None:
     }
 
 
-def test_camera_name_sets() -> None:
-    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("das-umi-v4")]) == (
+def test_camera_names_are_properties_of_the_embodiment() -> None:
+    assert tuple(camera.name for camera in embodiments["das-umi-v4"].cameras) == (
         "left_wrist",
         "right_wrist",
         "base",
     )
-    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("yubi-mono")]) == (
+    assert tuple(camera.name for camera in embodiments["yubi-mono"].cameras) == (
         "wrist_left",
         "wrist_right",
     )
-    assert camera_names(EPISODE_READY_EMBODIMENTS[EmbodimentId("piper")]) == ()
+    assert embodiments["piper"].cameras == ()
 
 
-def test_every_entry_validates_and_kinds_are_coherent() -> None:
-    """Character laws: every entry knows what it is, and what it is implies what it has.
-
-    A data-collection device without a camera cannot collect; a teleop station
-    without a leader cannot be driven and without a camera cannot be supervised.
-    Robots deliberately carry no cameras of their own — eyes arrive by composing
-    the body into a rig or station (piperx-station's `front` over piper's none).
-    """
-    for eid, spec in EPISODE_READY_EMBODIMENTS.items():
-        assert spec.embodiment_id == eid
-        assert spec.kind is not None, f"{eid} does not declare its character"
-        manifest = manifest_for(spec)
-        assert manifest.schema_version == 5
-        assert (
-            sum(
-                asset.format.value == "urdf" and asset.role.value == "description"
-                for asset in manifest.assets
+def test_every_entry_is_complete_and_round_trips() -> None:
+    for name in embodiments:
+        embodiment = embodiments[name]
+        assert isinstance(embodiment, Embodiment)
+        assert str(embodiment.name) == name
+        assert len(embodiment.id) == 64
+        assert embodiment.schema_version == 7
+        assert Embodiment.from_json(embodiment.to_json()) == embodiment
+        assert embodiment.urdf.local_path().is_file()
+        if embodiment.kind is EmbodimentKind.TELEOP_STATION:
+            assert any(
+                component.role is ComponentRole.LEADER for component in embodiment.components
             )
-            == 1
-        )
-        if spec.kind is EmbodimentKind.TELEOP_STATION:
-            assert any(a.role.value == "leader" for a in spec.attachments)
-            assert camera_names(spec), f"teleop station {eid} declares no camera"
-        if spec.kind is EmbodimentKind.CAPTURE_RIG:
-            assert camera_names(spec), f"capture rig {eid} declares no camera"
-
-
-def test_development_registry_exposes_typed_non_readiness() -> None:
-    entry = DEVELOPMENT_EMBODIMENTS[EmbodimentId("insta360-umi")]
-    assert entry.reason is DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION
-    assert entry.spec.embodiment_id == EmbodimentId("insta360-umi")
+            assert embodiment.cameras
+        if embodiment.kind is EmbodimentKind.CAPTURE_RIG:
+            assert embodiment.cameras

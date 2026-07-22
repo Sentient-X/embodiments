@@ -1,43 +1,22 @@
-"""Embodiment identity: the flat join key, part ids, kinds, and structured lineage.
-
-``EmbodimentId`` stays a flat opaque string — it lives in Postgres rows, ``.rrd`` metadata,
-wire JSON, and LeRobot exports, and equality is string equality. Structured ancestry lives
-INSIDE the record as :class:`Lineage`; it is never parsed out of the id. A hardware revision
-that changes kinematics or geometry gets a NEW id; a cosmetic revision keeps the id and notes
-itself in ``Lineage.revision``.
-"""
+"""Small identity vocabulary for content-addressed embodiments."""
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType
 
-from .errors import ManifestSchemaError
+from .errors import EmbodimentSchemaError
 
-EmbodimentId = NewType("EmbodimentId", str)
+EmbodimentName = NewType("EmbodimentName", str)
 PartId = NewType("PartId", str)
 
 
-class EmbodimentManifestDigest(str):
-    """Validated lowercase SHA-256 identity of a complete manifest revision."""
+class EmbodimentId(str):
+    """The lowercase SHA-256 of one complete embodiment document."""
 
-    def __new__(cls, value: str) -> "EmbodimentManifestDigest":
+    def __new__(cls, value: str) -> "EmbodimentId":
         if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
-            raise ManifestSchemaError(
-                "embodiment manifest digest must be 64 lowercase hexadecimal characters"
-            )
+            raise EmbodimentSchemaError("embodiment id must be 64 lowercase hexadecimal characters")
         return super().__new__(cls, value)
-
-
-@dataclass(frozen=True, slots=True)
-class EmbodimentRef:
-    """Exact deployable hardware identity: body name plus immutable manifest revision."""
-
-    embodiment_id: EmbodimentId
-    manifest_sha256: EmbodimentManifestDigest
-
-    def __post_init__(self) -> None:
-        if not str(self.embodiment_id).strip():
-            raise ManifestSchemaError("embodiment ref id must not be empty")
 
 
 class EmbodimentKind(StrEnum):
@@ -50,8 +29,8 @@ class EmbodimentKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Lineage:
-    """Structured ancestry carried inside the record, never encoded in the id string."""
+    """Internal registry metadata preserved in the portable document."""
 
-    family: str  # "so101", "das-umi", "yubi", "piper", "panda"
-    variant: str = ""  # "bimanual", "widejaw", "dm"
-    revision: str = ""  # hardware revision when it does NOT change data semantics
+    family: str
+    variant: str = ""
+    revision: str = ""

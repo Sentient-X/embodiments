@@ -14,9 +14,9 @@ Camera instance names are the sxd pipeline's canonical stream keys for the
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..curves import Curve1D
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, MimicJoint, SensorModel
 
 DAS_GRIPPER_URDF: Final = PackagedAsset(
@@ -131,38 +131,38 @@ QUEST3_HEAD: Final = CameraSpec(
     fps=30.0,
 )
 
-DAS_UMI_V4_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("das-umi-v4"),
+DAS_UMI_V4_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("das-umi-v4"),
     name="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
     attachments=(
-        Attachment("left_jaw", DAS_JAW_V4, AttachmentRole.BODY),
-        Attachment("right_jaw", DAS_JAW_V4, AttachmentRole.BODY),
-        Attachment(
-            "left_wrist", UVC_MONO_60, AttachmentRole.SENSOR, MountFrame("left_jaw", "link_ca2")
+        Component("left_jaw", DAS_JAW_V4, ComponentRole.BODY),
+        Component("right_jaw", DAS_JAW_V4, ComponentRole.BODY),
+        Component(
+            "left_wrist", UVC_MONO_60, ComponentRole.SENSOR, MountFrame("left_jaw", "link_ca2")
         ),
-        Attachment(
+        Component(
             "right_wrist",
             UVC_MONO_60,
-            AttachmentRole.SENSOR,
+            ComponentRole.SENSOR,
             MountFrame("right_jaw", "link_ca2"),
         ),
-        Attachment("base", QUEST3_HEAD, AttachmentRole.SENSOR, MountFrame(frame="quest3s_head")),
+        Component("base", QUEST3_HEAD, ComponentRole.SENSOR, MountFrame(frame="quest3s_head")),
     ),
     extra_assets=(DAS_UMI_V4_URDF,),
 )
 
-QUEST_EGO_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("quest-ego"),
+QUEST_EGO_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("quest-ego"),
     name="Quest 3 egocentric capture (no gripper)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
     attachments=(
-        Attachment(
+        Component(
             "head_left",
             QUEST3_HEAD,
-            AttachmentRole.SENSOR,
+            ComponentRole.SENSOR,
             MountFrame(frame="quest3s_head"),
         ),
     ),

@@ -1,4 +1,4 @@
-"""The flat physical body-channel layout of an embodiment, and its exactness laws.
+"""The ordered native body-state space of an embodiment, and its exactness laws.
 
 THE ORDERING LAW: the flat body-state vector of an embodiment is the concatenation, over
 its attachments in declared tuple order, restricted to body-role attachments, of each
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .errors import LayoutError
-from .identity import EmbodimentId, PartId
+from .identity import PartId
 
 
 class ChannelKind(StrEnum):
@@ -22,8 +22,8 @@ class ChannelKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ChannelSlot:
-    """One position in the physical body-state vector."""
+class StateCoordinate:
+    """One named coordinate in the embodiment's native body-state vector."""
 
     index: int
     instance: str  # attachment instance, such as "left_arm"
@@ -33,46 +33,50 @@ class ChannelSlot:
 
 
 @dataclass(frozen=True, slots=True)
-class FlatLayout:
-    """The derived flat-vector layout; every view of it is arithmetic over ``slots``."""
+class StateSpace:
+    """Ordered native coordinates; dense tensors are projections of this table."""
 
-    embodiment_id: EmbodimentId
-    slots: tuple[ChannelSlot, ...]
+    coordinates: tuple[StateCoordinate, ...]
 
     def __post_init__(self) -> None:
-        if [slot.index for slot in self.slots] != list(range(len(self.slots))):
-            raise LayoutError(self.embodiment_id, "slot indices must be 0..n-1 in order")
+        if [coordinate.index for coordinate in self.coordinates] != list(
+            range(len(self.coordinates))
+        ):
+            raise LayoutError("state", "slot indices must be 0..n-1 in order")
 
     @property
-    def channel_count(self) -> int:
+    def width(self) -> int:
         """Number of physical state channels; this says nothing about a controller."""
-        return len(self.slots)
+        return len(self.coordinates)
 
     @property
     def arm_joint_count(self) -> int:
-        return sum(1 for slot in self.slots if slot.kind is ChannelKind.ARM_JOINT)
+        return sum(1 for coordinate in self.coordinates if coordinate.kind is ChannelKind.ARM_JOINT)
 
     @property
     def gripper_count(self) -> int:
-        return sum(1 for slot in self.slots if slot.kind is ChannelKind.GRIPPER)
+        return sum(1 for coordinate in self.coordinates if coordinate.kind is ChannelKind.GRIPPER)
 
     @property
     def joint_count(self) -> int:
         """All non-gripper channels in the episode joint-state vector."""
-        return self.channel_count - self.gripper_count
+        return self.width - self.gripper_count
 
     def indices(self, kind: ChannelKind) -> tuple[int, ...]:
-        return tuple(slot.index for slot in self.slots if slot.kind is kind)
+        return tuple(coordinate.index for coordinate in self.coordinates if coordinate.kind is kind)
 
-    def channel_names(self) -> tuple[str, ...]:
+    @property
+    def names(self) -> tuple[str, ...]:
         """``instance/joint_name`` per slot — the unambiguous wire order."""
-        return tuple(f"{slot.instance}/{slot.joint_name}" for slot in self.slots)
+        return tuple(
+            f"{coordinate.instance}/{coordinate.joint_name}" for coordinate in self.coordinates
+        )
 
     def validate_widths(self, *, joint_dim: int, gripper_dim: int) -> None:
         """Fail closed unless an episode's joint/gripper widths match this body."""
         if joint_dim != self.joint_count or gripper_dim != self.gripper_count:
             raise LayoutError(
-                self.embodiment_id,
+                "state",
                 f"episode widths (joints={joint_dim}, grippers={gripper_dim}) do not match "
                 f"the declared layout (joints={self.joint_count}, "
                 f"grippers={self.gripper_count})",
@@ -83,18 +87,20 @@ class FlatLayout:
         ``[arm joints…, one gripper]`` blocks and nothing else. The supervisors bridge."""
         grippers = self.gripper_count
         if grippers == 0:
-            raise LayoutError(self.embodiment_id, "no gripper channels; not an arm-block layout")
-        if self.channel_count % grippers != 0:
-            raise LayoutError(self.embodiment_id, "channels do not divide into equal arm blocks")
-        block = self.channel_count // grippers
-        first = [slot.kind for slot in self.slots[:block]]
+            raise LayoutError("state", "no gripper channels; not an arm-block layout")
+        if self.width % grippers != 0:
+            raise LayoutError("state", "channels do not divide into equal arm blocks")
+        block = self.width // grippers
+        first = [coordinate.kind for coordinate in self.coordinates[:block]]
         gripper_positions = [i for i, kind in enumerate(first) if kind is ChannelKind.GRIPPER]
         if len(gripper_positions) != 1 or any(
             kind not in (ChannelKind.ARM_JOINT, ChannelKind.GRIPPER) for kind in first
         ):
-            raise LayoutError(self.embodiment_id, "block is not [arm joints…, one gripper]")
+            raise LayoutError("state", "block is not [arm joints…, one gripper]")
         for arm in range(1, grippers):
-            kinds = [slot.kind for slot in self.slots[arm * block : (arm + 1) * block]]
+            kinds = [
+                coordinate.kind for coordinate in self.coordinates[arm * block : (arm + 1) * block]
+            ]
             if kinds != first:
-                raise LayoutError(self.embodiment_id, "arm blocks are not identical")
+                raise LayoutError("state", "arm blocks are not identical")
         return grippers, block, gripper_positions[0]

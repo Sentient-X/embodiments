@@ -3,8 +3,8 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec, MountFrame
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint, MobileBaseSpec
 from .sources import menagerie
 
@@ -80,37 +80,37 @@ RBY1_HEAD: Final = JointGroupSpec(
 RBY1_RIGHT_GRIPPER: Final = _rby1_gripper("right")
 RBY1_LEFT_GRIPPER: Final = _rby1_gripper("left")
 
-RBY1_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("rby1"),
+RBY1_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("rby1"),
     name="Rainbow Robotics RBY1-M v1.3",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rby1", variant="m", revision="1.3"),
     attachments=(
-        Attachment("base", RBY1_BASE, AttachmentRole.BODY),
-        Attachment("torso", RBY1_TORSO, AttachmentRole.BODY, MountFrame("base", "link_torso_0")),
-        Attachment(
+        Component("base", RBY1_BASE, ComponentRole.BODY),
+        Component("torso", RBY1_TORSO, ComponentRole.BODY, MountFrame("base", "link_torso_0")),
+        Component(
             "right_arm",
             RBY1_RIGHT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "link_right_arm_0"),
         ),
-        Attachment(
+        Component(
             "left_arm",
             RBY1_LEFT_ARM,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("torso", "link_left_arm_0"),
         ),
-        Attachment("head", RBY1_HEAD, AttachmentRole.BODY, MountFrame("torso", "NECK_0")),
-        Attachment(
+        Component("head", RBY1_HEAD, ComponentRole.BODY, MountFrame("torso", "NECK_0")),
+        Component(
             "right_gripper",
             RBY1_RIGHT_GRIPPER,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("right_arm", "link_right_arm_6"),
         ),
-        Attachment(
+        Component(
             "left_gripper",
             RBY1_LEFT_GRIPPER,
-            AttachmentRole.BODY,
+            ComponentRole.BODY,
             MountFrame("left_arm", "link_left_arm_6"),
         ),
     ),

@@ -8,10 +8,7 @@ from sx_capabilities import (
     match_capabilities,
 )
 
-from sx_embodiments import EmbodimentSpec, manifest_for
-from sx_embodiments.known.panda import FRANKA_SPEC, PANDA_OMRON_SPEC
-from sx_embodiments.known.piper import PIPER_SPEC
-from sx_embodiments.known.so101 import BIMANUAL_SO101_SPEC
+from sx_embodiments import Embodiment, embodiments
 
 
 def _manipulation_requirements(count: int) -> TaskCapabilityRequirements:
@@ -26,17 +23,15 @@ def _manipulation_requirements(count: int) -> TaskCapabilityRequirements:
     )
 
 
-@pytest.mark.parametrize("spec", [PIPER_SPEC, FRANKA_SPEC])
-def test_single_arm_robots_bind_the_same_semantic_task_role(spec: EmbodimentSpec) -> None:
-    binding = match_capabilities(
-        _manipulation_requirements(1), manifest_for(spec).capability_profile
-    )
+@pytest.mark.parametrize("embodiment", [embodiments["piper"], embodiments["franka"]])
+def test_single_arm_robots_bind_the_same_semantic_task_role(embodiment: Embodiment) -> None:
+    binding = match_capabilities(_manipulation_requirements(1), embodiment.capabilities)
     assert binding.assignments[0].component_id in {"gripper", "jaw"}
 
 
 def test_bimanual_profile_binds_two_distinct_effectors() -> None:
     binding = match_capabilities(
-        _manipulation_requirements(2), manifest_for(BIMANUAL_SO101_SPEC).capability_profile
+        _manipulation_requirements(2), embodiments["bimanual-so101"].capabilities
     )
     assert tuple(item.component_id for item in binding.assignments) == (
         "left_jaw",
@@ -45,14 +40,12 @@ def test_bimanual_profile_binds_two_distinct_effectors() -> None:
 
 
 def test_fixed_and_mobile_panda_differ_by_derived_locomotion_capability() -> None:
-    mobile = manifest_for(PANDA_OMRON_SPEC).capability_profile
-    fixed = manifest_for(FRANKA_SPEC).capability_profile
+    mobile = embodiments["panda_omron"].capabilities
+    fixed = embodiments["franka"].capabilities
     assert any(Capability.LOCOMOTION_PLANAR in item.capabilities for item in mobile.components)
     assert not any(Capability.LOCOMOTION_PLANAR in item.capabilities for item in fixed.components)
 
 
 def test_single_arm_profile_cannot_fake_bimanuality() -> None:
     with pytest.raises(UnsatisfiedCapabilityRequirementsError):
-        match_capabilities(
-            _manipulation_requirements(2), manifest_for(PIPER_SPEC).capability_profile
-        )
+        match_capabilities(_manipulation_requirements(2), embodiments["piper"].capabilities)

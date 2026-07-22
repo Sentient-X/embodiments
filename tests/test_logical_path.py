@@ -12,12 +12,11 @@ from sx_embodiments import (
     AssetProvenance,
     AssetRef,
     AssetRole,
-    ManifestSchemaError,
-    manifest_for,
-    manifest_from_dict,
+    Embodiment,
+    EmbodimentSchemaError,
+    embodiments,
     validate_logical_path,
 )
-from sx_embodiments.known.panda import FRANKA_SPEC
 
 _SHA = "a" * 64
 
@@ -56,10 +55,10 @@ def test_srdf_is_a_first_class_format() -> None:
 
 
 def test_same_blob_at_two_logical_paths_is_legal() -> None:
-    base = manifest_for(FRANKA_SPEC)
-    manifest = replace(base, assets=(*base.assets, _ref("meshes/a.dae"), _ref("meshes/b.dae")))
-    assert len(manifest.assets) == len(base.assets) + 2
-    with pytest.raises(ManifestSchemaError):
+    base = embodiments["franka"]
+    embodiment = replace(base, assets=(*base.assets, _ref("meshes/a.dae"), _ref("meshes/b.dae")))
+    assert len(embodiment.assets) == len(base.assets) + 2
+    with pytest.raises(EmbodimentSchemaError):
         replace(
             base,
             assets=(*base.assets, _ref("meshes/a.dae"), _ref("meshes/a.dae")),
@@ -67,23 +66,22 @@ def test_same_blob_at_two_logical_paths_is_legal() -> None:
 
 
 def test_wire_round_trip_carries_logical_path() -> None:
-    base = manifest_for(FRANKA_SPEC)
-    manifest = replace(base, assets=(*base.assets, _ref(None)))
-    parsed = manifest_from_dict(manifest.to_dict())
+    base = embodiments["franka"]
+    embodiment = replace(base, assets=(*base.assets, _ref(None)))
+    parsed = Embodiment.from_dict(embodiment.to_dict())
     assert parsed.assets[0].logical_path is not None
     assert parsed.assets[-1].logical_path is None
 
 
 def test_wire_rejects_malformed_logical_path() -> None:
-    manifest = manifest_for(FRANKA_SPEC)
-    document = manifest.to_dict()
+    document = embodiments["franka"].to_dict()
     assets = document["assets"]
     assert isinstance(assets, list)
     entry = cast("dict[str, object]", assets[0])
     assert isinstance(entry, dict)
     entry["logical_path"] = "../escape"
-    with pytest.raises(ManifestSchemaError):
-        manifest_from_dict(document)
+    with pytest.raises(EmbodimentSchemaError):
+        Embodiment.from_dict(document)
     entry["logical_path"] = 7
-    with pytest.raises(ManifestSchemaError):
-        manifest_from_dict(document)
+    with pytest.raises(EmbodimentSchemaError):
+        Embodiment.from_dict(document)

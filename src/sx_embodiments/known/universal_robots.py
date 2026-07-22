@@ -3,8 +3,8 @@
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Attachment, AttachmentRole, EmbodimentSpec
-from ..identity import EmbodimentId, EmbodimentKind, Lineage, PartId
+from ..compose import Component, ComponentRole, _EmbodimentDefinition
+from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import ArmSpec
 from .sources import menagerie
 
@@ -80,17 +80,17 @@ def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ArmSpec:
 UR5E_ARM: Final = _ur_arm("ur5e", UR5E_URDF, UR5E_MJCF)
 UR10E_ARM: Final = _ur_arm("ur10e", UR10E_URDF, UR10E_MJCF)
 
-UR5E_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("ur5e"),
+UR5E_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("ur5e"),
     name="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
-    attachments=(Attachment("arm", UR5E_ARM, AttachmentRole.BODY),),
+    attachments=(Component("arm", UR5E_ARM, ComponentRole.BODY),),
 )
-UR10E_SPEC: Final = EmbodimentSpec(
-    embodiment_id=EmbodimentId("ur10e"),
+UR10E_SPEC: Final = _EmbodimentDefinition(
+    embodiment_id=EmbodimentName("ur10e"),
     name="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur10e"),
-    attachments=(Attachment("arm", UR10E_ARM, AttachmentRole.BODY),),
+    attachments=(Component("arm", UR10E_ARM, ComponentRole.BODY),),
 )
