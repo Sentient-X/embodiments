@@ -5,6 +5,7 @@ from typing import Final, Literal
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec, MimicJoint
 from .sources import menagerie
 
@@ -50,6 +51,7 @@ def _aloha_arm(side: Literal["left", "right"]) -> ArmSpec:
                 "wrist_rotate",
             )
         ),
+        joint_units=(CoordinateUnit.RADIAN,) * 6,
         joint_lower=_ARM_LOWER,
         joint_upper=_ARM_UPPER,
         home_joints=_ARM_HOME,
@@ -62,6 +64,7 @@ def _aloha_gripper(side: Literal["left", "right"]) -> GripperSpec:
     return GripperSpec(
         part_id=PartId(f"aloha-{side}-gripper"),
         joint_names=(driven,),
+        joint_units=(CoordinateUnit.METER,),
         joint_lower=(0.0,),
         joint_upper=(0.041,),
         travel_m=(0.0, 0.082),

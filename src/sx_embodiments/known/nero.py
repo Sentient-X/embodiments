@@ -14,6 +14,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, PhysicalSpec
 
 NERO_URDF: Final = PackagedAsset(
@@ -33,6 +34,7 @@ NERO_URDF: Final = PackagedAsset(
 NERO_ARM: Final = ArmSpec(
     part_id=PartId("nero-arm"),
     joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"),
+    joint_units=(CoordinateUnit.RADIAN,) * 7,
     joint_lower=(-2.70526, -1.74, -2.75, -1.01, -2.75, -0.73, -1.5707963),
     joint_upper=(2.70526, 1.74, 2.75, 2.14, 2.75, 0.95, 1.5707963),
     home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),

@@ -12,6 +12,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
 from .sources import menagerie
 
@@ -40,6 +41,7 @@ PIPER_URDF: Final = PackagedAsset(
 PIPER_ARM: Final = ArmSpec(
     part_id=PartId("piper-arm"),
     joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
+    joint_units=(CoordinateUnit.RADIAN,) * 6,
     joint_lower=(-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439),
     joint_upper=(2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439),
     home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -51,6 +53,7 @@ PIPER_ARM: Final = ArmSpec(
 PIPER_GRIPPER: Final = GripperSpec(
     part_id=PartId("piper-gripper"),
     joint_names=("joint7",),
+    joint_units=(CoordinateUnit.METER,),
     joint_lower=(0.0,),
     joint_upper=(0.035,),
     travel_m=(0.0, 0.07),  # parallel jaw: aperture = 2 x finger stroke (0.035 m each)

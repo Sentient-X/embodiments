@@ -9,6 +9,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import (
     ArmSpec,
     ControlRates,
@@ -53,6 +54,7 @@ PANDA_ARM: Final = ArmSpec(
         "panda_joint6",
         "panda_joint7",
     ),
+    joint_units=(CoordinateUnit.RADIAN,) * 7,
     joint_lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
     joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
@@ -64,6 +66,7 @@ PANDA_ARM: Final = ArmSpec(
 PANDA_GRIPPER: Final = GripperSpec(
     part_id=PartId("panda-gripper"),
     joint_names=("panda_finger_joint1",),
+    joint_units=(CoordinateUnit.METER,),
     joint_lower=(0.0,),
     joint_upper=(0.04,),
     travel_m=(0.0, 0.08),  # parallel jaw: aperture = 2 x finger stroke (0.04 m each)

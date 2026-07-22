@@ -167,26 +167,38 @@ def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
     coordinates: list[StateCoordinate] = []
     for attachment in body:
         part = attachment.part
+        lower: tuple[float | None, ...]
+        upper: tuple[float | None, ...]
         if isinstance(part, ArmSpec):
-            names, kind = part.joint_names, ChannelKind.ARM_JOINT
+            names, units, kind = part.joint_names, part.joint_units, ChannelKind.ARM_JOINT
+            lower, upper = part.joint_lower, part.joint_upper
         elif isinstance(part, JointGroupSpec):
-            names, kind = part.joint_names, ChannelKind.BODY_JOINT
+            names, units, kind = part.joint_names, part.joint_units, ChannelKind.BODY_JOINT
+            lower, upper = part.joint_lower, part.joint_upper
         elif isinstance(part, GripperSpec):
-            names, kind = part.joint_names, ChannelKind.GRIPPER
+            names, units, kind = part.joint_names, part.joint_units, ChannelKind.GRIPPER
+            lower, upper = part.joint_lower, part.joint_upper
         elif isinstance(part, MobileBaseSpec):
-            names, kind = part.channel_names, ChannelKind.BASE
+            names, units, kind = part.channel_names, part.channel_units, ChannelKind.BASE
+            lower = (None,) * len(names)
+            upper = (None,) * len(names)
         else:  # pragma: no cover - excluded by layout_declared()
             raise LayoutError(name, f"unlayoutable part {part!r}")
         base = len(coordinates)
         coordinates.extend(
             StateCoordinate(
                 index=base + offset,
-                instance=attachment.instance,
+                instance=attachment.component_id,
                 part_id=part.part_id,
                 joint_name=name,
                 kind=kind,
+                unit=unit,
+                lower=lo,
+                upper=hi,
             )
-            for offset, name in enumerate(names)
+            for offset, (name, unit, lo, hi) in enumerate(
+                zip(names, units, lower, upper, strict=True)
+            )
         )
     return StateSpace(coordinates=tuple(coordinates))
 

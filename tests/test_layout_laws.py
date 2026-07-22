@@ -29,8 +29,7 @@ def test_bimanual_so101_state_is_the_supervisors_wire_convention() -> None:
     assert state.width == 12
     assert state.arm_joint_count == 10
     assert state.gripper_count == 2
-    # The supervisors ChannelLayout(arms=2, block=6, gripper_index=5), derived not declared.
-    assert state.uniform_arm_blocks() == (2, 6, 5)
+    assert state.indices(ChannelKind.ARM_JOINT) == (0, 1, 2, 3, 4, 6, 7, 8, 9, 10)
     assert state.indices(ChannelKind.GRIPPER) == (5, 11)
 
 
@@ -45,7 +44,8 @@ def test_piper_state() -> None:
         "arm/joint6",
         "gripper/joint7",
     )
-    assert state.uniform_arm_blocks() == (1, 7, 6)
+    assert state.indices(ChannelKind.ARM_JOINT) == (0, 1, 2, 3, 4, 5)
+    assert state.indices(ChannelKind.GRIPPER) == (6,)
 
 
 def test_das_capture_rig_state_is_two_jaw_channels() -> None:
@@ -53,8 +53,7 @@ def test_das_capture_rig_state_is_two_jaw_channels() -> None:
     assert state.names == ("left_jaw/joint_1", "right_jaw/joint_1")
     assert state.arm_joint_count == 0
     assert state.gripper_count == 2
-    # Degenerate-but-coherent: two one-channel jaw "blocks".
-    assert state.uniform_arm_blocks() == (2, 1, 0)
+    assert state.indices(ChannelKind.GRIPPER) == (0, 1)
 
 
 def test_width_validation_enforces_declared_layouts() -> None:
@@ -90,6 +89,9 @@ def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
     } == expected
 
 
-def test_whole_body_layout_is_not_misclassified_as_arm_blocks() -> None:
-    with pytest.raises(LayoutError):
-        embodiments["rby1"].state.uniform_arm_blocks()
+def test_whole_body_layout_exposes_exact_coordinate_kinds() -> None:
+    state = embodiments["rby1"].state
+    assert state.indices(ChannelKind.BASE) == tuple(range(4))
+    assert state.indices(ChannelKind.BODY_JOINT) == (*range(4, 10), 24, 25)
+    assert state.indices(ChannelKind.ARM_JOINT) == tuple(range(10, 24))
+    assert state.indices(ChannelKind.GRIPPER) == (26, 27)

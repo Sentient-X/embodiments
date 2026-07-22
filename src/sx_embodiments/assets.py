@@ -166,6 +166,10 @@ class AssetRef:
         """Resolve and verify a packaged asset when its bytes are installed locally."""
         return resolve_asset(self)
 
+    def read_bytes(self) -> bytes:
+        """Read verified local content for a packaged asset."""
+        return self.local_path().read_bytes()
+
 
 def asset_root() -> Path:
     """Locate the canonical ``assets/`` tree, or fail closed."""

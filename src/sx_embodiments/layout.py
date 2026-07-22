@@ -10,6 +10,8 @@ order IS wire order. Mount frames are informational and never affect channel ord
 from dataclasses import dataclass
 from enum import StrEnum
 
+from sx_capabilities import ComponentId
+
 from .errors import LayoutError
 from .identity import PartId
 
@@ -21,15 +23,36 @@ class ChannelKind(StrEnum):
     BASE = "base"
 
 
+class CoordinateUnit(StrEnum):
+    """Physical units admitted by native embodiment and action coordinates."""
+
+    RADIAN = "rad"
+    METER = "m"
+    RADIANS_PER_SECOND = "rad/s"
+    METERS_PER_SECOND = "m/s"
+    NEWTON_METER = "N*m"
+    UNITLESS = "unitless"
+
+
 @dataclass(frozen=True, slots=True)
 class StateCoordinate:
     """One named coordinate in the embodiment's native body-state vector."""
 
     index: int
-    instance: str  # attachment instance, such as "left_arm"
+    instance: ComponentId  # attachment instance, such as "left_arm"
     part_id: PartId
     joint_name: str  # description joint or physical base channel
     kind: ChannelKind
+    unit: CoordinateUnit
+    lower: float | None = None
+    upper: float | None = None
+
+    def __post_init__(self) -> None:
+        """Bounds are either both known or both absent for unbounded native state."""
+        if (self.lower is None) is not (self.upper is None):
+            raise LayoutError(self.instance, f"{self.joint_name}: incomplete coordinate bounds")
+        if self.lower is not None and self.upper is not None and self.lower >= self.upper:
+            raise LayoutError(self.instance, f"{self.joint_name}: lower bound must be < upper")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,26 +104,3 @@ class StateSpace:
                 f"the declared layout (joints={self.joint_count}, "
                 f"grippers={self.gripper_count})",
             )
-
-    def uniform_arm_blocks(self) -> tuple[int, int, int]:
-        """``(arms, block, gripper_index)`` — succeeds ONLY when the layout is N identical
-        ``[arm joints…, one gripper]`` blocks and nothing else. The supervisors bridge."""
-        grippers = self.gripper_count
-        if grippers == 0:
-            raise LayoutError("state", "no gripper channels; not an arm-block layout")
-        if self.width % grippers != 0:
-            raise LayoutError("state", "channels do not divide into equal arm blocks")
-        block = self.width // grippers
-        first = [coordinate.kind for coordinate in self.coordinates[:block]]
-        gripper_positions = [i for i, kind in enumerate(first) if kind is ChannelKind.GRIPPER]
-        if len(gripper_positions) != 1 or any(
-            kind not in (ChannelKind.ARM_JOINT, ChannelKind.GRIPPER) for kind in first
-        ):
-            raise LayoutError("state", "block is not [arm joints…, one gripper]")
-        for arm in range(1, grippers):
-            kinds = [
-                coordinate.kind for coordinate in self.coordinates[arm * block : (arm + 1) * block]
-            ]
-            if kinds != first:
-                raise LayoutError("state", "arm blocks are not identical")
-        return grippers, block, gripper_positions[0]

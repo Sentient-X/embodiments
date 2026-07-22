@@ -7,7 +7,7 @@ import math
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 from sx_capabilities import CapabilityProfile, ComponentCapabilities
@@ -25,7 +25,7 @@ from .compose import (
 from .curves import Curve1D
 from .errors import AssetIntegrityError, EmbodimentSchemaError, LayoutError, MissingUrdfError
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
-from .layout import StateSpace
+from .layout import CoordinateUnit, StateSpace
 from .parts import (
     ArmSpec,
     CameraBinding,
@@ -44,7 +44,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +129,16 @@ class Embodiment:
             for asset in self.assets
             if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
         )
+
+    @property
+    def urdf_path(self) -> Path:
+        """Verified local path of the authoritative description asset."""
+        return self.urdf.local_path()
+
+    @property
+    def urdf_bytes(self) -> bytes:
+        """Verified bytes of the authoritative description asset."""
+        return self.urdf.read_bytes()
 
     @property
     def single_arm(self) -> ArmSpec:
@@ -274,7 +284,11 @@ def _component_to_dict(component: Component) -> dict[str, object]:
         return wire | {
             "type": "arm",
             "joints": _joint_rows(
-                part.joint_names, part.joint_lower, part.joint_upper, part.home_joints
+                part.joint_names,
+                part.joint_units,
+                part.joint_lower,
+                part.joint_upper,
+                part.home_joints,
             ),
             "physical": _physical_to_dict(part.physical),
         }
@@ -282,13 +296,19 @@ def _component_to_dict(component: Component) -> dict[str, object]:
         return wire | {
             "type": "joint_group",
             "joints": _joint_rows(
-                part.joint_names, part.joint_lower, part.joint_upper, part.home_joints
+                part.joint_names,
+                part.joint_units,
+                part.joint_lower,
+                part.joint_upper,
+                part.home_joints,
             ),
         }
     if isinstance(part, GripperSpec):
         return wire | {
             "type": "gripper",
-            "joints": _joint_rows(part.joint_names, part.joint_lower, part.joint_upper),
+            "joints": _joint_rows(
+                part.joint_names, part.joint_units, part.joint_lower, part.joint_upper
+            ),
             "travel_m": list(part.travel_m) if part.travel_m is not None else None,
             "mimic_joints": [
                 {"name": mimic.joint_name, "of": mimic.of, "multiplier": mimic.multiplier}
@@ -311,7 +331,13 @@ def _component_to_dict(component: Component) -> dict[str, object]:
             "resolution": list(part.resolution) if part.resolution is not None else None,
         }
     if isinstance(part, MobileBaseSpec):
-        return wire | {"type": "mobile_base", "channels": list(part.channel_names)}
+        return wire | {
+            "type": "mobile_base",
+            "channels": [
+                {"name": name, "unit": unit.value}
+                for name, unit in zip(part.channel_names, part.channel_units, strict=True)
+            ],
+        }
     if isinstance(part, ForceTorqueSpec):
         return wire | {"type": "force_torque", "rate_hz": part.rate_hz}
     if isinstance(part, DeviceSpec):
@@ -367,21 +393,25 @@ def _parse_component(raw: object, label: str) -> Component:
 
 def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: str) -> Part:
     if kind in {"arm", "joint_group", "gripper"}:
-        names, lower, upper, homes = _parse_joints(_require(entry, "joints"), label)
+        names, units, lower, upper, homes = _parse_joints(_require(entry, "joints"), label)
         if kind == "arm":
             return ArmSpec(
                 part_id,
                 names,
+                units,
                 lower,
                 upper,
                 _require_homes(homes, label),
                 physical=_parse_physical(entry["physical"], label),
             )
         if kind == "joint_group":
-            return JointGroupSpec(part_id, names, lower, upper, _require_homes(homes, label))
+            return JointGroupSpec(
+                part_id, names, units, lower, upper, _require_homes(homes, label)
+            )
         return GripperSpec(
             part_id,
             names,
+            units,
             lower,
             upper,
             travel_m=_parse_pair(entry["travel_m"], f"{label}.travel_m"),
@@ -399,7 +429,8 @@ def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: 
             _parse_resolution(entry["resolution"], label),
         )
     if kind == "mobile_base":
-        return MobileBaseSpec(part_id, _string_list(entry["channels"], f"{label}.channels"))
+        names, units = _parse_base_channels(entry["channels"], label)
+        return MobileBaseSpec(part_id, names, units)
     if kind == "force_torque":
         return ForceTorqueSpec(part_id, _optional_number(entry["rate_hz"], f"{label}.rate_hz"))
     return DeviceSpec(part_id, _string(entry, "description", label))
@@ -407,6 +438,7 @@ def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: 
 
 def _joint_rows(
     names: tuple[str, ...],
+    units: tuple[CoordinateUnit, ...],
     lower: tuple[float, ...],
     upper: tuple[float, ...],
     homes: tuple[float, ...] | None = None,
@@ -414,6 +446,7 @@ def _joint_rows(
     return [
         {
             "name": name,
+            "unit": units[index].value,
             "lower": lo,
             "upper": hi,
             **({"home": homes[index]} if homes is not None else {}),
@@ -424,18 +457,52 @@ def _joint_rows(
 
 def _parse_joints(
     raw: object, label: str
-) -> tuple[tuple[str, ...], tuple[float, ...], tuple[float, ...], tuple[float | None, ...]]:
+) -> tuple[
+    tuple[str, ...],
+    tuple[CoordinateUnit, ...],
+    tuple[float, ...],
+    tuple[float, ...],
+    tuple[float | None, ...],
+]:
     if not isinstance(raw, list) or not raw:
         raise EmbodimentSchemaError(f"{label}.joints must be a non-empty list")
     rows = tuple(_mapping(row, f"{label}.joints") for row in cast(list[object], raw))
     for row in rows:
-        if set(row) not in ({"name", "lower", "upper"}, {"name", "lower", "upper", "home"}):
+        if set(row) not in (
+            {"name", "unit", "lower", "upper"},
+            {"name", "unit", "lower", "upper", "home"},
+        ):
             raise EmbodimentSchemaError(f"{label}.joints has invalid fields")
+    try:
+        units = tuple(
+            CoordinateUnit(_string(row, "unit", f"{label}.joints")) for row in rows
+        )
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"{label}.joints contains an unknown unit") from exc
     return (
         tuple(_string(row, "name", f"{label}.joints") for row in rows),
+        units,
         tuple(_number(row["lower"], f"{label}.joints.lower") for row in rows),
         tuple(_number(row["upper"], f"{label}.joints.upper") for row in rows),
         tuple(_optional_number(row.get("home"), f"{label}.joints.home") for row in rows),
+    )
+
+
+def _parse_base_channels(
+    raw: object, label: str
+) -> tuple[tuple[str, ...], tuple[CoordinateUnit, ...]]:
+    rows = tuple(_mapping(row, f"{label}.channels") for row in _list(raw, label))
+    for row in rows:
+        _exact_keys(row, {"name", "unit"}, f"{label}.channels")
+    try:
+        units = tuple(
+            CoordinateUnit(_string(row, "unit", f"{label}.channels")) for row in rows
+        )
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"{label}.channels contains an unknown unit") from exc
+    return (
+        tuple(_string(row, "name", f"{label}.channels") for row in rows),
+        units,
     )
 
 

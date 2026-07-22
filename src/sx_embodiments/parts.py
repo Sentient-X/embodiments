@@ -20,6 +20,7 @@ from .assets import PackagedAsset
 from .curves import Curve1D
 from .errors import PartValidationError
 from .identity import PartId
+from .layout import CoordinateUnit
 
 
 class SensorModel(StrEnum):
@@ -73,13 +74,14 @@ class PhysicalSpec:
 def _validate_joint_box(
     part_id: PartId,
     joint_names: tuple[str, ...],
+    joint_units: tuple[CoordinateUnit, ...],
     lower: tuple[float, ...],
     upper: tuple[float, ...],
 ) -> None:
     if len({*joint_names}) != len(joint_names):
         raise PartValidationError(part_id, "joint names must be unique")
-    if not (len(joint_names) == len(lower) == len(upper)):
-        raise PartValidationError(part_id, "joint names and limits must have equal length")
+    if not (len(joint_names) == len(joint_units) == len(lower) == len(upper)):
+        raise PartValidationError(part_id, "joint names, units, and limits must have equal length")
     if any(lo >= hi for lo, hi in zip(lower, upper, strict=True)):
         raise PartValidationError(part_id, "joint lower limits must be < upper limits")
 
@@ -88,6 +90,7 @@ def _validate_joint_part(
     part_id: PartId,
     noun: str,
     joint_names: tuple[str, ...],
+    joint_units: tuple[CoordinateUnit, ...],
     lower: tuple[float, ...],
     upper: tuple[float, ...],
     home_joints: tuple[float, ...],
@@ -95,7 +98,7 @@ def _validate_joint_part(
     """The shared invariants of any actuated joint chain (arm, group, gripper homes)."""
     if not joint_names:
         raise PartValidationError(part_id, f"{noun} needs at least one joint")
-    _validate_joint_box(part_id, joint_names, lower, upper)
+    _validate_joint_box(part_id, joint_names, joint_units, lower, upper)
     if len(home_joints) != len(joint_names):
         raise PartValidationError(part_id, "home_joints must match the joint count")
     if any(home < lo or home > hi for home, lo, hi in zip(home_joints, lower, upper, strict=True)):
@@ -108,6 +111,7 @@ class ArmSpec:
 
     part_id: PartId
     joint_names: tuple[str, ...]
+    joint_units: tuple[CoordinateUnit, ...]
     joint_lower: tuple[float, ...]
     joint_upper: tuple[float, ...]
     home_joints: tuple[float, ...]
@@ -119,6 +123,7 @@ class ArmSpec:
             self.part_id,
             "an arm",
             self.joint_names,
+            self.joint_units,
             self.joint_lower,
             self.joint_upper,
             self.home_joints,
@@ -139,6 +144,7 @@ class JointGroupSpec:
 
     part_id: PartId
     joint_names: tuple[str, ...]
+    joint_units: tuple[CoordinateUnit, ...]
     joint_lower: tuple[float, ...]
     joint_upper: tuple[float, ...]
     home_joints: tuple[float, ...]
@@ -149,6 +155,7 @@ class JointGroupSpec:
             self.part_id,
             "a joint group",
             self.joint_names,
+            self.joint_units,
             self.joint_lower,
             self.joint_upper,
             self.home_joints,
@@ -179,6 +186,7 @@ class GripperSpec:
 
     part_id: PartId
     joint_names: tuple[str, ...]
+    joint_units: tuple[CoordinateUnit, ...]
     joint_lower: tuple[float, ...]
     joint_upper: tuple[float, ...]
     travel_m: tuple[float, float] | None = None
@@ -190,7 +198,13 @@ class GripperSpec:
     def __post_init__(self) -> None:
         if not self.joint_names:
             raise PartValidationError(self.part_id, "a gripper needs at least one actuated joint")
-        _validate_joint_box(self.part_id, self.joint_names, self.joint_lower, self.joint_upper)
+        _validate_joint_box(
+            self.part_id,
+            self.joint_names,
+            self.joint_units,
+            self.joint_lower,
+            self.joint_upper,
+        )
         if self.travel_m is not None:
             lo, hi = self.travel_m
             if not 0.0 <= lo < hi:
@@ -246,7 +260,14 @@ class MobileBaseSpec:
 
     part_id: PartId
     channel_names: tuple[str, ...] = ()
+    channel_units: tuple[CoordinateUnit, ...] = ()
     assets: tuple[PackagedAsset, ...] = ()
+
+    def __post_init__(self) -> None:
+        if len(self.channel_names) != len(self.channel_units):
+            raise PartValidationError(
+                self.part_id, "base channel names and units must have equal length"
+            )
 
 
 @dataclass(frozen=True, slots=True)

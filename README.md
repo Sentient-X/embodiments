@@ -21,7 +21,7 @@ receives the object. Storage and service boundaries that need only identity carr
 64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
 friendly registry name or that content ID.
 
-Schema v7 stores one topologically ordered component graph plus nominal rates and
+Schema v8 stores one topologically ordered component graph plus nominal rates and
 content-addressed assets. State order, camera bindings, capabilities, arm/gripper convenience
 views, and the ID are derived from those facts. This keeps one source for morphology while
 remaining ergonomic for drivers, simulation, training, and task admission.

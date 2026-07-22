@@ -25,7 +25,7 @@ from .errors import (
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, PartId
 from .known import EmbodimentRegistry, embodiments
-from .layout import ChannelKind, StateSpace
+from .layout import ChannelKind, CoordinateUnit, StateSpace
 from .parts import CameraModality, LensProjection, SensorModel
 
 __all__ = [
@@ -43,6 +43,7 @@ __all__ = [
     "ComponentKind",
     "ComponentRole",
     "CompositionError",
+    "CoordinateUnit",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",

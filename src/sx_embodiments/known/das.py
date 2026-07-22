@@ -17,6 +17,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..curves import Curve1D
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import CameraModality, CameraSpec, GripperSpec, MimicJoint, SensorModel
 
 DAS_GRIPPER_URDF: Final = PackagedAsset(
@@ -103,6 +104,7 @@ DAS_JAW_GAP_CURVE: Final = Curve1D(
 DAS_JAW_V4: Final = GripperSpec(
     part_id=PartId("das-jaw-v4"),
     joint_names=("joint_1",),  # the ONE actuated DOF; everything else mimics
+    joint_units=(CoordinateUnit.RADIAN,),
     joint_lower=(0.0,),
     joint_upper=(0.925,),
     travel_m=(0.0, 0.105),

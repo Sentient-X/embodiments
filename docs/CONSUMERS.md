@@ -7,7 +7,7 @@ lands only with a production consumer.
 |---|---|---|
 | Train | full `Embodiment` in artifacts and simulator bindings; `EmbodimentId` in run/checkpoint metadata | exact action interface and embodiment at ingest, export, publication, and load |
 | Fleet | `EmbodimentId` on releases, targets, and deployments | release, target, controller, and Worlds evidence agree before motion |
-| Catalog | full schema-v7 object as the governed resource; `EmbodimentId` in segment/checkpoint rows | fail-closed parsing, ID resolution, asset promotion, and lineage |
+| Catalog | full schema-v8 object as the governed resource; `EmbodimentId` in segment/checkpoint rows | fail-closed parsing, ID resolution, asset promotion, and lineage |
 | Experience | full object resolved from Catalog; `EmbodimentId` on capture requests and orders | task roles resolve against component capabilities and the exact revision |
 | Worlds | full object in executable bindings and RRD evidence; `EmbodimentId` in scenes and run records | task, scene, checkpoint, served controller, and evidence agree |
 | real2sim | `robot.with_assets(...)` and `validate_logical_path` | bundle closure and output bytes fail closed |

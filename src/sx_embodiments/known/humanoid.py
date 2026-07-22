@@ -12,6 +12,7 @@ from typing import Final, Literal
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec
 
 SENTIENT_HUMANOID_URDF: Final = PackagedAsset(
@@ -44,6 +45,7 @@ SENTIENT_HUMANOID_MJCF: Final = PackagedAsset(
 SENTIENT_HUMANOID_TORSO: Final = JointGroupSpec(
     part_id=PartId("sentient-humanoid-torso"),
     joint_names=("torso_joint", "waist_roll_joint", "waist_pitch_joint"),
+    joint_units=(CoordinateUnit.RADIAN,) * 3,
     joint_lower=(-1.570796326795, -0.270002435284, -0.767944870878),
     joint_upper=(1.570796326795, 0.270002435284, 0.767944870878),
     home_joints=(0.0, 0.0, 0.0),
@@ -66,6 +68,7 @@ def _humanoid_arm(side: Literal["left", "right"]) -> ArmSpec:
                 "wrist_yaw",
             )
         ),
+        joint_units=(CoordinateUnit.RADIAN,) * 5,
         joint_lower=(
             -3.14159265359,
             shoulder_roll[0],
@@ -91,6 +94,7 @@ def _humanoid_leg(side: Literal["left", "right"]) -> JointGroupSpec:
             f"{side}_{name}_joint"
             for name in ("hip_roll", "hip_pitch", "hip_yaw", "knee", "foot1", "foot2")
         ),
+        joint_units=(CoordinateUnit.RADIAN,) * 6,
         joint_lower=(
             -0.279252680319,
             -2.094395102393,

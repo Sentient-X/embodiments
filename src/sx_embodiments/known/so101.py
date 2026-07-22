@@ -4,7 +4,7 @@ Joint names and limits mirror ``assets/so101/so101.urdf`` (pinned by
 ``tests/test_urdf_parity.py``). The bimanual flat convention ``[left 0..5 | right 0..5]``
 with the jaw at index 5 of each block is exactly the declared attachment order — the
 supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
-``embodiments[...].state.uniform_arm_blocks()``.
+``embodiments[...].state.coordinates``.
 """
 
 from typing import Final
@@ -12,6 +12,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
 
 SO101_URDF: Final = PackagedAsset(
@@ -31,6 +32,7 @@ SO101_URDF: Final = PackagedAsset(
 SO101_ARM: Final = ArmSpec(
     part_id=PartId("so101-arm"),
     joint_names=("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"),
+    joint_units=(CoordinateUnit.RADIAN,) * 5,
     joint_lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385),
     joint_upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
     home_joints=(0.0, 0.0, 0.0, 0.0, 0.0),
@@ -40,6 +42,7 @@ SO101_ARM: Final = ArmSpec(
 SO101_JAW: Final = GripperSpec(
     part_id=PartId("so101-jaw"),
     joint_names=("gripper",),
+    joint_units=(CoordinateUnit.RADIAN,),
     joint_lower=(-0.174533,),
     joint_upper=(2.0944,),
     # aperture-in-meters not yet measured; episodes carry the joint value

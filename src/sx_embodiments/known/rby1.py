@@ -5,6 +5,7 @@ from typing import Final, Literal
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint, MobileBaseSpec
 from .sources import menagerie
 
@@ -33,12 +34,14 @@ RBY1_URDF: Final = PackagedAsset(
 RBY1_BASE: Final = MobileBaseSpec(
     part_id=PartId("rby1m-base"),
     channel_names=("wheel_fr", "wheel_fl", "wheel_rr", "wheel_rl"),
+    channel_units=(CoordinateUnit.RADIAN,) * 4,
     assets=(RBY1_URDF, RBY1_MJCF),
 )
 
 RBY1_TORSO: Final = JointGroupSpec(
     part_id=PartId("rby1-torso"),
     joint_names=tuple(f"torso_{index}" for index in range(6)),
+    joint_units=(CoordinateUnit.RADIAN,) * 6,
     joint_lower=(-0.349066, -1.0472, -2.47837, -0.785398, -0.523599, -1.5708),
     joint_upper=(0.349066, 1.52173, 1.5708, 1.5708, 0.523599, 1.5708),
     home_joints=(0.0,) * 6,
@@ -50,6 +53,7 @@ def _rby1_arm(side: Literal["left", "right"]) -> ArmSpec:
     return ArmSpec(
         part_id=PartId(f"rby1-{side}-arm"),
         joint_names=tuple(f"{side}_arm_{index}" for index in range(7)),
+        joint_units=(CoordinateUnit.RADIAN,) * 7,
         joint_lower=(-2.35619, second[0], -2.0944, -2.61799, -3.14159, -0.872665, -1.5708),
         joint_upper=(2.35619, second[1], 2.0944, 0.01, 3.14159, 0.872665, 1.5708),
         home_joints=(0.0,) * 7,
@@ -62,6 +66,7 @@ def _rby1_gripper(side: Literal["left", "right"]) -> GripperSpec:
     return GripperSpec(
         part_id=PartId(f"rby1-{side}-gripper"),
         joint_names=(driven,),
+        joint_units=(CoordinateUnit.RADIAN,),
         joint_lower=(-0.05,),
         joint_upper=(0.0,),
         mimic_joints=(MimicJoint(f"gripper_finger_{suffix}2", of=driven, multiplier=1.0),),
@@ -73,6 +78,7 @@ RBY1_LEFT_ARM: Final = _rby1_arm("left")
 RBY1_HEAD: Final = JointGroupSpec(
     part_id=PartId("rby1-head"),
     joint_names=("head_0", "head_1"),
+    joint_units=(CoordinateUnit.RADIAN,) * 2,
     joint_lower=(-1.57, -1.57),
     joint_upper=(1.57, 1.57),
     home_joints=(0.0, 0.0),

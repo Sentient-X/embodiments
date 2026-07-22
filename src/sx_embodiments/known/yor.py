@@ -5,6 +5,7 @@ from typing import Final, Literal
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec, MobileBaseSpec
 
 YOR_MJCF: Final = PackagedAsset(
@@ -47,11 +48,13 @@ YOR_BASE: Final = MobileBaseSpec(
         "back_right_steer",
         "drive_back_right",
     ),
+    channel_units=(CoordinateUnit.RADIAN,) * 8,
     assets=(YOR_URDF, YOR_MJCF),
 )
 YOR_LIFT: Final = JointGroupSpec(
     part_id=PartId("yor-telescoping-lift"),
     joint_names=("Slider_1", "Slider_2"),
+    joint_units=(CoordinateUnit.METER,) * 2,
     joint_lower=(0.0, 0.0),
     joint_upper=(0.208, 0.208),
     home_joints=(0.0, 0.0),
@@ -63,6 +66,7 @@ def _yor_arm(side: Literal["left", "right"]) -> ArmSpec:
     return ArmSpec(
         part_id=PartId(f"yor-{side}-piper-arm"),
         joint_names=tuple(f"{side}_arm_joint{index}" for index in range(1, 7)),
+        joint_units=(CoordinateUnit.RADIAN,) * 6,
         joint_lower=(-2.61, 0.0, -2.965, -1.74, -1.2, -3.0),
         joint_upper=(2.61, 3.13, 0.0, 1.74, 1.2, 3.0),
         home_joints=(0.0, 1.58065, -0.578175, 0.0, -0.912, wrist_home),

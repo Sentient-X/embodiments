@@ -5,6 +5,7 @@ from typing import Final, Literal
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec
 from .sources import menagerie
 
@@ -39,6 +40,7 @@ def _g1_leg(side: Literal["left", "right"]) -> JointGroupSpec:
             f"{side}_{name}_joint"
             for name in ("hip_pitch", "hip_roll", "hip_yaw", "knee", "ankle_pitch", "ankle_roll")
         ),
+        joint_units=(CoordinateUnit.RADIAN,) * 6,
         joint_lower=(-2.5307, roll[0], -2.7576, -0.087267, -0.87267, -0.2618),
         joint_upper=(2.8798, roll[1], 2.7576, 2.8798, 0.5236, 0.2618),
         home_joints=(0.0,) * 6,
@@ -63,6 +65,7 @@ def _g1_arm(side: Literal["left", "right"]) -> ArmSpec:
                 "wrist_yaw",
             )
         ),
+        joint_units=(CoordinateUnit.RADIAN,) * 7,
         joint_lower=(
             -3.0892,
             shoulder_roll[0],
@@ -90,6 +93,7 @@ UNITREE_G1_RIGHT_LEG: Final = _g1_leg("right")
 UNITREE_G1_TORSO: Final = JointGroupSpec(
     part_id=PartId("unitree-g1-torso"),
     joint_names=("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"),
+    joint_units=(CoordinateUnit.RADIAN,) * 3,
     joint_lower=(-2.618, -0.52, -0.52),
     joint_upper=(2.618, 0.52, 0.52),
     home_joints=(0.0, 0.0, 0.0),

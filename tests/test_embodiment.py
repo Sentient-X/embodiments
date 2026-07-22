@@ -68,7 +68,7 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 7
+    assert wire["schema_version"] == 8
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
@@ -80,7 +80,7 @@ def test_embodiment_round_trips_identity_and_assets() -> None:
 def test_authoritative_urdf_is_an_asset_property() -> None:
     embodiment = embodiments["piper"]
     assert embodiment.urdf in embodiment.assets
-    assert embodiment.urdf.local_path().read_bytes().lstrip().startswith(b"<?xml")
+    assert embodiment.urdf_bytes.lstrip().startswith(b"<?xml")
 
 
 def test_external_assets_preserve_all_embodiment_facts() -> None:
@@ -91,7 +91,7 @@ def test_external_assets_preserve_all_embodiment_facts() -> None:
         logical_path=PurePosixPath("urdf/piper.urdf"),
     )
     external = canonical.with_assets(
-        (external_asset,), urdf=canonical.urdf.local_path().read_bytes()
+        (external_asset,), urdf=canonical.urdf_bytes
     )
     assert external.state == canonical.state
     assert external.components == canonical.components
@@ -113,7 +113,7 @@ def test_id_is_the_content_identity() -> None:
     assert len(embodiment.id) == 64
     changed = replace(embodiment, name=EmbodimentName("piper-revision"))
     assert changed.id != embodiment.id
-    assert embodiments[str(embodiment.id)] == embodiment
+    assert embodiments[embodiment.id] == embodiment
 
 
 @pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])
@@ -127,7 +127,7 @@ def test_from_dict_fails_closed() -> None:
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict({**good, "schema_version": 6})
     with pytest.raises(EmbodimentSchemaError):
-        Embodiment.from_dict({**good, "schema_version": 7.0})
+        Embodiment.from_dict({**good, "schema_version": 8.0})
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict({key: value for key, value in good.items() if key != "assets"})
     raw_assets = cast(list[dict[str, object]], good["assets"])

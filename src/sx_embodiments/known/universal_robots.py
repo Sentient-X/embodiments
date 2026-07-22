@@ -5,6 +5,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..layout import CoordinateUnit
 from ..parts import ArmSpec
 from .sources import menagerie
 
@@ -70,6 +71,7 @@ def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ArmSpec:
     return ArmSpec(
         part_id=PartId(f"{model}-arm"),
         joint_names=_JOINT_NAMES,
+        joint_units=(CoordinateUnit.RADIAN,) * 6,
         joint_lower=_JOINT_LOWER,
         joint_upper=_JOINT_UPPER,
         home_joints=_HOME,
