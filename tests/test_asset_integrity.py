@@ -26,12 +26,14 @@ from sx_embodiments.known.universal_robots import (
     UR10E_URDF,
 )
 from sx_embodiments.known.yor import YOR_MJCF, YOR_URDF
+from sx_embodiments.known.yubi import YUBI_HANDS_URDF
 
 PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
     DAS_GRIPPER_URDF,
     DAS_UMI_V4_URDF,
     QUEST_EGO_URDF,
+    YUBI_HANDS_URDF,
     PIPER_URDF,
     PIPER_MJCF,
     NERO_URDF,
