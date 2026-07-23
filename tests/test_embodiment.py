@@ -12,6 +12,7 @@ from sx_embodiments import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    EmbodiedAsset,
     Embodiment,
     EmbodimentId,
     EmbodimentName,
@@ -28,18 +29,20 @@ _DIGEST = "a" * 64
 def _ref(
     uri: str = "https://assets.example/arm.urdf",
     sha256: str = _DIGEST,
-) -> AssetRef:
-    return AssetRef(
-        uri=uri,
-        sha256=sha256,
-        format=AssetFormat.URDF,
-        role=AssetRole.DESCRIPTION,
-        provenance=AssetProvenance(
-            repository="https://assets.example/source",
-            revision="fixture",
-            path="arm.urdf",
-            license_id="Apache-2.0",
-        ),
+) -> EmbodiedAsset:
+    return EmbodiedAsset.from_ref(
+        AssetRef(
+            uri=uri,
+            sha256=sha256,
+            format=AssetFormat.URDF,
+            role=AssetRole.DESCRIPTION,
+            provenance=AssetProvenance(
+                repository="https://assets.example/source",
+                revision="fixture",
+                path="arm.urdf",
+                license_id="Apache-2.0",
+            ),
+        )
     )
 
 
@@ -85,27 +88,25 @@ def test_authoritative_urdf_is_an_asset_property() -> None:
 
 def test_external_assets_preserve_all_embodiment_facts() -> None:
     canonical = embodiments["piper"]
-    external_asset = replace(
-        canonical.urdf,
+    external_ref = replace(
+        canonical.urdf.ref,
         uri="bundle://piper/urdf/piper.urdf",
         logical_path=PurePosixPath("urdf/piper.urdf"),
     )
-    external = canonical.with_assets(
-        (external_asset,), urdf=canonical.urdf_bytes
-    )
+    external = canonical.with_assets((external_ref,), urdf=canonical.urdf_bytes)
     assert external.state == canonical.state
     assert external.components == canonical.components
     assert external.capabilities == canonical.capabilities
     assert external.cameras == canonical.cameras
     assert external.rates == canonical.rates
-    assert external.assets == (external_asset,)
+    assert external.assets == (EmbodiedAsset.from_ref(external_ref),)
     assert external.id != canonical.id
 
 
 def test_external_assets_rehash_the_authoritative_urdf() -> None:
     canonical = embodiments["piper"]
     with pytest.raises(AssetIntegrityError, match="authoritative URDF bytes"):
-        canonical.with_assets((canonical.urdf,), urdf=b"<robot name='tampered'/>")
+        canonical.with_assets((canonical.urdf.ref,), urdf=b"<robot name='tampered'/>")
 
 
 def test_id_is_the_content_identity() -> None:

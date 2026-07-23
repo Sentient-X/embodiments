@@ -12,6 +12,7 @@ from sx_embodiments import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    EmbodiedAsset,
     Embodiment,
     EmbodimentSchemaError,
     embodiments,
@@ -21,19 +22,21 @@ from sx_embodiments import (
 _SHA = "a" * 64
 
 
-def _ref(logical_path: str | None) -> AssetRef:
-    return AssetRef(
-        uri="https://example.invalid/bundle",
-        sha256=_SHA,
-        format=AssetFormat.MESH,
-        role=AssetRole.GEOMETRY,
-        logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
-        provenance=AssetProvenance(
-            repository="https://example.invalid/source",
-            revision="fixture",
-            path="mesh.dae",
-            license_id="Apache-2.0",
-        ),
+def _ref(logical_path: str | None) -> EmbodiedAsset:
+    return EmbodiedAsset.from_ref(
+        AssetRef(
+            uri="https://example.invalid/bundle",
+            sha256=_SHA,
+            format=AssetFormat.MESH,
+            role=AssetRole.GEOMETRY,
+            logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
+            provenance=AssetProvenance(
+                repository="https://example.invalid/source",
+                revision="fixture",
+                path="mesh.dae",
+                license_id="Apache-2.0",
+            ),
+        )
     )
 
 

@@ -21,7 +21,12 @@ from pathlib import Path, PurePosixPath
 from typing import Self
 from urllib.parse import urlparse
 
-from .errors import AssetDigestMismatchError, AssetIntegrityError, AssetsUnavailableError
+from .errors import (
+    AssetDigestMismatchError,
+    AssetIntegrityError,
+    AssetsUnavailableError,
+    EmbodimentSchemaError,
+)
 
 _ASSETS_ENV = "SX_EMBODIMENTS_ASSETS"
 
@@ -211,6 +216,71 @@ def resolve_asset(ref: AssetRef) -> Path:
     if actual != ref.sha256:
         raise AssetDigestMismatchError(relpath, ref.sha256, actual)
     return resolved
+
+
+@dataclass(frozen=True, slots=True)
+class EmbodiedAsset:
+    """A governed embodiment bundle member: an asset that always names its origin.
+
+    Identical in content facts to :class:`AssetRef`, but ``provenance`` is mandatory: every
+    embodiment asset must state where its bytes came from. That invariant lives in the type,
+    not in a runtime guard, so readers never re-narrow an optional. (Scene assets that
+    legitimately lack provenance stay plain :class:`AssetRef`.) Adopt a verified reference
+    with :meth:`from_ref`; project back with :attr:`ref` for asset-generic consumers.
+    """
+
+    uri: str
+    sha256: str
+    format: AssetFormat
+    role: AssetRole
+    provenance: AssetProvenance
+    media_type: str | None = None
+    byte_size: int | None = None
+    logical_path: PurePosixPath | None = None
+
+    def __post_init__(self) -> None:
+        # Adopt AssetRef's fail-closed content invariants (URI, digest, size, logical path);
+        # provenance is non-optional here by type, so a malformed field fails closed exactly
+        # as AssetRef does.
+        _ = self.ref
+
+    @classmethod
+    def from_ref(cls, ref: AssetRef) -> "EmbodiedAsset":
+        """Adopt a verified reference, enforcing the embodiment provenance invariant."""
+        if ref.provenance is None:
+            raise EmbodimentSchemaError("every embodiment asset must carry provenance")
+        return cls(
+            uri=ref.uri,
+            sha256=ref.sha256,
+            format=ref.format,
+            role=ref.role,
+            provenance=ref.provenance,
+            media_type=ref.media_type,
+            byte_size=ref.byte_size,
+            logical_path=ref.logical_path,
+        )
+
+    @property
+    def ref(self) -> AssetRef:
+        """Project to a plain :class:`AssetRef` for asset-generic consumers."""
+        return AssetRef(
+            uri=self.uri,
+            sha256=self.sha256,
+            format=self.format,
+            role=self.role,
+            media_type=self.media_type,
+            byte_size=self.byte_size,
+            logical_path=self.logical_path,
+            provenance=self.provenance,
+        )
+
+    def local_path(self) -> Path:
+        """Resolve and verify a packaged asset when its bytes are installed locally."""
+        return resolve_asset(self.ref)
+
+    def read_bytes(self) -> bytes:
+        """Read verified local content for a packaged asset."""
+        return self.local_path().read_bytes()
 
 
 @dataclass(frozen=True, slots=True)

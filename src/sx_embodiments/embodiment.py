@@ -12,7 +12,14 @@ from typing import cast
 
 from sx_capabilities import CapabilityProfile, ComponentCapabilities
 
-from .assets import AssetFormat, AssetProvenance, AssetRef, AssetRole, PackagedAsset
+from .assets import (
+    AssetFormat,
+    AssetProvenance,
+    AssetRef,
+    AssetRole,
+    EmbodiedAsset,
+    PackagedAsset,
+)
 from .compose import (
     Component,
     ComponentRole,
@@ -62,7 +69,7 @@ class Embodiment:
     kind: EmbodimentKind
     lineage: Lineage
     components: tuple[Component, ...]
-    assets: tuple[AssetRef, ...]
+    assets: tuple[EmbodiedAsset, ...]
     rates: ControlRates | None = None
     schema_version: int = SCHEMA_VERSION
 
@@ -91,8 +98,6 @@ class Embodiment:
         ]
         if len(urdfs) != 1:
             raise MissingUrdfError(str(self.name), len(urdfs))
-        if any(asset.provenance is None for asset in self.assets):
-            raise EmbodimentSchemaError("every embodiment asset must carry provenance")
         validate_components(str(self.name), self.kind, self.components)
 
     @property
@@ -123,7 +128,7 @@ class Embodiment:
         return self.rates.policy_hz if self.rates is not None else None
 
     @property
-    def urdf(self) -> AssetRef:
+    def urdf(self) -> EmbodiedAsset:
         return next(
             asset
             for asset in self.assets
@@ -183,7 +188,9 @@ class Embodiment:
     def with_assets(self, assets: tuple[AssetRef, ...], *, urdf: bytes) -> "Embodiment":
         """Return this morphology bound to another verified asset bundle."""
         _validate_urdf(self.name, assets, urdf)
-        return dataclasses.replace(self, assets=assets)
+        return dataclasses.replace(
+            self, assets=tuple(EmbodiedAsset.from_ref(asset) for asset in assets)
+        )
 
     def canonical_json(self) -> str:
         """Canonical content bytes used to derive ``id``; the id is not self-hashed."""
@@ -560,10 +567,8 @@ def _parse_curve(raw: object, label: str) -> Curve1D | None:
     )
 
 
-def _asset_to_dict(asset: AssetRef) -> dict[str, object]:
+def _asset_to_dict(asset: EmbodiedAsset) -> dict[str, object]:
     provenance = asset.provenance
-    if provenance is None:
-        raise EmbodimentSchemaError("embodiment assets require provenance")
     return {
         "uri": asset.uri,
         "sha256": asset.sha256,
@@ -582,10 +587,10 @@ def _asset_to_dict(asset: AssetRef) -> dict[str, object]:
     }
 
 
-def _parse_assets(raw: object) -> tuple[AssetRef, ...]:
+def _parse_assets(raw: object) -> tuple[EmbodiedAsset, ...]:
     if not isinstance(raw, list):
         raise EmbodimentSchemaError("assets must be a list")
-    return tuple(_parse_asset(item) for item in cast(list[object], raw))
+    return tuple(EmbodiedAsset.from_ref(_parse_asset(item)) for item in cast(list[object], raw))
 
 
 def _parse_asset(raw: object) -> AssetRef:
@@ -688,7 +693,7 @@ def embodiment_from_definition(definition: _EmbodimentDefinition) -> Embodiment:
         kind=definition.kind,
         lineage=definition.lineage,
         components=tuple(_portable_component(component) for component in definition.attachments),
-        assets=tuple(refs),
+        assets=tuple(EmbodiedAsset.from_ref(ref) for ref in refs),
         rates=definition.rates,
     )
 

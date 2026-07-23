@@ -5,6 +5,7 @@ from .assets import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    EmbodiedAsset,
     validate_logical_path,
 )
 from .compose import Component, ComponentKind, ComponentRole
@@ -44,6 +45,7 @@ __all__ = [
     "ComponentRole",
     "CompositionError",
     "CoordinateUnit",
+    "EmbodiedAsset",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
