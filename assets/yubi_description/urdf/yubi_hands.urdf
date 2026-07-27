@@ -219,4 +219,16 @@
     <parent link="left_hand_root"/>
     <child link="quest_left_controller"/>
   </joint>
+  <link name="quest3s_head"/>
+  <joint name="quest_origin_to_head" type="floating">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="quest_origin"/>
+    <child link="quest3s_head"/>
+  </joint>
+  <link name="quest3s_camera_optical"/>
+  <joint name="quest3s_head_to_camera_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="quest3s_head"/>
+    <child link="quest3s_camera_optical"/>
+  </joint>
 </robot>

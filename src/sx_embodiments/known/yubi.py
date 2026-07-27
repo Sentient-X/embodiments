@@ -24,11 +24,11 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
 from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
-from .das import DAS_JAW_V4, UVC_MONO_60
+from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
 
 YUBI_HANDS_URDF: Final = PackagedAsset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
-    sha256="5fde67b523815c7a349d71792659590d5dd3b104fb0821f74ab3df6f8d8fcf33",
+    sha256="88aeb45bf71905aea6e64ca804b06102b7c4c0ca45bdf71586a4aea4d8901c13",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -87,6 +87,14 @@ def _yubi(
                 wrist_camera,
                 ComponentRole.SENSOR,
                 MountFrame(frame="right_hand_cam_link"),
+            ),
+            # The Quest passthrough head view (das-umi's ``base`` pattern);
+            # the composite URDF carries the quest3s_head link it mounts on.
+            Component(
+                "base",
+                QUEST3_HEAD,
+                ComponentRole.SENSOR,
+                MountFrame(frame="quest3s_head"),
             ),
         ),
         extra_assets=(YUBI_HANDS_URDF,),

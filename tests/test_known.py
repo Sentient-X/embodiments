@@ -66,6 +66,7 @@ def test_camera_names_are_properties_of_the_embodiment() -> None:
     assert tuple(camera.name for camera in embodiments["yubi-mono"].cameras) == (
         "wrist_left",
         "wrist_right",
+        "base",
     )
     assert embodiments["piper"].cameras == ()
 
