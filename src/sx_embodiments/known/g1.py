@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec
@@ -101,7 +101,7 @@ UNITREE_G1_TORSO: Final = JointGroupSpec(
 UNITREE_G1_LEFT_ARM: Final = _g1_arm("left")
 UNITREE_G1_RIGHT_ARM: Final = _g1_arm("right")
 
-UNITREE_G1_SPEC: Final = _EmbodimentDefinition(
+UNITREE_G1_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("unitree-g1"),
     name="Unitree G1 (29 DOF)",
     kind=EmbodimentKind.ROBOT,

@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint, MobileBaseSpec
@@ -86,7 +86,7 @@ RBY1_HEAD: Final = JointGroupSpec(
 RBY1_RIGHT_GRIPPER: Final = _rby1_gripper("right")
 RBY1_LEFT_GRIPPER: Final = _rby1_gripper("left")
 
-RBY1_SPEC: Final = _EmbodimentDefinition(
+RBY1_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("rby1"),
     name="Rainbow Robotics RBY1-M v1.3",
     kind=EmbodimentKind.ROBOT,

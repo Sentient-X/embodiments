@@ -23,8 +23,8 @@ from .assets import (
 from .compose import (
     Component,
     ComponentRole,
+    EmbodimentDefinition,
     MountFrame,
-    _EmbodimentDefinition,
     camera_bindings,
     state_space,
     validate_components,
@@ -347,9 +347,9 @@ def _component_to_dict(component: Component) -> dict[str, object]:
         }
     if isinstance(part, ForceTorqueSpec):
         return wire | {"type": "force_torque", "rate_hz": part.rate_hz}
-    if isinstance(part, DeviceSpec):
-        return wire | {"type": "device", "description": part.description}
-    raise EmbodimentSchemaError(f"unsupported component part {part!r}")
+    # Exhaustive over Part: a new member breaks this binding at check time, not at runtime.
+    device: DeviceSpec = part
+    return wire | {"type": "device", "description": device.description}
 
 
 def _parse_components(raw: object) -> tuple[Component, ...]:
@@ -412,9 +412,7 @@ def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: 
                 physical=_parse_physical(entry["physical"], label),
             )
         if kind == "joint_group":
-            return JointGroupSpec(
-                part_id, names, units, lower, upper, _require_homes(homes, label)
-            )
+            return JointGroupSpec(part_id, names, units, lower, upper, _require_homes(homes, label))
         return GripperSpec(
             part_id,
             names,
@@ -481,9 +479,7 @@ def _parse_joints(
         ):
             raise EmbodimentSchemaError(f"{label}.joints has invalid fields")
     try:
-        units = tuple(
-            CoordinateUnit(_string(row, "unit", f"{label}.joints")) for row in rows
-        )
+        units = tuple(CoordinateUnit(_string(row, "unit", f"{label}.joints")) for row in rows)
     except ValueError as exc:
         raise EmbodimentSchemaError(f"{label}.joints contains an unknown unit") from exc
     return (
@@ -502,9 +498,7 @@ def _parse_base_channels(
     for row in rows:
         _exact_keys(row, {"name", "unit"}, f"{label}.channels")
     try:
-        units = tuple(
-            CoordinateUnit(_string(row, "unit", f"{label}.channels")) for row in rows
-        )
+        units = tuple(CoordinateUnit(_string(row, "unit", f"{label}.channels")) for row in rows)
     except ValueError as exc:
         raise EmbodimentSchemaError(f"{label}.channels contains an unknown unit") from exc
     return (
@@ -677,7 +671,7 @@ def _portable_component(component: Component) -> Component:
     return dataclasses.replace(component, part=part, mount=mount)
 
 
-def embodiment_from_definition(definition: _EmbodimentDefinition) -> Embodiment:
+def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
     refs: list[AssetRef] = []
     seen: set[tuple[str, str]] = set()
     for asset in _packaged_assets(definition):
@@ -698,7 +692,7 @@ def embodiment_from_definition(definition: _EmbodimentDefinition) -> Embodiment:
     )
 
 
-def authoritative_urdf(definition: _EmbodimentDefinition) -> PackagedAsset:
+def authoritative_urdf(definition: EmbodimentDefinition) -> PackagedAsset:
     matches = tuple(
         {
             (asset.relpath, asset.sha256): asset
@@ -711,7 +705,7 @@ def authoritative_urdf(definition: _EmbodimentDefinition) -> PackagedAsset:
     return matches[0]
 
 
-def _packaged_assets(definition: _EmbodimentDefinition) -> list[PackagedAsset]:
+def _packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
     assets: list[PackagedAsset] = []
     for component in definition.attachments:
         part = component.part
@@ -766,13 +760,6 @@ def _string(document: Mapping[str, object], key: str, label: str) -> str:
     if not isinstance(value, str):
         raise EmbodimentSchemaError(f"{label}.{key} must be a string")
     return value
-
-
-def _string_list(raw: object, label: str) -> tuple[str, ...]:
-    values = _list(raw, label)
-    if any(not isinstance(value, str) for value in values):
-        raise EmbodimentSchemaError(f"{label} must contain strings")
-    return tuple(cast(list[str], values))
 
 
 def _number(raw: object, label: str) -> float:

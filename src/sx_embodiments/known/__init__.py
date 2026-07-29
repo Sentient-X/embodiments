@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from ..compose import _EmbodimentDefinition
+from ..compose import EmbodimentDefinition
 from ..embodiment import Embodiment, embodiment_from_definition
 from ..errors import UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
@@ -24,7 +24,7 @@ from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
 from .yubi import YUBI_DEPTH_SPEC, YUBI_MONO_SPEC, YUBI_WIDEJAW_SPEC
 
-_ALL_SPECS: Final[tuple[_EmbodimentDefinition, ...]] = (
+_ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     PIPER_SPEC,
     NERO_SPEC,
     ALOHA_SPEC,
@@ -46,7 +46,7 @@ _ALL_SPECS: Final[tuple[_EmbodimentDefinition, ...]] = (
     PIPERX_STATION_SPEC,
 )
 
-_DEFINITIONS: Final[Mapping[EmbodimentName, _EmbodimentDefinition]] = {
+_DEFINITIONS: Final[Mapping[EmbodimentName, EmbodimentDefinition]] = {
     spec.embodiment_id: spec for spec in _ALL_SPECS
 }
 
@@ -57,7 +57,7 @@ class DevelopmentReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DevelopmentEmbodiment:
-    spec: _EmbodimentDefinition
+    spec: EmbodimentDefinition
     reason: DevelopmentReason
 
 
@@ -72,7 +72,7 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
 class EmbodimentRegistry(Mapping[str, Embodiment]):
     """Read-only, lazy registry with ordinary mapping semantics."""
 
-    def __init__(self, definitions: Mapping[EmbodimentName, _EmbodimentDefinition]) -> None:
+    def __init__(self, definitions: Mapping[EmbodimentName, EmbodimentDefinition]) -> None:
         self._definitions = dict(definitions)
         self._cache: dict[EmbodimentName, Embodiment] = {}
 

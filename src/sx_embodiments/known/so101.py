@@ -10,7 +10,7 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
@@ -59,7 +59,7 @@ def so101_side(side: str) -> tuple[Component, ...]:
     )
 
 
-SO101_SPEC: Final = _EmbodimentDefinition(
+SO101_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("so101"),
     name="SO-101 (single arm)",
     kind=EmbodimentKind.ROBOT,
@@ -71,7 +71,7 @@ SO101_SPEC: Final = _EmbodimentDefinition(
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )
 
-BIMANUAL_SO101_SPEC: Final = _EmbodimentDefinition(
+BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("bimanual-so101"),
     name="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,

@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec, MobileBaseSpec
@@ -76,7 +76,7 @@ def _yor_arm(side: Literal["left", "right"]) -> ArmSpec:
 YOR_LEFT_ARM: Final = _yor_arm("left")
 YOR_RIGHT_ARM: Final = _yor_arm("right")
 
-YOR_SPEC: Final = _EmbodimentDefinition(
+YOR_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("yor"),
     name="YOR bimanual mobile robot",
     kind=EmbodimentKind.ROBOT,

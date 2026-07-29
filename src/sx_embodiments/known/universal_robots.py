@@ -3,7 +3,7 @@
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec
@@ -82,14 +82,14 @@ def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ArmSpec:
 UR5E_ARM: Final = _ur_arm("ur5e", UR5E_URDF, UR5E_MJCF)
 UR10E_ARM: Final = _ur_arm("ur10e", UR10E_URDF, UR10E_MJCF)
 
-UR5E_SPEC: Final = _EmbodimentDefinition(
+UR5E_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("ur5e"),
     name="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
     attachments=(Component("arm", UR5E_ARM, ComponentRole.BODY),),
 )
-UR10E_SPEC: Final = _EmbodimentDefinition(
+UR10E_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("ur10e"),
     name="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,

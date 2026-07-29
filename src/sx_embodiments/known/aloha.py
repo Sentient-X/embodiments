@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec, MimicJoint
@@ -77,7 +77,7 @@ ALOHA_RIGHT_ARM: Final = _aloha_arm("right")
 ALOHA_LEFT_GRIPPER: Final = _aloha_gripper("left")
 ALOHA_RIGHT_GRIPPER: Final = _aloha_gripper("right")
 
-ALOHA_SPEC: Final = _EmbodimentDefinition(
+ALOHA_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("aloha"),
     name="ALOHA 2",
     kind=EmbodimentKind.ROBOT,

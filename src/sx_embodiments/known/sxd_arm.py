@@ -1,7 +1,7 @@
 """The factory's reference 6-DOF arm description (the built-in `emb_sxd_arm` seed).
 
 Asset-only for now: the data-factory seeds its built-in embodiment row from this file and
-derives DOF by parsing it. A full `_EmbodimentDefinition` lands if a second consumer needs the
+derives DOF by parsing it. A full `EmbodimentDefinition` lands if a second consumer needs the
 typed joint box.
 """
 

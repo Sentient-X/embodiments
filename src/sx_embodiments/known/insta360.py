@@ -14,7 +14,7 @@ the das-umi-v4 shape); the converter's MCAP namespace keys (``left``/``right`` i
 
 from typing import Final
 
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, DeviceSpec, LensProjection, SensorModel
 
@@ -34,7 +34,7 @@ INSTA360_UMI_JAW: Final = DeviceSpec(
     "bench aperture widths not yet measured",
 )
 
-INSTA360_UMI_SPEC: Final = _EmbodimentDefinition(
+INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("insta360-umi"),
     name="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
     kind=EmbodimentKind.CAPTURE_RIG,

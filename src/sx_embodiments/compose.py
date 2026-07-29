@@ -84,8 +84,13 @@ _BODY_PARTS = (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 
 
 @dataclass(frozen=True, slots=True)
-class _EmbodimentDefinition:
-    """Internal source record used to construct one public ``Embodiment``."""
+class EmbodimentDefinition:
+    """Source record used to construct one public ``Embodiment``.
+
+    Package-internal despite the public name: it is not exported from
+    ``sx_embodiments``, and ``tools/check_embodiment_ownership.py`` keeps
+    construction inside the ``known/`` registry.
+    """
 
     embodiment_id: EmbodimentName
     name: str
@@ -113,9 +118,7 @@ class _EmbodimentDefinition:
         return not any(isinstance(a.part, DeviceSpec) for a in self.body_attachments())
 
 
-def validate_components(
-    name: str, kind: EmbodimentKind, components: tuple[Component, ...]
-) -> None:
+def validate_components(name: str, kind: EmbodimentKind, components: tuple[Component, ...]) -> None:
     """Validate one topologically ordered component graph."""
     if not components:
         raise CompositionError(name, "an embodiment needs at least one component")

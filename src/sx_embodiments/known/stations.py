@@ -2,13 +2,13 @@
 
 from typing import Final
 
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
 from .das import UVC_MONO_60
 from .piper import PIPER_ARM, PIPER_GRIPPER
 
-PIPERX_STATION_SPEC: Final = _EmbodimentDefinition(
+PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("piperx-station"),
     name="PiperX single-arm teleop station",
     kind=EmbodimentKind.TELEOP_STATION,

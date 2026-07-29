@@ -10,7 +10,7 @@ the hardware URDF limits below win at the execution boundary.
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, JointGroupSpec
@@ -120,7 +120,7 @@ SENTIENT_HUMANOID_LEFT_ARM: Final = _humanoid_arm("left")
 SENTIENT_HUMANOID_RIGHT_LEG: Final = _humanoid_leg("right")
 SENTIENT_HUMANOID_LEFT_LEG: Final = _humanoid_leg("left")
 
-SENTIENT_HUMANOID_SPEC: Final = _EmbodimentDefinition(
+SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("sentient-humanoid"),
     name="Sentient humanoid",
     kind=EmbodimentKind.ROBOT,

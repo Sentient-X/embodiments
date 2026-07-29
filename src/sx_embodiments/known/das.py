@@ -14,7 +14,7 @@ Camera instance names are the sxd pipeline's canonical stream keys for the
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..curves import Curve1D
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
@@ -133,7 +133,7 @@ QUEST3_HEAD: Final = CameraSpec(
     fps=30.0,
 )
 
-DAS_UMI_V4_SPEC: Final = _EmbodimentDefinition(
+DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("das-umi-v4"),
     name="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
     kind=EmbodimentKind.CAPTURE_RIG,
@@ -155,7 +155,7 @@ DAS_UMI_V4_SPEC: Final = _EmbodimentDefinition(
     extra_assets=(DAS_UMI_V4_URDF,),
 )
 
-QUEST_EGO_SPEC: Final = _EmbodimentDefinition(
+QUEST_EGO_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("quest-ego"),
     name="Quest 3 egocentric capture (no gripper)",
     kind=EmbodimentKind.CAPTURE_RIG,

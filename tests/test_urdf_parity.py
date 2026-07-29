@@ -130,9 +130,7 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         joint.get("name"): joint for joint in root.iter("joint") if joint.get("type") == "revolute"
     }
     hands = ("left", "right")
-    assert set(revolute) == {
-        f"{hand}_{finger}_finger_joint" for hand in hands for finger in hands
-    }
+    assert set(revolute) == {f"{hand}_{finger}_finger_joint" for hand in hands for finger in hands}
     for hand in ("left", "right"):
         driven = revolute[f"{hand}_right_finger_joint"]
         limit = driven.find("limit")
@@ -146,9 +144,7 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
 
     package_root = asset_root()
     meshes = {
-        mesh.get("filename")
-        for mesh in root.iter("mesh")
-        if mesh.get("filename") is not None
+        mesh.get("filename") for mesh in root.iter("mesh") if mesh.get("filename") is not None
     }
     assert meshes, "yubi hands URDF references no meshes"
     for filename in meshes:
@@ -160,8 +156,6 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
 def test_yubi_camera_mounts_exist_in_authoritative_urdf() -> None:
     for name in ("yubi-mono", "yubi-depth", "yubi-widejaw"):
         embodiment = embodiments[name]
-        links = {
-            link.get("name") for link in ET.fromstring(embodiment.urdf_bytes).iter("link")
-        }
+        links = {link.get("name") for link in ET.fromstring(embodiment.urdf_bytes).iter("link")}
         for camera in embodiment.cameras:
             assert camera.frame in links, f"{name}: camera {camera.name} frame {camera.frame}"

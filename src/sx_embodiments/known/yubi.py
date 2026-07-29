@@ -21,7 +21,7 @@ import dataclasses
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
 from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
@@ -66,8 +66,8 @@ def _yubi(
     revision: str,
     jaw: GripperSpec,
     wrist_camera: CameraSpec,
-) -> _EmbodimentDefinition:
-    return _EmbodimentDefinition(
+) -> EmbodimentDefinition:
+    return EmbodimentDefinition(
         embodiment_id=EmbodimentName(embodiment_id),
         name=name,
         kind=EmbodimentKind.CAPTURE_RIG,

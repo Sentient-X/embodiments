@@ -7,7 +7,7 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, MountFrame, _EmbodimentDefinition
+from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import (
@@ -75,7 +75,7 @@ PANDA_GRIPPER: Final = GripperSpec(
 
 OMRON_BASE: Final = MobileBaseSpec(part_id=PartId("omron-ld"))  # commanded outside joint space
 
-PANDA_OMRON_SPEC: Final = _EmbodimentDefinition(
+PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("panda_omron"),
     name="Franka Panda on Omron LD mobile base",
     kind=EmbodimentKind.ROBOT,
@@ -88,7 +88,7 @@ PANDA_OMRON_SPEC: Final = _EmbodimentDefinition(
     rates=ControlRates(policy_hz=20.0),
 )
 
-FRANKA_SPEC: Final = _EmbodimentDefinition(
+FRANKA_SPEC: Final = EmbodimentDefinition(
     embodiment_id=EmbodimentName("franka"),
     name="Franka Panda (fixed base)",
     kind=EmbodimentKind.ROBOT,
