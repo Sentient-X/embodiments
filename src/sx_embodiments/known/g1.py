@@ -102,8 +102,8 @@ UNITREE_G1_LEFT_ARM: Final = _g1_arm("left")
 UNITREE_G1_RIGHT_ARM: Final = _g1_arm("right")
 
 UNITREE_G1_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("unitree-g1"),
-    name="Unitree G1 (29 DOF)",
+    name=EmbodimentName("unitree-g1"),
+    label="Unitree G1 (29 DOF)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="unitree-g1", variant="29dof"),
     attachments=(

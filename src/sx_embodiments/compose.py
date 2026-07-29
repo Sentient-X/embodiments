@@ -92,8 +92,8 @@ class EmbodimentDefinition:
     construction inside the ``known/`` registry.
     """
 
-    embodiment_id: EmbodimentName
-    name: str
+    name: EmbodimentName
+    label: str
     kind: EmbodimentKind
     lineage: Lineage
     attachments: tuple[Component, ...]
@@ -101,10 +101,10 @@ class EmbodimentDefinition:
     extra_assets: tuple[PackagedAsset, ...] = ()
 
     def __post_init__(self) -> None:
-        name = str(self.embodiment_id)
+        name = str(self.name)
         if not name.strip():
             raise CompositionError(name, "embodiment name must not be empty")
-        if not self.name.strip():
+        if not self.label.strip():
             raise CompositionError(name, "label must not be empty")
         if not self.lineage.family.strip():
             raise CompositionError(name, "family must not be empty")

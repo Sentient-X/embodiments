@@ -680,10 +680,10 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
             refs.append(asset.ref())
             seen.add(key)
     urdf = authoritative_urdf(definition)
-    _validate_urdf(definition.embodiment_id, tuple(refs), urdf.path().read_bytes())
+    _validate_urdf(definition.name, tuple(refs), urdf.path().read_bytes())
     return Embodiment(
-        name=definition.embodiment_id,
-        label=definition.name,
+        name=definition.name,
+        label=definition.label,
         kind=definition.kind,
         lineage=definition.lineage,
         components=tuple(_portable_component(component) for component in definition.attachments),
@@ -701,7 +701,7 @@ def authoritative_urdf(definition: EmbodimentDefinition) -> PackagedAsset:
         }.values()
     )
     if len(matches) != 1:
-        raise MissingUrdfError(str(definition.embodiment_id), len(matches))
+        raise MissingUrdfError(str(definition.name), len(matches))
     return matches[0]
 
 

@@ -19,11 +19,9 @@ class AssetIntegrityError(EmbodimentError):
 class MissingUrdfError(EmbodimentError):
     """An episode-ready embodiment has no single authoritative URDF description."""
 
-    def __init__(self, embodiment_id: str, count: int) -> None:
-        super().__init__(
-            f"{embodiment_id}: expected exactly one URDF description asset, found {count}"
-        )
-        self.embodiment_id = embodiment_id
+    def __init__(self, name: str, count: int) -> None:
+        super().__init__(f"{name}: expected exactly one URDF description asset, found {count}")
+        self.name = name
         self.count = count
 
 
@@ -57,9 +55,9 @@ class PartValidationError(EmbodimentError):
 class CompositionError(EmbodimentError):
     """An embodiment's attachments violate its kind's composition rules."""
 
-    def __init__(self, embodiment_id: str, message: str) -> None:
-        super().__init__(f"{embodiment_id}: {message}")
-        self.embodiment_id = embodiment_id
+    def __init__(self, name: str, message: str) -> None:
+        super().__init__(f"{name}: {message}")
+        self.name = name
 
 
 class ComponentGraphError(EmbodimentError):
@@ -69,9 +67,9 @@ class ComponentGraphError(EmbodimentError):
 class LayoutError(EmbodimentError):
     """A native state space cannot be derived or does not match the requested shape."""
 
-    def __init__(self, embodiment_id: str, message: str) -> None:
-        super().__init__(f"{embodiment_id}: {message}")
-        self.embodiment_id = embodiment_id
+    def __init__(self, name: str, message: str) -> None:
+        super().__init__(f"{name}: {message}")
+        self.name = name
 
 
 class InvalidCameraMountError(CompositionError):
@@ -79,11 +77,11 @@ class InvalidCameraMountError(CompositionError):
 
 
 class UnknownEmbodimentError(EmbodimentError):
-    """An embodiment id is not in the canonical registry."""
+    """An embodiment name is not in the canonical registry."""
 
-    def __init__(self, embodiment_id: str) -> None:
-        super().__init__(f"unknown embodiment: {embodiment_id!r}")
-        self.embodiment_id = embodiment_id
+    def __init__(self, name: str) -> None:
+        super().__init__(f"unknown embodiment: {name!r}")
+        self.name = name
 
 
 class EmbodimentSchemaError(EmbodimentError):

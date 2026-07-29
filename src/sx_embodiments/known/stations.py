@@ -9,8 +9,8 @@ from .das import UVC_MONO_60
 from .piper import PIPER_ARM, PIPER_GRIPPER
 
 PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("piperx-station"),
-    name="PiperX single-arm teleop station",
+    name=EmbodimentName("piperx-station"),
+    label="PiperX single-arm teleop station",
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="piper", variant="piperx"),
     attachments=(

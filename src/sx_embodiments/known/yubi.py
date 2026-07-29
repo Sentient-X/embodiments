@@ -60,16 +60,16 @@ D405_30: Final = CameraSpec(
 
 
 def _yubi(
-    embodiment_id: str,
     name: str,
+    label: str,
     variant: str,
     revision: str,
     jaw: GripperSpec,
     wrist_camera: CameraSpec,
 ) -> EmbodimentDefinition:
     return EmbodimentDefinition(
-        embodiment_id=EmbodimentName(embodiment_id),
-        name=name,
+        name=EmbodimentName(name),
+        label=label,
         kind=EmbodimentKind.CAPTURE_RIG,
         lineage=Lineage(family="yubi", variant=variant, revision=revision),
         attachments=(

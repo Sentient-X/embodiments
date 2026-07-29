@@ -44,8 +44,8 @@ NERO_ARM: Final = ArmSpec(
 )
 
 NERO_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("nero"),
-    name="Agilex NERO",
+    name=EmbodimentName("nero"),
+    label="Agilex NERO",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="nero"),
     attachments=(Component("arm", NERO_ARM, ComponentRole.BODY),),

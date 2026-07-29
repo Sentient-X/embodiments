@@ -87,8 +87,8 @@ RBY1_RIGHT_GRIPPER: Final = _rby1_gripper("right")
 RBY1_LEFT_GRIPPER: Final = _rby1_gripper("left")
 
 RBY1_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("rby1"),
-    name="Rainbow Robotics RBY1-M v1.3",
+    name=EmbodimentName("rby1"),
+    label="Rainbow Robotics RBY1-M v1.3",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rby1", variant="m", revision="1.3"),
     attachments=(

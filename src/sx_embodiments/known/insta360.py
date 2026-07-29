@@ -35,8 +35,8 @@ INSTA360_UMI_JAW: Final = DeviceSpec(
 )
 
 INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("insta360-umi"),
-    name="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
+    name=EmbodimentName("insta360-umi"),
+    label="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="insta360-umi"),
     attachments=(

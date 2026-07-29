@@ -134,8 +134,8 @@ QUEST3_HEAD: Final = CameraSpec(
 )
 
 DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("das-umi-v4"),
-    name="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
+    name=EmbodimentName("das-umi-v4"),
+    label="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
     attachments=(
@@ -156,8 +156,8 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("quest-ego"),
-    name="Quest 3 egocentric capture (no gripper)",
+    name=EmbodimentName("quest-ego"),
+    label="Quest 3 egocentric capture (no gripper)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
     attachments=(

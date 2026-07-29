@@ -121,8 +121,8 @@ SENTIENT_HUMANOID_RIGHT_LEG: Final = _humanoid_leg("right")
 SENTIENT_HUMANOID_LEFT_LEG: Final = _humanoid_leg("left")
 
 SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("sentient-humanoid"),
-    name="Sentient humanoid",
+    name=EmbodimentName("sentient-humanoid"),
+    label="Sentient humanoid",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),
     attachments=(

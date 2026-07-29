@@ -47,7 +47,7 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
 )
 
 _DEFINITIONS: Final[Mapping[EmbodimentName, EmbodimentDefinition]] = {
-    spec.embodiment_id: spec for spec in _ALL_SPECS
+    spec.name: spec for spec in _ALL_SPECS
 }
 
 
@@ -62,7 +62,7 @@ class DevelopmentEmbodiment:
 
 
 DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] = {
-    INSTA360_UMI_SPEC.embodiment_id: DevelopmentEmbodiment(
+    INSTA360_UMI_SPEC.name: DevelopmentEmbodiment(
         spec=INSTA360_UMI_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
     )

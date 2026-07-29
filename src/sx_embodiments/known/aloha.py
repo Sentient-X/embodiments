@@ -78,8 +78,8 @@ ALOHA_LEFT_GRIPPER: Final = _aloha_gripper("left")
 ALOHA_RIGHT_GRIPPER: Final = _aloha_gripper("right")
 
 ALOHA_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("aloha"),
-    name="ALOHA 2",
+    name=EmbodimentName("aloha"),
+    label="ALOHA 2",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
     attachments=(

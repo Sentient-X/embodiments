@@ -77,8 +77,8 @@ YOR_LEFT_ARM: Final = _yor_arm("left")
 YOR_RIGHT_ARM: Final = _yor_arm("right")
 
 YOR_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("yor"),
-    name="YOR bimanual mobile robot",
+    name=EmbodimentName("yor"),
+    label="YOR bimanual mobile robot",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="yor"),
     attachments=(

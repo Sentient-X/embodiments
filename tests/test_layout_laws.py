@@ -84,9 +84,7 @@ def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
         "yor": 22,
         "sentient-humanoid": 25,
     }
-    assert {
-        embodiment_id: embodiments[embodiment_id].state.width for embodiment_id in expected
-    } == expected
+    assert {name: embodiments[name].state.width for name in expected} == expected
 
 
 def test_whole_body_layout_exposes_exact_coordinate_kinds() -> None:

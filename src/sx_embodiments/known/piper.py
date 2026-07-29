@@ -61,8 +61,8 @@ PIPER_GRIPPER: Final = GripperSpec(
 )
 
 PIPER_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("piper"),
-    name="Agilex Piper",
+    name=EmbodimentName("piper"),
+    label="Agilex Piper",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
     attachments=(

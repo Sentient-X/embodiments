@@ -76,8 +76,8 @@ PANDA_GRIPPER: Final = GripperSpec(
 OMRON_BASE: Final = MobileBaseSpec(part_id=PartId("omron-ld"))  # commanded outside joint space
 
 PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("panda_omron"),
-    name="Franka Panda on Omron LD mobile base",
+    name=EmbodimentName("panda_omron"),
+    label="Franka Panda on Omron LD mobile base",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda", variant="omron"),
     attachments=(
@@ -89,8 +89,8 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
 )
 
 FRANKA_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("franka"),
-    name="Franka Panda (fixed base)",
+    name=EmbodimentName("franka"),
+    label="Franka Panda (fixed base)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda"),
     attachments=(

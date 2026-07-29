@@ -60,8 +60,8 @@ def so101_side(side: str) -> tuple[Component, ...]:
 
 
 SO101_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("so101"),
-    name="SO-101 (single arm)",
+    name=EmbodimentName("so101"),
+    label="SO-101 (single arm)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
     attachments=(
@@ -72,8 +72,8 @@ SO101_SPEC: Final = EmbodimentDefinition(
 )
 
 BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
-    embodiment_id=EmbodimentName("bimanual-so101"),
-    name="Bimanual SO-101",
+    name=EmbodimentName("bimanual-so101"),
+    label="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101", variant="bimanual"),
     attachments=(*so101_side("left"), *so101_side("right")),
