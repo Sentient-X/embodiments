@@ -10,6 +10,7 @@ import pytest
 from sx_embodiments import AssetDigestMismatchError, AssetFormat, AssetsUnavailableError
 from sx_embodiments.assets import PackagedAsset, asset_root
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
+from sx_embodiments.known.b601 import B601_DM_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
@@ -18,7 +19,6 @@ from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
 from sx_embodiments.known.piper import PIPER_MJCF, PIPER_URDF
 from sx_embodiments.known.rby1 import RBY1_MJCF, RBY1_URDF
 from sx_embodiments.known.so101 import SO101_URDF
-from sx_embodiments.known.sxd_arm import SXD_ARM_URDF
 from sx_embodiments.known.universal_robots import (
     UR5E_MJCF,
     UR5E_URDF,
@@ -53,7 +53,7 @@ PINNED: tuple[PackagedAsset, ...] = (
     YOR_MJCF,
     SENTIENT_HUMANOID_URDF,
     SENTIENT_HUMANOID_MJCF,
-    SXD_ARM_URDF,
+    B601_DM_URDF,
 )
 
 
@@ -79,6 +79,7 @@ def test_urdf_mesh_references_exist() -> None:
         (SO101_URDF, root / "so101"),
         (DAS_GRIPPER_URDF, root / "das_gripper_with_vr"),
         (SENTIENT_HUMANOID_URDF, root / "humanoid_pkg"),
+        (B601_DM_URDF, root / "b601_dm"),
     ):
         tree = ET.parse(asset.path())
         for mesh in tree.getroot().iter("mesh"):

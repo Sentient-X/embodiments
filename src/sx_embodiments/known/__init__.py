@@ -10,6 +10,7 @@ from ..embodiment import Embodiment, embodiment_from_definition
 from ..errors import UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
 from .aloha import ALOHA_SPEC
+from .b601 import B601_DM_SPEC, B601_DM_STATION_SPEC, BIMANUAL_B601_DM_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .g1 import UNITREE_G1_SPEC
 from .humanoid import SENTIENT_HUMANOID_SPEC
@@ -44,6 +45,9 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     YUBI_DEPTH_SPEC,
     YUBI_WIDEJAW_SPEC,
     PIPERX_STATION_SPEC,
+    B601_DM_SPEC,
+    BIMANUAL_B601_DM_SPEC,
+    B601_DM_STATION_SPEC,
 )
 
 _DEFINITIONS: Final[Mapping[EmbodimentName, EmbodimentDefinition]] = {
@@ -65,7 +69,7 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
     INSTA360_UMI_SPEC.name: DevelopmentEmbodiment(
         spec=INSTA360_UMI_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
-    )
+    ),
 }
 
 

@@ -1,17 +1,19 @@
 """Part specs mirror the description assets they claim to mirror (stdlib xml only).
 
-Scoped to the parts whose docstrings assert URDF parity: SO-101 and the DAS jaw. The
-Piper spec deliberately diverges from its menagerie MJCF (deployed limits win; see
-``known/piper.py``), so it is NOT pinned here.
+Scoped to the parts whose docstrings assert URDF parity: SO-101, the DAS jaw, the Sentient
+humanoid, and the reBot B601-DM. The Piper spec deliberately diverges from its menagerie
+MJCF (deployed limits win; see ``known/piper.py``), so it is NOT pinned here.
 """
 
 import xml.etree.ElementTree as ET
+from math import radians
 from pathlib import Path
 
 from sx_embodiments import (
     AssetFormat,
     embodiments,
 )
+from sx_embodiments.known.b601 import B601_ARM, B601_DM_URDF, B601_GRIPPER
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
     SENTIENT_HUMANOID_LEFT_ARM,
@@ -45,6 +47,70 @@ def test_so101_spec_matches_urdf() -> None:
         assert (lower, upper) == (SO101_ARM.joint_lower[i], SO101_ARM.joint_upper[i])
     lower, upper, _ = joints[SO101_JAW.joint_names[0]]
     assert (lower, upper) == (SO101_JAW.joint_lower[0], SO101_JAW.joint_upper[0])
+
+
+def test_b601_spec_matches_urdf_and_records_the_driver_divergence() -> None:
+    """The B601-DM channels ARE the vendored URDF's movable joints (the Piper precedent).
+
+    Every name, unit, and limit comes from the description; the deployed driver's second
+    vocabulary and its disagreeing soft box are pinned here too, so the divergence the
+    module docstring describes cannot drift silently.
+    """
+    joints = _movable_joints(B601_DM_URDF.path())
+    assert set(joints) == {
+        *B601_ARM.joint_names,
+        *B601_GRIPPER.joint_names,
+        *(mimic.joint_name for mimic in B601_GRIPPER.mimic_joints),
+    }
+    for index, name in enumerate(B601_ARM.joint_names):
+        lower, upper, element = joints[name]
+        assert (lower, upper) == (B601_ARM.joint_lower[index], B601_ARM.joint_upper[index])
+        assert element.get("type") == "revolute"
+
+    finger, mirror = "gripper_joint1", "gripper_joint2"
+    lower, upper, element = joints[finger]
+    assert (lower, upper) == (B601_GRIPPER.joint_lower[0], B601_GRIPPER.joint_upper[0])
+    assert element.get("type") == "prismatic"
+    assert element.find("mimic") is None  # the driven finger mimics nothing
+    # The mirror's coupling is a declared URDF fact (the vendoring patch: upstream's
+    # SolidWorks export omitted it), so the seven-channel layout is DERIVED from the
+    # description rather than asserted around a gap — the DAS jaw's shape.
+    mirror_lower, mirror_upper, mirror_element = joints[mirror]
+    assert (mirror_lower, mirror_upper) == (lower, upper)  # identical stroke
+    declared = mirror_element.find("mimic")
+    assert declared is not None
+    (recorded,) = B601_GRIPPER.mimic_joints
+    assert recorded.joint_name == mirror
+    assert declared.get("joint") == recorded.of == finger
+    assert float(declared.get("multiplier", "1")) == recorded.multiplier
+    assert B601_GRIPPER.travel_m == (0.0, 2 * upper)  # aperture = 2 x finger stroke
+
+    # The deployed driver's box (degrees) against the described box (radians), per joint.
+    driver_deg = {
+        "joint1": (-150.0, 150.0),  # shoulder_pan
+        "joint2": (-200.0, 1.0),  # shoulder_lift
+        "joint3": (-200.0, 1.0),  # elbow_flex
+        "joint4": (-80.0, 90.0),  # wrist_flex
+        "joint5": (-90.0, 90.0),  # wrist_yaw
+        "joint6": (-90.0, 90.0),  # wrist_roll
+    }
+    tighter = {"joint1", "joint6"}  # driver clips inside the described stop
+    looser = {"joint2", "joint3"}  # driver admits ~20 deg beyond it (upstream discrepancy)
+    for name, (driver_lo, driver_hi) in driver_deg.items():
+        described_lo, described_hi, _ = joints[name]
+        if name in tighter:
+            assert described_lo < radians(driver_lo) and radians(driver_hi) < described_hi
+        elif name in looser:
+            assert radians(driver_lo) < described_lo and described_hi < radians(driver_hi)
+        else:  # joint4/joint5: agree to the URDF's 1.57-for-90-deg rounding
+            assert abs(radians(driver_hi) - described_hi) < 1e-3
+    assert B601_ARM.home_joints == (0.0,) * 6  # the driver's calibrated zero pose
+    assert all(
+        lo <= home <= hi  # joint2/joint3 close AT zero: the described upper limit is 0.0
+        for lo, home, hi in zip(
+            B601_ARM.joint_lower, B601_ARM.home_joints, B601_ARM.joint_upper, strict=True
+        )
+    )
 
 
 def test_das_jaw_matches_urdf_mimic_chain() -> None:

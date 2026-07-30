@@ -54,6 +54,9 @@ def test_registry_ids_are_byte_stable() -> None:
         "yubi-depth",
         "yubi-widejaw",
         "piperx-station",
+        "b601-dm",
+        "bimanual-b601-dm",
+        "b601-dm-station",
     }
 
 
