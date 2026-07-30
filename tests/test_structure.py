@@ -1,4 +1,4 @@
-from sx_capabilities import Capability, ComponentId
+from sx_contracts import Capability, ComponentId
 
 from sx_embodiments import (
     ComponentKind,

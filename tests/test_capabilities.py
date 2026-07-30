@@ -1,5 +1,5 @@
 import pytest
-from sx_capabilities import (
+from sx_contracts import (
     Capability,
     TaskCapabilityRequirements,
     TaskRoleId,

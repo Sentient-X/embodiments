@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from sx_capabilities import CapabilityProfile, ComponentCapabilities
+from sx_contracts import CapabilityProfile, ComponentCapabilities
 
 from .assets import (
     AssetFormat,

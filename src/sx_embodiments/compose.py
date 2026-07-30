@@ -8,7 +8,7 @@ declared attachment order is the wire order (see :mod:`sx_embodiments.layout`).
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sx_capabilities import Capability, ComponentId
+from sx_contracts import Capability, ComponentId
 
 from .assets import PackagedAsset
 from .errors import ComponentGraphError, CompositionError, LayoutError

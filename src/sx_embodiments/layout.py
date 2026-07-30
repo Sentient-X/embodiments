@@ -10,7 +10,7 @@ order IS wire order. Mount frames are informational and never affect channel ord
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sx_capabilities import ComponentId
+from sx_contracts import ComponentId
 
 from .errors import LayoutError
 from .identity import PartId
