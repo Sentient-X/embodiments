@@ -45,6 +45,9 @@ PIPER_ARM: Final = ArmSpec(
     joint_lower=(-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439),
     joint_upper=(2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439),
     home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    # Grasp centre 0.45 m forward, 0.52 m up from the base, pointing straight down, with the
+    # wrist roll at zero so its whole travel remains for task yaw on either side.
+    ready_joints=(0.0, 1.4547, -0.9060, 0.0, 1.1093, 0.0),
     assets=(PIPER_URDF, PIPER_MJCF),
     # AgileX PiPER datasheet (global.agilex.ai/products/piper).
     physical=PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2),
@@ -57,6 +60,9 @@ PIPER_GRIPPER: Final = GripperSpec(
     joint_lower=(0.0,),
     joint_upper=(0.035,),
     travel_m=(0.0, 0.07),  # parallel jaw: aperture = 2 x finger stroke (0.035 m each)
+    # Midpoint of the finger pads along the mount frame's approach (+z) axis; the
+    # fingertips reach 0.03 m further, the clearance a grasp must leave below the target.
+    grasp_centre_m=(0.0, 0.0, 0.10503),
     mimic_joints=(MimicJoint("joint8", of="joint7", multiplier=-1.0),),
 )
 

@@ -107,7 +107,13 @@ def _validate_joint_part(
 
 @dataclass(frozen=True, slots=True)
 class ArmSpec:
-    """A serial arm; ``joint_names`` order defines this part's channel order."""
+    """A serial arm; ``joint_names`` order defines this part's channel order.
+
+    ``ready_joints`` is a work-ready configuration — tool over the workspace, poised to
+    act — distinct from ``home_joints`` (the driver's calibrated zero, which may point
+    the arm straight up). Consumers that stage motion (scene composition, bench bring-up)
+    read ``ready``; drivers home to ``home``.
+    """
 
     part_id: PartId
     joint_names: tuple[str, ...]
@@ -115,6 +121,7 @@ class ArmSpec:
     joint_lower: tuple[float, ...]
     joint_upper: tuple[float, ...]
     home_joints: tuple[float, ...]
+    ready_joints: tuple[float, ...] | None = None
     assets: tuple[PackagedAsset, ...] = ()
     physical: PhysicalSpec | None = None
 
@@ -128,6 +135,16 @@ class ArmSpec:
             self.joint_upper,
             self.home_joints,
         )
+        if self.ready_joints is not None:
+            if len(self.ready_joints) != len(self.joint_names):
+                raise PartValidationError(self.part_id, "ready_joints must match the joint count")
+            if any(
+                ready < lo or ready > hi
+                for ready, lo, hi in zip(
+                    self.ready_joints, self.joint_lower, self.joint_upper, strict=True
+                )
+            ):
+                raise PartValidationError(self.part_id, "ready_joints must lie within the limits")
 
     @property
     def dof(self) -> int:
@@ -181,7 +198,10 @@ class GripperSpec:
 
     ``travel_m`` is the physical aperture range ``(closed, full_open)`` in meters when it is
     known; ``gap_curve`` is the measured aperture(q) forward-kinematic table for linkages
-    where aperture is not linear in the joint angle (the DAS jaw).
+    where aperture is not linear in the joint angle (the DAS jaw). ``grasp_centre_m`` is
+    the grasp centre — the midpoint between the closed finger pads — in the gripper's
+    mount frame, so tool-frame consumers (scene composition, TCP feedback, Cartesian
+    preflight) share one measured offset instead of each re-deriving it.
     """
 
     part_id: PartId
@@ -190,6 +210,7 @@ class GripperSpec:
     joint_lower: tuple[float, ...]
     joint_upper: tuple[float, ...]
     travel_m: tuple[float, float] | None = None
+    grasp_centre_m: tuple[float, float, float] | None = None
     mimic_joints: tuple[MimicJoint, ...] = ()
     gap_curve: Curve1D | None = None
     assets: tuple[PackagedAsset, ...] = ()

@@ -71,13 +71,27 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 8
+    assert wire["schema_version"] == 9
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
     assert Embodiment.from_dict(wire) == embodiment
     assert Embodiment.from_json(embodiment.to_json()) == embodiment
     assert embodiment.state.width == 7
+
+
+def test_tool_frame_facts_round_trip_and_fail_closed() -> None:
+    piper = embodiments["piper"]
+    assert piper.ready_joints == (0.0, 1.4547, -0.9060, 0.0, 1.1093, 0.0)
+    assert piper.grasp_centre_m == (0.0, 0.0, 0.10503)
+    round_tripped = Embodiment.from_json(piper.to_json())
+    assert round_tripped.ready_joints == piper.ready_joints
+    assert round_tripped.grasp_centre_m == piper.grasp_centre_m
+    undeclared = embodiments["so101"]
+    with pytest.raises(LayoutError):
+        _ = undeclared.ready_joints
+    with pytest.raises(LayoutError):
+        _ = undeclared.grasp_centre_m
 
 
 def test_authoritative_urdf_is_an_asset_property() -> None:
@@ -128,7 +142,7 @@ def test_from_dict_fails_closed() -> None:
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict({**good, "schema_version": 6})
     with pytest.raises(EmbodimentSchemaError):
-        Embodiment.from_dict({**good, "schema_version": 8.0})
+        Embodiment.from_dict({**good, "schema_version": 9.0})
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict({key: value for key, value in good.items() if key != "assets"})
     raw_assets = cast(list[dict[str, object]], good["assets"])

@@ -51,7 +51,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +179,22 @@ class Embodiment:
         return self.gripper_travel_m[1]
 
     @property
+    def grasp_centre_m(self) -> tuple[float, float, float]:
+        """The grasp centre in the gripper's mount frame; fails closed when undeclared."""
+        centre = self.single_gripper.grasp_centre_m
+        if centre is None:
+            raise LayoutError(str(self.name), "gripper grasp centre is not declared")
+        return centre
+
+    @property
+    def ready_joints(self) -> tuple[float, ...]:
+        """The arm's work-ready configuration; fails closed when undeclared."""
+        ready = self.single_arm.ready_joints
+        if ready is None:
+            raise LayoutError(str(self.name), "arm ready configuration is not declared")
+        return ready
+
+    @property
     def has_mobile_base(self) -> bool:
         return any(
             component.role is ComponentRole.BODY and isinstance(component.part, MobileBaseSpec)
@@ -296,6 +312,7 @@ def _component_to_dict(component: Component) -> dict[str, object]:
                 part.joint_lower,
                 part.joint_upper,
                 part.home_joints,
+                part.ready_joints,
             ),
             "physical": _physical_to_dict(part.physical),
         }
@@ -317,6 +334,9 @@ def _component_to_dict(component: Component) -> dict[str, object]:
                 part.joint_names, part.joint_units, part.joint_lower, part.joint_upper
             ),
             "travel_m": list(part.travel_m) if part.travel_m is not None else None,
+            "grasp_centre_m": (
+                list(part.grasp_centre_m) if part.grasp_centre_m is not None else None
+            ),
             "mimic_joints": [
                 {"name": mimic.joint_name, "of": mimic.of, "multiplier": mimic.multiplier}
                 for mimic in part.mimic_joints
@@ -368,7 +388,8 @@ def _parse_component(raw: object, label: str) -> Component:
     expected_by_kind = {
         "arm": common | {"joints", "physical"},
         "joint_group": common | {"joints"},
-        "gripper": common | {"joints", "travel_m", "mimic_joints", "gap_curve", "physical"},
+        "gripper": common
+        | {"joints", "travel_m", "grasp_centre_m", "mimic_joints", "gap_curve", "physical"},
         "camera": common | {"sensor_model", "modality", "fps", "projection", "resolution"},
         "mobile_base": common | {"channels"},
         "force_torque": common | {"rate_hz"},
@@ -400,7 +421,9 @@ def _parse_component(raw: object, label: str) -> Component:
 
 def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: str) -> Part:
     if kind in {"arm", "joint_group", "gripper"}:
-        names, units, lower, upper, homes = _parse_joints(_require(entry, "joints"), label)
+        names, units, lower, upper, homes, readies = _parse_joints(_require(entry, "joints"), label)
+        if kind != "arm" and any(ready is not None for ready in readies):
+            raise EmbodimentSchemaError(f"{label}.joints.ready is only valid on an arm")
         if kind == "arm":
             return ArmSpec(
                 part_id,
@@ -409,6 +432,7 @@ def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: 
                 lower,
                 upper,
                 _require_homes(homes, label),
+                ready_joints=_all_or_no_readies(readies, label),
                 physical=_parse_physical(entry["physical"], label),
             )
         if kind == "joint_group":
@@ -420,6 +444,7 @@ def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: 
             lower,
             upper,
             travel_m=_parse_pair(entry["travel_m"], f"{label}.travel_m"),
+            grasp_centre_m=_parse_triple(entry["grasp_centre_m"], f"{label}.grasp_centre_m"),
             mimic_joints=_parse_mimics(entry["mimic_joints"], label),
             gap_curve=_parse_curve(entry["gap_curve"], label),
             physical=_parse_physical(entry["physical"], label),
@@ -447,6 +472,7 @@ def _joint_rows(
     lower: tuple[float, ...],
     upper: tuple[float, ...],
     homes: tuple[float, ...] | None = None,
+    readies: tuple[float, ...] | None = None,
 ) -> list[dict[str, object]]:
     return [
         {
@@ -455,6 +481,7 @@ def _joint_rows(
             "lower": lo,
             "upper": hi,
             **({"home": homes[index]} if homes is not None else {}),
+            **({"ready": readies[index]} if readies is not None else {}),
         }
         for index, (name, lo, hi) in enumerate(zip(names, lower, upper, strict=True))
     ]
@@ -468,6 +495,7 @@ def _parse_joints(
     tuple[float, ...],
     tuple[float, ...],
     tuple[float | None, ...],
+    tuple[float | None, ...],
 ]:
     if not isinstance(raw, list) or not raw:
         raise EmbodimentSchemaError(f"{label}.joints must be a non-empty list")
@@ -476,6 +504,7 @@ def _parse_joints(
         if set(row) not in (
             {"name", "unit", "lower", "upper"},
             {"name", "unit", "lower", "upper", "home"},
+            {"name", "unit", "lower", "upper", "home", "ready"},
         ):
             raise EmbodimentSchemaError(f"{label}.joints has invalid fields")
     try:
@@ -488,6 +517,7 @@ def _parse_joints(
         tuple(_number(row["lower"], f"{label}.joints.lower") for row in rows),
         tuple(_number(row["upper"], f"{label}.joints.upper") for row in rows),
         tuple(_optional_number(row.get("home"), f"{label}.joints.home") for row in rows),
+        tuple(_optional_number(row.get("ready"), f"{label}.joints.ready") for row in rows),
     )
 
 
@@ -510,6 +540,14 @@ def _parse_base_channels(
 def _require_homes(values: tuple[float | None, ...], label: str) -> tuple[float, ...]:
     if any(value is None for value in values):
         raise EmbodimentSchemaError(f"{label}.joints require home values")
+    return cast(tuple[float, ...], values)
+
+
+def _all_or_no_readies(values: tuple[float | None, ...], label: str) -> tuple[float, ...] | None:
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise EmbodimentSchemaError(f"{label}.joints must declare ready on every joint or none")
     return cast(tuple[float, ...], values)
 
 
@@ -659,6 +697,15 @@ def _parse_pair(raw: object, label: str) -> tuple[float, float] | None:
     if len(values) != 2:
         raise EmbodimentSchemaError(f"{label} must contain two numbers")
     return _number(values[0], label), _number(values[1], label)
+
+
+def _parse_triple(raw: object, label: str) -> tuple[float, float, float] | None:
+    if raw is None:
+        return None
+    values = _list(raw, label)
+    if len(values) != 3:
+        raise EmbodimentSchemaError(f"{label} must contain three numbers")
+    return _number(values[0], label), _number(values[1], label), _number(values[2], label)
 
 
 def _portable_component(component: Component) -> Component:
