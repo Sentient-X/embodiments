@@ -52,6 +52,10 @@ class PartValidationError(EmbodimentError):
         self.part_id = part_id
 
 
+class GripperKinematicsError(PartValidationError):
+    """A gripper's drive↔aperture relation is not derivable from its declared facts."""
+
+
 class CompositionError(EmbodimentError):
     """An embodiment's attachments violate its kind's composition rules."""
 

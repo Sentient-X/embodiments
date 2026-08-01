@@ -18,7 +18,7 @@ from enum import StrEnum
 
 from .assets import PackagedAsset
 from .curves import Curve1D
-from .errors import PartValidationError
+from .errors import GripperKinematicsError, PartValidationError
 from .identity import PartId
 from .layout import CoordinateUnit
 
@@ -247,6 +247,43 @@ class GripperSpec:
     @property
     def dof(self) -> int:
         return len(self.joint_names)
+
+    def aperture_from_drive(self, q: float) -> float:
+        """Aperture (meters) produced by drive-joint value ``q``, clamped to the travel.
+
+        Derived from the declared facts only — the measured ``gap_curve`` when one exists,
+        else the affine map from a single drive joint's box onto ``travel_m`` (the parallel
+        jaw: piper's 0.035 m stroke opens a 0.07 m aperture). A gripper declaring neither
+        relation raises :class:`GripperKinematicsError`; there is no guessed default.
+        Both directions clamp outside the declared range (``Curve1D`` semantics): range
+        enforcement belongs to safety constraints and episode validation, not FK.
+        """
+        if self.gap_curve is not None:
+            return self.gap_curve.at(q)
+        if self.travel_m is not None and self.dof == 1:
+            lo, hi = self.joint_lower[0], self.joint_upper[0]
+            closed, opened = self.travel_m
+            clamped = min(max(q, lo), hi)
+            return closed + (clamped - lo) / (hi - lo) * (opened - closed)
+        raise GripperKinematicsError(
+            self.part_id,
+            "drive-aperture relation needs a gap_curve, or travel_m with a single drive joint",
+        )
+
+    def drive_from_aperture(self, aperture_m: float) -> float:
+        """Drive-joint value that produces ``aperture_m`` — the inverse of
+        :meth:`aperture_from_drive`, clamped to the declared range."""
+        if self.gap_curve is not None:
+            return self.gap_curve.inverse_at(aperture_m)
+        if self.travel_m is not None and self.dof == 1:
+            lo, hi = self.joint_lower[0], self.joint_upper[0]
+            closed, opened = self.travel_m
+            clamped = min(max(aperture_m, closed), opened)
+            return lo + (clamped - closed) / (opened - closed) * (hi - lo)
+        raise GripperKinematicsError(
+            self.part_id,
+            "drive-aperture relation needs a gap_curve, or travel_m with a single drive joint",
+        )
 
 
 @dataclass(frozen=True, slots=True)
