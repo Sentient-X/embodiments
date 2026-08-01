@@ -11,12 +11,12 @@ lands only with a production consumer.
 | Experience | full object resolved from Catalog; `EmbodimentId` on capture requests and orders | task roles resolve against component capabilities and the exact revision |
 | Worlds | full object in executable bindings and RRD evidence; `EmbodimentId` in scenes and run records | task, scene, checkpoint, served controller, and evidence agree |
 | real2sim | `robot.with_assets(...)` and `validate_logical_path` | bundle closure and output bytes fail closed |
-| sx-telemetry | full object in each envelope; `EmbodimentId` in summaries | object/URDF/calibration/action agreement and tensor coordinate order |
+| sx-episodes | full object in each episode; `EmbodimentId` in summaries | object/URDF/calibration/action agreement and tensor coordinate order |
 | enpire | full object for drivers, safety, telemetry, and simulation | runtime limits and constraints derive directly from the object |
 | SXD | generated full-object projection because standalone workers cannot import workspace packages | byte-for-byte projection parity check |
 
-Rerun entity paths belong to `sx-telemetry`; camera names placed in those paths belong to the
-embodiment. Per-unit calibration belongs to the recording.
+Rerun episode entity paths belong to `sx-episodes`; nominal camera names/mounts/rates belong to
+the embodiment. Per-unit measured calibration belongs to the episode.
 
 Deliberate boundaries:
 
