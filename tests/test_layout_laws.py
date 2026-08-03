@@ -2,12 +2,7 @@
 
 import pytest
 
-from sx_embodiments import (
-    ChannelKind,
-    LayoutError,
-    UnknownEmbodimentError,
-    embodiments,
-)
+from sx_embodiments import ChannelKind, LayoutError, UnknownEmbodimentError, embodiments
 
 
 def test_bimanual_so101_state_is_the_supervisors_wire_convention() -> None:

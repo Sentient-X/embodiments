@@ -1,18 +1,14 @@
 """One content-addressed embodiment object and a friendly-name registry."""
 
 from .assets import (
-    AssetFormat,
-    AssetProvenance,
-    AssetRef,
-    AssetRole,
     EmbodiedAsset,
-    validate_logical_path,
+    asset_root,
+    resolve_asset,
 )
 from .compose import Component, ComponentKind, ComponentRole
 from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
-    AssetIntegrityError,
     AssetsUnavailableError,
     ComponentGraphError,
     CompositionError,
@@ -32,11 +28,6 @@ from .parts import CameraModality, LensProjection, SensorModel
 
 __all__ = [
     "AssetDigestMismatchError",
-    "AssetFormat",
-    "AssetIntegrityError",
-    "AssetProvenance",
-    "AssetRef",
-    "AssetRole",
     "AssetsUnavailableError",
     "CameraModality",
     "ChannelKind",
@@ -64,6 +55,7 @@ __all__ = [
     "SensorModel",
     "StateSpace",
     "UnknownEmbodimentError",
+    "asset_root",
     "embodiments",
-    "validate_logical_path",
+    "resolve_asset",
 ]

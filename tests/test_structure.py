@@ -1,10 +1,6 @@
 from sx_contracts import Capability, ComponentId
 
-from sx_embodiments import (
-    ComponentKind,
-    ComponentRole,
-    embodiments,
-)
+from sx_embodiments import ComponentKind, ComponentRole, embodiments
 
 
 def test_franka_component_graph_is_topological_and_capability_bearing() -> None:

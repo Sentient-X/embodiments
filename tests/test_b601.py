@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from sx_contracts import Capability
+from sx_contracts.assets import AssetFormat, AssetRole
 
 from sx_embodiments import (
     ChannelKind,
@@ -20,7 +21,6 @@ from sx_embodiments import (
     EmbodimentName,
     embodiments,
 )
-from sx_embodiments.assets import AssetFormat, AssetRole
 from sx_embodiments.compose import EmbodimentDefinition
 from sx_embodiments.errors import CompositionError
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS

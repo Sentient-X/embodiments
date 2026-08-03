@@ -1,7 +1,7 @@
 [project]
 name = "sx-embodiments"
 version = "0.1.0"
-description = "Dependency-free embodiment and robotics asset manifests shared across Sentient-X services."
+description = "The canonical embodiment registry over the sx-contracts asset vocabulary, shared across Sentient-X services."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }

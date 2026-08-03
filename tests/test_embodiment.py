@@ -5,13 +5,15 @@ from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
-
-from sx_embodiments import (
+from sx_contracts.assets import (
     AssetFormat,
     AssetIntegrityError,
     AssetProvenance,
     AssetRef,
     AssetRole,
+)
+
+from sx_embodiments import (
     EmbodiedAsset,
     Embodiment,
     EmbodimentId,

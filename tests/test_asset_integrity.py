@@ -6,8 +6,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from sx_contracts.assets import AssetFormat
 
-from sx_embodiments import AssetDigestMismatchError, AssetFormat, AssetsUnavailableError
+from sx_embodiments import AssetDigestMismatchError, AssetsUnavailableError, resolve_asset
 from sx_embodiments.assets import PackagedAsset, asset_root
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.b601 import B601_DM_URDF
@@ -143,7 +144,7 @@ def test_missing_packaged_asset_fails_closed() -> None:
 
 def test_resolve_asset_inverts_ref_and_verifies_bytes() -> None:
     ref = SO101_URDF.ref()
-    resolved = ref.local_path()
+    resolved = resolve_asset(ref)
     assert resolved == SO101_URDF.path()
     assert hashlib.sha256(resolved.read_bytes()).hexdigest() == ref.sha256
 
@@ -151,8 +152,8 @@ def test_resolve_asset_inverts_ref_and_verifies_bytes() -> None:
 def test_resolve_asset_fails_closed() -> None:
     ref = SO101_URDF.ref()
     with pytest.raises(AssetsUnavailableError, match="not a packaged"):
-        replace(ref, uri="https://example.com/so101.urdf").local_path()
+        resolve_asset(replace(ref, uri="https://example.com/so101.urdf"))
     with pytest.raises(AssetsUnavailableError, match="missing on disk"):
-        replace(ref, uri="package://sx-embodiments/so101/ghost.urdf").local_path()
+        resolve_asset(replace(ref, uri="package://sx-embodiments/so101/ghost.urdf"))
     with pytest.raises(AssetDigestMismatchError):
-        replace(ref, sha256="0" * 64).local_path()
+        resolve_asset(replace(ref, sha256="0" * 64))

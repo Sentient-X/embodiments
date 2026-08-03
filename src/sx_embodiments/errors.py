@@ -1,5 +1,9 @@
 """Typed failure modes for every sx_embodiments contract violation.
 
+(The asset *vocabulary* error, ``AssetIntegrityError``, lives with the vocabulary in
+``sx_contracts.assets`` since the 2026-08-03 absorption; the digest-mismatch error here
+subclasses it AND :class:`EmbodimentError` so both catch surfaces keep working.)
+
 Every rejection in this package raises a subclass of :class:`EmbodimentError` carrying the
 identifying field of whatever failed. The base inherits :class:`ValueError` deliberately:
 consumer boundaries that funnel construction failures through ``except ValueError`` (the
@@ -7,13 +11,11 @@ data-catalog episode-dir ingest, pre-adoption tests) keep failing closed while a
 migrate to the specific types.
 """
 
+from sx_contracts.assets import AssetIntegrityError
+
 
 class EmbodimentError(ValueError):
     """Base for all sx_embodiments contract violations."""
-
-
-class AssetIntegrityError(EmbodimentError):
-    """An asset reference is malformed: bad URI, digest, or size."""
 
 
 class MissingUrdfError(EmbodimentError):
@@ -25,7 +27,7 @@ class MissingUrdfError(EmbodimentError):
         self.count = count
 
 
-class AssetDigestMismatchError(AssetIntegrityError):
+class AssetDigestMismatchError(AssetIntegrityError, EmbodimentError):
     """Packaged asset bytes do not match their declared content digest."""
 
     def __init__(self, relpath: str, expected: str, actual: str) -> None:

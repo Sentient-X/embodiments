@@ -9,10 +9,9 @@ import xml.etree.ElementTree as ET
 from math import radians
 from pathlib import Path
 
-from sx_embodiments import (
-    AssetFormat,
-    embodiments,
-)
+from sx_contracts.assets import AssetFormat
+
+from sx_embodiments import embodiments
 from sx_embodiments.known.b601 import B601_ARM, B601_DM_URDF, B601_GRIPPER
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
