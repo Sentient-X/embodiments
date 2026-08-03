@@ -55,6 +55,10 @@ class AssetFormat(StrEnum):
     USDC = "usdc"
     USDZ = "usdz"
     MESH = "mesh"
+    SPLAT = "splat"
+    """A gaussian-splat radiance field (.ply/.spz/.lcc) — the visual record of a
+    captured or generated environment (the Worlds artifact ladder's reconstruction
+    rung)."""
     CALIBRATION = "calibration"
     OTHER = "other"
 
