@@ -7,7 +7,14 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..compose import (
+    BaseMount,
+    Component,
+    ComponentRole,
+    EmbodimentDefinition,
+    MountFrame,
+    MountKind,
+)
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import (
@@ -94,6 +101,13 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
         Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
     ),
     rates=ControlRates(policy_hz=20.0),
+    # Omron LD-60 chassis footprint (datasheet 699 x 500 mm); it drives on the floor
+    # and placement adds the facing constraint toward the work support.
+    base_mount=BaseMount(
+        kind=MountKind.MOBILE,
+        frame="base",
+        half_extents=(0.35, 0.25),
+    ),
 )
 
 FRANKA_SPEC: Final = EmbodimentDefinition(
@@ -104,5 +118,12 @@ FRANKA_SPEC: Final = EmbodimentDefinition(
     attachments=(
         Component("arm", PANDA_ARM, ComponentRole.BODY),
         Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
+    ),
+    # Footprint measured from the menagerie link0 collision geometry (xy AABB).
+    base_mount=BaseMount(
+        kind=MountKind.BOLT_DOWN,
+        frame="link0",
+        half_extents=(0.147, 0.099),
+        centre=(-0.042, 0.001),
     ),
 )

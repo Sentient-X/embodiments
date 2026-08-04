@@ -21,10 +21,12 @@ from .assets import (
     PackagedAsset,
 )
 from .compose import (
+    BaseMount,
     Component,
     ComponentRole,
     EmbodimentDefinition,
     MountFrame,
+    MountKind,
     camera_bindings,
     state_space,
     validate_components,
@@ -51,7 +53,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +73,10 @@ class Embodiment:
     components: tuple[Component, ...]
     assets: tuple[EmbodiedAsset, ...]
     rates: ControlRates | None = None
+    # How the body meets the world (the placement solver's body-side fact). Optional:
+    # a body nobody places in a world yet simply hasn't declared it; the solver's
+    # refusal on None is typed at that boundary.
+    base_mount: BaseMount | None = None
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -235,6 +241,17 @@ class Embodiment:
                 if self.rates is not None
                 else None
             ),
+            "base_mount": (
+                {
+                    "kind": self.base_mount.kind.value,
+                    "frame": self.base_mount.frame,
+                    "half_extents": list(self.base_mount.half_extents),
+                    "centre": list(self.base_mount.centre),
+                    "clearance_m": self.base_mount.clearance_m,
+                }
+                if self.base_mount is not None
+                else None
+            ),
             "assets": [_asset_to_dict(asset) for asset in self.assets],
         }
 
@@ -253,6 +270,7 @@ class Embodiment:
                 "revision",
                 "components",
                 "rates",
+                "base_mount",
                 "assets",
             },
             "embodiment",
@@ -277,6 +295,7 @@ class Embodiment:
             ),
             components=_parse_components(_require(document, "components")),
             rates=_parse_rates(_require(document, "rates")),
+            base_mount=_parse_base_mount(_require(document, "base_mount")),
             assets=_parse_assets(_require(document, "assets")),
         )
         if embodiment.id != expected_id:
@@ -676,6 +695,28 @@ def _parse_rates(raw: object) -> ControlRates | None:
     )
 
 
+def _parse_base_mount(raw: object) -> BaseMount | None:
+    if raw is None:
+        return None
+    entry = _mapping(raw, "base_mount")
+    _exact_keys(entry, {"kind", "frame", "half_extents", "centre", "clearance_m"}, "base_mount")
+    try:
+        kind = MountKind(_string(entry, "kind", "base_mount"))
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"base_mount.kind is unknown: {exc}") from exc
+    half = _parse_pair(entry["half_extents"], "base_mount.half_extents")
+    centre = _parse_pair(entry["centre"], "base_mount.centre")
+    if half is None or centre is None:
+        raise EmbodimentSchemaError("base_mount.half_extents and centre must be pairs")
+    return BaseMount(
+        kind=kind,
+        frame=_string(entry, "frame", "base_mount"),
+        half_extents=half,
+        centre=centre,
+        clearance_m=_number(entry["clearance_m"], "base_mount.clearance_m"),
+    )
+
+
 def _parse_resolution(raw: object, label: str) -> tuple[int, int] | None:
     if raw is None:
         return None
@@ -736,6 +777,7 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         components=tuple(_portable_component(component) for component in definition.attachments),
         assets=tuple(EmbodiedAsset.from_ref(ref) for ref in refs),
         rates=definition.rates,
+        base_mount=definition.base_mount,
     )
 
 

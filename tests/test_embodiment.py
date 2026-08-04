@@ -73,13 +73,16 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 9
+    assert wire["schema_version"] == 10
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
     assert Embodiment.from_dict(wire) == embodiment
     assert Embodiment.from_json(embodiment.to_json()) == embodiment
     assert embodiment.state.width == 7
+    mount = embodiment.base_mount
+    assert mount is not None and mount.kind.value == "bolt_down" and mount.frame == "base_link"
+    assert Embodiment.from_dict(wire).base_mount == mount
 
 
 def test_tool_frame_facts_round_trip_and_fail_closed() -> None:

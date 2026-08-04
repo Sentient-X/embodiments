@@ -53,6 +53,32 @@ class MountFrame:
     frame: str = ""  # frame/link name in the parent's description
 
 
+class MountKind(StrEnum):
+    """How a body meets the world — one side of the stance table placement solves over."""
+
+    BOLT_DOWN = "bolt_down"  # bolted flat onto a support surface (benchtop arms)
+    FREE_STANDING = "free_standing"  # rests unanchored on a support (tripods, fixtures)
+    MOBILE = "mobile"  # drives on the floor; placement adds a facing constraint
+    CLAMP_EDGE = "clamp_edge"  # clamps to a support's edge segment
+
+
+@dataclass(frozen=True, slots=True)
+class BaseMount:
+    """How this embodiment's root meets the world: the body's half of a placement.
+
+    ``frame`` names the footprint link in the registered description; the footprint is
+    the axis-aligned rectangle ``centre ± half_extents`` in that frame's xy plane
+    (measured from the description's collision geometry, not eyeballed);
+    ``clearance_m`` is the free margin placement must keep around it.
+    """
+
+    kind: MountKind
+    frame: str
+    half_extents: tuple[float, float]
+    centre: tuple[float, float] = (0.0, 0.0)
+    clearance_m: float = 0.0
+
+
 @dataclass(frozen=True, slots=True)
 class Component:
     """One named node in the embodiment graph, carrying its complete hardware facts."""
@@ -99,6 +125,7 @@ class EmbodimentDefinition:
     attachments: tuple[Component, ...]
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
+    base_mount: BaseMount | None = None
 
     def __post_init__(self) -> None:
         name = str(self.name)

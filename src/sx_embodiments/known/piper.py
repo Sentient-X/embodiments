@@ -10,7 +10,14 @@ deployed limits win on conflict because live safety constraints are derived from
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..compose import (
+    BaseMount,
+    Component,
+    ComponentRole,
+    EmbodimentDefinition,
+    MountFrame,
+    MountKind,
+)
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
@@ -76,4 +83,11 @@ PIPER_SPEC: Final = EmbodimentDefinition(
         Component("gripper", PIPER_GRIPPER, ComponentRole.BODY, MountFrame("arm", "joint6")),
     ),
     rates=ControlRates(policy_hz=30.0),
+    # Footprint measured from the menagerie base_link collision geometry (xy AABB).
+    base_mount=BaseMount(
+        kind=MountKind.BOLT_DOWN,
+        frame="base_link",
+        half_extents=(0.065, 0.036),
+        centre=(-0.011, 0.0),
+    ),
 )

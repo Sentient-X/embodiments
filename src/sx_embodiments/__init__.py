@@ -5,7 +5,7 @@ from .assets import (
     asset_root,
     resolve_asset,
 )
-from .compose import Component, ComponentKind, ComponentRole
+from .compose import BaseMount, Component, ComponentKind, ComponentRole, MountKind
 from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
@@ -29,6 +29,7 @@ from .parts import CameraModality, LensProjection, SensorModel
 __all__ = [
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
+    "BaseMount",
     "CameraModality",
     "ChannelKind",
     "Component",
@@ -50,6 +51,7 @@ __all__ = [
     "LayoutError",
     "LensProjection",
     "MissingUrdfError",
+    "MountKind",
     "PartId",
     "PartValidationError",
     "SensorModel",
