@@ -58,6 +58,10 @@ PANDA_ARM: Final = ArmSpec(
     joint_lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
     joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
+    # Work-ready: gripper straight down 0.26 m in front of the mount plane, 0.16 m above
+    # it, elbow up — the configuration a benchtop task starts from (the classic Franka
+    # ready holds the hand ~0.5 m up, staging rather than working height).
+    ready_joints=(0.0, -0.153, 0.0, -2.715, 0.0, 1.932, 0.785),
     assets=(PANDA_URDF, PANDA_MJCF),
     # Franka Emika Panda datasheet (download.franka.de/Datasheet-EN.pdf).
     physical=PhysicalSpec(payload_kg=3.0, reach_m=0.855, mass_kg=18.0),
@@ -70,6 +74,10 @@ PANDA_GRIPPER: Final = GripperSpec(
     joint_lower=(0.0,),
     joint_upper=(0.04,),
     travel_m=(0.0, 0.08),  # parallel jaw: aperture = 2 x finger stroke (0.04 m each)
+    # Midpoint of the finger pads along the hand frame's approach (+z) axis: fingers mount
+    # 0.0584 m from the hand origin and the pads centre 0.045 m further — the official
+    # flange-to-TCP 0.1034 m (the flange and hand frames share the z axis).
+    grasp_centre_m=(0.0, 0.0, 0.1034),
     mimic_joints=(MimicJoint("panda_finger_joint2", of="panda_finger_joint1", multiplier=1.0),),
 )
 
