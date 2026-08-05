@@ -4,19 +4,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType
 
+from sx_contracts.wire import HexDigest
+
 from .errors import EmbodimentSchemaError
 
 EmbodimentName = NewType("EmbodimentName", str)
 PartId = NewType("PartId", str)
 
 
-class EmbodimentId(str):
+class EmbodimentId(HexDigest):
     """The lowercase SHA-256 of one complete embodiment document."""
 
-    def __new__(cls, value: str) -> "EmbodimentId":
-        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
-            raise EmbodimentSchemaError("embodiment id must be 64 lowercase hexadecimal characters")
-        return super().__new__(cls, value)
+    error = EmbodimentSchemaError
+    noun = "embodiment id"
 
 
 class EmbodimentKind(StrEnum):

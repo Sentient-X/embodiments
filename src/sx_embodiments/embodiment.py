@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 from sx_contracts import CapabilityProfile, ComponentCapabilities
+from sx_contracts.identity import canonical_json as canonical_document
+from sx_contracts.identity import content_id
 
 from .assets import (
     AssetFormat,
@@ -109,7 +111,7 @@ class Embodiment:
     @property
     def id(self) -> EmbodimentId:
         """The exact content-addressed identity of this revision."""
-        return EmbodimentId(hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest())
+        return content_id(EmbodimentId, self._content_dict())
 
     @property
     def state(self) -> StateSpace:
@@ -216,15 +218,13 @@ class Embodiment:
 
     def canonical_json(self) -> str:
         """Canonical content bytes used to derive ``id``; the id is not self-hashed."""
-        return json.dumps(
-            self._content_dict(), ensure_ascii=False, separators=(",", ":"), sort_keys=True
-        )
+        return canonical_document(self._content_dict())
 
     def to_dict(self) -> dict[str, object]:
         return {"id": str(self.id), **self._content_dict()}
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return canonical_document(self.to_dict())
 
     def _content_dict(self) -> dict[str, object]:
         return {
