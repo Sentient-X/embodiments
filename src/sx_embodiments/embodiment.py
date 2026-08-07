@@ -73,6 +73,14 @@ class Embodiment:
     The component graph is the sole morphology. State order, roles, camera bindings,
     capabilities, and single-arm projections are derived from it. Friendly names are
     catalog aliases; ``id`` is the digest of the complete schema-11 document.
+
+    **Construction is registry-internal.** Outside this package an embodiment is obtained,
+    never assembled: ``embodiments[name]`` for a registered revision, ``from_dict``/
+    ``from_json`` for a stored document, ``with_assets`` for external-corpus ingest. The
+    arguments this constructor requires — components, lineage, kind, packaged assets — are
+    not on the public surface (see :mod:`sx_embodiments`), so a new revision is a change to
+    :mod:`sx_embodiments.known`, not a literal at a call site. Hardware facts have one
+    owner; a second construction site is a second source of truth.
     """
 
     name: EmbodimentName

@@ -1,6 +1,8 @@
 """The public registry is the only route from a name to a complete embodiment."""
 
-from sx_embodiments import ComponentRole, Embodiment, EmbodimentKind, embodiments
+from sx_embodiments import Embodiment, embodiments
+from sx_embodiments.compose import ComponentRole
+from sx_embodiments.identity import EmbodimentKind
 
 
 def test_piper_kinematics_are_derived_from_the_registry() -> None:

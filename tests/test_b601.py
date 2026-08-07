@@ -14,17 +14,14 @@ from sx_contracts.assets import AssetFormat, AssetRole
 
 from sx_embodiments import (
     ChannelKind,
-    ComponentRole,
     CoordinateUnit,
     Embodiment,
-    EmbodimentKind,
     EmbodimentName,
-    MountedOn,
-    RootMount,
     embodiments,
 )
-from sx_embodiments.compose import EmbodimentDefinition
+from sx_embodiments.compose import ComponentRole, EmbodimentDefinition, MountedOn, RootMount
 from sx_embodiments.errors import CompositionError
+from sx_embodiments.identity import EmbodimentKind
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
 from sx_embodiments.known.b601 import (
     B601_ARM,

@@ -1,6 +1,68 @@
+import dataclasses
+import types
+
 from sx_contracts import Capability, ComponentId
 
-from sx_embodiments import ComponentKind, ComponentRole, MountedOn, RootMount, embodiments
+import sx_embodiments
+from sx_embodiments import embodiments
+from sx_embodiments.compose import ComponentKind, ComponentRole, MountedOn, RootMount
+
+# The whole read-only public surface. An embodiment is obtained from the registry, never
+# assembled: the arguments ``Embodiment(...)`` requires — components, attachments, parts,
+# joint layouts, lineage, kinds — are absent here on purpose, so hardware facts keep one
+# construction site. Adding a name is a deliberate widening; adding construction material
+# hands a second source of truth to every consumer.
+PUBLIC_SURFACE = frozenset(
+    {
+        "AssetDigestMismatchError",
+        "AssetsUnavailableError",
+        "BaseMount",
+        "Bounds",
+        "ChannelKind",
+        "ComponentGraphError",
+        "CompositionError",
+        "CoordinateBounds",
+        "CoordinateUnit",
+        "Embodiment",
+        "EmbodimentError",
+        "EmbodimentId",
+        "EmbodimentName",
+        "EmbodimentSchemaError",
+        "GripperKinematicsError",
+        "InvalidCameraMountError",
+        "LayoutError",
+        "LensProjection",
+        "MissingUrdfError",
+        "MountKind",
+        "PartValidationError",
+        "Unbounded",
+        "UnknownEmbodimentError",
+        "embodiments",
+        "resolve_asset",
+    }
+)
+
+
+def test_public_surface_offers_no_way_to_assemble_an_embodiment() -> None:
+    exported = frozenset(sx_embodiments.__all__)
+    assert exported == PUBLIC_SURFACE
+    leaked = {
+        name
+        for name, value in vars(sx_embodiments).items()
+        if not name.startswith("_")
+        and name not in exported
+        and not isinstance(value, types.ModuleType)
+    }
+    assert not leaked, f"names reachable from the package root but not declared: {sorted(leaked)}"
+    required = {
+        field.name
+        for field in dataclasses.fields(sx_embodiments.Embodiment)
+        if field.default is dataclasses.MISSING
+    }
+    assert required == {"name", "label", "kind", "lineage", "components", "assets"}
+    # Three of the six required arguments have no public spelling at all, so the constructor
+    # is unreachable from outside without deliberately importing a private module.
+    assert not exported & {"Component", "EmbodimentKind", "Lineage"}
 
 
 def test_franka_component_graph_is_topological_and_capability_bearing() -> None:

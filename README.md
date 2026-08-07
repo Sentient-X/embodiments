@@ -16,8 +16,11 @@ robot.urdf          # authoritative content-addressed description
 ```
 
 `Embodiment` is one complete immutable hardware revision. There is no public manifest,
-reference, digest, structure, or kinematics wrapper to assemble. Code that needs hardware facts
-receives the object. Storage and service boundaries that need only identity carry `robot.id`, a
+reference, digest, structure, or kinematics wrapper to assemble — and no public way to
+assemble the revision itself. Code that needs hardware facts receives the object: from the
+registry, from `Embodiment.from_dict`/`from_json` for a stored document, or from
+`with_assets` for external-corpus ingest. Registering new hardware is a change to
+`sx_embodiments.known`, so every fact keeps one construction site. Storage and service boundaries that need only identity carry `robot.id`, a
 64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
 friendly registry name or that content ID.
 

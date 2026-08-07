@@ -1,20 +1,15 @@
-"""One content-addressed embodiment object and a friendly-name registry."""
+"""One content-addressed embodiment object and a friendly-name registry.
 
-from sx_contracts import ProvenancedAsset
+The public surface is read-only on purpose. ``embodiments[...]`` hands out complete
+:class:`~sx_embodiments.embodiment.Embodiment` objects; everything else exported here is
+vocabulary for *reading* one — state layout, base mounts, typed errors, asset resolution.
+The materials an embodiment is assembled from (components, attachments, parts, joint
+layouts, lineage, kinds) are not exported, so no caller outside this package can reach the
+arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodiments.known``.
+"""
 
-from .assets import asset_root, resolve_asset
-from .compose import (
-    BaseMount,
-    BodyAttachment,
-    Component,
-    ComponentKind,
-    ComponentRole,
-    LeaderAttachment,
-    MountedOn,
-    MountKind,
-    RootMount,
-    SensorAttachment,
-)
+from .assets import resolve_asset
+from .compose import BaseMount, MountKind
 from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
@@ -30,62 +25,35 @@ from .errors import (
     PartValidationError,
     UnknownEmbodimentError,
 )
-from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, PartId
-from .known import EmbodimentRegistry, embodiments
-from .layout import (
-    Bounds,
-    ChannelKind,
-    CoordinateBounds,
-    CoordinateUnit,
-    JointAxis,
-    JointLayout,
-    StateSpace,
-    Unbounded,
-)
-from .parts import CameraModality, LensProjection, SensorModel
+from .identity import EmbodimentId, EmbodimentName
+from .known import embodiments
+from .layout import Bounds, ChannelKind, CoordinateBounds, CoordinateUnit, Unbounded
+from .parts import LensProjection
 
 __all__ = [
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",
-    "BodyAttachment",
     "Bounds",
-    "CameraModality",
     "ChannelKind",
-    "Component",
     "ComponentGraphError",
-    "ComponentKind",
-    "ComponentRole",
     "CompositionError",
     "CoordinateBounds",
     "CoordinateUnit",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
-    "EmbodimentKind",
     "EmbodimentName",
-    "EmbodimentRegistry",
     "EmbodimentSchemaError",
     "GripperKinematicsError",
     "InvalidCameraMountError",
-    "JointAxis",
-    "JointLayout",
     "LayoutError",
-    "LeaderAttachment",
     "LensProjection",
     "MissingUrdfError",
     "MountKind",
-    "MountedOn",
-    "PartId",
     "PartValidationError",
-    "ProvenancedAsset",
-    "RootMount",
-    "SensorAttachment",
-    "SensorModel",
-    "StateSpace",
     "Unbounded",
     "UnknownEmbodimentError",
-    "asset_root",
     "embodiments",
     "resolve_asset",
 ]

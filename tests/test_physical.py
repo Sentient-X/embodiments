@@ -2,9 +2,10 @@
 
 import pytest
 
-from sx_embodiments import CameraModality, EmbodimentName, LensProjection, PartId, SensorModel
+from sx_embodiments import EmbodimentName, LensProjection
 from sx_embodiments.compose import camera_bindings
 from sx_embodiments.errors import PartValidationError
+from sx_embodiments.identity import PartId
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
 from sx_embodiments.known.nero import NERO_ARM
 from sx_embodiments.known.panda import PANDA_ARM
@@ -12,8 +13,10 @@ from sx_embodiments.known.piper import PIPER_ARM
 from sx_embodiments.known.so101 import SO101_ARM
 from sx_embodiments.known.yubi import D405_30
 from sx_embodiments.parts import (
+    CameraModality,
     CameraSpec,
     PhysicalSpec,
+    SensorModel,
 )
 
 
