@@ -2,14 +2,15 @@
 
 from typing import Final, Literal
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import EmbodimentDefinition, MountedOn, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec, MimicJoint
+from ._authoring import bounded_layout
 from .sources import menagerie
 
-ALOHA_MJCF: Final = PackagedAsset(
+ALOHA_MJCF: Final = packaged_asset(
     relpath="menagerie/aloha/aloha.xml",
     sha256="68430b29719bda1b75e63f540953f81991bc3fd136bdf0a43bbe3e04393b78d3",
     format=AssetFormat.MJCF,
@@ -17,7 +18,7 @@ ALOHA_MJCF: Final = PackagedAsset(
     provenance=menagerie("aloha/aloha.xml", "BSD-3-Clause"),
     media_type="application/xml",
 )
-ALOHA_URDF: Final = PackagedAsset(
+ALOHA_URDF: Final = packaged_asset(
     relpath="official/aloha/aloha.urdf",
     sha256="16dc0e1a2c84dac010ae629120afce5621e7201c87966ba2a91ff0e069de09a1",
     format=AssetFormat.URDF,
@@ -40,21 +41,23 @@ _ARM_HOME: Final = (0.0, -0.96, 1.16, 0.0, -0.3, 0.0)
 def _aloha_arm(side: Literal["left", "right"]) -> ArmSpec:
     return ArmSpec(
         part_id=PartId(f"aloha-{side}-arm"),
-        joint_names=tuple(
-            f"{side}/{name}"
-            for name in (
-                "waist",
-                "shoulder",
-                "elbow",
-                "forearm_roll",
-                "wrist_angle",
-                "wrist_rotate",
-            )
+        layout=bounded_layout(
+            names=tuple(
+                f"{side}/{name}"
+                for name in (
+                    "waist",
+                    "shoulder",
+                    "elbow",
+                    "forearm_roll",
+                    "wrist_angle",
+                    "wrist_rotate",
+                )
+            ),
+            units=(CoordinateUnit.RADIAN,) * 6,
+            lower=_ARM_LOWER,
+            upper=_ARM_UPPER,
         ),
-        joint_units=(CoordinateUnit.RADIAN,) * 6,
-        joint_lower=_ARM_LOWER,
-        joint_upper=_ARM_UPPER,
-        home_joints=_ARM_HOME,
+        home=_ARM_HOME,
         assets=(ALOHA_URDF, ALOHA_MJCF),
     )
 
@@ -63,10 +66,12 @@ def _aloha_gripper(side: Literal["left", "right"]) -> GripperSpec:
     driven = f"{side}/left_finger"
     return GripperSpec(
         part_id=PartId(f"aloha-{side}-gripper"),
-        joint_names=(driven,),
-        joint_units=(CoordinateUnit.METER,),
-        joint_lower=(0.0,),
-        joint_upper=(0.041,),
+        layout=bounded_layout(
+            names=(driven,),
+            units=(CoordinateUnit.METER,),
+            lower=(0.0,),
+            upper=(0.041,),
+        ),
         travel_m=(0.0, 0.082),
         mimic_joints=(MimicJoint(f"{side}/right_finger", of=driven, multiplier=1.0),),
     )
@@ -83,19 +88,17 @@ ALOHA_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
     attachments=(
-        Component("left_arm", ALOHA_LEFT_ARM, ComponentRole.BODY),
-        Component(
+        body_component("left_arm", ALOHA_LEFT_ARM),
+        body_component(
             "left_gripper",
             ALOHA_LEFT_GRIPPER,
-            ComponentRole.BODY,
-            MountFrame("left_arm", "left/gripper_link"),
+            MountedOn("left_arm", "left/gripper_link"),
         ),
-        Component("right_arm", ALOHA_RIGHT_ARM, ComponentRole.BODY),
-        Component(
+        body_component("right_arm", ALOHA_RIGHT_ARM),
+        body_component(
             "right_gripper",
             ALOHA_RIGHT_GRIPPER,
-            ComponentRole.BODY,
-            MountFrame("right_arm", "right/gripper_link"),
+            MountedOn("right_arm", "right/gripper_link"),
         ),
     ),
 )

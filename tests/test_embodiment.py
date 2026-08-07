@@ -11,10 +11,11 @@ from sx_contracts.assets import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    ProvenancedAsset,
 )
+from sx_contracts.content import ContentBlob, Sha256Digest
 
 from sx_embodiments import (
-    EmbodiedAsset,
     Embodiment,
     EmbodimentId,
     EmbodimentName,
@@ -23,7 +24,7 @@ from sx_embodiments import (
     PartValidationError,
     embodiments,
 )
-from sx_embodiments.curves import Curve1D
+from sx_embodiments.curves import Curve1D, Knot
 
 _DIGEST = "a" * 64
 
@@ -31,26 +32,26 @@ _DIGEST = "a" * 64
 def _ref(
     uri: str = "https://assets.example/arm.urdf",
     sha256: str = _DIGEST,
-) -> EmbodiedAsset:
-    return EmbodiedAsset.from_ref(
-        AssetRef(
-            uri=uri,
-            sha256=sha256,
+) -> ProvenancedAsset:
+    return ProvenancedAsset(
+        asset=AssetRef(
+            location=uri,
+            content=ContentBlob(Sha256Digest(sha256), 0),
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
-            provenance=AssetProvenance(
-                repository="https://assets.example/source",
-                revision="fixture",
-                path="arm.urdf",
-                license_id="Apache-2.0",
-            ),
-        )
+        ),
+        provenance=AssetProvenance(
+            repository="https://assets.example/source",
+            revision="fixture",
+            path="arm.urdf",
+            license_id="Apache-2.0",
+        ),
     )
 
 
 @pytest.mark.parametrize("digest", ["", "A" * 64, "z" * 64, "a" * 63])
 def test_non_canonical_asset_digest_rejected(digest: str) -> None:
-    with pytest.raises(AssetIntegrityError):
+    with pytest.raises(ValueError):
         _ref(sha256=digest)
 
 
@@ -73,7 +74,7 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 10
+    assert wire["schema_version"] == 11
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
@@ -108,24 +109,25 @@ def test_authoritative_urdf_is_an_asset_property() -> None:
 def test_external_assets_preserve_all_embodiment_facts() -> None:
     canonical = embodiments["piper"]
     external_ref = replace(
-        canonical.urdf.ref,
-        uri="bundle://piper/urdf/piper.urdf",
+        canonical.urdf.asset,
+        location="bundle://piper/urdf/piper.urdf",
         logical_path=PurePosixPath("urdf/piper.urdf"),
     )
-    external = canonical.with_assets((external_ref,), urdf=canonical.urdf_bytes)
+    external_asset = ProvenancedAsset(external_ref, canonical.urdf.provenance)
+    external = canonical.with_assets((external_asset,), urdf=canonical.urdf_bytes)
     assert external.state == canonical.state
     assert external.components == canonical.components
     assert external.capabilities == canonical.capabilities
     assert external.cameras == canonical.cameras
     assert external.rates == canonical.rates
-    assert external.assets == (EmbodiedAsset.from_ref(external_ref),)
+    assert external.assets == (external_asset,)
     assert external.id != canonical.id
 
 
 def test_external_assets_rehash_the_authoritative_urdf() -> None:
     canonical = embodiments["piper"]
     with pytest.raises(AssetIntegrityError, match="authoritative URDF bytes"):
-        canonical.with_assets((canonical.urdf.ref,), urdf=b"<robot name='tampered'/>")
+        canonical.with_assets((canonical.urdf,), urdf=b"<robot name='tampered'/>")
 
 
 def test_id_is_the_content_identity() -> None:
@@ -174,9 +176,9 @@ def test_capture_rig_carries_cameras() -> None:
     cameras = [
         component
         for component in cast(list[dict[str, object]], embodiment.to_dict()["components"])
-        if component["type"] == "camera"
+        if cast(dict[str, object], component["attachment"])["kind"] == "sensor"
     ]
-    assert [camera["name"] for camera in cameras] == ["left_wrist", "right_wrist", "base"]
+    assert [camera["instance"] for camera in cameras] == ["left_wrist", "right_wrist", "base"]
     assert embodiment.state.width == 2
 
 
@@ -186,13 +188,17 @@ def test_non_default_camera_optics_round_trip() -> None:
     cameras = [
         component
         for component in cast(list[dict[str, object]], wire["components"])
-        if component["type"] == "camera"
+        if cast(dict[str, object], component["attachment"])["kind"] == "sensor"
     ]
-    assert any(camera["resolution"] == [1280, 720] for camera in cameras)
+    parts = [
+        cast(dict[str, object], cast(dict[str, object], camera["attachment"])["part"])
+        for camera in cameras
+    ]
+    assert any(part["resolution"] == [1280, 720] for part in parts)
     parsed = Embodiment.from_dict(wire)
     assert parsed == embodiment
     assert parsed.id == embodiment.id
-    cameras[0]["projection"] = "orthographic"
+    parts[0]["projection"] = "orthographic"
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict(wire)
 
@@ -213,13 +219,13 @@ def test_arm_kinematics_reject_multi_arm_bodies() -> None:
 
 def test_curve_requires_monotonic_axes() -> None:
     with pytest.raises(PartValidationError):
-        Curve1D(x=(0.0, 1.0, 1.0), y=(0.0, 1.0, 2.0))
+        Curve1D((Knot(0.0, 0.0), Knot(1.0, 1.0), Knot(1.0, 2.0)))
     with pytest.raises(PartValidationError):
-        Curve1D(x=(0.0, 1.0, 2.0), y=(0.0, 1.0, 0.5))
+        Curve1D((Knot(0.0, 0.0), Knot(1.0, 1.0), Knot(2.0, 0.5)))
 
 
 def test_curve_interpolates_and_clamps() -> None:
-    curve = Curve1D(x=(0.0, 1.0, 2.0), y=(10.0, 8.0, 4.0))
+    curve = Curve1D((Knot(0.0, 10.0), Knot(1.0, 8.0), Knot(2.0, 4.0)))
     assert curve.at(0.5) == 9.0
     assert curve.at(-1.0) == 10.0
     assert curve.at(5.0) == 4.0

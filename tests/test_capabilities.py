@@ -1,6 +1,7 @@
 import pytest
 from sx_contracts import (
     Capability,
+    CapabilitySet,
     TaskCapabilityRequirements,
     TaskRoleId,
     TaskRoleRequirement,
@@ -16,7 +17,7 @@ def _manipulation_requirements(count: int) -> TaskCapabilityRequirements:
         tuple(
             TaskRoleRequirement(
                 TaskRoleId(f"manipulation.{index}"),
-                (Capability.SPATIAL_MOTION_SE3, Capability.GRASP),
+                CapabilitySet((Capability.SPATIAL_MOTION_SE3, Capability.GRASP)),
             )
             for index in range(count)
         )

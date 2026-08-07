@@ -19,6 +19,8 @@ from sx_embodiments import (
     Embodiment,
     EmbodimentKind,
     EmbodimentName,
+    MountedOn,
+    RootMount,
     embodiments,
 )
 from sx_embodiments.compose import EmbodimentDefinition
@@ -166,13 +168,16 @@ def test_station_camera_names_are_the_pod_agents_dataset_keys() -> None:
     )
     wrists = bindings[:2]
     assert all(binding.camera.model is SensorModel.REALSENSE_D405 for binding in wrists)
-    assert all(binding.parent_instance.endswith("_arm") for binding in wrists)
+    assert all(
+        isinstance(binding.mount, MountedOn) and binding.mount.parent.endswith("_arm")
+        for binding in wrists
+    )
     top = bindings[2]
     assert top.camera == D435I_30
     assert top.camera.model is SensorModel.REALSENSE_D435  # the deployed unit is a D435i
     assert top.camera.modality is CameraModality.RGBD
     assert top.camera.resolution is None  # D435 depth and RGB natives differ
-    assert top.parent_instance == ""
+    assert isinstance(top.mount, RootMount)
 
 
 def test_mount_frames_name_real_links_in_the_authoritative_description() -> None:
@@ -181,8 +186,7 @@ def test_mount_frames_name_real_links_in_the_authoritative_description() -> None
     }
     for name in ("b601-dm", "bimanual-b601-dm", "b601-dm-station"):
         for component in embodiments[name].components:
-            parent = component.mount.parent_instance
-            if parent:  # world-mounted parts (leaders, the overhead camera) name no link
+            if isinstance(component.mount, MountedOn):
                 assert component.mount.frame in links, f"{name}: {component.instance}"
 
 
@@ -193,15 +197,17 @@ def test_capabilities_are_a_grasping_pair_plus_three_rgbd_sensors() -> None:
     }
     # An undescribed leader device offers nothing derivable, so it is absent entirely.
     assert "left_leader" not in profile and "right_leader" not in profile
-    assert profile["left_arm"] == (Capability.SPATIAL_MOTION_SE3,)
-    assert profile["right_arm"] == (Capability.SPATIAL_MOTION_SE3,)
-    grasp = (Capability.SPATIAL_MOTION_SE3, Capability.GRASP, Capability.GRASP_PARALLEL)
-    assert profile["left_gripper"] == grasp
-    assert profile["right_gripper"] == grasp
-    sensing = (Capability.SENSING_RGB, Capability.SENSING_DEPTH)
-    assert profile["left_wrist_camera"] == sensing
-    assert profile["right_wrist_camera"] == sensing
-    assert profile["top_camera"] == sensing
+    assert profile["left_arm"].values == frozenset({Capability.SPATIAL_MOTION_SE3})
+    assert profile["right_arm"].values == frozenset({Capability.SPATIAL_MOTION_SE3})
+    grasp = frozenset(
+        {Capability.SPATIAL_MOTION_SE3, Capability.GRASP, Capability.GRASP_PARALLEL}
+    )
+    assert profile["left_gripper"].values == grasp
+    assert profile["right_gripper"].values == grasp
+    sensing = frozenset({Capability.SENSING_RGB, Capability.SENSING_DEPTH})
+    assert profile["left_wrist_camera"].values == sensing
+    assert profile["right_wrist_camera"].values == sensing
+    assert profile["top_camera"].values == sensing
 
 
 def test_content_ids_are_distinct_and_round_trip() -> None:
@@ -231,7 +237,7 @@ def test_the_declared_graph_is_topologically_ordered() -> None:
     for spec in (B601_DM_SPEC, BIMANUAL_B601_DM_SPEC, B601_DM_STATION_SPEC):
         declared: set[str] = set()
         for component in spec.attachments:
-            parent = component.mount.parent_instance
-            assert not parent or parent in declared, component.instance
+            if isinstance(component.mount, MountedOn):
+                assert component.mount.parent in declared, component.instance
             declared.add(component.instance)
         assert spec.layout_declared()

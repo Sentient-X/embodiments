@@ -13,14 +13,41 @@ marks the embodiment's channel layout as not yet declared, so layout-derived enf
 skips rather than invents.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from .assets import PackagedAsset
 from .curves import Curve1D
 from .errors import GripperKinematicsError, PartValidationError
 from .identity import PartId
-from .layout import CoordinateUnit
+from .layout import Bounds, CoordinateUnit, JointLayout
+
+if TYPE_CHECKING:
+    from .compose import ComponentMount
+
+
+def _names(layout: JointLayout) -> tuple[str, ...]:
+    return tuple(axis.name for axis in layout.axes)
+
+
+def _units(layout: JointLayout) -> tuple[CoordinateUnit, ...]:
+    return tuple(axis.unit for axis in layout.axes)
+
+
+def _lowers(layout: JointLayout) -> tuple[float, ...]:
+    if any(not isinstance(axis.bounds, Bounds) for axis in layout.axes):
+        raise PartValidationError(PartId("layout"), "layout contains unbounded axes")
+    return tuple(axis.bounds.lower for axis in layout.axes if isinstance(axis.bounds, Bounds))
+
+
+def _uppers(layout: JointLayout) -> tuple[float, ...]:
+    if any(not isinstance(axis.bounds, Bounds) for axis in layout.axes):
+        raise PartValidationError(PartId("layout"), "layout contains unbounded axes")
+    return tuple(axis.bounds.upper for axis in layout.axes if isinstance(axis.bounds, Bounds))
 
 
 class SensorModel(StrEnum):
@@ -65,44 +92,38 @@ class PhysicalSpec:
     mass_kg: float | None = None
 
     def __post_init__(self) -> None:
+        if self.payload_kg is None and self.reach_m is None and self.mass_kg is None:
+            raise PartValidationError(PartId("physical"), "an empty physical spec is not a fact")
         for name in ("payload_kg", "reach_m", "mass_kg"):
             value: float | None = getattr(self, name)
-            if value is not None and value <= 0.0:
+            if value is not None and (not math.isfinite(value) or value <= 0.0):
                 raise PartValidationError(PartId("physical"), f"{name} must be positive")
 
 
-def _validate_joint_box(
-    part_id: PartId,
-    joint_names: tuple[str, ...],
-    joint_units: tuple[CoordinateUnit, ...],
-    lower: tuple[float, ...],
-    upper: tuple[float, ...],
-) -> None:
-    if len({*joint_names}) != len(joint_names):
-        raise PartValidationError(part_id, "joint names must be unique")
-    if not (len(joint_names) == len(joint_units) == len(lower) == len(upper)):
-        raise PartValidationError(part_id, "joint names, units, and limits must have equal length")
-    if any(lo >= hi for lo, hi in zip(lower, upper, strict=True)):
-        raise PartValidationError(part_id, "joint lower limits must be < upper limits")
-
-
-def _validate_joint_part(
+def _validate_configuration(
     part_id: PartId,
     noun: str,
-    joint_names: tuple[str, ...],
-    joint_units: tuple[CoordinateUnit, ...],
-    lower: tuple[float, ...],
-    upper: tuple[float, ...],
-    home_joints: tuple[float, ...],
+    layout: JointLayout,
+    home: tuple[float, ...],
+    ready: tuple[float, ...] | None = None,
 ) -> None:
-    """The shared invariants of any actuated joint chain (arm, group, gripper homes)."""
-    if not joint_names:
+    if not layout.axes:
         raise PartValidationError(part_id, f"{noun} needs at least one joint")
-    _validate_joint_box(part_id, joint_names, joint_units, lower, upper)
-    if len(home_joints) != len(joint_names):
-        raise PartValidationError(part_id, "home_joints must match the joint count")
-    if any(home < lo or home > hi for home, lo, hi in zip(home_joints, lower, upper, strict=True)):
-        raise PartValidationError(part_id, "home_joints must lie within the limits")
+    for field_name, values in (("home", home), ("ready", ready)):
+        if values is None:
+            continue
+        if len(values) != layout.width:
+            raise PartValidationError(part_id, f"{field_name} must match the joint count")
+        if any(not math.isfinite(value) for value in values):
+            raise PartValidationError(part_id, f"{field_name} must contain finite values")
+        for value, axis in zip(values, layout.axes, strict=True):
+            if (
+                isinstance(axis.bounds, Bounds)
+                and not axis.bounds.lower <= value <= axis.bounds.upper
+            ):
+                raise PartValidationError(
+                    part_id, f"{field_name} must lie within the joint bounds"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,39 +137,42 @@ class ArmSpec:
     """
 
     part_id: PartId
-    joint_names: tuple[str, ...]
-    joint_units: tuple[CoordinateUnit, ...]
-    joint_lower: tuple[float, ...]
-    joint_upper: tuple[float, ...]
-    home_joints: tuple[float, ...]
-    ready_joints: tuple[float, ...] | None = None
+    layout: JointLayout
+    home: tuple[float, ...]
+    ready: tuple[float, ...] | None = None
     assets: tuple[PackagedAsset, ...] = ()
     physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
-        _validate_joint_part(
-            self.part_id,
-            "an arm",
-            self.joint_names,
-            self.joint_units,
-            self.joint_lower,
-            self.joint_upper,
-            self.home_joints,
-        )
-        if self.ready_joints is not None:
-            if len(self.ready_joints) != len(self.joint_names):
-                raise PartValidationError(self.part_id, "ready_joints must match the joint count")
-            if any(
-                ready < lo or ready > hi
-                for ready, lo, hi in zip(
-                    self.ready_joints, self.joint_lower, self.joint_upper, strict=True
-                )
-            ):
-                raise PartValidationError(self.part_id, "ready_joints must lie within the limits")
+        _validate_configuration(self.part_id, "an arm", self.layout, self.home, self.ready)
 
     @property
     def dof(self) -> int:
-        return len(self.joint_names)
+        return self.layout.width
+
+    @property
+    def home_joints(self) -> tuple[float, ...]:
+        return self.home
+
+    @property
+    def ready_joints(self) -> tuple[float, ...] | None:
+        return self.ready
+
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        return _names(self.layout)
+
+    @property
+    def joint_units(self) -> tuple[CoordinateUnit, ...]:
+        return _units(self.layout)
+
+    @property
+    def joint_lower(self) -> tuple[float, ...]:
+        return _lowers(self.layout)
+
+    @property
+    def joint_upper(self) -> tuple[float, ...]:
+        return _uppers(self.layout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,27 +184,36 @@ class JointGroupSpec:
     """
 
     part_id: PartId
-    joint_names: tuple[str, ...]
-    joint_units: tuple[CoordinateUnit, ...]
-    joint_lower: tuple[float, ...]
-    joint_upper: tuple[float, ...]
-    home_joints: tuple[float, ...]
+    layout: JointLayout
+    home: tuple[float, ...]
     assets: tuple[PackagedAsset, ...] = ()
 
     def __post_init__(self) -> None:
-        _validate_joint_part(
-            self.part_id,
-            "a joint group",
-            self.joint_names,
-            self.joint_units,
-            self.joint_lower,
-            self.joint_upper,
-            self.home_joints,
-        )
+        _validate_configuration(self.part_id, "a joint group", self.layout, self.home)
 
     @property
     def dof(self) -> int:
-        return len(self.joint_names)
+        return self.layout.width
+
+    @property
+    def home_joints(self) -> tuple[float, ...]:
+        return self.home
+
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        return _names(self.layout)
+
+    @property
+    def joint_units(self) -> tuple[CoordinateUnit, ...]:
+        return _units(self.layout)
+
+    @property
+    def joint_lower(self) -> tuple[float, ...]:
+        return _lowers(self.layout)
+
+    @property
+    def joint_upper(self) -> tuple[float, ...]:
+        return _uppers(self.layout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +223,12 @@ class MimicJoint:
     joint_name: str
     of: str  # the mimicked joint; may itself be a mimic (the DAS two-level chain)
     multiplier: float
+
+    def __post_init__(self) -> None:
+        if not self.joint_name.strip() or not self.of.strip():
+            raise PartValidationError(PartId("mimic"), "joint names must not be empty")
+        if not math.isfinite(self.multiplier):
+            raise PartValidationError(PartId("mimic"), "multiplier must be finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,10 +244,7 @@ class GripperSpec:
     """
 
     part_id: PartId
-    joint_names: tuple[str, ...]
-    joint_units: tuple[CoordinateUnit, ...]
-    joint_lower: tuple[float, ...]
-    joint_upper: tuple[float, ...]
+    layout: JointLayout
     travel_m: tuple[float, float] | None = None
     grasp_centre_m: tuple[float, float, float] | None = None
     mimic_joints: tuple[MimicJoint, ...] = ()
@@ -217,27 +253,28 @@ class GripperSpec:
     physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
-        if not self.joint_names:
+        if not self.layout.axes:
             raise PartValidationError(self.part_id, "a gripper needs at least one actuated joint")
-        _validate_joint_box(
-            self.part_id,
-            self.joint_names,
-            self.joint_units,
-            self.joint_lower,
-            self.joint_upper,
-        )
+        if any(not isinstance(axis.bounds, Bounds) for axis in self.layout.axes):
+            raise PartValidationError(self.part_id, "gripper axes require finite bounds")
         if self.travel_m is not None:
             lo, hi = self.travel_m
-            if not 0.0 <= lo < hi:
+            if not math.isfinite(lo) or not math.isfinite(hi) or not 0.0 <= lo < hi:
                 raise PartValidationError(self.part_id, "travel must satisfy 0 <= closed < open")
-        known = {*self.joint_names}
+        if self.grasp_centre_m is not None and any(
+            not math.isfinite(value) for value in self.grasp_centre_m
+        ):
+            raise PartValidationError(self.part_id, "grasp centre must contain finite values")
+        known = {axis.name for axis in self.layout.axes}
         for mimic in self.mimic_joints:
             if mimic.joint_name in known:
                 raise PartValidationError(
                     self.part_id, f"mimic joint {mimic.joint_name!r} duplicates a declared joint"
                 )
             known.add(mimic.joint_name)
-        resolvable = {*self.joint_names} | {m.joint_name for m in self.mimic_joints}
+        resolvable = {axis.name for axis in self.layout.axes} | {
+            mimic.joint_name for mimic in self.mimic_joints
+        }
         for mimic in self.mimic_joints:
             if mimic.of not in resolvable:
                 raise PartValidationError(
@@ -246,7 +283,23 @@ class GripperSpec:
 
     @property
     def dof(self) -> int:
-        return len(self.joint_names)
+        return self.layout.width
+
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        return _names(self.layout)
+
+    @property
+    def joint_units(self) -> tuple[CoordinateUnit, ...]:
+        return _units(self.layout)
+
+    @property
+    def joint_lower(self) -> tuple[float, ...]:
+        return _lowers(self.layout)
+
+    @property
+    def joint_upper(self) -> tuple[float, ...]:
+        return _uppers(self.layout)
 
     def aperture_from_drive(self, q: float) -> float:
         """Aperture (meters) produced by drive-joint value ``q``, clamped to the travel.
@@ -261,7 +314,9 @@ class GripperSpec:
         if self.gap_curve is not None:
             return self.gap_curve.at(q)
         if self.travel_m is not None and self.dof == 1:
-            lo, hi = self.joint_lower[0], self.joint_upper[0]
+            bounds = self.layout.axes[0].bounds
+            assert isinstance(bounds, Bounds)
+            lo, hi = bounds.lower, bounds.upper
             closed, opened = self.travel_m
             clamped = min(max(q, lo), hi)
             return closed + (clamped - lo) / (hi - lo) * (opened - closed)
@@ -276,7 +331,9 @@ class GripperSpec:
         if self.gap_curve is not None:
             return self.gap_curve.inverse_at(aperture_m)
         if self.travel_m is not None and self.dof == 1:
-            lo, hi = self.joint_lower[0], self.joint_upper[0]
+            bounds = self.layout.axes[0].bounds
+            assert isinstance(bounds, Bounds)
+            lo, hi = bounds.lower, bounds.upper
             closed, opened = self.travel_m
             clamped = min(max(aperture_m, closed), opened)
             return lo + (clamped - closed) / (opened - closed) * (hi - lo)
@@ -303,11 +360,18 @@ class CameraSpec:
     resolution: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
-        if self.fps <= 0.0:
+        if not math.isfinite(self.fps) or self.fps <= 0.0:
             raise PartValidationError(self.part_id, "fps must be positive")
         if self.resolution is not None:
             width, height = self.resolution
-            if width <= 0 or height <= 0:
+            if (
+                isinstance(width, bool)
+                or isinstance(height, bool)
+                or not isinstance(width, int)
+                or not isinstance(height, int)
+                or width <= 0
+                or height <= 0
+            ):
                 raise PartValidationError(self.part_id, "resolution must be positive")
 
 
@@ -317,15 +381,16 @@ class MobileBaseSpec:
     joint-space vector (the Panda-on-Omron case today)."""
 
     part_id: PartId
-    channel_names: tuple[str, ...] = ()
-    channel_units: tuple[CoordinateUnit, ...] = ()
+    layout: JointLayout = field(default_factory=lambda: JointLayout(()))
     assets: tuple[PackagedAsset, ...] = ()
 
-    def __post_init__(self) -> None:
-        if len(self.channel_names) != len(self.channel_units):
-            raise PartValidationError(
-                self.part_id, "base channel names and units must have equal length"
-            )
+    @property
+    def channel_names(self) -> tuple[str, ...]:
+        return _names(self.layout)
+
+    @property
+    def channel_units(self) -> tuple[CoordinateUnit, ...]:
+        return _units(self.layout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +399,12 @@ class ForceTorqueSpec:
 
     part_id: PartId
     rate_hz: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.rate_hz is not None and (
+            not math.isfinite(self.rate_hz) or self.rate_hz <= 0.0
+        ):
+            raise PartValidationError(self.part_id, "rate_hz must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +420,10 @@ class DeviceSpec:
     part_id: PartId
     description: str = ""
 
+    def __post_init__(self) -> None:
+        if not self.description.strip():
+            raise PartValidationError(self.part_id, "device description must not be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class CameraBinding:
@@ -356,8 +431,21 @@ class CameraBinding:
 
     name: str
     camera: CameraSpec
-    parent_instance: str = ""
-    frame: str = ""
+    mount: ComponentMount
+
+    @property
+    def parent_instance(self) -> str | None:
+        from .compose import MountedOn
+
+        return self.mount.parent if isinstance(self.mount, MountedOn) else None
+
+    @property
+    def frame(self) -> str:
+        from .compose import MountedOn, RootMount
+
+        if isinstance(self.mount, MountedOn | RootMount):
+            return self.mount.frame
+        raise PartValidationError(self.camera.part_id, "camera binding has an unknown mount")
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,9 +456,11 @@ class ControlRates:
     low_level_hz: float | None = None
 
     def __post_init__(self) -> None:
-        if self.policy_hz <= 0.0:
+        if not math.isfinite(self.policy_hz) or self.policy_hz <= 0.0:
             raise PartValidationError(PartId("rates"), "policy_hz must be positive")
-        if self.low_level_hz is not None and self.low_level_hz <= 0.0:
+        if self.low_level_hz is not None and (
+            not math.isfinite(self.low_level_hz) or self.low_level_hz <= 0.0
+        ):
             raise PartValidationError(PartId("rates"), "low_level_hz must be positive")
 
 

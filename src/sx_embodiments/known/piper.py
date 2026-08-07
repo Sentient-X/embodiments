@@ -9,21 +9,21 @@ deployed limits win on conflict because live safety constraints are derived from
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
-    Component,
-    ComponentRole,
     EmbodimentDefinition,
-    MountFrame,
+    MountedOn,
     MountKind,
+    body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
+from ._authoring import bounded_layout
 from .sources import menagerie
 
-PIPER_MJCF: Final = PackagedAsset(
+PIPER_MJCF: Final = packaged_asset(
     relpath="menagerie/agilex_piper/piper.xml",
     sha256="a7b5b5d3b2a68d5c553b2ee9665d54a422bd8bf1fa6f3251bc11834993d37098",
     format=AssetFormat.MJCF,
@@ -31,7 +31,7 @@ PIPER_MJCF: Final = PackagedAsset(
     provenance=menagerie("agilex_piper/piper.xml", "MIT"),
     media_type="application/xml",
 )
-PIPER_URDF: Final = PackagedAsset(
+PIPER_URDF: Final = packaged_asset(
     relpath="official/agilex_piper/piper_description.urdf",
     sha256="884c6536abe861105205cc58681fb069ba408e0673ab6b6222f4f06cdbc9dc9e",
     format=AssetFormat.URDF,
@@ -47,14 +47,16 @@ PIPER_URDF: Final = PackagedAsset(
 
 PIPER_ARM: Final = ArmSpec(
     part_id=PartId("piper-arm"),
-    joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
-    joint_units=(CoordinateUnit.RADIAN,) * 6,
-    joint_lower=(-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439),
-    joint_upper=(2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439),
-    home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    layout=bounded_layout(
+        names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
+        units=(CoordinateUnit.RADIAN,) * 6,
+        lower=(-2.6179, 0.0, -2.967, -1.745, -1.22, -2.09439),
+        upper=(2.6179, 3.14, 0.0, 1.745, 1.22, 2.09439),
+    ),
+    home=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
     # Grasp centre 0.45 m forward, 0.52 m up from the base, pointing straight down, with the
     # wrist roll at zero so its whole travel remains for task yaw on either side.
-    ready_joints=(0.0, 1.4547, -0.9060, 0.0, 1.1093, 0.0),
+    ready=(0.0, 1.4547, -0.9060, 0.0, 1.1093, 0.0),
     assets=(PIPER_URDF, PIPER_MJCF),
     # AgileX PiPER datasheet (global.agilex.ai/products/piper).
     physical=PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2),
@@ -62,10 +64,12 @@ PIPER_ARM: Final = ArmSpec(
 
 PIPER_GRIPPER: Final = GripperSpec(
     part_id=PartId("piper-gripper"),
-    joint_names=("joint7",),
-    joint_units=(CoordinateUnit.METER,),
-    joint_lower=(0.0,),
-    joint_upper=(0.035,),
+    layout=bounded_layout(
+        names=("joint7",),
+        units=(CoordinateUnit.METER,),
+        lower=(0.0,),
+        upper=(0.035,),
+    ),
     travel_m=(0.0, 0.07),  # parallel jaw: aperture = 2 x finger stroke (0.035 m each)
     # Midpoint of the finger pads along the mount frame's approach (+z) axis; the
     # fingertips reach 0.03 m further, the clearance a grasp must leave below the target.
@@ -79,8 +83,8 @@ PIPER_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
     attachments=(
-        Component("arm", PIPER_ARM, ComponentRole.BODY),
-        Component("gripper", PIPER_GRIPPER, ComponentRole.BODY, MountFrame("arm", "joint6")),
+        body_component("arm", PIPER_ARM),
+        body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "joint6")),
     ),
     rates=ControlRates(policy_hz=30.0),
     # Footprint measured from the menagerie base_link collision geometry (xy AABB).

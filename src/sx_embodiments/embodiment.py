@@ -1,5 +1,7 @@
 """One immutable embodiment over one authoritative typed component graph."""
 
+from __future__ import annotations
+
 import dataclasses
 import hashlib
 import json
@@ -10,33 +12,39 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from sx_contracts import CapabilityProfile, ComponentCapabilities
-from sx_contracts.identity import canonical_json as canonical_document
-from sx_contracts.identity import content_id
-
-from .assets import (
+from sx_contracts import CapabilityProfile, CapabilitySet, ComponentCapabilities
+from sx_contracts.assets import (
     AssetFormat,
+    AssetIntegrityError,
     AssetProvenance,
     AssetRef,
     AssetRole,
-    EmbodiedAsset,
-    PackagedAsset,
+    ProvenancedAsset,
 )
+from sx_contracts.content import ContentBlob, Sha256Digest
+from sx_contracts.identity import canonical_json as canonical_document
+from sx_contracts.identity import content_id
+
+from .assets import PackagedAsset, resolve_asset
 from .compose import (
     BaseMount,
+    BodyAttachment,
     Component,
     ComponentRole,
     EmbodimentDefinition,
-    MountFrame,
+    LeaderAttachment,
+    MountedOn,
     MountKind,
+    RootMount,
+    SensorAttachment,
     camera_bindings,
     state_space,
     validate_components,
 )
-from .curves import Curve1D
-from .errors import AssetIntegrityError, EmbodimentSchemaError, LayoutError, MissingUrdfError
+from .curves import Curve1D, Knot
+from .errors import EmbodimentSchemaError, LayoutError, MissingUrdfError
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
-from .layout import CoordinateUnit, StateSpace
+from .layout import Bounds, CoordinateUnit, JointAxis, JointLayout, StateSpace, Unbounded
 from .parts import (
     ArmSpec,
     CameraBinding,
@@ -55,17 +63,16 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 @dataclass(frozen=True, slots=True)
 class Embodiment:
-    """A complete hardware revision.
+    """A complete, content-addressed hardware revision.
 
-    ``components`` is the only stored morphology. State order, camera bindings,
-    capabilities, and single-arm runtime facts are derived from that graph.
-    ``id`` is the SHA-256 of the complete canonical document; friendly names are
-    registry and catalog aliases, never a second revision identity.
+    The component graph is the sole morphology. State order, roles, camera bindings,
+    capabilities, and single-arm projections are derived from it. Friendly names are
+    catalog aliases; ``id`` is the digest of the complete schema-11 document.
     """
 
     name: EmbodimentName
@@ -73,11 +80,8 @@ class Embodiment:
     kind: EmbodimentKind
     lineage: Lineage
     components: tuple[Component, ...]
-    assets: tuple[EmbodiedAsset, ...]
+    assets: tuple[ProvenancedAsset, ...]
     rates: ControlRates | None = None
-    # How the body meets the world (the placement solver's body-side fact). Optional:
-    # a body nobody places in a world yet simply hasn't declared it; the solver's
-    # refusal on None is typed at that boundary.
     base_mount: BaseMount | None = None
     schema_version: int = SCHEMA_VERSION
 
@@ -95,22 +99,29 @@ class Embodiment:
         if not self.assets:
             raise EmbodimentSchemaError("embodiment must reference at least one asset")
         identities = {
-            (asset.uri, asset.sha256, asset.role, asset.logical_path) for asset in self.assets
+            (
+                asset.asset.location,
+                asset.asset.content,
+                asset.asset.role,
+                asset.asset.logical_path,
+                asset.provenance,
+            )
+            for asset in self.assets
         }
         if len(identities) != len(self.assets):
             raise EmbodimentSchemaError("embodiment contains duplicate asset references")
-        urdfs = [
+        urdfs = tuple(
             asset
             for asset in self.assets
-            if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
-        ]
+            if asset.asset.format is AssetFormat.URDF
+            and asset.asset.role is AssetRole.DESCRIPTION
+        )
         if len(urdfs) != 1:
             raise MissingUrdfError(str(self.name), len(urdfs))
         validate_components(str(self.name), self.kind, self.components)
 
     @property
     def id(self) -> EmbodimentId:
-        """The exact content-addressed identity of this revision."""
         return content_id(EmbodimentId, self._content_dict())
 
     @property
@@ -125,7 +136,10 @@ class Embodiment:
     def capabilities(self) -> CapabilityProfile:
         return CapabilityProfile(
             tuple(
-                ComponentCapabilities(component.component_id, component.capabilities)
+                ComponentCapabilities(
+                    component.component_id,
+                    CapabilitySet(component.capabilities),
+                )
                 for component in self.components
                 if component.capabilities
             )
@@ -136,22 +150,23 @@ class Embodiment:
         return self.rates.policy_hz if self.rates is not None else None
 
     @property
-    def urdf(self) -> EmbodiedAsset:
+    def urdf(self) -> ProvenancedAsset:
         return next(
             asset
             for asset in self.assets
-            if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
+            if asset.asset.format is AssetFormat.URDF
+            and asset.asset.role is AssetRole.DESCRIPTION
         )
 
     @property
     def urdf_path(self) -> Path:
-        """Verified local path of the authoritative description asset."""
-        return self.urdf.local_path()
+        """Verified local path of the authoritative packaged description."""
+
+        return resolve_asset(self.urdf.asset)
 
     @property
     def urdf_bytes(self) -> bytes:
-        """Verified bytes of the authoritative description asset."""
-        return self.urdf.read_bytes()
+        return self.urdf_path.read_bytes()
 
     @property
     def single_arm(self) -> ArmSpec:
@@ -169,7 +184,8 @@ class Embodiment:
         grippers = tuple(
             component.part
             for component in self.components
-            if component.role is ComponentRole.BODY and isinstance(component.part, GripperSpec)
+            if component.role is ComponentRole.BODY
+            and isinstance(component.part, GripperSpec)
         )
         if len(grippers) != 1:
             raise LayoutError(str(self.name), "operation requires exactly one gripper")
@@ -188,7 +204,6 @@ class Embodiment:
 
     @property
     def grasp_centre_m(self) -> tuple[float, float, float]:
-        """The grasp centre in the gripper's mount frame; fails closed when undeclared."""
         centre = self.single_gripper.grasp_centre_m
         if centre is None:
             raise LayoutError(str(self.name), "gripper grasp centre is not declared")
@@ -196,8 +211,7 @@ class Embodiment:
 
     @property
     def ready_joints(self) -> tuple[float, ...]:
-        """The arm's work-ready configuration; fails closed when undeclared."""
-        ready = self.single_arm.ready_joints
+        ready = self.single_arm.ready
         if ready is None:
             raise LayoutError(str(self.name), "arm ready configuration is not declared")
         return ready
@@ -205,19 +219,24 @@ class Embodiment:
     @property
     def has_mobile_base(self) -> bool:
         return any(
-            component.role is ComponentRole.BODY and isinstance(component.part, MobileBaseSpec)
+            component.role is ComponentRole.BODY
+            and isinstance(component.part, MobileBaseSpec)
             for component in self.components
         )
 
-    def with_assets(self, assets: tuple[AssetRef, ...], *, urdf: bytes) -> "Embodiment":
-        """Return this morphology bound to another verified asset bundle."""
-        _validate_urdf(self.name, assets, urdf)
-        return dataclasses.replace(
-            self, assets=tuple(EmbodiedAsset.from_ref(asset) for asset in assets)
-        )
+    def with_assets(
+        self,
+        assets: tuple[ProvenancedAsset, ...],
+        *,
+        urdf: bytes,
+    ) -> Embodiment:
+        """Bind the morphology to another complete, provenance-bearing asset set."""
+
+        refs = tuple(asset.asset for asset in assets)
+        _validate_urdf(self.name, refs, urdf)
+        return dataclasses.replace(self, assets=assets)
 
     def canonical_json(self) -> str:
-        """Canonical content bytes used to derive ``id``; the id is not self-hashed."""
         return canonical_document(self._content_dict())
 
     def to_dict(self) -> dict[str, object]:
@@ -232,31 +251,19 @@ class Embodiment:
             "name": str(self.name),
             "label": self.label,
             "kind": self.kind.value,
-            "family": self.lineage.family,
-            "variant": self.lineage.variant,
-            "revision": self.lineage.revision,
+            "lineage": {
+                "family": self.lineage.family,
+                "variant": self.lineage.variant,
+                "revision": self.lineage.revision,
+            },
             "components": [_component_to_dict(component) for component in self.components],
-            "rates": (
-                {"policy_hz": self.rates.policy_hz, "low_level_hz": self.rates.low_level_hz}
-                if self.rates is not None
-                else None
-            ),
-            "base_mount": (
-                {
-                    "kind": self.base_mount.kind.value,
-                    "frame": self.base_mount.frame,
-                    "half_extents": list(self.base_mount.half_extents),
-                    "centre": list(self.base_mount.centre),
-                    "clearance_m": self.base_mount.clearance_m,
-                }
-                if self.base_mount is not None
-                else None
-            ),
-            "assets": [_asset_to_dict(asset) for asset in self.assets],
+            "rates": _rates_to_dict(self.rates),
+            "base_mount": _base_mount_to_dict(self.base_mount),
+            "assets": [_provenanced_asset_to_dict(asset) for asset in self.assets],
         }
 
     @classmethod
-    def from_dict(cls, document: Mapping[str, object]) -> "Embodiment":
+    def from_dict(cls, document: Mapping[str, object]) -> Embodiment:
         _exact_keys(
             document,
             {
@@ -265,9 +272,7 @@ class Embodiment:
                 "name",
                 "label",
                 "kind",
-                "family",
-                "variant",
-                "revision",
+                "lineage",
                 "components",
                 "rates",
                 "base_mount",
@@ -276,34 +281,32 @@ class Embodiment:
             "embodiment",
         )
         version = _require(document, "schema_version")
-        if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
+        if type(version) is not int or version != SCHEMA_VERSION:
             raise EmbodimentSchemaError(f"unsupported embodiment schema_version: {version!r}")
-        raw_id = _string(document, "id", "embodiment")
         try:
-            expected_id = EmbodimentId(raw_id)
+            expected_id = EmbodimentId(_string(document, "id", "embodiment"))
             kind = EmbodimentKind(_string(document, "kind", "embodiment"))
+            lineage = _parse_lineage(_require(document, "lineage"))
+            embodiment = cls(
+                name=EmbodimentName(_string(document, "name", "embodiment")),
+                label=_string(document, "label", "embodiment"),
+                kind=kind,
+                lineage=lineage,
+                components=_parse_components(_require(document, "components")),
+                rates=_parse_rates(_require(document, "rates")),
+                base_mount=_parse_base_mount(_require(document, "base_mount")),
+                assets=_parse_assets(_require(document, "assets")),
+            )
+        except EmbodimentSchemaError:
+            raise
         except ValueError as exc:
-            raise EmbodimentSchemaError(f"invalid embodiment identity or kind: {exc}") from exc
-        embodiment = cls(
-            name=EmbodimentName(_string(document, "name", "embodiment")),
-            label=_string(document, "label", "embodiment"),
-            kind=kind,
-            lineage=Lineage(
-                family=_string(document, "family", "embodiment"),
-                variant=_string(document, "variant", "embodiment"),
-                revision=_string(document, "revision", "embodiment"),
-            ),
-            components=_parse_components(_require(document, "components")),
-            rates=_parse_rates(_require(document, "rates")),
-            base_mount=_parse_base_mount(_require(document, "base_mount")),
-            assets=_parse_assets(_require(document, "assets")),
-        )
+            raise EmbodimentSchemaError(f"invalid embodiment: {exc}") from exc
         if embodiment.id != expected_id:
             raise EmbodimentSchemaError("embodiment id does not match its canonical content")
         return embodiment
 
     @classmethod
-    def from_json(cls, value: str) -> "Embodiment":
+    def from_json(cls, value: str) -> Embodiment:
         try:
             document: object = json.loads(value)
         except json.JSONDecodeError as exc:
@@ -314,44 +317,52 @@ class Embodiment:
 
 
 def _component_to_dict(component: Component) -> dict[str, object]:
-    part = component.part
-    wire: dict[str, object] = {
-        "name": component.instance,
-        "role": component.role.value,
-        "parent": component.mount.parent_instance or None,
-        "frame": component.mount.frame or component.instance,
-        "part_id": str(part.part_id),
+    attachment = component.attachment
+    if isinstance(attachment, BodyAttachment):
+        attachment_kind = "body"
+    elif isinstance(attachment, LeaderAttachment):
+        attachment_kind = "leader"
+    else:
+        attachment_kind = "sensor"
+    mount: dict[str, object]
+    if isinstance(component.mount, RootMount):
+        mount = {"kind": "root", "frame": component.mount.frame}
+    else:
+        mount = {
+            "kind": "mounted_on",
+            "parent": component.mount.parent,
+            "frame": component.mount.frame,
+        }
+    return {
+        "instance": component.instance,
+        "attachment": {
+            "kind": attachment_kind,
+            "part": _part_to_dict(attachment.part),
+        },
+        "mount": mount,
     }
+
+
+def _part_to_dict(part: Part) -> dict[str, object]:
+    common: dict[str, object] = {"part_id": str(part.part_id)}
     if isinstance(part, ArmSpec):
-        return wire | {
-            "type": "arm",
-            "joints": _joint_rows(
-                part.joint_names,
-                part.joint_units,
-                part.joint_lower,
-                part.joint_upper,
-                part.home_joints,
-                part.ready_joints,
-            ),
+        return common | {
+            "kind": "arm",
+            "layout": _layout_to_dict(part.layout),
+            "home": list(part.home),
+            "ready": list(part.ready) if part.ready is not None else None,
             "physical": _physical_to_dict(part.physical),
         }
     if isinstance(part, JointGroupSpec):
-        return wire | {
-            "type": "joint_group",
-            "joints": _joint_rows(
-                part.joint_names,
-                part.joint_units,
-                part.joint_lower,
-                part.joint_upper,
-                part.home_joints,
-            ),
+        return common | {
+            "kind": "joint_group",
+            "layout": _layout_to_dict(part.layout),
+            "home": list(part.home),
         }
     if isinstance(part, GripperSpec):
-        return wire | {
-            "type": "gripper",
-            "joints": _joint_rows(
-                part.joint_names, part.joint_units, part.joint_lower, part.joint_upper
-            ),
+        return common | {
+            "kind": "gripper",
+            "layout": _layout_to_dict(part.layout),
             "travel_m": list(part.travel_m) if part.travel_m is not None else None,
             "grasp_centre_m": (
                 list(part.grasp_centre_m) if part.grasp_centre_m is not None else None
@@ -361,15 +372,15 @@ def _component_to_dict(component: Component) -> dict[str, object]:
                 for mimic in part.mimic_joints
             ],
             "gap_curve": (
-                {"input": list(part.gap_curve.x), "output": list(part.gap_curve.y)}
+                [{"x": knot.x, "y": knot.y} for knot in part.gap_curve.knots]
                 if part.gap_curve is not None
                 else None
             ),
             "physical": _physical_to_dict(part.physical),
         }
     if isinstance(part, CameraSpec):
-        return wire | {
-            "type": "camera",
+        return common | {
+            "kind": "camera",
             "sensor_model": part.model.value,
             "modality": part.modality.value,
             "fps": part.fps,
@@ -377,203 +388,198 @@ def _component_to_dict(component: Component) -> dict[str, object]:
             "resolution": list(part.resolution) if part.resolution is not None else None,
         }
     if isinstance(part, MobileBaseSpec):
-        return wire | {
-            "type": "mobile_base",
-            "channels": [
-                {"name": name, "unit": unit.value}
-                for name, unit in zip(part.channel_names, part.channel_units, strict=True)
-            ],
-        }
+        return common | {"kind": "mobile_base", "layout": _layout_to_dict(part.layout)}
     if isinstance(part, ForceTorqueSpec):
-        return wire | {"type": "force_torque", "rate_hz": part.rate_hz}
-    # Exhaustive over Part: a new member breaks this binding at check time, not at runtime.
-    device: DeviceSpec = part
-    return wire | {"type": "device", "description": device.description}
+        return common | {"kind": "force_torque", "rate_hz": part.rate_hz}
+    return common | {"kind": "device", "description": part.description}
+
+
+def _layout_to_dict(layout: JointLayout) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for axis in layout.axes:
+        bounds: dict[str, object]
+        if isinstance(axis.bounds, Bounds):
+            bounds = {
+                "kind": "bounded",
+                "lower": axis.bounds.lower,
+                "upper": axis.bounds.upper,
+            }
+        else:
+            bounds = {"kind": "unbounded"}
+        rows.append({"name": axis.name, "unit": axis.unit.value, "bounds": bounds})
+    return rows
 
 
 def _parse_components(raw: object) -> tuple[Component, ...]:
-    if not isinstance(raw, list):
-        raise EmbodimentSchemaError("components must be a list")
+    rows = _list(raw, "components")
     return tuple(
-        _parse_component(item, f"components[{index}]")
-        for index, item in enumerate(cast(list[object], raw))
+        _parse_component(row, f"components[{index}]") for index, row in enumerate(rows)
     )
 
 
 def _parse_component(raw: object, label: str) -> Component:
     entry = _mapping(raw, label)
-    common = {"name", "role", "parent", "frame", "part_id", "type"}
-    kind = _string(entry, "type", label)
+    _exact_keys(entry, {"instance", "attachment", "mount"}, label)
+    attachment_entry = _mapping(entry["attachment"], f"{label}.attachment")
+    _exact_keys(attachment_entry, {"kind", "part"}, f"{label}.attachment")
+    attachment_kind = _string(attachment_entry, "kind", f"{label}.attachment")
+    part = _parse_part(attachment_entry["part"], f"{label}.attachment.part")
+    if attachment_kind == "body":
+        attachment = BodyAttachment(part)
+    elif attachment_kind == "leader":
+        attachment = LeaderAttachment(part)
+    elif attachment_kind == "sensor":
+        if not isinstance(part, CameraSpec | ForceTorqueSpec):
+            raise EmbodimentSchemaError(f"{label}.attachment sensor has a non-sensor part")
+        attachment = SensorAttachment(part)
+    else:
+        raise EmbodimentSchemaError(
+            f"{label}.attachment.kind is unknown: {attachment_kind!r}"
+        )
+    return Component(
+        instance=_string(entry, "instance", label),
+        attachment=attachment,
+        mount=_parse_component_mount(entry["mount"], f"{label}.mount"),
+    )
+
+
+def _parse_component_mount(raw: object, label: str) -> RootMount | MountedOn:
+    entry = _mapping(raw, label)
+    kind = _string(entry, "kind", label)
+    if kind == "root":
+        _exact_keys(entry, {"kind", "frame"}, label)
+        return RootMount(_string(entry, "frame", label))
+    if kind == "mounted_on":
+        _exact_keys(entry, {"kind", "parent", "frame"}, label)
+        return MountedOn(
+            parent=_string(entry, "parent", label),
+            frame=_string(entry, "frame", label),
+        )
+    raise EmbodimentSchemaError(f"{label}.kind is unknown: {kind!r}")
+
+
+def _parse_part(raw: object, label: str) -> Part:
+    entry = _mapping(raw, label)
+    kind = _string(entry, "kind", label)
+    common = {"kind", "part_id"}
     expected_by_kind = {
-        "arm": common | {"joints", "physical"},
-        "joint_group": common | {"joints"},
+        "arm": common | {"layout", "home", "ready", "physical"},
+        "joint_group": common | {"layout", "home"},
         "gripper": common
-        | {"joints", "travel_m", "grasp_centre_m", "mimic_joints", "gap_curve", "physical"},
-        "camera": common | {"sensor_model", "modality", "fps", "projection", "resolution"},
-        "mobile_base": common | {"channels"},
+        | {
+            "layout",
+            "travel_m",
+            "grasp_centre_m",
+            "mimic_joints",
+            "gap_curve",
+            "physical",
+        },
+        "camera": common
+        | {"sensor_model", "modality", "fps", "projection", "resolution"},
+        "mobile_base": common | {"layout"},
         "force_torque": common | {"rate_hz"},
         "device": common | {"description"},
     }
     expected = expected_by_kind.get(kind)
     if expected is None:
-        raise EmbodimentSchemaError(f"{label}.type is unknown: {kind!r}")
+        raise EmbodimentSchemaError(f"{label}.kind is unknown: {kind!r}")
     _exact_keys(entry, expected, label)
     part_id = PartId(_string(entry, "part_id", label))
     try:
-        part = _parse_part(kind, part_id, entry, label)
-        role = ComponentRole(_string(entry, "role", label))
-    except ValueError as exc:
-        raise EmbodimentSchemaError(f"invalid component vocabulary in {label}") from exc
-    parent = _require(entry, "parent")
-    if parent is not None and not isinstance(parent, str):
-        raise EmbodimentSchemaError(f"{label}.parent must be a string or null")
-    return Component(
-        instance=_string(entry, "name", label),
-        part=part,
-        role=role,
-        mount=MountFrame(
-            parent_instance=parent or "",
-            frame=_string(entry, "frame", label),
-        ),
-    )
-
-
-def _parse_part(kind: str, part_id: PartId, entry: Mapping[str, object], label: str) -> Part:
-    if kind in {"arm", "joint_group", "gripper"}:
-        names, units, lower, upper, homes, readies = _parse_joints(_require(entry, "joints"), label)
-        if kind != "arm" and any(ready is not None for ready in readies):
-            raise EmbodimentSchemaError(f"{label}.joints.ready is only valid on an arm")
         if kind == "arm":
             return ArmSpec(
-                part_id,
-                names,
-                units,
-                lower,
-                upper,
-                _require_homes(homes, label),
-                ready_joints=_all_or_no_readies(readies, label),
+                part_id=part_id,
+                layout=_parse_layout(entry["layout"], label),
+                home=_parse_vector(entry["home"], f"{label}.home"),
+                ready=_parse_optional_vector(entry["ready"], f"{label}.ready"),
                 physical=_parse_physical(entry["physical"], label),
             )
         if kind == "joint_group":
-            return JointGroupSpec(part_id, names, units, lower, upper, _require_homes(homes, label))
-        return GripperSpec(
-            part_id,
-            names,
-            units,
-            lower,
-            upper,
-            travel_m=_parse_pair(entry["travel_m"], f"{label}.travel_m"),
-            grasp_centre_m=_parse_triple(entry["grasp_centre_m"], f"{label}.grasp_centre_m"),
-            mimic_joints=_parse_mimics(entry["mimic_joints"], label),
-            gap_curve=_parse_curve(entry["gap_curve"], label),
-            physical=_parse_physical(entry["physical"], label),
+            return JointGroupSpec(
+                part_id=part_id,
+                layout=_parse_layout(entry["layout"], label),
+                home=_parse_vector(entry["home"], f"{label}.home"),
+            )
+        if kind == "gripper":
+            return GripperSpec(
+                part_id=part_id,
+                layout=_parse_layout(entry["layout"], label),
+                travel_m=_parse_pair(entry["travel_m"], f"{label}.travel_m"),
+                grasp_centre_m=_parse_triple(
+                    entry["grasp_centre_m"], f"{label}.grasp_centre_m"
+                ),
+                mimic_joints=_parse_mimics(entry["mimic_joints"], label),
+                gap_curve=_parse_curve(entry["gap_curve"], label),
+                physical=_parse_physical(entry["physical"], label),
+            )
+        if kind == "camera":
+            return CameraSpec(
+                part_id=part_id,
+                model=SensorModel(_string(entry, "sensor_model", label)),
+                modality=CameraModality(_string(entry, "modality", label)),
+                fps=_number(entry["fps"], f"{label}.fps"),
+                projection=LensProjection(_string(entry, "projection", label)),
+                resolution=_parse_resolution(entry["resolution"], label),
+            )
+        if kind == "mobile_base":
+            return MobileBaseSpec(part_id=part_id, layout=_parse_layout(entry["layout"], label))
+        if kind == "force_torque":
+            return ForceTorqueSpec(
+                part_id=part_id,
+                rate_hz=_optional_number(entry["rate_hz"], f"{label}.rate_hz"),
+            )
+        return DeviceSpec(
+            part_id=part_id,
+            description=_string(entry, "description", label),
         )
-    if kind == "camera":
-        return CameraSpec(
-            part_id,
-            SensorModel(_string(entry, "sensor_model", label)),
-            CameraModality(_string(entry, "modality", label)),
-            _number(entry["fps"], f"{label}.fps"),
-            LensProjection(_string(entry, "projection", label)),
-            _parse_resolution(entry["resolution"], label),
-        )
-    if kind == "mobile_base":
-        names, units = _parse_base_channels(entry["channels"], label)
-        return MobileBaseSpec(part_id, names, units)
-    if kind == "force_torque":
-        return ForceTorqueSpec(part_id, _optional_number(entry["rate_hz"], f"{label}.rate_hz"))
-    return DeviceSpec(part_id, _string(entry, "description", label))
-
-
-def _joint_rows(
-    names: tuple[str, ...],
-    units: tuple[CoordinateUnit, ...],
-    lower: tuple[float, ...],
-    upper: tuple[float, ...],
-    homes: tuple[float, ...] | None = None,
-    readies: tuple[float, ...] | None = None,
-) -> list[dict[str, object]]:
-    return [
-        {
-            "name": name,
-            "unit": units[index].value,
-            "lower": lo,
-            "upper": hi,
-            **({"home": homes[index]} if homes is not None else {}),
-            **({"ready": readies[index]} if readies is not None else {}),
-        }
-        for index, (name, lo, hi) in enumerate(zip(names, lower, upper, strict=True))
-    ]
-
-
-def _parse_joints(
-    raw: object, label: str
-) -> tuple[
-    tuple[str, ...],
-    tuple[CoordinateUnit, ...],
-    tuple[float, ...],
-    tuple[float, ...],
-    tuple[float | None, ...],
-    tuple[float | None, ...],
-]:
-    if not isinstance(raw, list) or not raw:
-        raise EmbodimentSchemaError(f"{label}.joints must be a non-empty list")
-    rows = tuple(_mapping(row, f"{label}.joints") for row in cast(list[object], raw))
-    for row in rows:
-        if set(row) not in (
-            {"name", "unit", "lower", "upper"},
-            {"name", "unit", "lower", "upper", "home"},
-            {"name", "unit", "lower", "upper", "home", "ready"},
-        ):
-            raise EmbodimentSchemaError(f"{label}.joints has invalid fields")
-    try:
-        units = tuple(CoordinateUnit(_string(row, "unit", f"{label}.joints")) for row in rows)
+    except EmbodimentSchemaError:
+        raise
     except ValueError as exc:
-        raise EmbodimentSchemaError(f"{label}.joints contains an unknown unit") from exc
-    return (
-        tuple(_string(row, "name", f"{label}.joints") for row in rows),
-        units,
-        tuple(_number(row["lower"], f"{label}.joints.lower") for row in rows),
-        tuple(_number(row["upper"], f"{label}.joints.upper") for row in rows),
-        tuple(_optional_number(row.get("home"), f"{label}.joints.home") for row in rows),
-        tuple(_optional_number(row.get("ready"), f"{label}.joints.ready") for row in rows),
-    )
+        raise EmbodimentSchemaError(f"invalid {label}: {exc}") from exc
 
 
-def _parse_base_channels(
-    raw: object, label: str
-) -> tuple[tuple[str, ...], tuple[CoordinateUnit, ...]]:
-    rows = tuple(_mapping(row, f"{label}.channels") for row in _list(raw, label))
-    for row in rows:
-        _exact_keys(row, {"name", "unit"}, f"{label}.channels")
-    try:
-        units = tuple(CoordinateUnit(_string(row, "unit", f"{label}.channels")) for row in rows)
-    except ValueError as exc:
-        raise EmbodimentSchemaError(f"{label}.channels contains an unknown unit") from exc
-    return (
-        tuple(_string(row, "name", f"{label}.channels") for row in rows),
-        units,
-    )
-
-
-def _require_homes(values: tuple[float | None, ...], label: str) -> tuple[float, ...]:
-    if any(value is None for value in values):
-        raise EmbodimentSchemaError(f"{label}.joints require home values")
-    return cast(tuple[float, ...], values)
-
-
-def _all_or_no_readies(values: tuple[float | None, ...], label: str) -> tuple[float, ...] | None:
-    if all(value is None for value in values):
-        return None
-    if any(value is None for value in values):
-        raise EmbodimentSchemaError(f"{label}.joints must declare ready on every joint or none")
-    return cast(tuple[float, ...], values)
+def _parse_layout(raw: object, label: str) -> JointLayout:
+    rows = _list(raw, f"{label}.layout")
+    axes: list[JointAxis] = []
+    for index, raw_axis in enumerate(rows):
+        axis_label = f"{label}.layout[{index}]"
+        entry = _mapping(raw_axis, axis_label)
+        _exact_keys(entry, {"name", "unit", "bounds"}, axis_label)
+        try:
+            unit = CoordinateUnit(_string(entry, "unit", axis_label))
+        except ValueError as exc:
+            raise EmbodimentSchemaError(f"{axis_label}.unit is unknown") from exc
+        bounds_entry = _mapping(entry["bounds"], f"{axis_label}.bounds")
+        bounds_kind = _string(bounds_entry, "kind", f"{axis_label}.bounds")
+        if bounds_kind == "bounded":
+            _exact_keys(
+                bounds_entry,
+                {"kind", "lower", "upper"},
+                f"{axis_label}.bounds",
+            )
+            bounds = Bounds(
+                _number(bounds_entry["lower"], f"{axis_label}.bounds.lower"),
+                _number(bounds_entry["upper"], f"{axis_label}.bounds.upper"),
+            )
+        elif bounds_kind == "unbounded":
+            _exact_keys(bounds_entry, {"kind"}, f"{axis_label}.bounds")
+            bounds = Unbounded()
+        else:
+            raise EmbodimentSchemaError(
+                f"{axis_label}.bounds.kind is unknown: {bounds_kind!r}"
+            )
+        axes.append(JointAxis(_string(entry, "name", axis_label), unit, bounds))
+    return JointLayout(tuple(axes))
 
 
 def _physical_to_dict(value: PhysicalSpec | None) -> dict[str, float | None] | None:
     if value is None:
         return None
-    return {"payload_kg": value.payload_kg, "reach_m": value.reach_m, "mass_kg": value.mass_kg}
+    return {
+        "payload_kg": value.payload_kg,
+        "reach_m": value.reach_m,
+        "mass_kg": value.mass_kg,
+    }
 
 
 def _parse_physical(raw: object, label: str) -> PhysicalSpec | None:
@@ -589,17 +595,16 @@ def _parse_physical(raw: object, label: str) -> PhysicalSpec | None:
 
 
 def _parse_mimics(raw: object, label: str) -> tuple[MimicJoint, ...]:
-    if not isinstance(raw, list):
-        raise EmbodimentSchemaError(f"{label}.mimic_joints must be a list")
     result: list[MimicJoint] = []
-    for item in cast(list[object], raw):
-        entry = _mapping(item, f"{label}.mimic_joints")
-        _exact_keys(entry, {"name", "of", "multiplier"}, f"{label}.mimic_joints")
+    for index, raw_mimic in enumerate(_list(raw, f"{label}.mimic_joints")):
+        mimic_label = f"{label}.mimic_joints[{index}]"
+        entry = _mapping(raw_mimic, mimic_label)
+        _exact_keys(entry, {"name", "of", "multiplier"}, mimic_label)
         result.append(
             MimicJoint(
-                _string(entry, "name", label),
-                _string(entry, "of", label),
-                _number(entry["multiplier"], f"{label}.mimic_joints.multiplier"),
+                joint_name=_string(entry, "name", mimic_label),
+                of=_string(entry, "of", mimic_label),
+                multiplier=_number(entry["multiplier"], f"{mimic_label}.multiplier"),
             )
         )
     return tuple(result)
@@ -608,26 +613,37 @@ def _parse_mimics(raw: object, label: str) -> tuple[MimicJoint, ...]:
 def _parse_curve(raw: object, label: str) -> Curve1D | None:
     if raw is None:
         return None
-    entry = _mapping(raw, f"{label}.gap_curve")
-    _exact_keys(entry, {"input", "output"}, f"{label}.gap_curve")
-    return Curve1D(
-        tuple(_number(value, f"{label}.gap_curve.input") for value in _list(entry["input"], label)),
-        tuple(
-            _number(value, f"{label}.gap_curve.output") for value in _list(entry["output"], label)
-        ),
-    )
+    knots: list[Knot] = []
+    for index, raw_knot in enumerate(_list(raw, f"{label}.gap_curve")):
+        knot_label = f"{label}.gap_curve[{index}]"
+        entry = _mapping(raw_knot, knot_label)
+        _exact_keys(entry, {"x", "y"}, knot_label)
+        knots.append(
+            Knot(
+                _number(entry["x"], f"{knot_label}.x"),
+                _number(entry["y"], f"{knot_label}.y"),
+            )
+        )
+    return Curve1D(tuple(knots))
 
 
-def _asset_to_dict(asset: EmbodiedAsset) -> dict[str, object]:
-    provenance = asset.provenance
+def _provenanced_asset_to_dict(value: ProvenancedAsset) -> dict[str, object]:
+    asset = value.asset
+    provenance = value.provenance
     return {
-        "uri": asset.uri,
-        "sha256": asset.sha256,
-        "format": asset.format.value,
-        "role": asset.role.value,
-        "media_type": asset.media_type,
-        "byte_size": asset.byte_size,
-        **({"logical_path": str(asset.logical_path)} if asset.logical_path is not None else {}),
+        "asset": {
+            "location": asset.location,
+            "content": {
+                "sha256": str(asset.content.sha256),
+                "size_bytes": asset.content.size_bytes,
+            },
+            "format": asset.format.value,
+            "role": asset.role.value,
+            "media_type": asset.media_type,
+            "logical_path": (
+                str(asset.logical_path) if asset.logical_path is not None else None
+            ),
+        },
         "provenance": {
             "repository": provenance.repository,
             "revision": provenance.revision,
@@ -638,50 +654,71 @@ def _asset_to_dict(asset: EmbodiedAsset) -> dict[str, object]:
     }
 
 
-def _parse_assets(raw: object) -> tuple[EmbodiedAsset, ...]:
-    if not isinstance(raw, list):
-        raise EmbodimentSchemaError("assets must be a list")
-    return tuple(EmbodiedAsset.from_ref(_parse_asset(item)) for item in cast(list[object], raw))
+def _parse_assets(raw: object) -> tuple[ProvenancedAsset, ...]:
+    return tuple(
+        _parse_provenanced_asset(item, f"assets[{index}]")
+        for index, item in enumerate(_list(raw, "assets"))
+    )
 
 
-def _parse_asset(raw: object) -> AssetRef:
-    entry = _mapping(raw, "asset")
-    required = {"uri", "sha256", "format", "role", "media_type", "byte_size", "provenance"}
-    _allowed_keys(entry, required, required | {"logical_path"}, "asset")
-    provenance_entry = _mapping(entry["provenance"], "asset.provenance")
+def _parse_provenanced_asset(raw: object, label: str) -> ProvenancedAsset:
+    entry = _mapping(raw, label)
+    _exact_keys(entry, {"asset", "provenance"}, label)
+    asset_entry = _mapping(entry["asset"], f"{label}.asset")
+    _exact_keys(
+        asset_entry,
+        {"location", "content", "format", "role", "media_type", "logical_path"},
+        f"{label}.asset",
+    )
+    content_entry = _mapping(asset_entry["content"], f"{label}.asset.content")
+    _exact_keys(content_entry, {"sha256", "size_bytes"}, f"{label}.asset.content")
+    provenance_entry = _mapping(entry["provenance"], f"{label}.provenance")
     _exact_keys(
         provenance_entry,
         {"repository", "revision", "path", "license_id", "generator"},
-        "asset.provenance",
+        f"{label}.provenance",
     )
+    media_type = asset_entry["media_type"]
+    if media_type is not None and not isinstance(media_type, str):
+        raise EmbodimentSchemaError(f"{label}.asset.media_type must be a string or null")
+    logical_path = asset_entry["logical_path"]
+    if logical_path is not None and not isinstance(logical_path, str):
+        raise EmbodimentSchemaError(f"{label}.asset.logical_path must be a string or null")
     generator = provenance_entry["generator"]
     if generator is not None and not isinstance(generator, str):
-        raise EmbodimentSchemaError("asset.provenance.generator must be a string or null")
-    logical_path = entry.get("logical_path")
-    if logical_path is not None and not isinstance(logical_path, str):
-        raise EmbodimentSchemaError("asset.logical_path must be a string or null")
-    media_type = entry["media_type"]
-    if media_type is not None and not isinstance(media_type, str):
-        raise EmbodimentSchemaError("asset.media_type must be a string or null")
+        raise EmbodimentSchemaError(f"{label}.provenance.generator must be a string or null")
     try:
-        return AssetRef(
-            uri=_string(entry, "uri", "asset"),
-            sha256=_string(entry, "sha256", "asset"),
-            format=AssetFormat(_string(entry, "format", "asset")),
-            role=AssetRole(_string(entry, "role", "asset")),
-            media_type=media_type,
-            byte_size=_optional_int(entry["byte_size"], "asset.byte_size"),
-            logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
-            provenance=AssetProvenance(
-                repository=_string(provenance_entry, "repository", "asset.provenance"),
-                revision=_string(provenance_entry, "revision", "asset.provenance"),
-                path=_string(provenance_entry, "path", "asset.provenance"),
-                license_id=_string(provenance_entry, "license_id", "asset.provenance"),
-                generator=generator,
+        asset = AssetRef(
+            location=_string(asset_entry, "location", f"{label}.asset"),
+            content=ContentBlob(
+                sha256=Sha256Digest(
+                    _string(content_entry, "sha256", f"{label}.asset.content")
+                ),
+                size_bytes=_integer(
+                    content_entry["size_bytes"], f"{label}.asset.content.size_bytes"
+                ),
             ),
+            format=AssetFormat(_string(asset_entry, "format", f"{label}.asset")),
+            role=AssetRole(_string(asset_entry, "role", f"{label}.asset")),
+            media_type=media_type,
+            logical_path=(PurePosixPath(logical_path) if logical_path is not None else None),
         )
-    except (AssetIntegrityError, ValueError) as exc:
-        raise EmbodimentSchemaError(f"invalid asset: {exc}") from exc
+        provenance = AssetProvenance(
+            repository=_string(provenance_entry, "repository", f"{label}.provenance"),
+            revision=_string(provenance_entry, "revision", f"{label}.provenance"),
+            path=_string(provenance_entry, "path", f"{label}.provenance"),
+            license_id=_string(provenance_entry, "license_id", f"{label}.provenance"),
+            generator=generator,
+        )
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"invalid {label}: {exc}") from exc
+    return ProvenancedAsset(asset=asset, provenance=provenance)
+
+
+def _rates_to_dict(value: ControlRates | None) -> dict[str, float | None] | None:
+    if value is None:
+        return None
+    return {"policy_hz": value.policy_hz, "low_level_hz": value.low_level_hz}
 
 
 def _parse_rates(raw: object) -> ControlRates | None:
@@ -695,6 +732,18 @@ def _parse_rates(raw: object) -> ControlRates | None:
     )
 
 
+def _base_mount_to_dict(value: BaseMount | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return {
+        "kind": value.kind.value,
+        "frame": value.frame,
+        "half_extents": list(value.half_extents),
+        "centre": list(value.centre),
+        "clearance_m": value.clearance_m,
+    }
+
+
 def _parse_base_mount(raw: object) -> BaseMount | None:
     if raw is None:
         return None
@@ -703,11 +752,9 @@ def _parse_base_mount(raw: object) -> BaseMount | None:
     try:
         kind = MountKind(_string(entry, "kind", "base_mount"))
     except ValueError as exc:
-        raise EmbodimentSchemaError(f"base_mount.kind is unknown: {exc}") from exc
-    half = _parse_pair(entry["half_extents"], "base_mount.half_extents")
-    centre = _parse_pair(entry["centre"], "base_mount.centre")
-    if half is None or centre is None:
-        raise EmbodimentSchemaError("base_mount.half_extents and centre must be pairs")
+        raise EmbodimentSchemaError("base_mount.kind is unknown") from exc
+    half = _required_pair(entry["half_extents"], "base_mount.half_extents")
+    centre = _required_pair(entry["centre"], "base_mount.centre")
     return BaseMount(
         kind=kind,
         frame=_string(entry, "frame", "base_mount"),
@@ -717,65 +764,42 @@ def _parse_base_mount(raw: object) -> BaseMount | None:
     )
 
 
-def _parse_resolution(raw: object, label: str) -> tuple[int, int] | None:
-    if raw is None:
-        return None
-    values = _list(raw, f"{label}.resolution")
-    if len(values) != 2 or any(
-        isinstance(value, bool) or not isinstance(value, int) for value in values
-    ):
-        raise EmbodimentSchemaError(f"{label}.resolution must contain two integers")
-    width, height = cast(list[int], values)
-    if width <= 0 or height <= 0:
-        raise EmbodimentSchemaError(f"{label}.resolution must be positive")
-    return width, height
-
-
-def _parse_pair(raw: object, label: str) -> tuple[float, float] | None:
-    if raw is None:
-        return None
-    values = _list(raw, label)
-    if len(values) != 2:
-        raise EmbodimentSchemaError(f"{label} must contain two numbers")
-    return _number(values[0], label), _number(values[1], label)
-
-
-def _parse_triple(raw: object, label: str) -> tuple[float, float, float] | None:
-    if raw is None:
-        return None
-    values = _list(raw, label)
-    if len(values) != 3:
-        raise EmbodimentSchemaError(f"{label} must contain three numbers")
-    return _number(values[0], label), _number(values[1], label), _number(values[2], label)
+def _parse_lineage(raw: object) -> Lineage:
+    entry = _mapping(raw, "lineage")
+    _exact_keys(entry, {"family", "variant", "revision"}, "lineage")
+    return Lineage(
+        family=_string(entry, "family", "lineage"),
+        variant=_string(entry, "variant", "lineage"),
+        revision=_string(entry, "revision", "lineage"),
+    )
 
 
 def _portable_component(component: Component) -> Component:
     part = component.part
     if isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
         part = dataclasses.replace(part, assets=())
-    mount = component.mount
-    if not mount.frame:
-        mount = dataclasses.replace(mount, frame=component.instance)
-    return dataclasses.replace(component, part=part, mount=mount)
+    attachment = dataclasses.replace(component.attachment, part=part)
+    return dataclasses.replace(component, attachment=attachment)
 
 
 def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
-    refs: list[AssetRef] = []
+    assets: list[ProvenancedAsset] = []
     seen: set[tuple[str, str]] = set()
-    for asset in _packaged_assets(definition):
-        key = (asset.relpath, asset.sha256)
+    for packaged in _packaged_assets(definition):
+        key = (packaged.relpath, packaged.sha256)
         if key not in seen:
-            refs.append(asset.ref())
+            assets.append(packaged.provenanced_asset())
             seen.add(key)
     urdf = authoritative_urdf(definition)
-    _validate_urdf(definition.name, tuple(refs), urdf.path().read_bytes())
+    refs = tuple(asset.asset for asset in assets)
+    _validate_urdf(definition.name, refs, urdf.path().read_bytes())
     return Embodiment(
         name=definition.name,
         label=definition.label,
         kind=definition.kind,
         lineage=definition.lineage,
         components=tuple(_portable_component(component) for component in definition.attachments),
-        assets=tuple(EmbodiedAsset.from_ref(ref) for ref in refs),
+        assets=tuple(assets),
         rates=definition.rates,
         base_mount=definition.base_mount,
     )
@@ -815,7 +839,7 @@ def _validate_urdf(name: EmbodimentName, assets: tuple[AssetRef, ...], urdf: byt
     actual = hashlib.sha256(urdf).hexdigest()
     if actual != urdfs[0].sha256:
         raise AssetIntegrityError(
-            f"{urdfs[0].uri}: authoritative URDF bytes have sha256 {actual}, "
+            f"{urdfs[0].location}: authoritative URDF bytes have sha256 {actual}, "
             f"expected {urdfs[0].sha256}"
         )
     try:
@@ -824,6 +848,56 @@ def _validate_urdf(name: EmbodimentName, assets: tuple[AssetRef, ...], urdf: byt
         raise EmbodimentSchemaError(f"{name}: authoritative URDF is invalid XML") from exc
     if root.tag != "robot" or not root.attrib.get("name", "").strip():
         raise EmbodimentSchemaError(f"{name}: authoritative URDF root must be a named <robot>")
+
+
+def _parse_resolution(raw: object, label: str) -> tuple[int, int] | None:
+    if raw is None:
+        return None
+    values = _list(raw, f"{label}.resolution")
+    if len(values) != 2:
+        raise EmbodimentSchemaError(f"{label}.resolution must contain two integers")
+    width = _integer(values[0], f"{label}.resolution[0]")
+    height = _integer(values[1], f"{label}.resolution[1]")
+    if width <= 0 or height <= 0:
+        raise EmbodimentSchemaError(f"{label}.resolution must be positive")
+    return width, height
+
+
+def _parse_vector(raw: object, label: str) -> tuple[float, ...]:
+    return tuple(_number(value, label) for value in _list(raw, label))
+
+
+def _parse_optional_vector(raw: object, label: str) -> tuple[float, ...] | None:
+    return None if raw is None else _parse_vector(raw, label)
+
+
+def _required_pair(raw: object, label: str) -> tuple[float, float]:
+    result = _parse_pair(raw, label)
+    if result is None:
+        raise EmbodimentSchemaError(f"{label} must contain two numbers")
+    return result
+
+
+def _parse_pair(raw: object, label: str) -> tuple[float, float] | None:
+    if raw is None:
+        return None
+    values = _list(raw, label)
+    if len(values) != 2:
+        raise EmbodimentSchemaError(f"{label} must contain two numbers")
+    return _number(values[0], label), _number(values[1], label)
+
+
+def _parse_triple(raw: object, label: str) -> tuple[float, float, float] | None:
+    if raw is None:
+        return None
+    values = _list(raw, label)
+    if len(values) != 3:
+        raise EmbodimentSchemaError(f"{label} must contain three numbers")
+    return (
+        _number(values[0], label),
+        _number(values[1], label),
+        _number(values[2], label),
+    )
 
 
 def _require(document: Mapping[str, object], key: str) -> object:
@@ -864,11 +938,9 @@ def _optional_number(raw: object, label: str) -> float | None:
     return None if raw is None else _number(raw, label)
 
 
-def _optional_int(raw: object, label: str) -> int | None:
-    if raw is None:
-        return None
+def _integer(raw: object, label: str) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int):
-        raise EmbodimentSchemaError(f"{label} must be an integer or null")
+        raise EmbodimentSchemaError(f"{label} must be an integer")
     return raw
 
 
@@ -878,15 +950,4 @@ def _exact_keys(document: Mapping[str, object], expected: set[str], label: str) 
         raise EmbodimentSchemaError(
             f"{label} keys differ: missing={sorted(expected - actual)}, "
             f"unknown={sorted(actual - expected)}"
-        )
-
-
-def _allowed_keys(
-    document: Mapping[str, object], required: set[str], allowed: set[str], label: str
-) -> None:
-    actual = set(document)
-    if not required <= actual or not actual <= allowed:
-        raise EmbodimentSchemaError(
-            f"{label} keys differ: missing={sorted(required - actual)}, "
-            f"unknown={sorted(actual - allowed)}"
         )

@@ -2,7 +2,14 @@
 
 from typing import Final
 
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..compose import (
+    EmbodimentDefinition,
+    MountedOn,
+    RootMount,
+    body_component,
+    leader_component,
+    sensor_component,
+)
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
 from .das import UVC_MONO_60
@@ -14,13 +21,12 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="piper", variant="piperx"),
     attachments=(
-        Component(
+        leader_component(
             "leader",
             DeviceSpec(PartId("piperx-leader"), "PiperX leader arm"),
-            ComponentRole.LEADER,
         ),
-        Component("arm", PIPER_ARM, ComponentRole.BODY),
-        Component("gripper", PIPER_GRIPPER, ComponentRole.BODY, MountFrame("arm", "joint6")),
-        Component("front", UVC_MONO_60, ComponentRole.SENSOR, MountFrame(frame="world")),
+        body_component("arm", PIPER_ARM),
+        body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "joint6")),
+        sensor_component("front", UVC_MONO_60, RootMount("world")),
     ),
 )

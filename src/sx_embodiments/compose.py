@@ -5,6 +5,7 @@ never by nesting specs — Python composition of tuples IS the compositional mod
 declared attachment order is the wire order (see :mod:`sx_embodiments.layout`).
 """
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -46,11 +47,25 @@ class ComponentKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class MountFrame:
-    """Where a part attaches. Informational (FK/renderers); NEVER affects channel order."""
+class RootMount:
+    frame: str
 
-    parent_instance: str = ""  # "" = the world/root
-    frame: str = ""  # frame/link name in the parent's description
+    def __post_init__(self) -> None:
+        if not self.frame.strip():
+            raise ComponentGraphError("root mount frame must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class MountedOn:
+    parent: str
+    frame: str
+
+    def __post_init__(self) -> None:
+        if not self.parent.strip() or not self.frame.strip():
+            raise ComponentGraphError("mounted components require parent and frame")
+
+
+ComponentMount = RootMount | MountedOn
 
 
 class MountKind(StrEnum):
@@ -78,15 +93,57 @@ class BaseMount:
     centre: tuple[float, float] = (0.0, 0.0)
     clearance_m: float = 0.0
 
+    def __post_init__(self) -> None:
+        if not self.frame.strip():
+            raise ComponentGraphError("base mount frame must not be empty")
+        if (
+            len(self.half_extents) != 2
+            or any(not math.isfinite(value) or value <= 0.0 for value in self.half_extents)
+        ):
+            raise ComponentGraphError("base mount half_extents must be two positive values")
+        if len(self.centre) != 2 or any(not math.isfinite(value) for value in self.centre):
+            raise ComponentGraphError("base mount centre must contain two finite values")
+        if not math.isfinite(self.clearance_m) or self.clearance_m < 0.0:
+            raise ComponentGraphError("base mount clearance_m must be finite and non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class BodyAttachment:
+    part: Part
+
+
+@dataclass(frozen=True, slots=True)
+class LeaderAttachment:
+    part: Part
+
+
+@dataclass(frozen=True, slots=True)
+class SensorAttachment:
+    part: CameraSpec | ForceTorqueSpec
+
+
+ComponentAttachment = BodyAttachment | LeaderAttachment | SensorAttachment
+
 
 @dataclass(frozen=True, slots=True)
 class Component:
-    """One named node in the embodiment graph, carrying its complete hardware facts."""
+    """One named node; attachment kind owns role and part as one fact."""
 
     instance: str
-    part: Part
-    role: ComponentRole
-    mount: MountFrame = MountFrame()
+    attachment: ComponentAttachment
+    mount: ComponentMount
+
+    @property
+    def part(self) -> Part:
+        return self.attachment.part
+
+    @property
+    def role(self) -> ComponentRole:
+        if isinstance(self.attachment, BodyAttachment):
+            return ComponentRole.BODY
+        if isinstance(self.attachment, LeaderAttachment):
+            return ComponentRole.LEADER
+        return ComponentRole.SENSOR
 
     @property
     def component_id(self) -> ComponentId:
@@ -103,6 +160,42 @@ class Component:
     @property
     def capabilities(self) -> tuple[Capability, ...]:
         return capabilities_for_part(self.part)
+
+
+def body_component(
+    instance: str,
+    part: Part,
+    mount: ComponentMount | None = None,
+) -> Component:
+    return Component(
+        instance,
+        BodyAttachment(part),
+        mount if mount is not None else RootMount(instance),
+    )
+
+
+def leader_component(
+    instance: str,
+    part: Part,
+    mount: ComponentMount | None = None,
+) -> Component:
+    return Component(
+        instance,
+        LeaderAttachment(part),
+        mount if mount is not None else RootMount(instance),
+    )
+
+
+def sensor_component(
+    instance: str,
+    part: CameraSpec | ForceTorqueSpec,
+    mount: ComponentMount | None = None,
+) -> Component:
+    return Component(
+        instance,
+        SensorAttachment(part),
+        mount if mount is not None else RootMount(instance),
+    )
 
 
 _SENSOR_PARTS = (CameraSpec, ForceTorqueSpec)
@@ -155,22 +248,26 @@ def validate_components(name: str, kind: EmbodimentKind, components: tuple[Compo
             raise CompositionError(name, "component names must not be empty")
         if component.instance in seen:
             raise CompositionError(name, f"duplicate component name {component.instance!r}")
-        parent = component.mount.parent_instance
-        if parent and parent not in seen:
+        parent = component.mount.parent if isinstance(component.mount, MountedOn) else None
+        if parent is not None and parent not in seen:
             raise CompositionError(
                 name,
                 f"{component.instance!r} mounts on {parent!r}, which is not declared "
                 "before it (components are topologically ordered by declaration)",
             )
         seen.add(component.instance)
-        if isinstance(component.part, _SENSOR_PARTS):
-            if component.role is not ComponentRole.SENSOR:
-                raise CompositionError(
-                    name, f"{component.instance!r}: sensor parts must use role SENSOR"
-                )
-        elif component.role is ComponentRole.SENSOR:
+        if isinstance(component.part, _SENSOR_PARTS) and not isinstance(
+            component.attachment, SensorAttachment
+        ):
             raise CompositionError(
-                name, f"{component.instance!r}: body parts cannot use role SENSOR"
+                name,
+                f"{component.instance!r}: sensor parts need sensor attachment",
+            )
+        if not isinstance(component.part, _SENSOR_PARTS) and isinstance(
+            component.attachment, SensorAttachment
+        ):
+            raise CompositionError(
+                name, f"{component.instance!r}: non-sensor parts cannot use sensor attachment"
             )
     leaders = [component for component in components if component.role is ComponentRole.LEADER]
     if kind is not EmbodimentKind.TELEOP_STATION and leaders:
@@ -197,38 +294,24 @@ def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
     coordinates: list[StateCoordinate] = []
     for attachment in body:
         part = attachment.part
-        lower: tuple[float | None, ...]
-        upper: tuple[float | None, ...]
         if isinstance(part, ArmSpec):
-            names, units, kind = part.joint_names, part.joint_units, ChannelKind.ARM_JOINT
-            lower, upper = part.joint_lower, part.joint_upper
+            kind = ChannelKind.ARM_JOINT
         elif isinstance(part, JointGroupSpec):
-            names, units, kind = part.joint_names, part.joint_units, ChannelKind.BODY_JOINT
-            lower, upper = part.joint_lower, part.joint_upper
+            kind = ChannelKind.BODY_JOINT
         elif isinstance(part, GripperSpec):
-            names, units, kind = part.joint_names, part.joint_units, ChannelKind.GRIPPER
-            lower, upper = part.joint_lower, part.joint_upper
+            kind = ChannelKind.GRIPPER
         elif isinstance(part, MobileBaseSpec):
-            names, units, kind = part.channel_names, part.channel_units, ChannelKind.BASE
-            lower = (None,) * len(names)
-            upper = (None,) * len(names)
+            kind = ChannelKind.BASE
         else:  # pragma: no cover - excluded by layout_declared()
             raise LayoutError(name, f"unlayoutable part {part!r}")
-        base = len(coordinates)
         coordinates.extend(
             StateCoordinate(
-                index=base + offset,
                 instance=attachment.component_id,
                 part_id=part.part_id,
-                joint_name=name,
+                axis=axis,
                 kind=kind,
-                unit=unit,
-                lower=lo,
-                upper=hi,
             )
-            for offset, (name, unit, lo, hi) in enumerate(
-                zip(names, units, lower, upper, strict=True)
-            )
+            for axis in part.layout.axes
         )
     return StateSpace(coordinates=tuple(coordinates))
 
@@ -239,8 +322,7 @@ def camera_bindings(components: tuple[Component, ...]) -> tuple[CameraBinding, .
         CameraBinding(
             name=a.instance,
             camera=a.part,
-            parent_instance=a.mount.parent_instance,
-            frame=a.mount.frame,
+            mount=a.mount,
         )
         for a in components
         if isinstance(a.part, CameraSpec)

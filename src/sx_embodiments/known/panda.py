@@ -6,14 +6,13 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
-    Component,
-    ComponentRole,
     EmbodimentDefinition,
-    MountFrame,
+    MountedOn,
     MountKind,
+    body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
@@ -25,9 +24,10 @@ from ..parts import (
     MobileBaseSpec,
     PhysicalSpec,
 )
+from ._authoring import bounded_layout
 from .sources import menagerie
 
-PANDA_MJCF: Final = PackagedAsset(
+PANDA_MJCF: Final = packaged_asset(
     relpath="menagerie/franka_emika_panda/panda.xml",
     sha256="96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273",
     format=AssetFormat.MJCF,
@@ -35,7 +35,7 @@ PANDA_MJCF: Final = PackagedAsset(
     provenance=menagerie("franka_emika_panda/panda.xml", "Apache-2.0"),
     media_type="application/xml",
 )
-PANDA_URDF: Final = PackagedAsset(
+PANDA_URDF: Final = packaged_asset(
     relpath="official/franka_panda/panda.urdf",
     sha256="668d8398e32164587fc2e9886b37d1a17a20d889cafe192f28ba245a3e82c24a",
     format=AssetFormat.URDF,
@@ -52,23 +52,25 @@ PANDA_URDF: Final = PackagedAsset(
 
 PANDA_ARM: Final = ArmSpec(
     part_id=PartId("panda-arm"),
-    joint_names=(
-        "panda_joint1",
-        "panda_joint2",
-        "panda_joint3",
-        "panda_joint4",
-        "panda_joint5",
-        "panda_joint6",
-        "panda_joint7",
+    layout=bounded_layout(
+        names=(
+            "panda_joint1",
+            "panda_joint2",
+            "panda_joint3",
+            "panda_joint4",
+            "panda_joint5",
+            "panda_joint6",
+            "panda_joint7",
+        ),
+        units=(CoordinateUnit.RADIAN,) * 7,
+        lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
+        upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
     ),
-    joint_units=(CoordinateUnit.RADIAN,) * 7,
-    joint_lower=(-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973),
-    joint_upper=(2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973),
-    home_joints=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
+    home=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
     # Work-ready: gripper straight down 0.26 m in front of the mount plane, 0.16 m above
     # it, elbow up — the configuration a benchtop task starts from (the classic Franka
     # ready holds the hand ~0.5 m up, staging rather than working height).
-    ready_joints=(0.0, -0.153, 0.0, -2.715, 0.0, 1.932, 0.785),
+    ready=(0.0, -0.153, 0.0, -2.715, 0.0, 1.932, 0.785),
     assets=(PANDA_URDF, PANDA_MJCF),
     # Franka Emika Panda datasheet (download.franka.de/Datasheet-EN.pdf).
     physical=PhysicalSpec(payload_kg=3.0, reach_m=0.855, mass_kg=18.0),
@@ -76,10 +78,12 @@ PANDA_ARM: Final = ArmSpec(
 
 PANDA_GRIPPER: Final = GripperSpec(
     part_id=PartId("panda-gripper"),
-    joint_names=("panda_finger_joint1",),
-    joint_units=(CoordinateUnit.METER,),
-    joint_lower=(0.0,),
-    joint_upper=(0.04,),
+    layout=bounded_layout(
+        names=("panda_finger_joint1",),
+        units=(CoordinateUnit.METER,),
+        lower=(0.0,),
+        upper=(0.04,),
+    ),
     travel_m=(0.0, 0.08),  # parallel jaw: aperture = 2 x finger stroke (0.04 m each)
     # Midpoint of the finger pads along the hand frame's approach (+z) axis: fingers mount
     # 0.0584 m from the hand origin and the pads centre 0.045 m further — the official
@@ -96,9 +100,9 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda", variant="omron"),
     attachments=(
-        Component("base", OMRON_BASE, ComponentRole.BODY),
-        Component("arm", PANDA_ARM, ComponentRole.BODY, MountFrame("base", "top_plate")),
-        Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
+        body_component("base", OMRON_BASE),
+        body_component("arm", PANDA_ARM, MountedOn("base", "top_plate")),
+        body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
     ),
     rates=ControlRates(policy_hz=20.0),
     # Omron LD-60 chassis footprint (datasheet 699 x 500 mm); it drives on the floor
@@ -116,8 +120,8 @@ FRANKA_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda"),
     attachments=(
-        Component("arm", PANDA_ARM, ComponentRole.BODY),
-        Component("gripper", PANDA_GRIPPER, ComponentRole.BODY, MountFrame("arm", "panda_link8")),
+        body_component("arm", PANDA_ARM),
+        body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
     ),
     # Footprint measured from the menagerie link0 collision geometry (xy AABB).
     base_mount=BaseMount(

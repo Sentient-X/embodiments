@@ -131,13 +131,7 @@ def test_installed_asset_tree_resolves(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 
 def test_missing_packaged_asset_fails_closed() -> None:
-    ghost = PackagedAsset(
-        relpath="so101/does_not_exist.urdf",
-        sha256=SO101_URDF.sha256,
-        format=SO101_URDF.format,
-        role=SO101_URDF.role,
-        provenance=SO101_URDF.provenance,
-    )
+    ghost = replace(SO101_URDF, relpath="so101/does_not_exist.urdf")
     with pytest.raises(AssetsUnavailableError):
         ghost.path()
 
@@ -152,8 +146,10 @@ def test_resolve_asset_inverts_ref_and_verifies_bytes() -> None:
 def test_resolve_asset_fails_closed() -> None:
     ref = SO101_URDF.ref()
     with pytest.raises(AssetsUnavailableError, match="not a packaged"):
-        resolve_asset(replace(ref, uri="https://example.com/so101.urdf"))
+        resolve_asset(replace(ref, location="https://example.com/so101.urdf"))
     with pytest.raises(AssetsUnavailableError, match="missing on disk"):
-        resolve_asset(replace(ref, uri="package://sx-embodiments/so101/ghost.urdf"))
+        resolve_asset(replace(ref, location="package://sx-embodiments/so101/ghost.urdf"))
     with pytest.raises(AssetDigestMismatchError):
-        resolve_asset(replace(ref, sha256="0" * 64))
+        resolve_asset(
+            replace(ref, content=replace(ref.content, sha256=type(ref.content.sha256)("0" * 64)))
+        )

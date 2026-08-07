@@ -11,29 +11,31 @@ from sx_contracts.assets import (
     AssetProvenance,
     AssetRef,
     AssetRole,
+    ProvenancedAsset,
     validate_logical_path,
 )
+from sx_contracts.content import ContentBlob, Sha256Digest
 
-from sx_embodiments import EmbodiedAsset, Embodiment, EmbodimentSchemaError, embodiments
+from sx_embodiments import Embodiment, EmbodimentSchemaError, embodiments
 
 _SHA = "a" * 64
 
 
-def _ref(logical_path: str | None) -> EmbodiedAsset:
-    return EmbodiedAsset.from_ref(
-        AssetRef(
-            uri="https://example.invalid/bundle",
-            sha256=_SHA,
+def _ref(logical_path: str | None) -> ProvenancedAsset:
+    return ProvenancedAsset(
+        asset=AssetRef(
+            location="https://example.invalid/bundle",
+            content=ContentBlob(Sha256Digest(_SHA), 0),
             format=AssetFormat.MESH,
             role=AssetRole.GEOMETRY,
             logical_path=PurePosixPath(logical_path) if logical_path is not None else None,
-            provenance=AssetProvenance(
-                repository="https://example.invalid/source",
-                revision="fixture",
-                path="mesh.dae",
-                license_id="Apache-2.0",
-            ),
-        )
+        ),
+        provenance=AssetProvenance(
+            repository="https://example.invalid/source",
+            revision="fixture",
+            path="mesh.dae",
+            license_id="Apache-2.0",
+        ),
     )
 
 
@@ -79,9 +81,10 @@ def test_wire_rejects_malformed_logical_path() -> None:
     assert isinstance(assets, list)
     entry = cast("dict[str, object]", assets[0])
     assert isinstance(entry, dict)
-    entry["logical_path"] = "../escape"
+    asset = cast("dict[str, object]", entry["asset"])
+    asset["logical_path"] = "../escape"
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict(document)
-    entry["logical_path"] = 7
+    asset["logical_path"] = 7
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict(document)

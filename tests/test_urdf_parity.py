@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sx_contracts.assets import AssetFormat
 
-from sx_embodiments import embodiments
+from sx_embodiments import embodiments, resolve_asset
 from sx_embodiments.known.b601 import B601_ARM, B601_DM_URDF, B601_GRIPPER
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
@@ -164,7 +164,7 @@ def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> N
         urdf = next(asset for asset in embodiment.assets if asset.format is AssetFormat.URDF)
         movable = {
             joint.get("name")
-            for joint in ET.parse(urdf.local_path()).getroot().iter("joint")
+            for joint in ET.parse(resolve_asset(urdf.asset)).getroot().iter("joint")
             if joint.get("type") not in (None, "fixed")
         }
         description_channels = {

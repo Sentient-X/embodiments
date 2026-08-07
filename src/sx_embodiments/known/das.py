@@ -13,14 +13,15 @@ Camera instance names are the sxd pipeline's canonical stream keys for the
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
-from ..curves import Curve1D
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component, sensor_component
+from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import CameraModality, CameraSpec, GripperSpec, MimicJoint, SensorModel
+from ._authoring import bounded_layout
 
-DAS_GRIPPER_URDF: Final = PackagedAsset(
+DAS_GRIPPER_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_Gripper_urdf.urdf",
     sha256="cea619914abc6539be8f608b3e68f9e70681ee25e583639723f9f285cc6410f9",
     format=AssetFormat.URDF,
@@ -34,7 +35,7 @@ DAS_GRIPPER_URDF: Final = PackagedAsset(
     media_type="application/xml",
 )
 
-DAS_UMI_V4_URDF: Final = PackagedAsset(
+DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
     sha256="02898860917342c97851116616125021b34a3c4b03a0b709e3f8106888fe635b",
     format=AssetFormat.URDF,
@@ -49,7 +50,7 @@ DAS_UMI_V4_URDF: Final = PackagedAsset(
     media_type="application/xml",
 )
 
-QUEST_EGO_URDF: Final = PackagedAsset(
+QUEST_EGO_URDF: Final = packaged_asset(
     relpath="quest_ego/urdf/quest_ego.urdf",
     sha256="c09c2ac0965b11eb26afb199b6efc1d39fc78b36663e5a6b3a6b7596d30b02a1",
     format=AssetFormat.URDF,
@@ -67,46 +68,32 @@ QUEST_EGO_URDF: Final = PackagedAsset(
 # Baked from the DAS link_3/link_4 mesh FK over q in [0, 0.925] (verified against real
 # episodes: observed max aperture ~0.0962 m; 0.105 m is the geometric full-open).
 DAS_JAW_GAP_CURVE: Final = Curve1D(
-    x=(
-        0.0,
-        0.0712,
-        0.1423,
-        0.2135,
-        0.2846,
-        0.3558,
-        0.4269,
-        0.4981,
-        0.5692,
-        0.6404,
-        0.7115,
-        0.7827,
-        0.8538,
-        0.925,
-    ),
-    y=(
-        0.105,
-        0.0987,
-        0.09198,
-        0.08484,
-        0.07734,
-        0.06951,
-        0.06139,
-        0.05302,
-        0.04446,
-        0.03571,
-        0.02687,
-        0.01794,
-        0.00899,
-        0.00011,
+    knots=(
+        Knot(0.0, 0.105),
+        Knot(0.0712, 0.0987),
+        Knot(0.1423, 0.09198),
+        Knot(0.2135, 0.08484),
+        Knot(0.2846, 0.07734),
+        Knot(0.3558, 0.06951),
+        Knot(0.4269, 0.06139),
+        Knot(0.4981, 0.05302),
+        Knot(0.5692, 0.04446),
+        Knot(0.6404, 0.03571),
+        Knot(0.7115, 0.02687),
+        Knot(0.7827, 0.01794),
+        Knot(0.8538, 0.00899),
+        Knot(0.925, 0.00011),
     ),
 )
 
 DAS_JAW_V4: Final = GripperSpec(
     part_id=PartId("das-jaw-v4"),
-    joint_names=("joint_1",),  # the ONE actuated DOF; everything else mimics
-    joint_units=(CoordinateUnit.RADIAN,),
-    joint_lower=(0.0,),
-    joint_upper=(0.925,),
+    layout=bounded_layout(
+        names=("joint_1",),  # the ONE actuated DOF; everything else mimics
+        units=(CoordinateUnit.RADIAN,),
+        lower=(0.0,),
+        upper=(0.925,),
+    ),
     travel_m=(0.0, 0.105),
     mimic_joints=(
         MimicJoint("joint_3", of="joint_1", multiplier=-1.0),
@@ -139,18 +126,17 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
     attachments=(
-        Component("left_jaw", DAS_JAW_V4, ComponentRole.BODY),
-        Component("right_jaw", DAS_JAW_V4, ComponentRole.BODY),
-        Component(
-            "left_wrist", UVC_MONO_60, ComponentRole.SENSOR, MountFrame("left_jaw", "link_ca2")
+        body_component("left_jaw", DAS_JAW_V4),
+        body_component("right_jaw", DAS_JAW_V4),
+        sensor_component(
+            "left_wrist", UVC_MONO_60, MountedOn("left_jaw", "link_ca2")
         ),
-        Component(
+        sensor_component(
             "right_wrist",
             UVC_MONO_60,
-            ComponentRole.SENSOR,
-            MountFrame("right_jaw", "link_ca2"),
+            MountedOn("right_jaw", "link_ca2"),
         ),
-        Component("base", QUEST3_HEAD, ComponentRole.SENSOR, MountFrame(frame="quest3s_head")),
+        sensor_component("base", QUEST3_HEAD, RootMount("quest3s_head")),
     ),
     extra_assets=(DAS_UMI_V4_URDF,),
 )
@@ -161,11 +147,10 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
     attachments=(
-        Component(
+        sensor_component(
             "head_left",
             QUEST3_HEAD,
-            ComponentRole.SENSOR,
-            MountFrame(frame="quest3s_head"),
+            RootMount("quest3s_head"),
         ),
     ),
     extra_assets=(QUEST_EGO_URDF,),

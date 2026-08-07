@@ -1,12 +1,6 @@
-"""The ordered native body-state space of an embodiment, and its exactness laws.
+"""Canonical joint layouts and the derived native body-state order."""
 
-THE ORDERING LAW: the flat body-state vector of an embodiment is the concatenation, over
-its attachments in declared tuple order, restricted to body-role attachments, of each
-part's joint/channel names in the part's declared order. Nothing reorders; declaration
-order IS wire order. Mount frames are informational and never affect channel order.
-``tests/test_layout_laws.py`` pins exact index tuples for every registry entry.
-"""
-
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -24,8 +18,6 @@ class ChannelKind(StrEnum):
 
 
 class CoordinateUnit(StrEnum):
-    """Physical units admitted by native embodiment and action coordinates."""
-
     RADIAN = "rad"
     METER = "m"
     RADIANS_PER_SECOND = "rad/s"
@@ -35,41 +27,107 @@ class CoordinateUnit(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class StateCoordinate:
-    """One named coordinate in the embodiment's native body-state vector."""
+class Unbounded:
+    """A coordinate whose physical range is intentionally not declared."""
 
-    index: int
-    instance: ComponentId  # attachment instance, such as "left_arm"
-    part_id: PartId
-    joint_name: str  # description joint or physical base channel
-    kind: ChannelKind
-    unit: CoordinateUnit
-    lower: float | None = None
-    upper: float | None = None
+
+@dataclass(frozen=True, slots=True)
+class Bounds:
+    lower: float
+    upper: float
 
     def __post_init__(self) -> None:
-        """Bounds are either both known or both absent for unbounded native state."""
-        if (self.lower is None) is not (self.upper is None):
-            raise LayoutError(self.instance, f"{self.joint_name}: incomplete coordinate bounds")
-        if self.lower is not None and self.upper is not None and self.lower >= self.upper:
-            raise LayoutError(self.instance, f"{self.joint_name}: lower bound must be < upper")
+        if (
+            isinstance(self.lower, bool)
+            or isinstance(self.upper, bool)
+            or not math.isfinite(self.lower)
+            or not math.isfinite(self.upper)
+            or self.lower >= self.upper
+        ):
+            raise LayoutError("joint", "bounds require finite lower < upper")
+        object.__setattr__(self, "lower", float(self.lower))
+        object.__setattr__(self, "upper", float(self.upper))
+
+
+CoordinateBounds = Unbounded | Bounds
+
+
+@dataclass(frozen=True, slots=True)
+class JointAxis:
+    """One joint coordinate; name, unit, and bounds cannot drift apart."""
+
+    name: str
+    unit: CoordinateUnit
+    bounds: CoordinateBounds
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise LayoutError("joint", "axis name must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class JointLayout:
+    """A joint vector whose tuple order is the only coordinate order."""
+
+    axes: tuple[JointAxis, ...]
+
+    def __post_init__(self) -> None:
+        names = tuple(axis.name for axis in self.axes)
+        if len(set(names)) != len(names):
+            raise LayoutError("joint", "axis names must be unique")
+
+    @property
+    def width(self) -> int:
+        return len(self.axes)
+
+
+def bounded_joint_layout(
+    rows: tuple[tuple[str, CoordinateUnit, float, float], ...],
+) -> JointLayout:
+    """Compact source-authoring helper; the returned value has one canonical form."""
+
+    return JointLayout(
+        tuple(
+            JointAxis(name, unit, Bounds(lower, upper))
+            for name, unit, lower, upper in rows
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class StateCoordinate:
+    """One coordinate in a derived state vector; tuple position is its index."""
+
+    instance: ComponentId
+    part_id: PartId
+    axis: JointAxis
+    kind: ChannelKind
+
+    @property
+    def joint_name(self) -> str:
+        return self.axis.name
+
+    @property
+    def unit(self) -> CoordinateUnit:
+        return self.axis.unit
+
+    @property
+    def lower(self) -> float | None:
+        return self.axis.bounds.lower if isinstance(self.axis.bounds, Bounds) else None
+
+    @property
+    def upper(self) -> float | None:
+        return self.axis.bounds.upper if isinstance(self.axis.bounds, Bounds) else None
 
 
 @dataclass(frozen=True, slots=True)
 class StateSpace:
-    """Ordered native coordinates; dense tensors are projections of this table."""
+    """Ordered native coordinates; dense tensors are projections of this tuple."""
 
     coordinates: tuple[StateCoordinate, ...]
 
-    def __post_init__(self) -> None:
-        if [coordinate.index for coordinate in self.coordinates] != list(
-            range(len(self.coordinates))
-        ):
-            raise LayoutError("state", "slot indices must be 0..n-1 in order")
-
     @property
     def width(self) -> int:
-        """Number of physical state channels; this says nothing about a controller."""
         return len(self.coordinates)
 
     @property
@@ -82,21 +140,20 @@ class StateSpace:
 
     @property
     def joint_count(self) -> int:
-        """All non-gripper channels in the episode joint-state vector."""
         return self.width - self.gripper_count
 
     def indices(self, kind: ChannelKind) -> tuple[int, ...]:
-        return tuple(coordinate.index for coordinate in self.coordinates if coordinate.kind is kind)
+        return tuple(
+            index for index, coordinate in enumerate(self.coordinates) if coordinate.kind is kind
+        )
 
     @property
     def names(self) -> tuple[str, ...]:
-        """``instance/joint_name`` per slot — the unambiguous wire order."""
         return tuple(
-            f"{coordinate.instance}/{coordinate.joint_name}" for coordinate in self.coordinates
+            f"{coordinate.instance}/{coordinate.axis.name}" for coordinate in self.coordinates
         )
 
     def validate_widths(self, *, joint_dim: int, gripper_dim: int) -> None:
-        """Fail closed unless an episode's joint/gripper widths match this body."""
         if joint_dim != self.joint_count or gripper_dim != self.gripper_count:
             raise LayoutError(
                 "state",

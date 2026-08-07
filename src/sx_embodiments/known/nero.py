@@ -11,13 +11,14 @@ xacro compositions with no plain URDF and no gripper datasheet, so no
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import EmbodimentDefinition, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, PhysicalSpec
+from ._authoring import bounded_layout
 
-NERO_URDF: Final = PackagedAsset(
+NERO_URDF: Final = packaged_asset(
     relpath="official/agilex_nero/nero_description.urdf",
     sha256="c297c4bd2caeff44c673ae69070fc80f950510c0cb33cfa8b81b5bc774e91278",
     format=AssetFormat.URDF,
@@ -33,11 +34,13 @@ NERO_URDF: Final = PackagedAsset(
 
 NERO_ARM: Final = ArmSpec(
     part_id=PartId("nero-arm"),
-    joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"),
-    joint_units=(CoordinateUnit.RADIAN,) * 7,
-    joint_lower=(-2.70526, -1.74, -2.75, -1.01, -2.75, -0.73, -1.5707963),
-    joint_upper=(2.70526, 1.74, 2.75, 2.14, 2.75, 0.95, 1.5707963),
-    home_joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    layout=bounded_layout(
+        names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"),
+        units=(CoordinateUnit.RADIAN,) * 7,
+        lower=(-2.70526, -1.74, -2.75, -1.01, -2.75, -0.73, -1.5707963),
+        upper=(2.70526, 1.74, 2.75, 2.14, 2.75, 0.95, 1.5707963),
+    ),
+    home=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
     assets=(NERO_URDF,),
     # AgileX NERO datasheet (global.agilex.ai/products/nero).
     physical=PhysicalSpec(payload_kg=3.0, reach_m=0.58, mass_kg=4.8),
@@ -48,5 +51,5 @@ NERO_SPEC: Final = EmbodimentDefinition(
     label="Agilex NERO",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="nero"),
-    attachments=(Component("arm", NERO_ARM, ComponentRole.BODY),),
+    attachments=(body_component("arm", NERO_ARM),),
 )

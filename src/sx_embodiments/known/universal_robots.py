@@ -2,14 +2,15 @@
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition
+from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset, packaged_asset
+from ..compose import EmbodimentDefinition, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec
+from ._authoring import bounded_layout
 from .sources import menagerie
 
-UR5E_MJCF: Final = PackagedAsset(
+UR5E_MJCF: Final = packaged_asset(
     relpath="menagerie/universal_robots_ur5e/ur5e.xml",
     sha256="ffd0a7b336d3c2d27c35a15cc0d4aaa95196769aca190ac8d6522d3318c345a0",
     format=AssetFormat.MJCF,
@@ -17,7 +18,7 @@ UR5E_MJCF: Final = PackagedAsset(
     provenance=menagerie("universal_robots_ur5e/ur5e.xml", "BSD-3-Clause"),
     media_type="application/xml",
 )
-UR10E_MJCF: Final = PackagedAsset(
+UR10E_MJCF: Final = packaged_asset(
     relpath="menagerie/universal_robots_ur10e/ur10e.xml",
     sha256="7495b8efe33e497ffe892b9279acb010671c2b4b5955f499aa2b1d320dd8c871",
     format=AssetFormat.MJCF,
@@ -25,7 +26,7 @@ UR10E_MJCF: Final = PackagedAsset(
     provenance=menagerie("universal_robots_ur10e/ur10e.xml", "BSD-3-Clause"),
     media_type="application/xml",
 )
-UR5E_URDF: Final = PackagedAsset(
+UR5E_URDF: Final = packaged_asset(
     relpath="official/universal_robots/ur5e.urdf",
     sha256="83b0eb2e97500cff0b947d37fd26428ebe3ab7d409c602dcd677488285bb3a9a",
     format=AssetFormat.URDF,
@@ -39,7 +40,7 @@ UR5E_URDF: Final = PackagedAsset(
     ),
     media_type="application/xml",
 )
-UR10E_URDF: Final = PackagedAsset(
+UR10E_URDF: Final = packaged_asset(
     relpath="official/universal_robots/ur10e.urdf",
     sha256="3e3b040f4bb12207d6e2ec95078108dbcd58e4d7d2e21a5a7806c9b8839a7a06",
     format=AssetFormat.URDF,
@@ -70,11 +71,13 @@ _HOME: Final = (-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0)
 def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ArmSpec:
     return ArmSpec(
         part_id=PartId(f"{model}-arm"),
-        joint_names=_JOINT_NAMES,
-        joint_units=(CoordinateUnit.RADIAN,) * 6,
-        joint_lower=_JOINT_LOWER,
-        joint_upper=_JOINT_UPPER,
-        home_joints=_HOME,
+        layout=bounded_layout(
+            names=_JOINT_NAMES,
+            units=(CoordinateUnit.RADIAN,) * 6,
+            lower=_JOINT_LOWER,
+            upper=_JOINT_UPPER,
+        ),
+        home=_HOME,
         assets=(urdf, mjcf),
     )
 
@@ -87,12 +90,12 @@ UR5E_SPEC: Final = EmbodimentDefinition(
     label="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
-    attachments=(Component("arm", UR5E_ARM, ComponentRole.BODY),),
+    attachments=(body_component("arm", UR5E_ARM),),
 )
 UR10E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur10e"),
     label="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur10e"),
-    attachments=(Component("arm", UR10E_ARM, ComponentRole.BODY),),
+    attachments=(body_component("arm", UR10E_ARM),),
 )

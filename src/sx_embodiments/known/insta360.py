@@ -14,7 +14,7 @@ the das-umi-v4 shape); the converter's MCAP namespace keys (``left``/``right`` i
 
 from typing import Final
 
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..compose import EmbodimentDefinition, MountedOn, body_component, sensor_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, DeviceSpec, LensProjection, SensorModel
 
@@ -40,13 +40,13 @@ INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="insta360-umi"),
     attachments=(
-        Component("left_jaw", INSTA360_UMI_JAW, ComponentRole.BODY),
-        Component("right_jaw", INSTA360_UMI_JAW, ComponentRole.BODY),
-        Component(
-            "left_wrist", X5_FISHEYE_30, ComponentRole.SENSOR, MountFrame("left_jaw", "handle")
+        body_component("left_jaw", INSTA360_UMI_JAW),
+        body_component("right_jaw", INSTA360_UMI_JAW),
+        sensor_component(
+            "left_wrist", X5_FISHEYE_30, MountedOn("left_jaw", "handle")
         ),
-        Component(
-            "right_wrist", X5_FISHEYE_30, ComponentRole.SENSOR, MountFrame("right_jaw", "handle")
+        sensor_component(
+            "right_wrist", X5_FISHEYE_30, MountedOn("right_jaw", "handle")
         ),
     ),
 )

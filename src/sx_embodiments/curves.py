@@ -1,10 +1,6 @@
-"""Piecewise-linear scalar curves for measured hardware relationships.
+"""Piecewise-linear scalar curves with each knot owning both coordinates."""
 
-The one current use is a gripper's aperture-vs-joint-angle forward-kinematic table (the
-DAS jaw ``gap(q)`` lookup, previously duplicated across seven data-pipeline files). The
-record is strictly monotonic in both axes so it is invertible without ambiguity.
-"""
-
+import math
 from bisect import bisect_left
 from dataclasses import dataclass
 from itertools import pairwise
@@ -12,51 +8,56 @@ from itertools import pairwise
 from .errors import PartValidationError
 
 
-def _strictly_monotonic(values: tuple[float, ...]) -> bool:
-    increasing = all(a < b for a, b in pairwise(values))
-    decreasing = all(a > b for a, b in pairwise(values))
-    return increasing or decreasing
+@dataclass(frozen=True, slots=True)
+class Knot:
+    x: float
+    y: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.x) or not math.isfinite(self.y):
+            raise PartValidationError("curve", "knots must be finite")
+        object.__setattr__(self, "x", float(self.x))
+        object.__setattr__(self, "y", float(self.y))
 
 
 @dataclass(frozen=True, slots=True)
 class Curve1D:
-    """A validated piecewise-linear ``y(x)``; both axes strictly monotonic.
+    """A validated, invertible piecewise-linear curve."""
 
-    ``at``/``inverse_at`` clamp outside the table (matching ``np.interp`` semantics so the
-    data-pipeline call sites keep byte-identical behavior after adoption).
-    """
-
-    x: tuple[float, ...]
-    y: tuple[float, ...]
+    knots: tuple[Knot, ...]
 
     def __post_init__(self) -> None:
-        if len(self.x) != len(self.y):
-            raise PartValidationError("curve", "x and y must have equal length")
-        if len(self.x) < 2:
+        if len(self.knots) < 2:
             raise PartValidationError("curve", "a curve needs at least two knots")
-        if not all(a < b for a, b in pairwise(self.x)):
-            raise PartValidationError("curve", "x must be strictly increasing")
-        if not _strictly_monotonic(self.y):
-            raise PartValidationError("curve", "y must be strictly monotonic")
+        if not all(left.x < right.x for left, right in pairwise(self.knots)):
+            raise PartValidationError("curve", "knot x values must be strictly increasing")
+        outputs = tuple(knot.y for knot in self.knots)
+        increasing = all(left < right for left, right in pairwise(outputs))
+        decreasing = all(left > right for left, right in pairwise(outputs))
+        if not (increasing or decreasing):
+            raise PartValidationError("curve", "knot y values must be strictly monotonic")
 
     def at(self, x: float) -> float:
-        """Interpolate ``y(x)``, clamped to the table's ends."""
-        return _interp(x, self.x, self.y)
+        return _interp(
+            x,
+            tuple(knot.x for knot in self.knots),
+            tuple(knot.y for knot in self.knots),
+        )
 
     def inverse_at(self, y: float) -> float:
-        """Interpolate ``x(y)`` — valid because ``y`` is strictly monotonic; clamped."""
-        if self.y[0] < self.y[-1]:
-            return _interp(y, self.y, self.x)
-        return _interp(y, tuple(reversed(self.y)), tuple(reversed(self.x)))
+        xs = tuple(knot.x for knot in self.knots)
+        ys = tuple(knot.y for knot in self.knots)
+        if ys[0] < ys[-1]:
+            return _interp(y, ys, xs)
+        return _interp(y, tuple(reversed(ys)), tuple(reversed(xs)))
 
 
-def _interp(v: float, xp: tuple[float, ...], fp: tuple[float, ...]) -> float:
-    if v <= xp[0]:
-        return fp[0]
-    if v >= xp[-1]:
-        return fp[-1]
-    hi = bisect_left(xp, v)
-    lo = hi - 1
-    span = xp[hi] - xp[lo]
-    frac = (v - xp[lo]) / span
-    return fp[lo] + frac * (fp[hi] - fp[lo])
+def _interp(value: float, inputs: tuple[float, ...], outputs: tuple[float, ...]) -> float:
+    if value <= inputs[0]:
+        return outputs[0]
+    if value >= inputs[-1]:
+        return outputs[-1]
+    upper = bisect_left(inputs, value)
+    lower = upper - 1
+    fraction = (value - inputs[lower]) / (inputs[upper] - inputs[lower])
+    return outputs[lower] + fraction * (outputs[upper] - outputs[lower])

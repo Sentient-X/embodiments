@@ -1,11 +1,20 @@
 """One content-addressed embodiment object and a friendly-name registry."""
 
-from .assets import (
-    EmbodiedAsset,
-    asset_root,
-    resolve_asset,
+from sx_contracts import ProvenancedAsset
+
+from .assets import asset_root, resolve_asset
+from .compose import (
+    BaseMount,
+    BodyAttachment,
+    Component,
+    ComponentKind,
+    ComponentRole,
+    LeaderAttachment,
+    MountedOn,
+    MountKind,
+    RootMount,
+    SensorAttachment,
 )
-from .compose import BaseMount, Component, ComponentKind, ComponentRole, MountKind
 from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
@@ -23,13 +32,24 @@ from .errors import (
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, PartId
 from .known import EmbodimentRegistry, embodiments
-from .layout import ChannelKind, CoordinateUnit, StateSpace
+from .layout import (
+    Bounds,
+    ChannelKind,
+    CoordinateBounds,
+    CoordinateUnit,
+    JointAxis,
+    JointLayout,
+    StateSpace,
+    Unbounded,
+)
 from .parts import CameraModality, LensProjection, SensorModel
 
 __all__ = [
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",
+    "BodyAttachment",
+    "Bounds",
     "CameraModality",
     "ChannelKind",
     "Component",
@@ -37,8 +57,8 @@ __all__ = [
     "ComponentKind",
     "ComponentRole",
     "CompositionError",
+    "CoordinateBounds",
     "CoordinateUnit",
-    "EmbodiedAsset",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
@@ -48,14 +68,22 @@ __all__ = [
     "EmbodimentSchemaError",
     "GripperKinematicsError",
     "InvalidCameraMountError",
+    "JointAxis",
+    "JointLayout",
     "LayoutError",
+    "LeaderAttachment",
     "LensProjection",
     "MissingUrdfError",
     "MountKind",
+    "MountedOn",
     "PartId",
     "PartValidationError",
+    "ProvenancedAsset",
+    "RootMount",
+    "SensorAttachment",
     "SensorModel",
     "StateSpace",
+    "Unbounded",
     "UnknownEmbodimentError",
     "asset_root",
     "embodiments",

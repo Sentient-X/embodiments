@@ -3,8 +3,9 @@
 import pytest
 
 from sx_embodiments import CoordinateUnit, GripperKinematicsError, embodiments
-from sx_embodiments.curves import Curve1D
+from sx_embodiments.curves import Curve1D, Knot
 from sx_embodiments.identity import PartId
+from sx_embodiments.layout import bounded_joint_layout
 from sx_embodiments.parts import GripperSpec
 
 
@@ -33,12 +34,9 @@ def test_out_of_range_values_clamp_like_the_curve_path() -> None:
 def test_gap_curve_wins_over_the_affine_map() -> None:
     curved = GripperSpec(
         part_id=PartId("curved-jaw"),
-        joint_names=("drive",),
-        joint_units=(CoordinateUnit.RADIAN,),
-        joint_lower=(0.0,),
-        joint_upper=(1.0,),
+        layout=bounded_joint_layout((("drive", CoordinateUnit.RADIAN, 0.0, 1.0),)),
         travel_m=(0.0, 0.08),
-        gap_curve=Curve1D(x=(0.0, 0.5, 1.0), y=(0.0, 0.06, 0.08)),
+        gap_curve=Curve1D((Knot(0.0, 0.0), Knot(0.5, 0.06), Knot(1.0, 0.08))),
     )
     assert curved.aperture_from_drive(0.5) == pytest.approx(0.06)
     assert curved.drive_from_aperture(0.06) == pytest.approx(0.5)
@@ -48,10 +46,12 @@ def test_gap_curve_wins_over_the_affine_map() -> None:
 def test_underdeclared_gripper_refuses_instead_of_guessing() -> None:
     bare = GripperSpec(
         part_id=PartId("bare-jaw"),
-        joint_names=("left", "right"),
-        joint_units=(CoordinateUnit.RADIAN, CoordinateUnit.RADIAN),
-        joint_lower=(0.0, 0.0),
-        joint_upper=(1.0, 1.0),
+        layout=bounded_joint_layout(
+            (
+                ("left", CoordinateUnit.RADIAN, 0.0, 1.0),
+                ("right", CoordinateUnit.RADIAN, 0.0, 1.0),
+            )
+        ),
         travel_m=(0.0, 0.08),  # two drive joints: the affine single-joint map does not apply
     )
     with pytest.raises(GripperKinematicsError):

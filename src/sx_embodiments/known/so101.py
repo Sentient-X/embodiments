@@ -9,13 +9,14 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import Component, EmbodimentDefinition, MountedOn, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
+from ._authoring import bounded_layout
 
-SO101_URDF: Final = PackagedAsset(
+SO101_URDF: Final = packaged_asset(
     relpath="so101/so101.urdf",
     sha256="dd7f789c1aa4b9f82174dd49f6c4d62f5338f0956ec8e59c37576ee161903279",
     format=AssetFormat.URDF,
@@ -31,20 +32,24 @@ SO101_URDF: Final = PackagedAsset(
 
 SO101_ARM: Final = ArmSpec(
     part_id=PartId("so101-arm"),
-    joint_names=("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"),
-    joint_units=(CoordinateUnit.RADIAN,) * 5,
-    joint_lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385),
-    joint_upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
-    home_joints=(0.0, 0.0, 0.0, 0.0, 0.0),
+    layout=bounded_layout(
+        names=("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"),
+        units=(CoordinateUnit.RADIAN,) * 5,
+        lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385),
+        upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
+    ),
+    home=(0.0, 0.0, 0.0, 0.0, 0.0),
     assets=(SO101_URDF,),
 )
 
 SO101_JAW: Final = GripperSpec(
     part_id=PartId("so101-jaw"),
-    joint_names=("gripper",),
-    joint_units=(CoordinateUnit.RADIAN,),
-    joint_lower=(-0.174533,),
-    joint_upper=(2.0944,),
+    layout=bounded_layout(
+        names=("gripper",),
+        units=(CoordinateUnit.RADIAN,),
+        lower=(-0.174533,),
+        upper=(2.0944,),
+    ),
     # aperture-in-meters not yet measured; episodes carry the joint value
 )
 
@@ -52,10 +57,8 @@ SO101_JAW: Final = GripperSpec(
 def so101_side(side: str) -> tuple[Component, ...]:
     """One SO-101 arm+jaw block; composing two sides IS the bimanual body."""
     return (
-        Component(f"{side}_arm", SO101_ARM, ComponentRole.BODY),
-        Component(
-            f"{side}_jaw", SO101_JAW, ComponentRole.BODY, MountFrame(f"{side}_arm", "wrist_roll")
-        ),
+        body_component(f"{side}_arm", SO101_ARM),
+        body_component(f"{side}_jaw", SO101_JAW, MountedOn(f"{side}_arm", "wrist_roll")),
     )
 
 
@@ -65,8 +68,8 @@ SO101_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
     attachments=(
-        Component("arm", SO101_ARM, ComponentRole.BODY),
-        Component("jaw", SO101_JAW, ComponentRole.BODY, MountFrame("arm", "wrist_roll")),
+        body_component("arm", SO101_ARM),
+        body_component("jaw", SO101_JAW, MountedOn("arm", "wrist_roll")),
     ),
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )

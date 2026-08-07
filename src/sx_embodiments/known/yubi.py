@@ -20,13 +20,13 @@ yubi-sw URDF — the URDF's own finger joints are not the wire channels.
 import dataclasses
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import EmbodimentDefinition, RootMount, body_component, sensor_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
 from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
 
-YUBI_HANDS_URDF: Final = PackagedAsset(
+YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
     sha256="88aeb45bf71905aea6e64ca804b06102b7c4c0ca45bdf71586a4aea4d8901c13",
     format=AssetFormat.URDF,
@@ -73,28 +73,25 @@ def _yubi(
         kind=EmbodimentKind.CAPTURE_RIG,
         lineage=Lineage(family="yubi", variant=variant, revision=revision),
         attachments=(
-            Component("left_jaw", jaw, ComponentRole.BODY),
-            Component("right_jaw", jaw, ComponentRole.BODY),
+            body_component("left_jaw", jaw),
+            body_component("right_jaw", jaw),
             # Hand-camera frames from the authoritative yubi-sw URDF.
-            Component(
+            sensor_component(
                 "wrist_left",
                 wrist_camera,
-                ComponentRole.SENSOR,
-                MountFrame(frame="left_hand_cam_link"),
+                RootMount("left_hand_cam_link"),
             ),
-            Component(
+            sensor_component(
                 "wrist_right",
                 wrist_camera,
-                ComponentRole.SENSOR,
-                MountFrame(frame="right_hand_cam_link"),
+                RootMount("right_hand_cam_link"),
             ),
             # The Quest passthrough head view (das-umi's ``base`` pattern);
             # the composite URDF carries the quest3s_head link it mounts on.
-            Component(
+            sensor_component(
                 "base",
                 QUEST3_HEAD,
-                ComponentRole.SENSOR,
-                MountFrame(frame="quest3s_head"),
+                RootMount("quest3s_head"),
             ),
         ),
         extra_assets=(YUBI_HANDS_URDF,),

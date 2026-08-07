@@ -1,6 +1,6 @@
 from sx_contracts import Capability, ComponentId
 
-from sx_embodiments import ComponentKind, ComponentRole, embodiments
+from sx_embodiments import ComponentKind, ComponentRole, MountedOn, RootMount, embodiments
 
 
 def test_franka_component_graph_is_topological_and_capability_bearing() -> None:
@@ -10,7 +10,7 @@ def test_franka_component_graph_is_topological_and_capability_bearing() -> None:
     assert arm.kind is ComponentKind.MANIPULATOR
     assert arm.capabilities == (Capability.SPATIAL_MOTION_SE3,)
     assert arm.role is ComponentRole.BODY
-    assert not arm.mount.parent_instance
+    assert isinstance(arm.mount, RootMount)
     assert gripper.component_id == ComponentId("gripper")
     assert gripper.kind is ComponentKind.EFFECTOR
     assert gripper.capabilities == (
@@ -18,7 +18,8 @@ def test_franka_component_graph_is_topological_and_capability_bearing() -> None:
         Capability.GRASP,
         Capability.GRASP_PARALLEL,
     )
-    assert gripper.mount.parent_instance == "arm"
+    assert isinstance(gripper.mount, MountedOn)
+    assert gripper.mount.parent == "arm"
     assert gripper.mount.frame == "panda_link8"
 
 

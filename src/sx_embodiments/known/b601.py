@@ -128,8 +128,16 @@ Further deliberate divergences:
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset
-from ..compose import Component, ComponentRole, EmbodimentDefinition, MountFrame
+from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..compose import (
+    Component,
+    EmbodimentDefinition,
+    MountedOn,
+    RootMount,
+    body_component,
+    leader_component,
+    sensor_component,
+)
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import (
@@ -141,9 +149,10 @@ from ..parts import (
     MimicJoint,
     SensorModel,
 )
+from ._authoring import bounded_layout
 from .yubi import D405_30
 
-B601_DM_URDF: Final = PackagedAsset(
+B601_DM_URDF: Final = packaged_asset(
     relpath="b601_dm/reBot_B601_DM_with_gripper.urdf",
     sha256="eb15a091412fa112f11d8bef3d170a40aa3cbb9db335fb145a1b27eb2aa000a0",
     format=AssetFormat.URDF,
@@ -166,21 +175,25 @@ B601_DM_URDF: Final = PackagedAsset(
 B601_ARM: Final = ArmSpec(
     part_id=PartId("rebot-b601dm-arm"),
     # Names and limits are the vendored URDF's revolute joints, in kinematic order.
-    joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
-    joint_units=(CoordinateUnit.RADIAN,) * 6,
-    joint_lower=(-2.8, -3.14, -3.14, -1.87, -1.57, -3.14),
-    joint_upper=(2.8, 0.0, 0.0, 1.57, 1.57, 3.14),
-    home_joints=(0.0,) * 6,  # the driver's calibrated zero pose, inside every URDF limit
+    layout=bounded_layout(
+        names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
+        units=(CoordinateUnit.RADIAN,) * 6,
+        lower=(-2.8, -3.14, -3.14, -1.87, -1.57, -3.14),
+        upper=(2.8, 0.0, 0.0, 1.57, 1.57, 3.14),
+    ),
+    home=(0.0,) * 6,  # the driver's calibrated zero pose, inside every URDF limit
     assets=(B601_DM_URDF,),
     # physical: no manufacturer datasheet captured, so payload/reach/mass stay unstated
 )
 
 B601_GRIPPER: Final = GripperSpec(
     part_id=PartId("rebot-b601dm-gripper"),
-    joint_names=("gripper_joint1",),  # the described actuated finger; the mirror mimics
-    joint_units=(CoordinateUnit.METER,),
-    joint_lower=(0.0,),
-    joint_upper=(0.0715,),
+    layout=bounded_layout(
+        names=("gripper_joint1",),  # the described actuated finger; the mirror mimics
+        units=(CoordinateUnit.METER,),
+        lower=(0.0,),
+        upper=(0.0715,),
+    ),
     travel_m=(0.0, 0.143),  # parallel jaw: aperture = 2 x finger stroke (0.0715 m each)
     mimic_joints=(MimicJoint("gripper_joint2", of="gripper_joint1", multiplier=1.0),),
 )
@@ -205,13 +218,12 @@ D435I_30: Final = CameraSpec(
 def b601_side(side: str) -> tuple[Component, ...]:
     """One B601-DM follower arm + gripper block; two sides ARE the bimanual body."""
     return (
-        Component(f"{side}_arm", B601_ARM, ComponentRole.BODY),
-        Component(
+        body_component(f"{side}_arm", B601_ARM),
+        body_component(
             f"{side}_gripper",
             B601_GRIPPER,
-            ComponentRole.BODY,
             # link6 is the URDF link the fixed ``gripper_joint`` hangs the jaw off.
-            MountFrame(f"{side}_arm", "link6"),
+            MountedOn(f"{side}_arm", "link6"),
         ),
     )
 
@@ -223,11 +235,10 @@ def _wrist_camera(side: str) -> Component:
     per-unit calibration that travels with the recording, and the jaw is rigidly fixed to
     ``link6``, so naming that link commits to nothing the URDF does not state.
     """
-    return Component(
+    return sensor_component(
         f"{side}_wrist_camera",
         D405_30,
-        ComponentRole.SENSOR,
-        MountFrame(f"{side}_arm", "link6"),
+        MountedOn(f"{side}_arm", "link6"),
     )
 
 
@@ -237,8 +248,8 @@ B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
     attachments=(
-        Component("arm", B601_ARM, ComponentRole.BODY),
-        Component("gripper", B601_GRIPPER, ComponentRole.BODY, MountFrame("arm", "link6")),
+        body_component("arm", B601_ARM),
+        body_component("gripper", B601_GRIPPER, MountedOn("arm", "link6")),
     ),
     # rates unbound: the pod's capture fps is a per-session parameter, not a hardware rate
 )
@@ -257,12 +268,12 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="rebot-b601", variant="dm-station"),
     attachments=(
-        Component("left_leader", B601_LEADER, ComponentRole.LEADER),
-        Component("right_leader", B601_LEADER, ComponentRole.LEADER),
+        leader_component("left_leader", B601_LEADER),
+        leader_component("right_leader", B601_LEADER),
         *b601_side("left"),
         *b601_side("right"),
         _wrist_camera("left"),
         _wrist_camera("right"),
-        Component("top_camera", D435I_30, ComponentRole.SENSOR, MountFrame(frame="world")),
+        sensor_component("top_camera", D435I_30, RootMount("world")),
     ),
 )
