@@ -206,9 +206,9 @@ _BODY_PARTS = (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 class EmbodimentDefinition:
     """Source record used to construct one public ``Embodiment``.
 
-    Package-internal despite the public name: it is not exported from
-    ``sx_embodiments``, and ``tools/check_embodiment_ownership.py`` keeps
-    construction inside the ``known/`` registry.
+    Package-internal despite the public name: neither it nor the components it holds are
+    exported from ``sx_embodiments``, so the only place a definition can be written is the
+    ``known/`` registry beside the assets it names.
     """
 
     name: EmbodimentName
