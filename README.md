@@ -37,10 +37,17 @@ External-corpus ingest starts from a registered object and replaces only its ver
 bundle:
 
 ```python
-robot = embodiments["franka"].with_assets(assets, urdf=urdf_bytes)
+from sx_contracts import ProvenancedAsset
+from sx_embodiments import Embodiment, embodiments
+
+
+def bind_external_assets(
+    assets: tuple[ProvenancedAsset, ...], urdf_bytes: bytes
+) -> Embodiment:
+    return embodiments["franka"].with_assets(assets, urdf=urdf_bytes)
 ```
 
-The caller supplies content-addressed assets and exact URDF bytes; the registered component
+The caller supplies provenance-bearing, content-addressed assets and exact URDF bytes; the registered component
 semantics remain authoritative. A mutable URL is a location, not asset identity, so ingest
 boundaries hash bytes before producing an `AssetRef`.
 
