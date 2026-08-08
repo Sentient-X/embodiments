@@ -17,8 +17,8 @@ jobs:
         run: uv sync
       - name: Lint
         run: |
-          uv run ruff check src tests
-          uv run ruff format --check src tests
+          uv run ruff check sx_embodiments tests
+          uv run ruff format --check sx_embodiments tests
       - name: Typecheck
         run: uv run pyright
       - name: Test

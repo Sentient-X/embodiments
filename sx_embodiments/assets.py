@@ -35,7 +35,7 @@ def asset_root() -> Path:
     installed = Path(__file__).resolve().parent / "_assets"
     if installed.is_dir():
         return installed
-    repo_relative = Path(__file__).resolve().parents[2] / "assets"
+    repo_relative = Path(__file__).resolve().parents[1] / "assets"
     if repo_relative.is_dir():
         return repo_relative
     raise AssetsUnavailableError(
