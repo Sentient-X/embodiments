@@ -22,8 +22,8 @@ from sx_contracts.assets import (
     ProvenancedAsset,
 )
 from sx_contracts.content import ContentBlob, Sha256Digest
+from sx_contracts.identity import JsonObject, content_id
 from sx_contracts.identity import canonical_json as canonical_document
-from sx_contracts.identity import content_id
 
 from .assets import PackagedAsset, resolve_asset
 from .compose import (
@@ -121,8 +121,7 @@ class Embodiment:
         urdfs = tuple(
             asset
             for asset in self.assets
-            if asset.asset.format is AssetFormat.URDF
-            and asset.asset.role is AssetRole.DESCRIPTION
+            if asset.asset.format is AssetFormat.URDF and asset.asset.role is AssetRole.DESCRIPTION
         )
         if len(urdfs) != 1:
             raise MissingUrdfError(str(self.name), len(urdfs))
@@ -130,7 +129,7 @@ class Embodiment:
 
     @property
     def id(self) -> EmbodimentId:
-        return content_id(EmbodimentId, self._content_dict())
+        return content_id(EmbodimentId, cast("JsonObject", self._content_dict()))
 
     @property
     def state(self) -> StateSpace:
@@ -162,8 +161,7 @@ class Embodiment:
         return next(
             asset
             for asset in self.assets
-            if asset.asset.format is AssetFormat.URDF
-            and asset.asset.role is AssetRole.DESCRIPTION
+            if asset.asset.format is AssetFormat.URDF and asset.asset.role is AssetRole.DESCRIPTION
         )
 
     @property
@@ -192,8 +190,7 @@ class Embodiment:
         grippers = tuple(
             component.part
             for component in self.components
-            if component.role is ComponentRole.BODY
-            and isinstance(component.part, GripperSpec)
+            if component.role is ComponentRole.BODY and isinstance(component.part, GripperSpec)
         )
         if len(grippers) != 1:
             raise LayoutError(str(self.name), "operation requires exactly one gripper")
@@ -227,8 +224,7 @@ class Embodiment:
     @property
     def has_mobile_base(self) -> bool:
         return any(
-            component.role is ComponentRole.BODY
-            and isinstance(component.part, MobileBaseSpec)
+            component.role is ComponentRole.BODY and isinstance(component.part, MobileBaseSpec)
             for component in self.components
         )
 
@@ -245,15 +241,17 @@ class Embodiment:
         return dataclasses.replace(self, assets=assets)
 
     def canonical_json(self) -> str:
-        return canonical_document(self._content_dict())
+        return canonical_document(cast("JsonObject", self._content_dict()))
 
     def to_dict(self) -> dict[str, object]:
         return {"id": str(self.id), **self._content_dict()}
 
     def to_json(self) -> str:
-        return canonical_document(self.to_dict())
+        return canonical_document(cast("JsonObject", self.to_dict()))
 
     def _content_dict(self) -> dict[str, object]:
+        # The object-typed projection is JSON by construction; canonical_json
+        # re-validates every leaf at runtime, so the cast at the callers is safe.
         return {
             "schema_version": self.schema_version,
             "name": str(self.name),
@@ -420,9 +418,7 @@ def _layout_to_dict(layout: JointLayout) -> list[dict[str, object]]:
 
 def _parse_components(raw: object) -> tuple[Component, ...]:
     rows = _list(raw, "components")
-    return tuple(
-        _parse_component(row, f"components[{index}]") for index, row in enumerate(rows)
-    )
+    return tuple(_parse_component(row, f"components[{index}]") for index, row in enumerate(rows))
 
 
 def _parse_component(raw: object, label: str) -> Component:
@@ -441,9 +437,7 @@ def _parse_component(raw: object, label: str) -> Component:
             raise EmbodimentSchemaError(f"{label}.attachment sensor has a non-sensor part")
         attachment = SensorAttachment(part)
     else:
-        raise EmbodimentSchemaError(
-            f"{label}.attachment.kind is unknown: {attachment_kind!r}"
-        )
+        raise EmbodimentSchemaError(f"{label}.attachment.kind is unknown: {attachment_kind!r}")
     return Component(
         instance=_string(entry, "instance", label),
         attachment=attachment,
@@ -482,8 +476,7 @@ def _parse_part(raw: object, label: str) -> Part:
             "gap_curve",
             "physical",
         },
-        "camera": common
-        | {"sensor_model", "modality", "fps", "projection", "resolution"},
+        "camera": common | {"sensor_model", "modality", "fps", "projection", "resolution"},
         "mobile_base": common | {"layout"},
         "force_torque": common | {"rate_hz"},
         "device": common | {"description"},
@@ -513,9 +506,7 @@ def _parse_part(raw: object, label: str) -> Part:
                 part_id=part_id,
                 layout=_parse_layout(entry["layout"], label),
                 travel_m=_parse_pair(entry["travel_m"], f"{label}.travel_m"),
-                grasp_centre_m=_parse_triple(
-                    entry["grasp_centre_m"], f"{label}.grasp_centre_m"
-                ),
+                grasp_centre_m=_parse_triple(entry["grasp_centre_m"], f"{label}.grasp_centre_m"),
                 mimic_joints=_parse_mimics(entry["mimic_joints"], label),
                 gap_curve=_parse_curve(entry["gap_curve"], label),
                 physical=_parse_physical(entry["physical"], label),
@@ -573,9 +564,7 @@ def _parse_layout(raw: object, label: str) -> JointLayout:
             _exact_keys(bounds_entry, {"kind"}, f"{axis_label}.bounds")
             bounds = Unbounded()
         else:
-            raise EmbodimentSchemaError(
-                f"{axis_label}.bounds.kind is unknown: {bounds_kind!r}"
-            )
+            raise EmbodimentSchemaError(f"{axis_label}.bounds.kind is unknown: {bounds_kind!r}")
         axes.append(JointAxis(_string(entry, "name", axis_label), unit, bounds))
     return JointLayout(tuple(axes))
 
@@ -648,9 +637,7 @@ def _provenanced_asset_to_dict(value: ProvenancedAsset) -> dict[str, object]:
             "format": asset.format.value,
             "role": asset.role.value,
             "media_type": asset.media_type,
-            "logical_path": (
-                str(asset.logical_path) if asset.logical_path is not None else None
-            ),
+            "logical_path": (str(asset.logical_path) if asset.logical_path is not None else None),
         },
         "provenance": {
             "repository": provenance.repository,
@@ -699,9 +686,7 @@ def _parse_provenanced_asset(raw: object, label: str) -> ProvenancedAsset:
         asset = AssetRef(
             location=_string(asset_entry, "location", f"{label}.asset"),
             content=ContentBlob(
-                sha256=Sha256Digest(
-                    _string(content_entry, "sha256", f"{label}.asset.content")
-                ),
+                sha256=Sha256Digest(_string(content_entry, "sha256", f"{label}.asset.content")),
                 size_bytes=_integer(
                     content_entry["size_bytes"], f"{label}.asset.content.size_bytes"
                 ),

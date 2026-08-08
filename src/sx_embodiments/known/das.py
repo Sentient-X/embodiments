@@ -128,9 +128,7 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component("left_jaw", DAS_JAW_V4),
         body_component("right_jaw", DAS_JAW_V4),
-        sensor_component(
-            "left_wrist", UVC_MONO_60, MountedOn("left_jaw", "link_ca2")
-        ),
+        sensor_component("left_wrist", UVC_MONO_60, MountedOn("left_jaw", "link_ca2")),
         sensor_component(
             "right_wrist",
             UVC_MONO_60,

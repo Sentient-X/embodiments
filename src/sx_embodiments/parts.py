@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .assets import PackagedAsset
 from .curves import Curve1D
@@ -121,9 +121,7 @@ def _validate_configuration(
                 isinstance(axis.bounds, Bounds)
                 and not axis.bounds.lower <= value <= axis.bounds.upper
             ):
-                raise PartValidationError(
-                    part_id, f"{field_name} must lie within the joint bounds"
-                )
+                raise PartValidationError(part_id, f"{field_name} must lie within the joint bounds")
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,7 +361,9 @@ class CameraSpec:
         if not math.isfinite(self.fps) or self.fps <= 0.0:
             raise PartValidationError(self.part_id, "fps must be positive")
         if self.resolution is not None:
-            width, height = self.resolution
+            # Untyped construction reaches this dataclass, so the pair is
+            # re-proved as ints (bools are ints and must be refused).
+            width, height = cast("tuple[object, object]", self.resolution)
             if (
                 isinstance(width, bool)
                 or isinstance(height, bool)
@@ -401,9 +401,7 @@ class ForceTorqueSpec:
     rate_hz: float | None = None
 
     def __post_init__(self) -> None:
-        if self.rate_hz is not None and (
-            not math.isfinite(self.rate_hz) or self.rate_hz <= 0.0
-        ):
+        if self.rate_hz is not None and (not math.isfinite(self.rate_hz) or self.rate_hz <= 0.0):
             raise PartValidationError(self.part_id, "rate_hz must be positive")
 
 
@@ -441,11 +439,7 @@ class CameraBinding:
 
     @property
     def frame(self) -> str:
-        from .compose import MountedOn, RootMount
-
-        if isinstance(self.mount, MountedOn | RootMount):
-            return self.mount.frame
-        raise PartValidationError(self.camera.part_id, "camera binding has an unknown mount")
+        return self.mount.frame
 
 
 @dataclass(frozen=True, slots=True)

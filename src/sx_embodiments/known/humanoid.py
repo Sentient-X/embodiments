@@ -134,12 +134,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     lineage=Lineage(family="sentient-humanoid"),
     attachments=(
         body_component("torso", SENTIENT_HUMANOID_TORSO),
-        body_component(
-            "right_arm", SENTIENT_HUMANOID_RIGHT_ARM, MountedOn("torso", "chest_link")
-        ),
-        body_component(
-            "left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link")
-        ),
+        body_component("right_arm", SENTIENT_HUMANOID_RIGHT_ARM, MountedOn("torso", "chest_link")),
+        body_component("left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link")),
         body_component("right_leg", SENTIENT_HUMANOID_RIGHT_LEG),
         body_component("left_leg", SENTIENT_HUMANOID_LEFT_LEG),
     ),

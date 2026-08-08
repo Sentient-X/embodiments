@@ -1,7 +1,7 @@
 """Agilex Piper: the single-arm fleet body.
 
 The joint box is the deployed canonical data (identical to the pre-recut ``PIPER``
-constant enpire safety derives from) — NOT the MuJoCo Menagerie ranges, which differ
+constant auto_perfect safety derives from) — NOT the MuJoCo Menagerie ranges, which differ
 slightly (menagerie joint3 lower -2.697 vs deployed -2.967, joint4 ±1.832 vs ±1.745,
 joint6 ±3.14 vs ±2.094). The menagerie MJCF is attached as the sim description asset;
 deployed limits win on conflict because live safety constraints are derived from them.

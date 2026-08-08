@@ -42,11 +42,7 @@ INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component("left_jaw", INSTA360_UMI_JAW),
         body_component("right_jaw", INSTA360_UMI_JAW),
-        sensor_component(
-            "left_wrist", X5_FISHEYE_30, MountedOn("left_jaw", "handle")
-        ),
-        sensor_component(
-            "right_wrist", X5_FISHEYE_30, MountedOn("right_jaw", "handle")
-        ),
+        sensor_component("left_wrist", X5_FISHEYE_30, MountedOn("left_jaw", "handle")),
+        sensor_component("right_wrist", X5_FISHEYE_30, MountedOn("right_jaw", "handle")),
     ),
 )

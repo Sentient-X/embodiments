@@ -22,9 +22,7 @@ def bounded_layout(
     )
 
 
-def unbounded_layout(
-    *, names: tuple[str, ...], units: tuple[CoordinateUnit, ...]
-) -> JointLayout:
+def unbounded_layout(*, names: tuple[str, ...], units: tuple[CoordinateUnit, ...]) -> JointLayout:
     """Zip a source table whose limits are genuinely undeclared."""
 
     if len(names) != len(units):

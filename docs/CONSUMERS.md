@@ -12,7 +12,7 @@ lands only with a production consumer.
 | Worlds | full object in executable bindings and RRD evidence; `EmbodimentId` in scenes and run records | task, scene, checkpoint, served controller, and evidence agree |
 | real2sim | registered object rebound by `robot.with_assets(...)` | the bundle's own closure check fails closed before rebinding |
 | sx-episodes | full object in each episode; `EmbodimentId` in summaries | object/URDF/calibration/action agreement and tensor coordinate order |
-| enpire | full object for drivers, safety, telemetry, and simulation | runtime limits and constraints derive directly from the object |
+| auto-perfect | full object for drivers, safety, telemetry, and simulation | runtime limits and constraints derive directly from the object |
 | SXD | generated full-object projection because standalone workers cannot import workspace packages | byte-for-byte projection parity check |
 
 Rerun episode entity paths belong to `sx-episodes`; nominal camera names/mounts/rates belong to

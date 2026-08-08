@@ -196,9 +196,7 @@ def test_capabilities_are_a_grasping_pair_plus_three_rgbd_sensors() -> None:
     assert "left_leader" not in profile and "right_leader" not in profile
     assert profile["left_arm"].values == frozenset({Capability.SPATIAL_MOTION_SE3})
     assert profile["right_arm"].values == frozenset({Capability.SPATIAL_MOTION_SE3})
-    grasp = frozenset(
-        {Capability.SPATIAL_MOTION_SE3, Capability.GRASP, Capability.GRASP_PARALLEL}
-    )
+    grasp = frozenset({Capability.SPATIAL_MOTION_SE3, Capability.GRASP, Capability.GRASP_PARALLEL})
     assert profile["left_gripper"].values == grasp
     assert profile["right_gripper"].values == grasp
     sensing = frozenset({Capability.SENSING_RGB, Capability.SENSING_DEPTH})

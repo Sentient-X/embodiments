@@ -65,9 +65,7 @@ def resolve_asset(ref: AssetRef) -> Path:
         raise AssetDigestMismatchError(relpath, ref.sha256, actual)
     actual_size = resolved.stat().st_size
     if actual_size != ref.byte_size:
-        raise AssetIntegrityError(
-            f"{relpath}: expected {ref.byte_size} bytes, got {actual_size}"
-        )
+        raise AssetIntegrityError(f"{relpath}: expected {ref.byte_size} bytes, got {actual_size}")
     return resolved
 
 

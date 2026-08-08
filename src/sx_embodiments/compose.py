@@ -96,9 +96,8 @@ class BaseMount:
     def __post_init__(self) -> None:
         if not self.frame.strip():
             raise ComponentGraphError("base mount frame must not be empty")
-        if (
-            len(self.half_extents) != 2
-            or any(not math.isfinite(value) or value <= 0.0 for value in self.half_extents)
+        if len(self.half_extents) != 2 or any(
+            not math.isfinite(value) or value <= 0.0 for value in self.half_extents
         ):
             raise ComponentGraphError("base mount half_extents must be two positive values")
         if len(self.centre) != 2 or any(not math.isfinite(value) for value in self.centre):

@@ -87,10 +87,7 @@ def bounded_joint_layout(
     """Compact source-authoring helper; the returned value has one canonical form."""
 
     return JointLayout(
-        tuple(
-            JointAxis(name, unit, Bounds(lower, upper))
-            for name, unit, lower, upper in rows
-        )
+        tuple(JointAxis(name, unit, Bounds(lower, upper)) for name, unit, lower, upper in rows)
     )
 
 
