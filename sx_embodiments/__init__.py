@@ -9,7 +9,7 @@ arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodim
 """
 
 from .assets import resolve_asset
-from .compose import BaseMount, MountKind
+from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
 from .embodiment import Embodiment
 from .errors import (
     AssetDigestMismatchError,
@@ -28,13 +28,15 @@ from .errors import (
 from .identity import EmbodimentId, EmbodimentName
 from .known import embodiments
 from .layout import Bounds, ChannelKind, CoordinateBounds, CoordinateUnit, Unbounded
-from .parts import LensProjection
+from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 
 __all__ = [
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",
     "Bounds",
+    "CameraOptics",
+    "CameraOpticsAuthority",
     "ChannelKind",
     "ComponentGraphError",
     "CompositionError",
@@ -45,12 +47,14 @@ __all__ = [
     "EmbodimentId",
     "EmbodimentName",
     "EmbodimentSchemaError",
+    "FactSource",
     "GripperKinematicsError",
     "InvalidCameraMountError",
     "LayoutError",
-    "LensProjection",
     "MissingUrdfError",
     "MountKind",
+    "OperatorMount",
+    "OperatorSite",
     "PartValidationError",
     "Unbounded",
     "UnknownEmbodimentError",

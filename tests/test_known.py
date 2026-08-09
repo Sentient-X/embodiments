@@ -1,8 +1,8 @@
 """The public registry is the only route from a name to a complete embodiment."""
 
 from sx_embodiments import Embodiment, embodiments
-from sx_embodiments.compose import ComponentRole
 from sx_embodiments.identity import EmbodimentKind
+from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, DevelopmentReason
 
 
 def test_piper_kinematics_are_derived_from_the_registry() -> None:
@@ -49,32 +49,41 @@ def test_registry_ids_are_byte_stable() -> None:
         "franka",
         "so101",
         "bimanual-so101",
-        "das-umi-v4",
         "quest-ego",
-        "yubi-mono",
-        "yubi-depth",
-        "yubi-widejaw",
-        "piperx-station",
         "b601-dm",
         "bimanual-b601-dm",
-        "b601-dm-station",
     }
 
 
 def test_camera_names_are_properties_of_the_embodiment() -> None:
-    assert tuple(camera.name for camera in embodiments["das-umi-v4"].cameras) == (
-        "left_wrist",
-        "right_wrist",
-        "head_left",
-        "head_right",
-    )
-    assert tuple(camera.name for camera in embodiments["yubi-mono"].cameras) == (
-        "wrist_left",
-        "wrist_right",
+    assert tuple(camera.name for camera in embodiments["quest-ego"].cameras) == (
         "head_left",
         "head_right",
     )
     assert embodiments["piper"].cameras == ()
+
+
+def test_incomplete_camera_rigs_are_development_only() -> None:
+    expected = {
+        "das-umi-v4": DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+        "yubi": DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+        "piperx-station": DevelopmentReason.MISSING_CAMERA_INSTALLATION,
+        "b601-dm-station": DevelopmentReason.MISSING_CAMERA_INSTALLATION,
+    }
+    for name, reason in expected.items():
+        entry = DEVELOPMENT_EMBODIMENTS[name]
+        assert entry.reason is reason
+        assert name not in set(embodiments)
+
+    yubi_mounts = DEVELOPMENT_EMBODIMENTS["yubi"].spec.operator_mounts
+    assert tuple(mount.site.value for mount in yubi_mounts) == (
+        "left_hand",
+        "right_hand",
+    )
+    assert tuple(mount.attachment_frame for mount in yubi_mounts) == (
+        "quest_left_controller",
+        "quest_right_controller",
+    )
 
 
 def test_every_entry_is_complete_and_round_trips() -> None:
@@ -83,13 +92,8 @@ def test_every_entry_is_complete_and_round_trips() -> None:
         assert isinstance(embodiment, Embodiment)
         assert str(embodiment.name) == name
         assert len(embodiment.id) == 64
-        assert embodiment.schema_version == 11
+        assert embodiment.schema_version == 12
         assert Embodiment.from_json(embodiment.to_json()) == embodiment
         assert embodiment.urdf_path.is_file()
-        if embodiment.kind is EmbodimentKind.TELEOP_STATION:
-            assert any(
-                component.role is ComponentRole.LEADER for component in embodiment.components
-            )
-            assert embodiment.cameras
         if embodiment.kind is EmbodimentKind.CAPTURE_RIG:
             assert embodiment.cameras

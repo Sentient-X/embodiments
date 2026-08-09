@@ -44,7 +44,10 @@ def test_piper_state() -> None:
 
 
 def test_das_capture_rig_state_is_two_jaw_channels() -> None:
-    state = embodiments["das-umi-v4"].state
+    from sx_embodiments.embodiment import embodiment_from_definition
+    from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
+
+    state = embodiment_from_definition(DEVELOPMENT_EMBODIMENTS["das-umi-v4"].spec).state
     assert state.names == ("left_jaw/joint_1", "right_jaw/joint_1")
     assert state.arm_joint_count == 0
     assert state.gripper_count == 2

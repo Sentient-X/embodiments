@@ -16,11 +16,27 @@ from typing import Final
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component, sensor_component
+from ..compose import (
+    EmbodimentDefinition,
+    OperatorMount,
+    OperatorSite,
+    RootMount,
+    body_component,
+    sensor_component,
+)
 from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import CameraModality, CameraSpec, GripperSpec, MimicJoint, SensorModel
+from ..parts import (
+    CameraModality,
+    CameraOptics,
+    CameraOpticsAuthority,
+    CameraSpec,
+    FactSource,
+    GripperSpec,
+    MimicJoint,
+    SensorModel,
+)
 from ._authoring import bounded_layout
 
 DAS_GRIPPER_URDF: Final = packaged_asset(
@@ -39,7 +55,7 @@ DAS_GRIPPER_URDF: Final = packaged_asset(
 
 DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
-    sha256="cd3c37dfa0cb1dd0b20c4a14477f46b6ad63917948b1761cbe586a4c06142d01",
+    sha256="5d25b310a58b7b737aad45f9bf3cbea266193d3b4b602be1226c9be00a122603",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -54,15 +70,15 @@ DAS_UMI_V4_URDF: Final = packaged_asset(
 
 QUEST_EGO_URDF: Final = packaged_asset(
     relpath="quest_ego/urdf/quest_ego.urdf",
-    sha256="a28a9ed9db63202a3afbf705ff37ec6a2408752d99984570d5fd2cdb7197984b",
+    sha256="f41d4a9a2d7e10e0e9da0a0f8c00a98cf95073cf6ed6ae852a8087a2590e1c5d",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
         repository="https://github.com/Sentient-X/sx-embodiments",
-        revision="manifest-v4",
+        revision="manifest-v5",
         path="assets/quest_ego/urdf/quest_ego.urdf",
         license_id="Apache-2.0",
-        generator="controller-free headset description with recording-calibrated optical frames",
+        generator="controller-free headset description with reference-unit optical frames",
     ),
     media_type="application/xml",
 )
@@ -136,11 +152,18 @@ DAS_JAW_V4: Final = GripperSpec(
     assets=(DAS_GRIPPER_URDF,),
 )
 
-UVC_MONO_60: Final = CameraSpec(
-    part_id=PartId("uvc-mono"),
-    model=SensorModel.UVC_MONO,
-    modality=CameraModality.RGB,
-    fps=60.0,
+QUEST3_REFERENCE_OPTICS: Final = CameraOptics(
+    width=1280,
+    height=960,
+    image_from_camera=(868.31, 0.0, 640.18, 0.0, 868.31, 482.07, 0.0, 0.0, 1.0),
+    distortion_model="none",
+    distortion_coefficients=(),
+    authority=CameraOpticsAuthority.REFERENCE_UNIT,
+    source=FactSource(
+        repository="https://gist.github.com/sudotman/652995df8c18c819d095ba0289dbb6f0",
+        revision="856868e4f1def6b8bd3d038f922f9b42609fce57",
+        path="quest3CameraIntrinsics",
+    ),
 )
 
 QUEST3_HEAD: Final = CameraSpec(
@@ -148,6 +171,7 @@ QUEST3_HEAD: Final = CameraSpec(
     model=SensorModel.QUEST3_RGB,
     modality=CameraModality.RGB,
     fps=30.0,
+    optics=QUEST3_REFERENCE_OPTICS,
 )
 
 DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
@@ -158,16 +182,6 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
         body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
-        sensor_component(
-            "left_wrist",
-            UVC_MONO_60,
-            MountedOn("left_jaw", "left_link_ca2"),
-        ),
-        sensor_component(
-            "right_wrist",
-            UVC_MONO_60,
-            MountedOn("right_jaw", "right_link_ca2"),
-        ),
         sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_camera_optical")),
         sensor_component(
             "head_right",
@@ -176,6 +190,11 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
         ),
     ),
     extra_assets=(DAS_UMI_V4_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
+    operator_mounts=(
+        OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),
+        OperatorMount(OperatorSite.LEFT_HAND, "left_base_link", "left_handle"),
+        OperatorMount(OperatorSite.RIGHT_HAND, "right_base_link", "right_handle"),
+    ),
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentDefinition(
@@ -196,4 +215,5 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
         ),
     ),
     extra_assets=(QUEST_EGO_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
+    operator_mounts=(OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),),
 )

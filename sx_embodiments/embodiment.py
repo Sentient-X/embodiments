@@ -34,11 +34,14 @@ from .compose import (
     LeaderAttachment,
     MountedOn,
     MountKind,
+    OperatorMount,
+    OperatorSite,
     RootMount,
     SensorAttachment,
     camera_bindings,
     state_space,
     validate_components,
+    validate_operator_mounts,
 )
 from .curves import Curve1D, Knot
 from .errors import EmbodimentSchemaError, LayoutError, MissingUrdfError
@@ -48,13 +51,15 @@ from .parts import (
     ArmSpec,
     CameraBinding,
     CameraModality,
+    CameraOptics,
+    CameraOpticsAuthority,
     CameraSpec,
     ControlRates,
     DeviceSpec,
+    FactSource,
     ForceTorqueSpec,
     GripperSpec,
     JointGroupSpec,
-    LensProjection,
     MimicJoint,
     MobileBaseSpec,
     Part,
@@ -62,7 +67,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +76,7 @@ class Embodiment:
 
     The component graph is the sole morphology. State order, roles, camera bindings,
     capabilities, and single-arm projections are derived from it. Friendly names are
-    catalog aliases; ``id`` is the digest of the complete schema-11 document.
+    catalog aliases; ``id`` is the digest of the complete schema-12 document.
 
     **Construction is registry-internal.** Outside this package an embodiment is obtained,
     never assembled: ``embodiments[name]`` for a registered revision, ``from_dict``/
@@ -90,6 +95,7 @@ class Embodiment:
     assets: tuple[ProvenancedAsset, ...]
     rates: ControlRates | None = None
     base_mount: BaseMount | None = None
+    operator_mounts: tuple[OperatorMount, ...] = ()
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -125,6 +131,7 @@ class Embodiment:
         if len(urdfs) != 1:
             raise MissingUrdfError(str(self.name), len(urdfs))
         validate_components(str(self.name), self.kind, self.components)
+        validate_operator_mounts(str(self.name), self.kind, self.operator_mounts)
 
     @property
     def id(self) -> EmbodimentId:
@@ -236,7 +243,13 @@ class Embodiment:
         """Bind the morphology to another complete, provenance-bearing asset set."""
 
         refs = tuple(asset.asset for asset in assets)
-        _validate_urdf(self.name, refs, urdf)
+        _validate_urdf(
+            self.name,
+            refs,
+            urdf,
+            components=self.components,
+            operator_mounts=self.operator_mounts,
+        )
         return dataclasses.replace(self, assets=assets)
 
     def canonical_json(self) -> str:
@@ -264,6 +277,7 @@ class Embodiment:
             "components": [_component_to_dict(component) for component in self.components],
             "rates": _rates_to_dict(self.rates),
             "base_mount": _base_mount_to_dict(self.base_mount),
+            "operator_mounts": [_operator_mount_to_dict(mount) for mount in self.operator_mounts],
             "assets": [_provenanced_asset_to_dict(asset) for asset in self.assets],
         }
 
@@ -281,6 +295,7 @@ class Embodiment:
                 "components",
                 "rates",
                 "base_mount",
+                "operator_mounts",
                 "assets",
             },
             where="embodiment",
@@ -300,6 +315,7 @@ class Embodiment:
                 components=_parse_components(entry),
                 rates=_parse_rates(entry),
                 base_mount=_parse_base_mount(entry),
+                operator_mounts=_parse_operator_mounts(entry),
                 assets=_parse_assets(entry),
             )
         except EmbodimentSchemaError:
@@ -384,13 +400,25 @@ def _part_to_dict(part: Part) -> dict[str, object]:
             "physical": _physical_to_dict(part.physical),
         }
     if isinstance(part, CameraSpec):
+        optics = part.optics
         return common | {
             "kind": "camera",
             "sensor_model": part.model.value,
             "modality": part.modality.value,
             "fps": part.fps,
-            "projection": part.projection.value,
-            "resolution": list(part.resolution) if part.resolution is not None else None,
+            "optics": {
+                "width": optics.width,
+                "height": optics.height,
+                "image_from_camera": list(optics.image_from_camera),
+                "distortion_model": optics.distortion_model,
+                "distortion_coefficients": list(optics.distortion_coefficients),
+                "authority": optics.authority.value,
+                "source": {
+                    "repository": optics.source.repository,
+                    "revision": optics.source.revision,
+                    "path": optics.source.path,
+                },
+            },
         }
     if isinstance(part, MobileBaseSpec):
         return common | {"kind": "mobile_base", "layout": _layout_to_dict(part.layout)}
@@ -471,7 +499,7 @@ def _parse_part(document: decode.Document) -> Part:
             "gap_curve",
             "physical",
         },
-        "camera": common | {"sensor_model", "modality", "fps", "projection", "resolution"},
+        "camera": common | {"sensor_model", "modality", "fps", "optics"},
         "mobile_base": common | {"layout"},
         "force_torque": common | {"rate_hz"},
         "device": common | {"description"},
@@ -507,13 +535,40 @@ def _parse_part(document: decode.Document) -> Part:
                 physical=_parse_physical(entry),
             )
         if kind == "camera":
+            optics = decode.exactly(
+                decode.mapping(entry, "optics"),
+                {
+                    "width",
+                    "height",
+                    "image_from_camera",
+                    "distortion_model",
+                    "distortion_coefficients",
+                    "authority",
+                    "source",
+                },
+            )
+            source = decode.exactly(
+                decode.mapping(optics, "source"),
+                {"repository", "revision", "path"},
+            )
             return CameraSpec(
                 part_id=part_id,
                 model=SensorModel(decode.text(entry, "sensor_model")),
                 modality=CameraModality(decode.text(entry, "modality")),
                 fps=decode.number(entry, "fps"),
-                projection=LensProjection(decode.text(entry, "projection")),
-                resolution=_parse_resolution(entry),
+                optics=CameraOptics(
+                    width=decode.integer(optics, "width"),
+                    height=decode.integer(optics, "height"),
+                    image_from_camera=decode.numbers(optics, "image_from_camera"),
+                    distortion_model=decode.text(optics, "distortion_model"),
+                    distortion_coefficients=decode.numbers(optics, "distortion_coefficients"),
+                    authority=CameraOpticsAuthority(decode.text(optics, "authority")),
+                    source=FactSource(
+                        repository=decode.text(source, "repository"),
+                        revision=decode.text(source, "revision"),
+                        path=decode.text(source, "path"),
+                    ),
+                ),
             )
         if kind == "mobile_base":
             return MobileBaseSpec(part_id=part_id, layout=_parse_layout(entry))
@@ -716,6 +771,32 @@ def _parse_base_mount(document: decode.Document) -> BaseMount | None:
     )
 
 
+def _operator_mount_to_dict(value: OperatorMount) -> dict[str, str]:
+    return {
+        "site": value.site.value,
+        "root_frame": value.root_frame,
+        "attachment_frame": value.attachment_frame,
+    }
+
+
+def _parse_operator_mounts(document: decode.Document) -> tuple[OperatorMount, ...]:
+    mounts: list[OperatorMount] = []
+    for raw in decode.documents(document, "operator_mounts"):
+        entry = decode.exactly(raw, {"site", "root_frame", "attachment_frame"})
+        try:
+            site = OperatorSite(decode.text(entry, "site"))
+        except ValueError as exc:
+            raise EmbodimentSchemaError(f"{entry.where}.site is unknown") from exc
+        mounts.append(
+            OperatorMount(
+                site=site,
+                root_frame=decode.text(entry, "root_frame"),
+                attachment_frame=decode.text(entry, "attachment_frame"),
+            )
+        )
+    return tuple(mounts)
+
+
 def _parse_lineage(document: decode.Document) -> Lineage:
     entry = decode.exactly(document, {"family", "variant", "revision"})
     return Lineage(
@@ -743,7 +824,13 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
             seen.add(key)
     urdf = authoritative_urdf(definition)
     refs = tuple(asset.asset for asset in assets)
-    _validate_urdf(definition.name, refs, urdf.path().read_bytes())
+    _validate_urdf(
+        definition.name,
+        refs,
+        urdf.path().read_bytes(),
+        components=definition.attachments,
+        operator_mounts=definition.operator_mounts,
+    )
     return Embodiment(
         name=definition.name,
         label=definition.label,
@@ -753,6 +840,7 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         assets=tuple(assets),
         rates=definition.rates,
         base_mount=definition.base_mount,
+        operator_mounts=definition.operator_mounts,
     )
 
 
@@ -779,7 +867,14 @@ def _packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
     return assets
 
 
-def _validate_urdf(name: EmbodimentName, assets: tuple[AssetRef, ...], urdf: bytes) -> None:
+def _validate_urdf(
+    name: EmbodimentName,
+    assets: tuple[AssetRef, ...],
+    urdf: bytes,
+    *,
+    components: tuple[Component, ...],
+    operator_mounts: tuple[OperatorMount, ...],
+) -> None:
     urdfs = tuple(
         asset
         for asset in assets
@@ -799,6 +894,35 @@ def _validate_urdf(name: EmbodimentName, assets: tuple[AssetRef, ...], urdf: byt
         raise EmbodimentSchemaError(f"{name}: authoritative URDF is invalid XML") from exc
     if root.tag != "robot" or not root.attrib.get("name", "").strip():
         raise EmbodimentSchemaError(f"{name}: authoritative URDF root must be a named <robot>")
+    links = {link.get("name"): link for link in root.iter("link") if link.get("name")}
+    camera_frames = {
+        component.mount.frame for component in components if isinstance(component.part, CameraSpec)
+    }
+    missing_cameras = camera_frames - links.keys()
+    if missing_cameras:
+        raise EmbodimentSchemaError(
+            f"{name}: camera frames are absent from the authoritative URDF: "
+            f"{', '.join(sorted(missing_cameras))}"
+        )
+    non_optical = {
+        frame
+        for frame in camera_frames
+        if links[frame].get("data-frame-convention") != "camera_optical"
+    }
+    if non_optical:
+        raise EmbodimentSchemaError(
+            f"{name}: camera frames are not declared camera_optical: "
+            f"{', '.join(sorted(non_optical))}"
+        )
+    operator_frames = {
+        frame for mount in operator_mounts for frame in (mount.root_frame, mount.attachment_frame)
+    }
+    missing_operator_frames = operator_frames - links.keys()
+    if missing_operator_frames:
+        raise EmbodimentSchemaError(
+            f"{name}: operator mount frames are absent from the authoritative URDF: "
+            f"{', '.join(sorted(missing_operator_frames))}"
+        )
 
 
 # -- the arities this schema fixes ------------------------------------------------------
@@ -806,19 +930,6 @@ def _validate_urdf(name: EmbodimentName, assets: tuple[AssetRef, ...], urdf: byt
 # `decode` reads a vector; how long that vector must be is this schema's fact, so the
 # arity checks live here. Each returns the exact tuple type its part field is declared
 # as, which is what keeps the constructors honest without a cast.
-
-
-def _parse_resolution(document: decode.Document) -> tuple[int, int] | None:
-    if document["resolution"] is None:
-        return None
-    values = decode.sequence(document, "resolution")
-    problem = f"{document.where}.resolution must contain two positive integers"
-    if len(values) != 2:
-        raise EmbodimentSchemaError(problem)
-    width, height = values
-    if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
-        raise EmbodimentSchemaError(problem)
-    return width, height
 
 
 def _parse_optional_vector(document: decode.Document, key: str) -> tuple[float, ...] | None:

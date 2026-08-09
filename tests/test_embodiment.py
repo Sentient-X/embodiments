@@ -74,7 +74,7 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 11
+    assert wire["schema_version"] == 12
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
@@ -171,20 +171,21 @@ def test_embodiment_rejects_duplicate_assets() -> None:
         replace(embodiments["piper"], assets=(asset, asset))
 
 
-def test_capture_rig_carries_cameras() -> None:
-    embodiment = embodiments["das-umi-v4"]
+def test_supported_capture_rig_carries_complete_cameras() -> None:
+    embodiment = embodiments["quest-ego"]
     cameras = [
         component
         for component in cast(list[dict[str, object]], embodiment.to_dict()["components"])
         if cast(dict[str, object], component["attachment"])["kind"] == "sensor"
     ]
-    assert [camera["instance"] for camera in cameras] == [
-        "left_wrist",
-        "right_wrist",
-        "head_left",
-        "head_right",
-    ]
-    assert embodiment.state.width == 2
+    assert [camera["instance"] for camera in cameras] == ["head_left", "head_right"]
+    for camera in cameras:
+        part = cast(dict[str, object], cast(dict[str, object], camera["attachment"])["part"])
+        optics = cast(dict[str, object], part["optics"])
+        assert optics["width"] == 1280
+        assert optics["height"] == 960
+        assert len(cast(list[float], optics["image_from_camera"])) == 9
+    assert embodiment.state.width == 0
 
 
 def test_quest_ego_is_a_controller_free_stereo_headset() -> None:
@@ -194,12 +195,11 @@ def test_quest_ego_is_a_controller_free_stereo_headset() -> None:
     assert "quest3mesh.obj" in urdf
     assert "controller" not in urdf
 
-    for capture_rig in ("das-umi-v4", "yubi-mono", "yubi-depth", "yubi-widejaw"):
-        assert "quest3mesh.obj" in embodiments[capture_rig].urdf_bytes.decode()
+    assert tuple(mount.site.value for mount in embodiment.operator_mounts) == ("head",)
 
 
-def test_non_default_camera_optics_round_trip() -> None:
-    embodiment = embodiments["yubi-depth"]
+def test_camera_optics_round_trip_and_fail_closed() -> None:
+    embodiment = embodiments["quest-ego"]
     wire = embodiment.to_dict()
     cameras = [
         component
@@ -210,11 +210,22 @@ def test_non_default_camera_optics_round_trip() -> None:
         cast(dict[str, object], cast(dict[str, object], camera["attachment"])["part"])
         for camera in cameras
     ]
-    assert any(part["resolution"] == [1280, 720] for part in parts)
+    optics = cast(dict[str, object], parts[0]["optics"])
+    assert optics["image_from_camera"] == [
+        868.31,
+        0.0,
+        640.18,
+        0.0,
+        868.31,
+        482.07,
+        0.0,
+        0.0,
+        1.0,
+    ]
     parsed = Embodiment.from_dict(wire)
     assert parsed == embodiment
     assert parsed.id == embodiment.id
-    parts[0]["projection"] = "orthographic"
+    optics["image_from_camera"] = [0.0] * 9
     with pytest.raises(EmbodimentSchemaError):
         Embodiment.from_dict(wire)
 

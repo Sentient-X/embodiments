@@ -179,8 +179,8 @@ def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> N
 
 def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
     """The vendored yubi-sw description: per hand one encoder-driven finger joint
-    with a -1 mimic mirror, the hand-camera links the registry mounts cameras on,
-    the Quest controller mount frames, and a closed mesh set."""
+    with a -1 mimic mirror, hand-camera housings, Quest controller mount frames,
+    and a closed mesh set. It does not fabricate a Quest headset."""
     from sx_embodiments.assets import asset_root
     from sx_embodiments.known.yubi import YUBI_HANDS_URDF
 
@@ -215,7 +215,7 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         mesh.get("filename") for mesh in root.iter("mesh") if mesh.get("filename") is not None
     }
     assert meshes, "yubi hands URDF references no meshes"
-    assert "package://sx-embodiments/quest_ego/meshes/quest3mesh.obj" in meshes
+    assert "package://sx-embodiments/quest_ego/meshes/quest3mesh.obj" not in meshes
     for filename in meshes:
         assert filename is not None and filename.startswith("package://")
         package, relative = filename.removeprefix("package://").split("/", 1)
@@ -224,9 +224,9 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         assert (package_root / relative).is_file(), f"unresolved mesh {filename}"
 
 
-def test_yubi_camera_mounts_exist_in_authoritative_urdf() -> None:
-    for name in ("yubi-mono", "yubi-depth", "yubi-widejaw"):
-        embodiment = embodiments[name]
-        links = {link.get("name") for link in ET.fromstring(embodiment.urdf_bytes).iter("link")}
-        for camera in embodiment.cameras:
-            assert camera.frame in links, f"{name}: camera {camera.name} frame {camera.frame}"
+def test_yubi_camera_housings_are_not_promoted_as_calibrated_optics() -> None:
+    from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
+
+    entry = DEVELOPMENT_EMBODIMENTS["yubi"]
+    assert entry.reason.value == "missing_camera_calibration"
+    assert not any(component.role.value == "sensor" for component in entry.spec.attachments)

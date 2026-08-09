@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .assets import PackagedAsset
 from .curves import Curve1D
@@ -66,17 +66,98 @@ class CameraModality(StrEnum):
     RGBD = "rgbd"
 
 
-class LensProjection(StrEnum):
-    """The lens's nominal projection family — the calibration MODEL, never a calibration.
+class CameraOpticsAuthority(StrEnum):
+    """What makes a camera's default optics true.
 
-    Per-unit calibrated intrinsics (K/D matrices) are capture data and travel with the
-    recording (MCAP ``camera_info``, Quest characteristics JSONs); the registry states only
-    which projection family the optics follow. ``EQUIDISTANT`` is byte-equal to the
-    Foxglove/OpenCV fisheye ``distortion_model`` wire string.
+    ``MODEL_NOMINAL`` is a manufacturer-published model value. ``REFERENCE_UNIT`` is a
+    measured physical unit pinned by source revision. Neither is silently promoted to a
+    per-unit calibration: an episode's measured camera facts remain the higher-authority
+    observation for that recording.
     """
 
-    PINHOLE = "pinhole"
-    EQUIDISTANT = "equidistant"
+    MODEL_NOMINAL = "model_nominal"
+    REFERENCE_UNIT = "reference_unit"
+
+
+@dataclass(frozen=True, slots=True)
+class FactSource:
+    """A revision-pinned source for a non-asset physical fact."""
+
+    repository: str
+    revision: str
+    path: str
+
+    def __post_init__(self) -> None:
+        if not self.repository.strip() or not self.revision.strip() or not self.path.strip():
+            raise PartValidationError(PartId("fact-source"), "fact source fields must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class CameraOptics:
+    """A complete default optical profile for one image stream.
+
+    The intrinsic matrix is row-major and calibrated for exactly ``width`` x ``height``.
+    ``distortion_model`` and coefficients use the same wire vocabulary as
+    ``sx.episode.CameraCalibration``. The source and authority make the default auditable;
+    serial-specific episode calibration overrides it without changing embodiment identity.
+    """
+
+    width: int
+    height: int
+    image_from_camera: tuple[float, ...]
+    distortion_model: str
+    distortion_coefficients: tuple[float, ...]
+    authority: CameraOpticsAuthority
+    source: FactSource
+
+    def __post_init__(self) -> None:
+        if type(self.width) is not int or type(self.height) is not int:
+            raise PartValidationError(PartId("camera-optics"), "image dimensions must be integers")
+        if self.width <= 0 or self.height <= 0:
+            raise PartValidationError(PartId("camera-optics"), "image dimensions must be positive")
+        if len(self.image_from_camera) != 9 or any(
+            not math.isfinite(value) for value in self.image_from_camera
+        ):
+            raise PartValidationError(
+                PartId("camera-optics"), "intrinsic matrix must be finite 3x3"
+            )
+        fx, skew, cx, row_1_x, fy, cy, row_2_x, row_2_y, row_2_z = self.image_from_camera
+        if fx <= 0.0 or fy <= 0.0:
+            raise PartValidationError(PartId("camera-optics"), "focal lengths must be positive")
+        if (
+            any(abs(value) > 1e-9 for value in (row_1_x, row_2_x, row_2_y))
+            or abs(row_2_z - 1.0) > 1e-9
+        ):
+            raise PartValidationError(
+                PartId("camera-optics"), "intrinsic matrix must use canonical homogeneous rows"
+            )
+        if not all(math.isfinite(value) for value in (skew, cx, cy)):
+            raise PartValidationError(PartId("camera-optics"), "intrinsic matrix must be finite")
+        coefficient_counts = {
+            "none": 0,
+            "plumb_bob": 5,
+            "rational_polynomial": 8,
+            "equidistant": 4,
+            "kannala_brandt": 4,
+        }
+        expected_coefficients = coefficient_counts.get(self.distortion_model)
+        if expected_coefficients is None:
+            raise PartValidationError(
+                PartId("camera-optics"), "distortion model is not in the camera wire vocabulary"
+            )
+        if len(self.distortion_coefficients) != expected_coefficients:
+            raise PartValidationError(
+                PartId("camera-optics"),
+                f"{self.distortion_model} needs exactly {expected_coefficients} coefficients",
+            )
+        if any(not math.isfinite(value) for value in self.distortion_coefficients):
+            raise PartValidationError(
+                PartId("camera-optics"), "distortion coefficients must be finite"
+            )
+        if not 0.0 <= cx < self.width or not 0.0 <= cy < self.height:
+            raise PartValidationError(
+                PartId("camera-optics"), "principal point must lie inside the declared raster"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,36 +424,22 @@ class GripperSpec:
 
 @dataclass(frozen=True, slots=True)
 class CameraSpec:
-    """A camera product; per-instance name and mount live on the Attachment.
+    """One camera image stream with complete default optics.
 
-    ``resolution`` is the product's native ``(width, height)`` in pixels, set only when one
-    unambiguous per-product figure exists (a D435's depth and RGB streams differ — it stays
-    ``None`` there until a consumer needs per-stream resolutions).
+    A physical RGB-D product with different color and depth imagers is represented by two
+    camera stream components. Collapsing them into an ``RGBD`` pseudo-camera would erase
+    their different raster, intrinsics, and optical centres.
     """
 
     part_id: PartId
     model: SensorModel
     modality: CameraModality
     fps: float
-    projection: LensProjection = LensProjection.PINHOLE
-    resolution: tuple[int, int] | None = None
+    optics: CameraOptics
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.fps) or self.fps <= 0.0:
             raise PartValidationError(self.part_id, "fps must be positive")
-        if self.resolution is not None:
-            # Untyped construction reaches this dataclass, so the pair is
-            # re-proved as ints (bools are ints and must be refused).
-            width, height = cast("tuple[object, object]", self.resolution)
-            if (
-                isinstance(width, bool)
-                or isinstance(height, bool)
-                or not isinstance(width, int)
-                or not isinstance(height, int)
-                or width <= 0
-                or height <= 0
-            ):
-                raise PartValidationError(self.part_id, "resolution must be positive")
 
 
 @dataclass(frozen=True, slots=True)

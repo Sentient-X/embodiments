@@ -137,21 +137,16 @@ from ..compose import (
     RootMount,
     body_component,
     leader_component,
-    sensor_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import (
     ArmSpec,
-    CameraModality,
-    CameraSpec,
     DeviceSpec,
     GripperSpec,
     MimicJoint,
-    SensorModel,
 )
 from ._authoring import bounded_layout
-from .yubi import D405_30
 
 B601_DM_URDF: Final = packaged_asset(
     relpath="b601_dm/reBot_B601_DM_with_gripper.urdf",
@@ -234,15 +229,6 @@ B601_LEADER: Final = DeviceSpec(
     "gripper); kinematic description not captured",
 )
 
-D435I_30: Final = CameraSpec(
-    part_id=PartId("realsense-d435i"),
-    model=SensorModel.REALSENSE_D435,
-    modality=CameraModality.RGBD,
-    fps=30.0,
-    # resolution stays None: the D435 family's depth and RGB streams have different
-    # native sizes, so no single per-product figure exists (see CameraSpec).
-)
-
 
 def b601_side(side: str) -> tuple[Component, ...]:
     """One B601-DM follower arm + gripper block; two sides ARE the bimanual body."""
@@ -253,20 +239,6 @@ def b601_side(side: str) -> tuple[Component, ...]:
             B601_GRIPPER,
             MountedOn(f"{side}_arm", f"{side}_link6"),
         ),
-    )
-
-
-def _wrist_camera(side: str) -> Component:
-    """The pod's D405 on one follower wrist.
-
-    The mount frame is the arm's last link: the exact bracket-to-optics extrinsic is
-    per-unit calibration that travels with the recording, and the jaw is rigidly fixed to
-    ``link6``, so naming that link commits to nothing the URDF does not state.
-    """
-    return sensor_component(
-        f"{side}_wrist_camera",
-        D405_30,
-        MountedOn(f"{side}_arm", f"{side}_link6"),
     )
 
 
@@ -302,9 +274,6 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
         leader_component("right_leader", B601_LEADER, RootMount("right_leader")),
         *b601_side("left"),
         *b601_side("right"),
-        _wrist_camera("left"),
-        _wrist_camera("right"),
-        sensor_component("top_camera", D435I_30, RootMount("top_camera")),
     ),
     extra_assets=(B601_DM_SOURCE_URDF, B601_DM_STATION_URDF),
 )

@@ -9,11 +9,9 @@ from ..compose import (
     RootMount,
     body_component,
     leader_component,
-    sensor_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
-from .das import UVC_MONO_60
 from .piper import PIPER_ARM, PIPER_GRIPPER, PIPER_SOURCE_URDF
 
 PIPER_STATION_URDF: Final = packaged_asset(
@@ -48,7 +46,6 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
             PIPER_GRIPPER,
             MountedOn("follower_arm", "follower_link6"),
         ),
-        sensor_component("front", UVC_MONO_60, RootMount("front_camera")),
     ),
     extra_assets=(PIPER_SOURCE_URDF, PIPER_STATION_URDF),
 )

@@ -47,17 +47,25 @@ def render() -> bytes:
     )
     material = ET.SubElement(visual, "material", {"name": "quest_shell"})
     ET.SubElement(material, "color", {"rgba": "0.78 0.79 0.82 1"})
-    for side, frame in (
-        ("left", "quest3s_camera_optical"),
-        ("right", "quest3s_right_camera_optical"),
+    for side, frame, xyz in (
+        ("left", "quest3s_camera_optical", "-0.032 0.075 -0.011"),
+        ("right", "quest3s_right_camera_optical", "0.032 0.075 -0.011"),
     ):
-        ET.SubElement(robot, "link", {"name": frame})
+        ET.SubElement(
+            robot,
+            "link",
+            {"name": frame, "data-frame-convention": "camera_optical"},
+        )
         head_camera = ET.SubElement(
             robot,
             "joint",
             {"name": f"quest3s_head_to_{side}_camera_optical", "type": "fixed"},
         )
-        ET.SubElement(head_camera, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
+        ET.SubElement(
+            head_camera,
+            "origin",
+            {"xyz": xyz, "rpy": "-1.5707963267948966 0 0"},
+        )
         ET.SubElement(head_camera, "parent", {"link": "quest3s_head"})
         ET.SubElement(head_camera, "child", {"link": frame})
     nominal_origins = {"left": "0 0.16 0", "right": "0 -0.16 0"}

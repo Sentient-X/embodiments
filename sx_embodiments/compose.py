@@ -77,6 +77,33 @@ class MountKind(StrEnum):
     CLAMP_EDGE = "clamp_edge"  # clamps to a support's edge segment
 
 
+class OperatorSite(StrEnum):
+    """Human-body sites a capture device is physically worn at or held by."""
+
+    HEAD = "head"
+    LEFT_HAND = "left_hand"
+    RIGHT_HAND = "right_hand"
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorMount:
+    """Ergonomic attachment of one movable URDF subtree to a human-body site.
+
+    ``root_frame`` is the subtree the viewer may place. ``attachment_frame`` is the exact
+    device frame that coincides with the body site (the gripper handle, not its camera or
+    base origin). Keeping both frames makes the body placement a kinematic solve rather
+    than a family-name-specific coordinate nudge.
+    """
+
+    site: OperatorSite
+    root_frame: str
+    attachment_frame: str
+
+    def __post_init__(self) -> None:
+        if not self.root_frame.strip() or not self.attachment_frame.strip():
+            raise ComponentGraphError("operator mount frames must not be empty")
+
+
 @dataclass(frozen=True, slots=True)
 class BaseMount:
     """How this embodiment's root meets the world: the body's half of a placement.
@@ -218,6 +245,7 @@ class EmbodimentDefinition:
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
     base_mount: BaseMount | None = None
+    operator_mounts: tuple[OperatorMount, ...] = ()
 
     def __post_init__(self) -> None:
         name = str(self.name)
@@ -228,6 +256,7 @@ class EmbodimentDefinition:
         if not self.lineage.family.strip():
             raise CompositionError(name, "family must not be empty")
         validate_components(name, self.kind, self.attachments)
+        validate_operator_mounts(name, self.kind, self.operator_mounts)
 
     def body_attachments(self) -> tuple[Component, ...]:
         return tuple(a for a in self.attachments if a.role is ComponentRole.BODY)
@@ -280,6 +309,18 @@ def validate_components(name: str, kind: EmbodimentKind, components: tuple[Compo
         component.role is ComponentRole.BODY for component in components
     ):
         raise CompositionError(name, "a robot needs at least one body component")
+
+
+def validate_operator_mounts(
+    name: str,
+    kind: EmbodimentKind,
+    mounts: tuple[OperatorMount, ...],
+) -> None:
+    if mounts and kind is not EmbodimentKind.CAPTURE_RIG:
+        raise CompositionError(name, "only capture rigs may declare operator mounts")
+    sites = tuple(mount.site for mount in mounts)
+    if len(set(sites)) != len(sites):
+        raise CompositionError(name, "operator body sites must be unique")
 
 
 def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:

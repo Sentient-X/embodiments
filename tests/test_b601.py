@@ -1,9 +1,8 @@
 """The reBot B601-DM family: one arm block, composed into complete descriptions.
 
 ``b601-dm`` (single follower), ``bimanual-b601-dm`` (the pair the pod runs), and
-``b601-dm-station`` (that pair with its two leaders and three cameras) all resolve from the
-public registry with one-arm, two-arm, and complete station URDFs derived from the same
-vendored source, so a description never drops a declared component.
+The single and bimanual robot bodies resolve publicly. The station description remains a
+development record until its installed camera extrinsics are captured.
 """
 
 import xml.etree.ElementTree as ET
@@ -19,7 +18,8 @@ from sx_embodiments import (
     EmbodimentName,
     embodiments,
 )
-from sx_embodiments.compose import ComponentRole, EmbodimentDefinition, MountedOn, RootMount
+from sx_embodiments.compose import ComponentRole, EmbodimentDefinition, MountedOn
+from sx_embodiments.embodiment import embodiment_from_definition
 from sx_embodiments.errors import CompositionError
 from sx_embodiments.identity import EmbodimentKind
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
@@ -32,9 +32,7 @@ from sx_embodiments.known.b601 import (
     B601_GRIPPER,
     BIMANUAL_B601_DM_SPEC,
     BIMANUAL_B601_DM_URDF,
-    D435I_30,
 )
-from sx_embodiments.parts import CameraModality, SensorModel
 
 _ARM_BLOCK = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper_joint1")
 
@@ -44,22 +42,26 @@ def _block(instance_prefix: str) -> tuple[str, ...]:
     return (*(f"{arm}/{name}" for name in _ARM_BLOCK[:6]), f"{gripper}/{_ARM_BLOCK[6]}")
 
 
-def test_all_three_resolve_by_name_from_the_public_registry() -> None:
-    """Promotion: the family is registered, so nothing is held back any more."""
-    for name in ("b601-dm", "bimanual-b601-dm", "b601-dm-station"):
+def _station() -> Embodiment:
+    return embodiment_from_definition(B601_DM_STATION_SPEC)
+
+
+def test_complete_robot_bodies_resolve_from_the_public_registry() -> None:
+    for name in ("b601-dm", "bimanual-b601-dm"):
         embodiment = embodiments[name]
         assert isinstance(embodiment, Embodiment)
         assert str(embodiment.name) == name
         assert embodiment.lineage.family == "rebot-b601"
         assert embodiments[embodiment.id] is embodiment  # content id resolves too
         assert EmbodimentName(name) not in DEVELOPMENT_EMBODIMENTS
+    assert EmbodimentName("b601-dm-station") in DEVELOPMENT_EMBODIMENTS
+    assert "b601-dm-station" not in set(embodiments)
 
 
 def test_each_composition_has_a_complete_authoritative_description() -> None:
     expected = {
         "b601-dm": (B601_DM_URDF, 10),
         "bimanual-b601-dm": (BIMANUAL_B601_DM_URDF, 21),
-        "b601-dm-station": (B601_DM_STATION_URDF, 26),
     }
     for name, (asset, link_count) in expected.items():
         embodiment = embodiments[name]
@@ -73,10 +75,11 @@ def test_each_composition_has_a_complete_authoritative_description() -> None:
         )
     assert embodiments["b601-dm"].urdf.provenance.generator is not None
     assert "meshes/" in embodiments["b601-dm"].urdf.provenance.generator
-    for name in ("bimanual-b601-dm", "b601-dm-station"):
+    for name in ("bimanual-b601-dm",):
         assert embodiments[name].urdf.provenance.generator == (
             "sx-embodiments/tools/compose_registered_urdfs.py"
         )
+    assert len(ET.parse(B601_DM_STATION_URDF.path()).getroot().findall("link")) == 26
 
 
 def test_the_vendored_mesh_closure_resolves_from_the_embodiment() -> None:
@@ -134,7 +137,7 @@ def test_bimanual_state_is_left_block_then_right_block() -> None:
 
 def test_the_station_state_is_the_two_followers_and_nothing_else() -> None:
     """Leaders contribute identity and assets, never channels."""
-    station = embodiments["b601-dm-station"]
+    station = _station()
     assert station.kind is EmbodimentKind.TELEOP_STATION
     assert station.state.names == embodiments["bimanual-b601-dm"].state.names
     assert station.state.width == 14
@@ -165,40 +168,27 @@ def test_units_and_limits_are_the_descriptions_own() -> None:
     assert B601_GRIPPER.joint_units == (CoordinateUnit.METER,)
 
 
-def test_station_camera_names_are_the_pod_agents_dataset_keys() -> None:
-    """``teleop_camera_ports.CAMERA_ROLES``: two D405 wrists and one overhead D435i."""
-    bindings = embodiments["b601-dm-station"].cameras
-    assert tuple(binding.name for binding in bindings) == (
-        "left_wrist_camera",
-        "right_wrist_camera",
-        "top_camera",
-    )
-    wrists = bindings[:2]
-    assert all(binding.camera.model is SensorModel.REALSENSE_D405 for binding in wrists)
-    assert all(
-        isinstance(binding.mount, MountedOn) and binding.mount.parent.endswith("_arm")
-        for binding in wrists
-    )
-    top = bindings[2]
-    assert top.camera == D435I_30
-    assert top.camera.model is SensorModel.REALSENSE_D435  # the deployed unit is a D435i
-    assert top.camera.modality is CameraModality.RGBD
-    assert top.camera.resolution is None  # D435 depth and RGB natives differ
-    assert isinstance(top.mount, RootMount)
+def test_station_is_not_promoted_without_installed_camera_extrinsics() -> None:
+    entry = DEVELOPMENT_EMBODIMENTS[EmbodimentName("b601-dm-station")]
+    assert entry.spec is B601_DM_STATION_SPEC
+    assert entry.reason.value == "missing_camera_installation"
+    assert _station().cameras == ()
 
 
 def test_mount_frames_name_real_links_in_the_authoritative_description() -> None:
-    for name in ("b601-dm", "bimanual-b601-dm", "b601-dm-station"):
-        links = {
-            link.get("name")
-            for link in ET.fromstring(embodiments[name].urdf_bytes).iter("link")
-        }
-        for component in embodiments[name].components:
+    values = {
+        "b601-dm": embodiments["b601-dm"],
+        "bimanual-b601-dm": embodiments["bimanual-b601-dm"],
+        "b601-dm-station": _station(),
+    }
+    for name, embodiment in values.items():
+        links = {link.get("name") for link in ET.fromstring(embodiment.urdf_bytes).iter("link")}
+        for component in embodiment.components:
             assert component.mount.frame in links, f"{name}: {component.instance}"
 
 
 def test_station_marks_only_unsurfaced_devices_for_honest_preview() -> None:
-    root = ET.fromstring(embodiments["b601-dm-station"].urdf_bytes)
+    root = ET.fromstring(_station().urdf_bytes)
     anchors = {
         link.get("name"): (
             link.get("data-preview-kind"),
@@ -216,10 +206,9 @@ def test_station_marks_only_unsurfaced_devices_for_honest_preview() -> None:
     }
 
 
-def test_capabilities_are_a_grasping_pair_plus_three_rgbd_sensors() -> None:
+def test_development_station_capabilities_are_only_the_proven_follower_pair() -> None:
     profile = {
-        str(entry.component_id): entry.capabilities
-        for entry in embodiments["b601-dm-station"].capabilities.components
+        str(entry.component_id): entry.capabilities for entry in _station().capabilities.components
     }
     # An undescribed leader device offers nothing derivable, so it is absent entirely.
     assert "left_leader" not in profile and "right_leader" not in profile
@@ -228,19 +217,19 @@ def test_capabilities_are_a_grasping_pair_plus_three_rgbd_sensors() -> None:
     grasp = frozenset({Capability.SPATIAL_MOTION_SE3, Capability.GRASP, Capability.GRASP_PARALLEL})
     assert profile["left_gripper"].values == grasp
     assert profile["right_gripper"].values == grasp
-    sensing = frozenset({Capability.SENSING_RGB, Capability.SENSING_DEPTH})
-    assert profile["left_wrist_camera"].values == sensing
-    assert profile["right_wrist_camera"].values == sensing
-    assert profile["top_camera"].values == sensing
 
 
 def test_content_ids_are_distinct_and_round_trip() -> None:
     """Three compositions of one part set are three revisions, not one."""
-    names = ("b601-dm", "bimanual-b601-dm", "b601-dm-station")
-    ids = {name: embodiments[name].id for name in names}
+    values = {
+        "b601-dm": embodiments["b601-dm"],
+        "bimanual-b601-dm": embodiments["bimanual-b601-dm"],
+        "b601-dm-station": _station(),
+    }
+    ids = {name: embodiment.id for name, embodiment in values.items()}
     assert len(set(ids.values())) == 3
     for name, identity in ids.items():
-        embodiment = embodiments[name]
+        embodiment = values[name]
         assert len(identity) == 64
         assert Embodiment.from_json(embodiment.to_json()) == embodiment
 

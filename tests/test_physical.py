@@ -2,21 +2,15 @@
 
 import pytest
 
-from sx_embodiments import EmbodimentName, LensProjection
+from sx_embodiments import CameraOptics, CameraOpticsAuthority, EmbodimentName, FactSource
 from sx_embodiments.compose import camera_bindings
 from sx_embodiments.errors import PartValidationError
-from sx_embodiments.identity import PartId
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
+from sx_embodiments.known.das import QUEST3_REFERENCE_OPTICS
 from sx_embodiments.known.panda import PANDA_ARM
 from sx_embodiments.known.piper import PIPER_ARM
 from sx_embodiments.known.so101 import SO101_ARM
-from sx_embodiments.known.yubi import D405_30
-from sx_embodiments.parts import (
-    CameraModality,
-    CameraSpec,
-    PhysicalSpec,
-    SensorModel,
-)
+from sx_embodiments.parts import PhysicalSpec
 
 
 def test_piper_datasheet_facts() -> None:
@@ -41,27 +35,54 @@ def test_physical_spec_rejects_nonpositive_values() -> None:
         PhysicalSpec(reach_m=-0.1)
 
 
-def test_d405_optics() -> None:
-    assert D405_30.resolution == (1280, 720)
-    assert D405_30.projection is LensProjection.PINHOLE
+def test_quest_reference_optics_are_complete_and_revision_pinned() -> None:
+    assert (QUEST3_REFERENCE_OPTICS.width, QUEST3_REFERENCE_OPTICS.height) == (1280, 960)
+    assert QUEST3_REFERENCE_OPTICS.authority is CameraOpticsAuthority.REFERENCE_UNIT
+    assert QUEST3_REFERENCE_OPTICS.image_from_camera[:6] == (
+        868.31,
+        0.0,
+        640.18,
+        0.0,
+        868.31,
+        482.07,
+    )
+    assert len(QUEST3_REFERENCE_OPTICS.source.revision) == 40
 
 
-def test_camera_resolution_rejects_nonpositive() -> None:
+def test_camera_optics_reject_nonpositive_raster() -> None:
     with pytest.raises(PartValidationError):
-        CameraSpec(
-            part_id=PartId("bad-cam"),
-            model=SensorModel.UVC_MONO,
-            modality=CameraModality.RGB,
-            fps=30.0,
-            resolution=(0, 720),
+        CameraOptics(
+            width=0,
+            height=720,
+            image_from_camera=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            distortion_model="none",
+            distortion_coefficients=(),
+            authority=CameraOpticsAuthority.MODEL_NOMINAL,
+            source=FactSource("https://example.test", "revision", "camera"),
         )
 
 
-def test_insta360_umi_entry() -> None:
-    """The X5 rig: equidistant fisheye wire fact, undeclared jaw layout, wrist camera pair."""
+@pytest.mark.parametrize(
+    ("model", "coefficients"),
+    (("invented", ()), ("none", (0.0,)), ("equidistant", (0.0, 0.0, 0.0))),
+)
+def test_camera_optics_reject_incomplete_distortion_facts(
+    model: str,
+    coefficients: tuple[float, ...],
+) -> None:
+    with pytest.raises(PartValidationError):
+        CameraOptics(
+            width=1280,
+            height=960,
+            image_from_camera=(868.0, 0.0, 640.0, 0.0, 868.0, 480.0, 0.0, 0.0, 1.0),
+            distortion_model=model,
+            distortion_coefficients=coefficients,
+            authority=CameraOpticsAuthority.MODEL_NOMINAL,
+            source=FactSource("https://example.test", "revision", "camera"),
+        )
+
+
+def test_insta360_umi_entry_is_explicitly_incomplete() -> None:
     spec = DEVELOPMENT_EMBODIMENTS[EmbodimentName("insta360-umi")].spec
     assert not spec.layout_declared()  # jaw kinematics uncaptured -> enforcement skips
-    bindings = camera_bindings(spec.attachments)
-    assert tuple(binding.name for binding in bindings) == ("left_wrist", "right_wrist")
-    assert all(binding.camera.projection is LensProjection.EQUIDISTANT for binding in bindings)
-    assert all(binding.camera.fps == 30.0 for binding in bindings)
+    assert camera_bindings(spec.attachments) == ()

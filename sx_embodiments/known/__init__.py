@@ -22,7 +22,7 @@ from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
 from .stations import PIPERX_STATION_SPEC
 from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
-from .yubi import YUBI_DEPTH_SPEC, YUBI_MONO_SPEC, YUBI_WIDEJAW_SPEC
+from .yubi import YUBI_SPEC
 
 _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     PIPER_SPEC,
@@ -37,15 +37,9 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     FRANKA_SPEC,
     SO101_SPEC,
     BIMANUAL_SO101_SPEC,
-    DAS_UMI_V4_SPEC,
     QUEST_EGO_SPEC,
-    YUBI_MONO_SPEC,
-    YUBI_DEPTH_SPEC,
-    YUBI_WIDEJAW_SPEC,
-    PIPERX_STATION_SPEC,
     B601_DM_SPEC,
     BIMANUAL_B601_DM_SPEC,
-    B601_DM_STATION_SPEC,
 )
 
 _DEFINITIONS: Final[Mapping[EmbodimentName, EmbodimentDefinition]] = {
@@ -55,6 +49,8 @@ _DEFINITIONS: Final[Mapping[EmbodimentName, EmbodimentDefinition]] = {
 
 class DevelopmentReason(StrEnum):
     MISSING_AUTHORITATIVE_DESCRIPTION = "missing_authoritative_description"
+    MISSING_CAMERA_CALIBRATION = "missing_camera_calibration"
+    MISSING_CAMERA_INSTALLATION = "missing_camera_installation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +63,22 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
     INSTA360_UMI_SPEC.name: DevelopmentEmbodiment(
         spec=INSTA360_UMI_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
+    ),
+    DAS_UMI_V4_SPEC.name: DevelopmentEmbodiment(
+        spec=DAS_UMI_V4_SPEC,
+        reason=DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+    ),
+    YUBI_SPEC.name: DevelopmentEmbodiment(
+        spec=YUBI_SPEC,
+        reason=DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+    ),
+    PIPERX_STATION_SPEC.name: DevelopmentEmbodiment(
+        spec=PIPERX_STATION_SPEC,
+        reason=DevelopmentReason.MISSING_CAMERA_INSTALLATION,
+    ),
+    B601_DM_STATION_SPEC.name: DevelopmentEmbodiment(
+        spec=B601_DM_STATION_SPEC,
+        reason=DevelopmentReason.MISSING_CAMERA_INSTALLATION,
     ),
 }
 
