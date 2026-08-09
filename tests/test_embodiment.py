@@ -178,8 +178,21 @@ def test_capture_rig_carries_cameras() -> None:
         for component in cast(list[dict[str, object]], embodiment.to_dict()["components"])
         if cast(dict[str, object], component["attachment"])["kind"] == "sensor"
     ]
-    assert [camera["instance"] for camera in cameras] == ["left_wrist", "right_wrist", "base"]
+    assert [camera["instance"] for camera in cameras] == [
+        "left_wrist",
+        "right_wrist",
+        "head_left",
+        "head_right",
+    ]
     assert embodiment.state.width == 2
+
+
+def test_quest_ego_is_a_controller_free_stereo_headset() -> None:
+    embodiment = embodiments["quest-ego"]
+    assert tuple(camera.name for camera in embodiment.cameras) == ("head_left", "head_right")
+    urdf = embodiment.urdf_bytes.decode()
+    assert "quest3mesh.obj" in urdf
+    assert "controller" not in urdf
 
 
 def test_non_default_camera_optics_round_trip() -> None:

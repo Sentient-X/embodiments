@@ -7,13 +7,15 @@ the measured ``gap(q)`` forward kinematics of ``assets/das_gripper_with_vr``: fu
 ``tests/test_urdf_parity.py``.
 
 Camera instance names are the sxd pipeline's canonical stream keys for the
-``quest-genrobot-umi`` hardware bundle (``left_wrist``/``right_wrist``/``base``) and the
-``/quest3s/head_left/camera`` topic for the ego rig.
+``quest-genrobot-umi`` hardware bundle: two wrists and the independently calibrated
+left/right Quest passthrough cameras.
 """
 
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
+
+from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component, sensor_component
 from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
@@ -37,7 +39,7 @@ DAS_GRIPPER_URDF: Final = packaged_asset(
 
 DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
-    sha256="fa022fcd4b392320775b4b70062a7b90da222828af126996947d05bad21b149b",
+    sha256="bb3bbe3fe8f6ddb9fa2669df8967ab05109aa677cdf631df410691dba5ad1686",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -52,7 +54,7 @@ DAS_UMI_V4_URDF: Final = packaged_asset(
 
 QUEST_EGO_URDF: Final = packaged_asset(
     relpath="quest_ego/urdf/quest_ego.urdf",
-    sha256="c09c2ac0965b11eb26afb199b6efc1d39fc78b36663e5a6b3a6b7596d30b02a1",
+    sha256="a28a9ed9db63202a3afbf705ff37ec6a2408752d99984570d5fd2cdb7197984b",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -60,9 +62,37 @@ QUEST_EGO_URDF: Final = packaged_asset(
         revision="manifest-v4",
         path="assets/quest_ego/urdf/quest_ego.urdf",
         license_id="Apache-2.0",
-        generator="canonical two-frame Quest capture-rig description",
+        generator="controller-free headset description with recording-calibrated optical frames",
     ),
     media_type="application/xml",
+)
+
+QUEST3_HEADSET_MESH: Final = packaged_asset(
+    relpath="quest_ego/meshes/quest3mesh.obj",
+    sha256="3601bece91279ae9efd85c334274c5689700cef198621a9bf9f122a7a39589ce",
+    format=AssetFormat.MESH,
+    role=AssetRole.GEOMETRY,
+    provenance=AssetProvenance(
+        repository="https://github.com/Ericcsr/ARCap",
+        revision="00ffd461ce7e6e8cd48dd74f6486576ee59d1a0d",
+        path="data_processing/assets/quest3mesh.obj",
+        license_id="MIT",
+    ),
+    media_type="model/obj",
+)
+
+QUEST3_HEADSET_LICENSE: Final = packaged_asset(
+    relpath="quest_ego/LICENSE.ARCap",
+    sha256="af471fb8777589b95290ccf8628ce0aa62ef1030d29f3370e047890ee04a3f99",
+    format=AssetFormat.OTHER,
+    role=AssetRole.LICENSE,
+    provenance=AssetProvenance(
+        repository="https://github.com/Ericcsr/ARCap",
+        revision="8fe21e533d2af8549b8c880ff331445dc0a42dbf",
+        path="LICENSE",
+        license_id="MIT",
+    ),
+    media_type="text/plain",
 )
 
 # Baked from the DAS link_3/link_4 mesh FK over q in [0, 0.925] (verified against real
@@ -128,28 +158,42 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
         body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
-        sensor_component("left_wrist", UVC_MONO_60, MountedOn("left_jaw", "link_ca2")),
+        sensor_component(
+            "left_wrist",
+            UVC_MONO_60,
+            MountedOn("left_jaw", "left_link_ca2"),
+        ),
         sensor_component(
             "right_wrist",
             UVC_MONO_60,
-            MountedOn("right_jaw", "link_ca2"),
+            MountedOn("right_jaw", "right_link_ca2"),
         ),
-        sensor_component("base", QUEST3_HEAD, RootMount("quest3s_head")),
+        sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_camera_optical")),
+        sensor_component(
+            "head_right",
+            QUEST3_HEAD,
+            RootMount("quest3s_right_camera_optical"),
+        ),
     ),
     extra_assets=(DAS_UMI_V4_URDF,),
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("quest-ego"),
-    label="Quest 3 egocentric capture (no gripper)",
+    label="Quest 3 egocentric headset (stereo passthrough, no controllers)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
     attachments=(
         sensor_component(
             "head_left",
             QUEST3_HEAD,
-            RootMount("quest3s_head"),
+            RootMount("quest3s_camera_optical"),
+        ),
+        sensor_component(
+            "head_right",
+            QUEST3_HEAD,
+            RootMount("quest3s_right_camera_optical"),
         ),
     ),
-    extra_assets=(QUEST_EGO_URDF,),
+    extra_assets=(QUEST_EGO_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
 )

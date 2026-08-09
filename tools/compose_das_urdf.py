@@ -37,13 +37,19 @@ def render() -> bytes:
     source = ET.parse(SOURCE).getroot()
     robot = ET.Element("robot", {"name": "das_umi_v4"})
     ET.SubElement(robot, "link", {"name": "quest3s_head"})
-    ET.SubElement(robot, "link", {"name": "quest3s_camera_optical"})
-    head_camera = ET.SubElement(
-        robot, "joint", {"name": "quest3s_head_to_camera_optical", "type": "fixed"}
-    )
-    ET.SubElement(head_camera, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
-    ET.SubElement(head_camera, "parent", {"link": "quest3s_head"})
-    ET.SubElement(head_camera, "child", {"link": "quest3s_camera_optical"})
+    for side, frame in (
+        ("left", "quest3s_camera_optical"),
+        ("right", "quest3s_right_camera_optical"),
+    ):
+        ET.SubElement(robot, "link", {"name": frame})
+        head_camera = ET.SubElement(
+            robot,
+            "joint",
+            {"name": f"quest3s_head_to_{side}_camera_optical", "type": "fixed"},
+        )
+        ET.SubElement(head_camera, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
+        ET.SubElement(head_camera, "parent", {"link": "quest3s_head"})
+        ET.SubElement(head_camera, "child", {"link": frame})
     nominal_origins = {"left": "0 0.16 0", "right": "0 -0.16 0"}
     for side in ("left", "right"):
         robot.extend(_prefix_tree(source, side))

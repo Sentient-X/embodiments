@@ -1,10 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <robot name="quest_ego">
-  <link name="quest3s_head"/>
+  <!-- Controller-free Quest 3 headset surface from ARCap's MIT-licensed model. -->
+  <material name="quest_shell">
+    <color rgba="0.78 0.79 0.82 1"/>
+  </material>
+  <link name="quest3s_head">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5707 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://sx-embodiments/quest_ego/meshes/quest3mesh.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="quest_shell"/>
+    </visual>
+  </link>
+  <!-- The measured head-to-camera transforms travel with each recording. -->
   <link name="quest3s_camera_optical"/>
   <joint name="quest3s_head_to_camera_optical" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="quest3s_head"/>
     <child link="quest3s_camera_optical"/>
+  </joint>
+  <link name="quest3s_right_camera_optical"/>
+  <joint name="quest3s_head_to_right_camera_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="quest3s_head"/>
+    <child link="quest3s_right_camera_optical"/>
   </joint>
 </robot>

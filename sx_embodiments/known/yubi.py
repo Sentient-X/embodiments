@@ -20,7 +20,9 @@ yubi-sw URDF — the URDF's own finger joints are not the wire channels.
 import dataclasses
 from typing import Final
 
-from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
+
+from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, RootMount, body_component, sensor_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
@@ -28,7 +30,7 @@ from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
 
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
-    sha256="2486f4de156c9105e525548b6cd5d4db44fd0256ade54686682eba066b4ae99b",
+    sha256="d5ee2d86e8f513f34ae07a2d03acfd40e7480b7ff1ee561ad399b2a22153c1c2",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -86,12 +88,17 @@ def _yubi(
                 wrist_camera,
                 RootMount("right_hand_cam_link"),
             ),
-            # The Quest passthrough head view (das-umi's ``base`` pattern);
-            # the composite URDF carries the quest3s_head link it mounts on.
+            # Quest passthrough is stereo; each eye is calibrated independently
+            # against the headset in the recording.
             sensor_component(
-                "base",
+                "head_left",
                 QUEST3_HEAD,
-                RootMount("quest3s_head"),
+                RootMount("quest3s_camera_optical"),
+            ),
+            sensor_component(
+                "head_right",
+                QUEST3_HEAD,
+                RootMount("quest3s_right_camera_optical"),
             ),
         ),
         extra_assets=(YUBI_HANDS_URDF,),
@@ -99,11 +106,26 @@ def _yubi(
 
 
 YUBI_MONO_SPEC: Final = _yubi(
-    "yubi-mono", "YUBI (UVC monocular wrists)", "mono", "v2-composite", YUBI_JAW_FINRAY, UVC_MONO_60
+    "yubi-mono",
+    "YUBI · standard jaws · UVC monocular wrists",
+    "mono",
+    "v2-composite",
+    YUBI_JAW_FINRAY,
+    UVC_MONO_60,
 )
 YUBI_DEPTH_SPEC: Final = _yubi(
-    "yubi-depth", "YUBI (RealSense D405 wrists)", "depth", "v2-composite", YUBI_JAW_FINRAY, D405_30
+    "yubi-depth",
+    "YUBI · standard jaws · RealSense D405 RGB-D wrists",
+    "depth",
+    "v2-composite",
+    YUBI_JAW_FINRAY,
+    D405_30,
 )
 YUBI_WIDEJAW_SPEC: Final = _yubi(
-    "yubi-widejaw", "YUBI (wide 140 mm jaw)", "widejaw", "v3-alu", YUBI_JAW_WIDE140, UVC_MONO_60
+    "yubi-widejaw",
+    "YUBI · 140 mm wide jaws · UVC monocular wrists",
+    "widejaw",
+    "v3-alu",
+    YUBI_JAW_WIDE140,
+    UVC_MONO_60,
 )

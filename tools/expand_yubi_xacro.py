@@ -32,10 +32,16 @@ _QUEST_HEAD_SUFFIX = """  <link name="quest3s_head"/>
     <child link="quest3s_head"/>
   </joint>
   <link name="quest3s_camera_optical"/>
-  <joint name="quest3s_head_to_camera_optical" type="fixed">
+  <joint name="quest3s_head_to_left_camera_optical" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="quest3s_head"/>
     <child link="quest3s_camera_optical"/>
+  </joint>
+  <link name="quest3s_right_camera_optical"/>
+  <joint name="quest3s_head_to_right_camera_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="quest3s_head"/>
+    <child link="quest3s_right_camera_optical"/>
   </joint>
 </robot>"""
 
