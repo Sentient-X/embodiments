@@ -39,7 +39,7 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "N", "T20", "RUF"]
 known-first-party = ["sx_embodiments"]
 
 [tool.pyright]
-include = ["sx_embodiments", "tests"]
+include = ["sx_embodiments"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 
