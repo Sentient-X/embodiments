@@ -26,11 +26,17 @@ from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, RootMount, body_component, sensor_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import CameraModality, CameraSpec, GripperSpec, SensorModel
-from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
+from .das import (
+    DAS_JAW_V4,
+    QUEST3_HEAD,
+    QUEST3_HEADSET_LICENSE,
+    QUEST3_HEADSET_MESH,
+    UVC_MONO_60,
+)
 
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
-    sha256="d5ee2d86e8f513f34ae07a2d03acfd40e7480b7ff1ee561ad399b2a22153c1c2",
+    sha256="9036692e4b4aaa77c052fa663d07c887f59592d13eaa710656dcceffd9ed6093",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -101,7 +107,7 @@ def _yubi(
                 RootMount("quest3s_right_camera_optical"),
             ),
         ),
-        extra_assets=(YUBI_HANDS_URDF,),
+        extra_assets=(YUBI_HANDS_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
     )
 
 

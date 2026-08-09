@@ -194,6 +194,9 @@ def test_quest_ego_is_a_controller_free_stereo_headset() -> None:
     assert "quest3mesh.obj" in urdf
     assert "controller" not in urdf
 
+    for capture_rig in ("das-umi-v4", "yubi-mono", "yubi-depth", "yubi-widejaw"):
+        assert "quest3mesh.obj" in embodiments[capture_rig].urdf_bytes.decode()
+
 
 def test_non_default_camera_optics_round_trip() -> None:
     embodiment = embodiments["yubi-depth"]

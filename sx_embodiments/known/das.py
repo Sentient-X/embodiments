@@ -39,7 +39,7 @@ DAS_GRIPPER_URDF: Final = packaged_asset(
 
 DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
-    sha256="bb3bbe3fe8f6ddb9fa2669df8967ab05109aa677cdf631df410691dba5ad1686",
+    sha256="cd3c37dfa0cb1dd0b20c4a14477f46b6ad63917948b1761cbe586a4c06142d01",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -175,7 +175,7 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
             RootMount("quest3s_right_camera_optical"),
         ),
     ),
-    extra_assets=(DAS_UMI_V4_URDF,),
+    extra_assets=(DAS_UMI_V4_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentDefinition(

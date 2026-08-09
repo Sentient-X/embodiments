@@ -23,9 +23,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/yubi_description/urdf/yubi_hand.urdf.xacro"
 TARGET = ROOT / "assets/yubi_description/urdf/yubi_hands.urdf"
 
-# The Quest head composite (das-umi naming): the registry mounts the ``base``
-# head camera on ``quest3s_head``.
-_QUEST_HEAD_SUFFIX = """  <link name="quest3s_head"/>
+# The Quest head composite (das-umi naming): the registry mounts its stereo
+# cameras on the surface's independently calibrated optical links.
+_QUEST_HEAD_SUFFIX = """  <link name="quest3s_head">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5707 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://sx-embodiments/quest_ego/meshes/quest3mesh.obj"/>
+      </geometry>
+      <material name="quest_shell">
+        <color rgba="0.78 0.79 0.82 1"/>
+      </material>
+    </visual>
+  </link>
   <joint name="quest_origin_to_head" type="floating">
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="quest_origin"/>

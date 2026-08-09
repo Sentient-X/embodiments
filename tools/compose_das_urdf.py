@@ -36,7 +36,17 @@ def _prefix_tree(source: ET.Element, side: str) -> list[ET.Element]:
 def render() -> bytes:
     source = ET.parse(SOURCE).getroot()
     robot = ET.Element("robot", {"name": "das_umi_v4"})
-    ET.SubElement(robot, "link", {"name": "quest3s_head"})
+    head = ET.SubElement(robot, "link", {"name": "quest3s_head"})
+    visual = ET.SubElement(head, "visual")
+    ET.SubElement(visual, "origin", {"xyz": "0 0 0", "rpy": "1.5707 0 3.14159"})
+    geometry = ET.SubElement(visual, "geometry")
+    ET.SubElement(
+        geometry,
+        "mesh",
+        {"filename": "package://sx-embodiments/quest_ego/meshes/quest3mesh.obj"},
+    )
+    material = ET.SubElement(visual, "material", {"name": "quest_shell"})
+    ET.SubElement(material, "color", {"rgba": "0.78 0.79 0.82 1"})
     for side, frame in (
         ("left", "quest3s_camera_optical"),
         ("right", "quest3s_right_camera_optical"),

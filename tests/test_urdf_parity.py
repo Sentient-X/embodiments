@@ -215,9 +215,12 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         mesh.get("filename") for mesh in root.iter("mesh") if mesh.get("filename") is not None
     }
     assert meshes, "yubi hands URDF references no meshes"
+    assert "package://sx-embodiments/quest_ego/meshes/quest3mesh.obj" in meshes
     for filename in meshes:
-        assert filename is not None and filename.startswith("package://yubi_description/")
-        relative = filename.removeprefix("package://")
+        assert filename is not None and filename.startswith("package://")
+        package, relative = filename.removeprefix("package://").split("/", 1)
+        if package != "sx-embodiments":
+            relative = f"{package}/{relative}"
         assert (package_root / relative).is_file(), f"unresolved mesh {filename}"
 
 
