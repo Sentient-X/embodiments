@@ -38,7 +38,6 @@ def test_panda_omron_kinematics_are_derived_from_the_registry() -> None:
 def test_registry_ids_are_byte_stable() -> None:
     assert set(embodiments) == {
         "piper",
-        "nero",
         "aloha",
         "rby1",
         "unitree-g1",

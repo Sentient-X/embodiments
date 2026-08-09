@@ -24,7 +24,7 @@ YOR_MJCF: Final = packaged_asset(
 )
 YOR_URDF: Final = packaged_asset(
     relpath="official/yor/yor.urdf",
-    sha256="3c65774c00643d455f840fc9d7f00e4c6b661d027cdfc1f2b2218230cb5c8124",
+    sha256="b5242242eb182ac80af88c1ccafbf042adc82e72112519867bb4e808cf63ce38",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

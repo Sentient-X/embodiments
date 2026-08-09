@@ -1,6 +1,7 @@
 """New registry parts match the joint names and limits in their pinned MJCFs."""
 
 import xml.etree.ElementTree as ET
+from math import isclose
 
 from sx_embodiments.assets import PackagedAsset
 from sx_embodiments.known.aloha import (
@@ -33,7 +34,7 @@ from sx_embodiments.known.universal_robots import (
     UR10E_ARM,
     UR10E_MJCF,
 )
-from sx_embodiments.known.yor import YOR_LEFT_ARM, YOR_LIFT, YOR_MJCF, YOR_RIGHT_ARM
+from sx_embodiments.known.yor import YOR_LEFT_ARM, YOR_LIFT, YOR_MJCF, YOR_RIGHT_ARM, YOR_URDF
 from sx_embodiments.parts import ArmSpec, GripperSpec, JointGroupSpec
 
 JointPart = ArmSpec | JointGroupSpec | GripperSpec
@@ -120,3 +121,18 @@ def test_yor_lift_and_arms_match_mjcf() -> None:
     ranges = _joint_ranges(YOR_MJCF)
     for part in (YOR_LIFT, YOR_LEFT_ARM, YOR_RIGHT_ARM):
         _assert_part_matches(part, ranges)
+
+
+def test_yor_urdf_preserves_the_mjcf_root_pose() -> None:
+    root = ET.parse(YOR_URDF.path()).getroot()
+    joint = root.find("joint[@name='yor_origin_to_base']")
+    assert joint is not None
+    origin = joint.find("origin")
+    assert origin is not None
+    assert tuple(float(value) for value in origin.get("xyz", "").split()) == (
+        0.0,
+        0.0,
+        0.10477502,
+    )
+    roll, pitch, yaw = (float(value) for value in origin.get("rpy", "").split())
+    assert isclose(roll, 0.0) and isclose(pitch, 1.57) and isclose(yaw, 0.0)

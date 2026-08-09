@@ -150,14 +150,13 @@ def convert(path: Path) -> ET.Element:
     }
     root = ET.Element("robot", {"name": source.get("model", "yor")})
 
-    def visit(body: ET.Element, parent: str | None) -> None:
+    def visit(body: ET.Element, parent: str) -> None:
         name = body.get("name")
         if name is None:
             raise UnsupportedMjcfError("every YOR body must have a name")
         if body.find("freejoint") is not None:
-            if parent is not None:
-                raise UnsupportedMjcfError("only the root body may carry a freejoint")
-        elif parent is not None:
+            raise UnsupportedMjcfError("only the root body may carry a freejoint")
+        else:
             _joint(root, parent, body)
         _link(root, body, meshes, materials)
         for child in body.findall("body"):
@@ -166,7 +165,22 @@ def convert(path: Path) -> ET.Element:
     bodies = worldbody.findall("body")
     if len(bodies) != 1:
         raise UnsupportedMjcfError("YOR MJCF must have exactly one root body")
-    visit(bodies[0], None)
+    root_body = bodies[0]
+    root_name = root_body.get("name")
+    if root_name is None:
+        raise UnsupportedMjcfError("the YOR root body must have a name")
+    ET.SubElement(root, "link", {"name": "yor_origin"})
+    root_joint = ET.SubElement(
+        root,
+        "joint",
+        {"name": f"yor_origin_to_{root_name}", "type": "fixed"},
+    )
+    _origin(root_joint, root_body)
+    ET.SubElement(root_joint, "parent", {"link": "yor_origin"})
+    ET.SubElement(root_joint, "child", {"link": root_name})
+    _link(root, root_body, meshes, materials)
+    for child in root_body.findall("body"):
+        visit(child, root_name)
     ET.indent(root, space="  ")
     return root
 

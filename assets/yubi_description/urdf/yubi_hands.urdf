@@ -200,12 +200,12 @@
   <link name="left_left_finger_tip_link">
     </link>
   <joint name="quest_origin_to_left" type="floating">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <origin rpy="0 0 0" xyz="0 0.16 0"/>
     <parent link="quest_origin"/>
     <child link="left_hand_root"/>
   </joint>
   <joint name="quest_origin_to_right" type="floating">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <origin rpy="0 0 0" xyz="0 -0.16 0"/>
     <parent link="quest_origin"/>
     <child link="right_hand_root"/>
   </joint>

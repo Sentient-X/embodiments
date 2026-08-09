@@ -11,15 +11,15 @@ from sx_contracts.assets import AssetFormat
 from sx_embodiments import AssetDigestMismatchError, AssetsUnavailableError, resolve_asset
 from sx_embodiments.assets import PackagedAsset, asset_root
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
-from sx_embodiments.known.b601 import B601_DM_URDF
+from sx_embodiments.known.b601 import B601_DM_STATION_URDF, B601_DM_URDF, BIMANUAL_B601_DM_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
-from sx_embodiments.known.nero import NERO_URDF
 from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
 from sx_embodiments.known.piper import PIPER_MJCF, PIPER_URDF
 from sx_embodiments.known.rby1 import RBY1_MJCF, RBY1_URDF
-from sx_embodiments.known.so101 import SO101_URDF
+from sx_embodiments.known.so101 import BIMANUAL_SO101_URDF, SO101_URDF
+from sx_embodiments.known.stations import PIPER_STATION_URDF
 from sx_embodiments.known.universal_robots import (
     UR5E_MJCF,
     UR5E_URDF,
@@ -31,13 +31,13 @@ from sx_embodiments.known.yubi import YUBI_HANDS_URDF
 
 PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
+    BIMANUAL_SO101_URDF,
     DAS_GRIPPER_URDF,
     DAS_UMI_V4_URDF,
     QUEST_EGO_URDF,
     YUBI_HANDS_URDF,
     PIPER_URDF,
     PIPER_MJCF,
-    NERO_URDF,
     PANDA_URDF,
     PANDA_MJCF,
     ALOHA_URDF,
@@ -55,6 +55,9 @@ PINNED: tuple[PackagedAsset, ...] = (
     SENTIENT_HUMANOID_URDF,
     SENTIENT_HUMANOID_MJCF,
     B601_DM_URDF,
+    BIMANUAL_B601_DM_URDF,
+    B601_DM_STATION_URDF,
+    PIPER_STATION_URDF,
 )
 
 
@@ -78,9 +81,12 @@ def test_urdf_mesh_references_exist() -> None:
     root = asset_root()
     for asset, mesh_base in (
         (SO101_URDF, root / "so101"),
+        (BIMANUAL_SO101_URDF, root / "so101"),
         (DAS_GRIPPER_URDF, root / "das_gripper_with_vr"),
         (SENTIENT_HUMANOID_URDF, root / "humanoid_pkg"),
         (B601_DM_URDF, root / "b601_dm"),
+        (BIMANUAL_B601_DM_URDF, root / "b601_dm"),
+        (B601_DM_STATION_URDF, root / "b601_dm"),
     ):
         tree = ET.parse(asset.path())
         for mesh in tree.getroot().iter("mesh"):

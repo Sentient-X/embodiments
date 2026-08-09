@@ -1,9 +1,9 @@
-"""The reBot B601-DM family: one arm block, composed three ways, one description.
+"""The reBot B601-DM family: one arm block, composed into complete descriptions.
 
 ``b601-dm`` (single follower), ``bimanual-b601-dm`` (the pair the pod runs), and
 ``b601-dm-station`` (that pair with its two leaders and three cameras) all resolve from the
-public registry over the same vendored URDF, so the derived wire layout is pinned here for
-each of them.
+public registry with one-arm, two-arm, and complete station URDFs derived from the same
+vendored source, so a description never drops a declared component.
 """
 
 import xml.etree.ElementTree as ET
@@ -27,9 +27,11 @@ from sx_embodiments.known.b601 import (
     B601_ARM,
     B601_DM_SPEC,
     B601_DM_STATION_SPEC,
+    B601_DM_STATION_URDF,
     B601_DM_URDF,
     B601_GRIPPER,
     BIMANUAL_B601_DM_SPEC,
+    BIMANUAL_B601_DM_URDF,
     D435I_30,
 )
 from sx_embodiments.parts import CameraModality, SensorModel
@@ -53,20 +55,28 @@ def test_all_three_resolve_by_name_from_the_public_registry() -> None:
         assert EmbodimentName(name) not in DEVELOPMENT_EMBODIMENTS
 
 
-def test_the_three_share_one_authoritative_description() -> None:
-    """One URDF, attached on the arm block, so the three cannot drift apart."""
-    urdfs = {embodiments[name].urdf for name in ("b601-dm", "bimanual-b601-dm", "b601-dm-station")}
-    assert len(urdfs) == 1
-    urdf = urdfs.pop()
-    assert urdf.uri == "package://sx-embodiments/b601_dm/reBot_B601_DM_with_gripper.urdf"
-    assert urdf.sha256 == B601_DM_URDF.sha256
-    assert urdf.format is AssetFormat.URDF and urdf.role is AssetRole.DESCRIPTION
-    provenance = urdf.provenance
-    assert provenance.repository == "https://github.com/Seeed-Projects/reBotArmController_ROS2"
-    assert provenance.revision == "a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd"
-    assert provenance.license_id == "Apache-2.0"
-    # The digest is of the vendored file, so the rewrite must be declared, not implied.
-    assert provenance.generator is not None and "meshes/" in provenance.generator
+def test_each_composition_has_a_complete_authoritative_description() -> None:
+    expected = {
+        "b601-dm": (B601_DM_URDF, 10),
+        "bimanual-b601-dm": (BIMANUAL_B601_DM_URDF, 21),
+        "b601-dm-station": (B601_DM_STATION_URDF, 26),
+    }
+    for name, (asset, link_count) in expected.items():
+        embodiment = embodiments[name]
+        assert embodiment.urdf.sha256 == asset.sha256
+        assert embodiment.urdf.format is AssetFormat.URDF
+        assert embodiment.urdf.role is AssetRole.DESCRIPTION
+        root = ET.fromstring(embodiment.urdf_bytes)
+        assert len(root.findall("link")) == link_count
+        assert embodiment.urdf.provenance.repository == (
+            "https://github.com/Seeed-Projects/reBotArmController_ROS2"
+        )
+    assert embodiments["b601-dm"].urdf.provenance.generator is not None
+    assert "meshes/" in embodiments["b601-dm"].urdf.provenance.generator
+    for name in ("bimanual-b601-dm", "b601-dm-station"):
+        assert embodiments[name].urdf.provenance.generator == (
+            "sx-embodiments/tools/compose_registered_urdfs.py"
+        )
 
 
 def test_the_vendored_mesh_closure_resolves_from_the_embodiment() -> None:
@@ -178,13 +188,32 @@ def test_station_camera_names_are_the_pod_agents_dataset_keys() -> None:
 
 
 def test_mount_frames_name_real_links_in_the_authoritative_description() -> None:
-    links = {
-        link.get("name") for link in ET.fromstring(embodiments["b601-dm"].urdf_bytes).iter("link")
-    }
     for name in ("b601-dm", "bimanual-b601-dm", "b601-dm-station"):
+        links = {
+            link.get("name")
+            for link in ET.fromstring(embodiments[name].urdf_bytes).iter("link")
+        }
         for component in embodiments[name].components:
-            if isinstance(component.mount, MountedOn):
-                assert component.mount.frame in links, f"{name}: {component.instance}"
+            assert component.mount.frame in links, f"{name}: {component.instance}"
+
+
+def test_station_marks_only_unsurfaced_devices_for_honest_preview() -> None:
+    root = ET.fromstring(embodiments["b601-dm-station"].urdf_bytes)
+    anchors = {
+        link.get("name"): (
+            link.get("data-preview-kind"),
+            link.get("data-preview-label"),
+        )
+        for link in root.findall("link")
+        if link.get("data-preview-kind") is not None
+    }
+    assert anchors == {
+        "left_leader": ("leader", "Left leader · surface unavailable"),
+        "right_leader": ("leader", "Right leader · surface unavailable"),
+        "left_wrist_camera": ("camera", "Left wrist camera"),
+        "right_wrist_camera": ("camera", "Right wrist camera"),
+        "top_camera": ("camera", "Top camera"),
+    }
 
 
 def test_capabilities_are_a_grasping_pair_plus_three_rgbd_sensors() -> None:

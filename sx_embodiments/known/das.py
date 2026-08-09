@@ -37,7 +37,7 @@ DAS_GRIPPER_URDF: Final = packaged_asset(
 
 DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
-    sha256="02898860917342c97851116616125021b34a3c4b03a0b709e3f8106888fe635b",
+    sha256="fa022fcd4b392320775b4b70062a7b90da222828af126996947d05bad21b149b",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -126,8 +126,8 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
     attachments=(
-        body_component("left_jaw", DAS_JAW_V4),
-        body_component("right_jaw", DAS_JAW_V4),
+        body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
+        body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
         sensor_component("left_wrist", UVC_MONO_60, MountedOn("left_jaw", "link_ca2")),
         sensor_component(
             "right_wrist",

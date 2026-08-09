@@ -1,5 +1,11 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="cone-e">
+  <link name="yor_origin" />
+  <joint name="yor_origin_to_base" type="fixed">
+    <origin xyz="0.00000000 0.00000000 0.10477502" rpy="0 1.57 0" />
+    <parent link="yor_origin" />
+    <child link="base" />
+  </joint>
   <link name="base" />
   <joint name="base_to_base_profile_short" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -649,4 +655,3 @@
   </joint>
   <link name="right_arm_camera_body" />
 </robot>
-

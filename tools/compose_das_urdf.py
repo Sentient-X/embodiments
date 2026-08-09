@@ -44,10 +44,19 @@ def render() -> bytes:
     ET.SubElement(head_camera, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
     ET.SubElement(head_camera, "parent", {"link": "quest3s_head"})
     ET.SubElement(head_camera, "child", {"link": "quest3s_camera_optical"})
+    nominal_origins = {"left": "0 0.16 0", "right": "0 -0.16 0"}
     for side in ("left", "right"):
         robot.extend(_prefix_tree(source, side))
-        mount = ET.SubElement(robot, "joint", {"name": f"head_to_{side}_rig", "type": "fixed"})
-        ET.SubElement(mount, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
+        mount = ET.SubElement(
+            robot,
+            "joint",
+            {"name": f"head_to_{side}_rig", "type": "floating"},
+        )
+        ET.SubElement(
+            mount,
+            "origin",
+            {"xyz": nominal_origins[side], "rpy": "0 0 0"},
+        )
         ET.SubElement(mount, "parent", {"link": "quest3s_head"})
         ET.SubElement(mount, "child", {"link": f"{side}_world"})
     ET.indent(robot, space="  ")

@@ -42,6 +42,21 @@ _QUEST_HEAD_SUFFIX = """  <link name="quest3s_head"/>
 
 def render() -> bytes:
     document = xacro.process_file(str(SOURCE))
+    for name, xyz in (
+        ("quest_origin_to_left", "0 0.16 0"),
+        ("quest_origin_to_right", "0 -0.16 0"),
+    ):
+        joints = [
+            joint
+            for joint in document.getElementsByTagName("joint")
+            if joint.getAttribute("name") == name
+        ]
+        if len(joints) != 1:
+            raise ValueError(f"rendered xacro needs one {name!r} joint")
+        origins = joints[0].getElementsByTagName("origin")
+        if len(origins) != 1:
+            raise ValueError(f"rendered xacro joint {name!r} needs one origin")
+        origins[0].setAttribute("xyz", xyz)
     # Serialize only the <robot> element with our own stable banner — xacro's
     # default banner embeds the absolute build path, which is not deterministic.
     body = document.documentElement.toprettyxml(indent="  ")

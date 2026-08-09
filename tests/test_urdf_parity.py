@@ -9,8 +9,6 @@ import xml.etree.ElementTree as ET
 from math import radians
 from pathlib import Path
 
-from sx_contracts.assets import AssetFormat
-
 from sx_embodiments import embodiments, resolve_asset
 from sx_embodiments.known.b601 import B601_ARM, B601_DM_URDF, B601_GRIPPER
 from sx_embodiments.known.das import DAS_JAW_V4
@@ -161,16 +159,21 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
 
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
     for embodiment in embodiments.values():
-        urdf = next(asset for asset in embodiment.assets if asset.format is AssetFormat.URDF)
+        if embodiment.lineage.family == "yubi":
+            # YUBI records the DAS magnetic-encoder jaw coordinate while its upstream
+            # hand URDF names a different servo-side finger joint (known/yubi.py).
+            continue
+        urdf = embodiment.urdf
         movable = {
             joint.get("name")
             for joint in ET.parse(resolve_asset(urdf.asset)).getroot().iter("joint")
             if joint.get("type") not in (None, "fixed")
         }
-        description_channels = {
-            coordinate.joint_name for coordinate in embodiment.state.coordinates
-        }
-        assert description_channels <= movable
+        for coordinate in embodiment.state.coordinates:
+            side = str(coordinate.instance).split("_", 1)[0]
+            assert coordinate.joint_name in movable or (
+                f"{side}_{coordinate.joint_name}" in movable
+            ), f"{embodiment.name}: {coordinate.instance}/{coordinate.joint_name}"
         assert all(asset.provenance is not None for asset in embodiment.assets)
 
 

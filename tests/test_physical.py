@@ -7,7 +7,6 @@ from sx_embodiments.compose import camera_bindings
 from sx_embodiments.errors import PartValidationError
 from sx_embodiments.identity import PartId
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
-from sx_embodiments.known.nero import NERO_ARM
 from sx_embodiments.known.panda import PANDA_ARM
 from sx_embodiments.known.piper import PIPER_ARM
 from sx_embodiments.known.so101 import SO101_ARM
@@ -23,11 +22,6 @@ from sx_embodiments.parts import (
 def test_piper_datasheet_facts() -> None:
     """AgileX PiPER datasheet: 1.5 kg payload, 626 mm reach, 4.2 kg mass."""
     assert PIPER_ARM.physical == PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2)
-
-
-def test_nero_datasheet_facts() -> None:
-    """AgileX NERO datasheet: 3 kg payload, 580 mm reach, 4.8 kg mass."""
-    assert NERO_ARM.physical == PhysicalSpec(payload_kg=3.0, reach_m=0.58, mass_kg=4.8)
 
 
 def test_panda_datasheet_facts() -> None:

@@ -15,6 +15,7 @@ from ..compose import (
     EmbodimentDefinition,
     MountedOn,
     MountKind,
+    RootMount,
     body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
@@ -31,9 +32,22 @@ PIPER_MJCF: Final = packaged_asset(
     provenance=menagerie("agilex_piper/piper.xml", "MIT"),
     media_type="application/xml",
 )
-PIPER_URDF: Final = packaged_asset(
+PIPER_SOURCE_URDF: Final = packaged_asset(
     relpath="official/agilex_piper/piper_description.urdf",
     sha256="884c6536abe861105205cc58681fb069ba408e0673ab6b6222f4f06cdbc9dc9e",
+    format=AssetFormat.URDF,
+    role=AssetRole.OTHER,
+    provenance=AssetProvenance(
+        repository="https://github.com/agilexrobotics/piper_ros",
+        revision="ac41fcbcdda598f01b51cf6175ed9a24d0dacadc",
+        path="src/piper_description/urdf/piper_description.urdf",
+        license_id="MIT",
+    ),
+    media_type="application/xml",
+)
+PIPER_URDF: Final = packaged_asset(
+    relpath="official/agilex_piper/piper_canonical.urdf",
+    sha256="e4215e76bfcbd9665b7895ba567c68efc295256915717fd1c5f4a56b4874357b",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -41,6 +55,8 @@ PIPER_URDF: Final = packaged_asset(
         revision="ac41fcbcdda598f01b51cf6175ed9a24d0dacadc",
         path="src/piper_description/urdf/piper_description.urdf",
         license_id="MIT",
+        generator="sx-embodiments/tools/compose_registered_urdfs.py: project the "
+        "MJCF equality joint8=-joint7 into URDF mimic metadata",
     ),
     media_type="application/xml",
 )
@@ -57,7 +73,7 @@ PIPER_ARM: Final = ArmSpec(
     # Grasp centre 0.45 m forward, 0.52 m up from the base, pointing straight down, with the
     # wrist roll at zero so its whole travel remains for task yaw on either side.
     ready=(0.0, 1.4547, -0.9060, 0.0, 1.1093, 0.0),
-    assets=(PIPER_URDF, PIPER_MJCF),
+    assets=(PIPER_MJCF,),
     # AgileX PiPER datasheet (global.agilex.ai/products/piper).
     physical=PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2),
 )
@@ -83,9 +99,10 @@ PIPER_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
     attachments=(
-        body_component("arm", PIPER_ARM),
-        body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "joint6")),
+        body_component("arm", PIPER_ARM, RootMount("base_link")),
+        body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "link6")),
     ),
+    extra_assets=(PIPER_URDF,),
     rates=ControlRates(policy_hz=30.0),
     # Footprint measured from the menagerie base_link collision geometry (xy AABB).
     base_mount=BaseMount(

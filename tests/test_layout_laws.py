@@ -70,7 +70,6 @@ def test_every_registered_robot_has_native_state() -> None:
 
 def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
     expected = {
-        "nero": 7,
         "aloha": 14,
         "rby1": 28,
         "unitree-g1": 29,

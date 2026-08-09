@@ -28,7 +28,7 @@ from .das import DAS_JAW_V4, QUEST3_HEAD, UVC_MONO_60
 
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
-    sha256="88aeb45bf71905aea6e64ca804b06102b7c4c0ca45bdf71586a4aea4d8901c13",
+    sha256="2486f4de156c9105e525548b6cd5d4db44fd0256ade54686682eba066b4ae99b",
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -73,8 +73,8 @@ def _yubi(
         kind=EmbodimentKind.CAPTURE_RIG,
         lineage=Lineage(family="yubi", variant=variant, revision=revision),
         attachments=(
-            body_component("left_jaw", jaw),
-            body_component("right_jaw", jaw),
+            body_component("left_jaw", jaw, RootMount("left_hand_root")),
+            body_component("right_jaw", jaw, RootMount("right_hand_root")),
             # Hand-camera frames from the authoritative yubi-sw URDF.
             sensor_component(
                 "wrist_left",

@@ -7,10 +7,11 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 ``embodiments[...].state.coordinates``.
 """
 
+import dataclasses
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import Component, EmbodimentDefinition, MountedOn, body_component
+from ..compose import Component, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
@@ -29,6 +30,21 @@ SO101_URDF: Final = packaged_asset(
     ),
     media_type="application/xml",
 )
+SO101_SOURCE_URDF: Final = dataclasses.replace(SO101_URDF, role=AssetRole.OTHER)
+BIMANUAL_SO101_URDF: Final = packaged_asset(
+    relpath="so101/bimanual_so101.urdf",
+    sha256="df87bae56067a63a5401868c9fd8a97817051e4a2026b14b16085d9bd214c123",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/AbdulazizAlmuzairee/Squint",
+        revision="d8ca2fbfb4cef6b6097c71f9ec172c76125a572f",
+        path="envs/robot/so101.urdf",
+        license_id="MIT",
+        generator="sx-embodiments/tools/compose_registered_urdfs.py",
+    ),
+    media_type="application/xml",
+)
 
 SO101_ARM: Final = ArmSpec(
     part_id=PartId("so101-arm"),
@@ -39,7 +55,6 @@ SO101_ARM: Final = ArmSpec(
         upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
     ),
     home=(0.0, 0.0, 0.0, 0.0, 0.0),
-    assets=(SO101_URDF,),
 )
 
 SO101_JAW: Final = GripperSpec(
@@ -57,8 +72,12 @@ SO101_JAW: Final = GripperSpec(
 def so101_side(side: str) -> tuple[Component, ...]:
     """One SO-101 arm+jaw block; composing two sides IS the bimanual body."""
     return (
-        body_component(f"{side}_arm", SO101_ARM),
-        body_component(f"{side}_jaw", SO101_JAW, MountedOn(f"{side}_arm", "wrist_roll")),
+        body_component(f"{side}_arm", SO101_ARM, RootMount(f"{side}_base_link")),
+        body_component(
+            f"{side}_jaw",
+            SO101_JAW,
+            MountedOn(f"{side}_arm", f"{side}_gripper_link"),
+        ),
     )
 
 
@@ -68,9 +87,10 @@ SO101_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
     attachments=(
-        body_component("arm", SO101_ARM),
-        body_component("jaw", SO101_JAW, MountedOn("arm", "wrist_roll")),
+        body_component("arm", SO101_ARM, RootMount("base_link")),
+        body_component("jaw", SO101_JAW, MountedOn("arm", "gripper_link")),
     ),
+    extra_assets=(SO101_URDF,),
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )
 
@@ -80,5 +100,6 @@ BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101", variant="bimanual"),
     attachments=(*so101_side("left"), *so101_side("right")),
+    extra_assets=(SO101_SOURCE_URDF, BIMANUAL_SO101_URDF),
     # rates unbound: per-episode control_hz travels with the recordings
 )

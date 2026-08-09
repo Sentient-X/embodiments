@@ -126,6 +126,7 @@ Further deliberate divergences:
   channels, so nothing is lost by naming it honestly.
 """
 
+import dataclasses
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
@@ -171,6 +172,35 @@ B601_DM_URDF: Final = packaged_asset(
     ),
     media_type="application/xml",
 )
+B601_DM_SOURCE_URDF: Final = dataclasses.replace(B601_DM_URDF, role=AssetRole.OTHER)
+BIMANUAL_B601_DM_URDF: Final = packaged_asset(
+    relpath="b601_dm/bimanual_B601_DM.urdf",
+    sha256="21d4f8b3849783e8ca42757298ff4239de68ceceba37d6947e23471aa81b0b84",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Seeed-Projects/reBotArmController_ROS2",
+        revision="a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd",
+        path="src/rebotarm_bringup/description/urdf/reBot_B601_DM_with_gripper.urdf",
+        license_id="Apache-2.0",
+        generator="sx-embodiments/tools/compose_registered_urdfs.py",
+    ),
+    media_type="application/xml",
+)
+B601_DM_STATION_URDF: Final = packaged_asset(
+    relpath="b601_dm/B601_DM_station.urdf",
+    sha256="dc55378246f27b5a309089968482b00c281c6185487cc7b37e9a53bb24763d65",
+    format=AssetFormat.URDF,
+    role=AssetRole.DESCRIPTION,
+    provenance=AssetProvenance(
+        repository="https://github.com/Seeed-Projects/reBotArmController_ROS2",
+        revision="a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd",
+        path="src/rebotarm_bringup/description/urdf/reBot_B601_DM_with_gripper.urdf",
+        license_id="Apache-2.0",
+        generator="sx-embodiments/tools/compose_registered_urdfs.py",
+    ),
+    media_type="application/xml",
+)
 
 B601_ARM: Final = ArmSpec(
     part_id=PartId("rebot-b601dm-arm"),
@@ -182,7 +212,6 @@ B601_ARM: Final = ArmSpec(
         upper=(2.8, 0.0, 0.0, 1.57, 1.57, 3.14),
     ),
     home=(0.0,) * 6,  # the driver's calibrated zero pose, inside every URDF limit
-    assets=(B601_DM_URDF,),
     # physical: no manufacturer datasheet captured, so payload/reach/mass stay unstated
 )
 
@@ -218,12 +247,11 @@ D435I_30: Final = CameraSpec(
 def b601_side(side: str) -> tuple[Component, ...]:
     """One B601-DM follower arm + gripper block; two sides ARE the bimanual body."""
     return (
-        body_component(f"{side}_arm", B601_ARM),
+        body_component(f"{side}_arm", B601_ARM, RootMount(f"{side}_base_link")),
         body_component(
             f"{side}_gripper",
             B601_GRIPPER,
-            # link6 is the URDF link the fixed ``gripper_joint`` hangs the jaw off.
-            MountedOn(f"{side}_arm", "link6"),
+            MountedOn(f"{side}_arm", f"{side}_link6"),
         ),
     )
 
@@ -238,7 +266,7 @@ def _wrist_camera(side: str) -> Component:
     return sensor_component(
         f"{side}_wrist_camera",
         D405_30,
-        MountedOn(f"{side}_arm", "link6"),
+        MountedOn(f"{side}_arm", f"{side}_link6"),
     )
 
 
@@ -248,9 +276,10 @@ B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
     attachments=(
-        body_component("arm", B601_ARM),
+        body_component("arm", B601_ARM, RootMount("base_link")),
         body_component("gripper", B601_GRIPPER, MountedOn("arm", "link6")),
     ),
+    extra_assets=(B601_DM_URDF,),
     # rates unbound: the pod's capture fps is a per-session parameter, not a hardware rate
 )
 
@@ -260,6 +289,7 @@ BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm-bimanual"),
     attachments=(*b601_side("left"), *b601_side("right")),
+    extra_assets=(B601_DM_SOURCE_URDF, BIMANUAL_B601_DM_URDF),
 )
 
 B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
@@ -268,12 +298,13 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="rebot-b601", variant="dm-station"),
     attachments=(
-        leader_component("left_leader", B601_LEADER),
-        leader_component("right_leader", B601_LEADER),
+        leader_component("left_leader", B601_LEADER, RootMount("left_leader")),
+        leader_component("right_leader", B601_LEADER, RootMount("right_leader")),
         *b601_side("left"),
         *b601_side("right"),
         _wrist_camera("left"),
         _wrist_camera("right"),
-        sensor_component("top_camera", D435I_30, RootMount("world")),
+        sensor_component("top_camera", D435I_30, RootMount("top_camera")),
     ),
+    extra_assets=(B601_DM_SOURCE_URDF, B601_DM_STATION_URDF),
 )

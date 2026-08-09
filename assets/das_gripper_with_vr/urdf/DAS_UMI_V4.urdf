@@ -432,8 +432,8 @@
     <child link="left_link_mid_right_finger" />
     <axis xyz="0 0 0" />
   </joint>
-  <joint name="head_to_left_rig" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0" />
+  <joint name="head_to_left_rig" type="floating">
+    <origin xyz="0 0.16 0" rpy="0 0 0" />
     <parent link="quest3s_head" />
     <child link="left_world" />
   </joint>
@@ -862,8 +862,8 @@
     <child link="right_link_mid_right_finger" />
     <axis xyz="0 0 0" />
   </joint>
-  <joint name="head_to_right_rig" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0" />
+  <joint name="head_to_right_rig" type="floating">
+    <origin xyz="0 -0.16 0" rpy="0 0 0" />
     <parent link="quest3s_head" />
     <child link="right_world" />
   </joint>

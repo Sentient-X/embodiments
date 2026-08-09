@@ -24,7 +24,7 @@ registry, from `Embodiment.from_dict`/`from_json` for a stored document, or from
 64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
 friendly registry name or that content ID.
 
-Schema v8 stores one topologically ordered component graph plus nominal rates and
+Schema v11 stores one topologically ordered component graph plus nominal rates and
 content-addressed assets. State order, camera bindings, capabilities, arm/gripper convenience
 views, and the ID are derived from those facts. This keeps one source for morphology while
 remaining ergonomic for drivers, simulation, training, and task admission.
@@ -58,6 +58,6 @@ are recorded in `THIRD_PARTY_NOTICES.md`. Wheels and sdists include the tree und
 `sx_embodiments/_assets`. `sx_embodiments.assets.asset_root()` resolves the environment override,
 installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailableError`.
 
-The registry covers Piper, NERO, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
+The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
 Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.
 Declaration order is the native physical coordinate order and is pinned against each URDF.

@@ -15,7 +15,6 @@ from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .g1 import UNITREE_G1_SPEC
 from .humanoid import SENTIENT_HUMANOID_SPEC
 from .insta360 import INSTA360_UMI_SPEC
-from .nero import NERO_SPEC
 from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
@@ -27,7 +26,6 @@ from .yubi import YUBI_DEPTH_SPEC, YUBI_MONO_SPEC, YUBI_WIDEJAW_SPEC
 
 _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     PIPER_SPEC,
-    NERO_SPEC,
     ALOHA_SPEC,
     RBY1_SPEC,
     UNITREE_G1_SPEC,
