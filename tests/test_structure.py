@@ -25,6 +25,7 @@ PUBLIC_SURFACE = frozenset(
         "CompositionError",
         "CoordinateBounds",
         "CoordinateUnit",
+        "development_embodiments",
         "Embodiment",
         "EmbodimentError",
         "EmbodimentId",

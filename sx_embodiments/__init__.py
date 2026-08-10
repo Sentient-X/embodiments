@@ -26,7 +26,7 @@ from .errors import (
     UnknownEmbodimentError,
 )
 from .identity import EmbodimentId, EmbodimentName
-from .known import embodiments
+from .known import development_embodiments, embodiments
 from .layout import Bounds, ChannelKind, CoordinateBounds, CoordinateUnit, Unbounded
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 
@@ -58,6 +58,7 @@ __all__ = [
     "PartValidationError",
     "Unbounded",
     "UnknownEmbodimentError",
+    "development_embodiments",
     "embodiments",
     "resolve_asset",
 ]

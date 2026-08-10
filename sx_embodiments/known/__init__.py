@@ -112,3 +112,20 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
 
 
 embodiments: Final = EmbodimentRegistry(_DEFINITIONS)
+
+development_embodiments: Final = EmbodimentRegistry(
+    {name: entry.spec for name, entry in DEVELOPMENT_EMBODIMENTS.items()}
+)
+"""The same objects, from the registry that says they are not conformant yet.
+
+`DEVELOPMENT_EMBODIMENTS` records *why* each of these is held back — a missing camera
+calibration or installation — but held back from what? Without this it was held back from
+being resolvable at all, and the consumers that already ran on these bodies simply broke:
+sxd's UMI episode emitter is production, it emits `das-umi-v4` episodes daily, and the
+factory seeds a `piperx-station` pod.
+
+So the demotion is real but it is a *statement*, not a removal. A caller that needs one of
+these reads it from here, and the call site then says out loud that the body it is using
+has a fact still under construction. Promotion is one line: move the spec into
+`_ALL_SPECS`, and every `development_embodiments[...]` that should follow it fails loudly.
+"""
