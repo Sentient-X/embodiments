@@ -13,6 +13,7 @@ from sx_embodiments.assets import PackagedAsset, asset_root
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.b601 import B601_DM_STATION_URDF, B601_DM_URDF, BIMANUAL_B601_DM_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
+from sx_embodiments.known.ffw import FFW_BG2_URDF
 from sx_embodiments.known.g1 import UNITREE_G1_MJCF, UNITREE_G1_URDF
 from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMANOID_URDF
 from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
@@ -58,6 +59,7 @@ PINNED: tuple[PackagedAsset, ...] = (
     BIMANUAL_B601_DM_URDF,
     B601_DM_STATION_URDF,
     PIPER_STATION_URDF,
+    FFW_BG2_URDF,
 )
 
 
@@ -87,6 +89,7 @@ def test_urdf_mesh_references_exist() -> None:
         (B601_DM_URDF, root / "b601_dm"),
         (BIMANUAL_B601_DM_URDF, root / "b601_dm"),
         (B601_DM_STATION_URDF, root / "b601_dm"),
+        (FFW_BG2_URDF, root / "ai_worker/ffw_bg2_rev4"),
     ):
         tree = ET.parse(asset.path())
         for mesh in tree.getroot().iter("mesh"):
