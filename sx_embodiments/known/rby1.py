@@ -13,6 +13,7 @@ from .sources import menagerie
 RBY1_MJCF: Final = packaged_asset(
     relpath="menagerie/rainbow_robotics_rby1/rby1m_1.3.xml",
     sha256="fa6d736f76e27de5aba22b96e0c98655ae6a0ad36f6ece52a915bf71b460c66c",
+    size_bytes=34775,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=menagerie("rainbow_robotics_rby1/rby1m_1.3.xml", "Apache-2.0"),
@@ -21,6 +22,7 @@ RBY1_MJCF: Final = packaged_asset(
 RBY1_URDF: Final = packaged_asset(
     relpath="official/rby1/rby1m_v1.3.urdf",
     sha256="66f4ad14779793e94df87b59356321190c9882766b2ed9cbeba6624c0880f11d",
+    size_bytes=38603,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

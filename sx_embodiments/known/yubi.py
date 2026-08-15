@@ -29,6 +29,7 @@ from .das import DAS_JAW_V4
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
     sha256="360033943828a8e6822f09a75db92856cb30feacd8131219780326f4c60b5e44",
+    size_bytes=7563,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

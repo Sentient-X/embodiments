@@ -131,20 +131,33 @@ def packaged_asset(
     *,
     relpath: str,
     sha256: str,
+    size_bytes: int,
     format: AssetFormat,
     role: AssetRole,
     provenance: AssetProvenance,
     media_type: str | None = None,
 ) -> PackagedAsset:
-    """Author a packaged source from its expected digest and measured source size."""
+    """Author a packaged source from its declared content identity.
+
+    Both halves of the identity are authored, and neither is read off the disk. The
+    asymmetry this replaces — digest declared, size measured — made every module-scope
+    declaration a filesystem probe, so `import sx_embodiments` required all 632 asset
+    files to be present and raised `AssetsUnavailableError` from the import machinery
+    when one was not. That cost was paid by every consumer, including the ones that
+    never read a mesh: the GPU step runtime is an ASR/media node whose build context is
+    capped at 32 MiB, so it cannot carry the 492 MB tree and could not import the
+    registry at all.
+
+    Declaring the size is not weaker than measuring it. `path()` and `ref()` still
+    resolve through `asset_root()` and still fail closed, and the per-asset suite pins
+    every declared digest *and* size against the bytes on disk, so a wrong number here
+    is a failing test rather than a fact nobody checks.
+    """
 
     validate_logical_path(PurePosixPath(relpath))
-    path = asset_root() / relpath
-    if not path.is_file():
-        raise AssetsUnavailableError(f"packaged asset missing on disk: {relpath}")
     return PackagedAsset(
         relpath=relpath,
-        content=ContentBlob(Sha256Digest(sha256), path.stat().st_size),
+        content=ContentBlob(Sha256Digest(sha256), size_bytes),
         format=format,
         role=role,
         provenance=provenance,

@@ -151,6 +151,7 @@ from ._authoring import bounded_layout
 B601_DM_URDF: Final = packaged_asset(
     relpath="b601_dm/reBot_B601_DM_with_gripper.urdf",
     sha256="eb15a091412fa112f11d8bef3d170a40aa3cbb9db335fb145a1b27eb2aa000a0",
+    size_bytes=13428,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -171,6 +172,7 @@ B601_DM_SOURCE_URDF: Final = dataclasses.replace(B601_DM_URDF, role=AssetRole.OT
 BIMANUAL_B601_DM_URDF: Final = packaged_asset(
     relpath="b601_dm/bimanual_B601_DM.urdf",
     sha256="21d4f8b3849783e8ca42757298ff4239de68ceceba37d6947e23471aa81b0b84",
+    size_bytes=21997,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -185,6 +187,7 @@ BIMANUAL_B601_DM_URDF: Final = packaged_asset(
 B601_DM_STATION_URDF: Final = packaged_asset(
     relpath="b601_dm/B601_DM_station.urdf",
     sha256="dc55378246f27b5a309089968482b00c281c6185487cc7b37e9a53bb24763d65",
+    size_bytes=23455,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

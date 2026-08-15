@@ -30,6 +30,7 @@ from .sources import menagerie
 PANDA_MJCF: Final = packaged_asset(
     relpath="menagerie/franka_emika_panda/panda.xml",
     sha256="96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273",
+    size_bytes=14438,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=menagerie("franka_emika_panda/panda.xml", "Apache-2.0"),
@@ -38,6 +39,7 @@ PANDA_MJCF: Final = packaged_asset(
 PANDA_URDF: Final = packaged_asset(
     relpath="official/franka_panda/panda.urdf",
     sha256="668d8398e32164587fc2e9886b37d1a17a20d889cafe192f28ba245a3e82c24a",
+    size_bytes=19046,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

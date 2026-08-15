@@ -1,6 +1,9 @@
 """Every pinned digest matches the file on disk (the file is the truth; the pin guards)."""
 
 import hashlib
+import os
+import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
@@ -162,3 +165,46 @@ def test_resolve_asset_fails_closed() -> None:
         resolve_asset(
             replace(ref, content=replace(ref.content, sha256=type(ref.content.sha256)("0" * 64)))
         )
+
+
+def test_importing_the_registry_does_not_require_the_asset_tree() -> None:
+    """A declaration is authored, not measured, so import touches no asset file.
+
+    This package is imported by four pillars, and its `known/` modules build every
+    PackagedAsset at module scope. While `packaged_asset` stat()ed the file to learn its
+    size, that made `import sx_embodiments` a hard dependency on all 632 asset files —
+    and an image that legitimately ships none of them, like the GPU step runtime whose
+    build context is capped at 32 MiB, died inside the import machinery with
+    `AssetsUnavailableError: packaged asset missing on disk: quest_ego/meshes/
+    quest3mesh.obj`. Absence must surface where the bytes are actually asked for.
+
+    A fresh interpreter is the only honest check: the registry is a module-level
+    singleton, so an in-process import would already be cached and prove nothing.
+    """
+    env = {**os.environ, "SX_EMBODIMENTS_ASSETS": str(Path("/nonexistent-asset-root"))}
+    probe = (
+        "import sx_embodiments;"
+        "from sx_embodiments.known.das import QUEST3_HEADSET_MESH as m;"
+        "print(len(list(sx_embodiments.embodiments)), m.content.size_bytes)"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stderr
+    count, size = done.stdout.split()
+    assert int(count) > 0 and int(size) > 0
+
+    # ...and the same interpreter still refuses to hand out bytes it cannot verify.
+    denied = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from sx_embodiments.known.das import QUEST3_HEADSET_MESH as m; m.path()",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert denied.returncode != 0
+    assert "AssetsUnavailableError" in denied.stderr

@@ -13,6 +13,7 @@ from .sources import menagerie
 ALOHA_MJCF: Final = packaged_asset(
     relpath="menagerie/aloha/aloha.xml",
     sha256="68430b29719bda1b75e63f540953f81991bc3fd136bdf0a43bbe3e04393b78d3",
+    size_bytes=19150,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=menagerie("aloha/aloha.xml", "BSD-3-Clause"),
@@ -21,6 +22,7 @@ ALOHA_MJCF: Final = packaged_asset(
 ALOHA_URDF: Final = packaged_asset(
     relpath="official/aloha/aloha.urdf",
     sha256="16dc0e1a2c84dac010ae629120afce5621e7201c87966ba2a91ff0e069de09a1",
+    size_bytes=35575,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

@@ -12,6 +12,7 @@ from ._authoring import bounded_layout, unbounded_layout
 YOR_MJCF: Final = packaged_asset(
     relpath="yor/robot.mjcf",
     sha256="8e9289b712938e1e8c72516ebd28c76c800e2937a4b49d22e60a124708848ee9",
+    size_bytes=28545,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -25,6 +26,7 @@ YOR_MJCF: Final = packaged_asset(
 YOR_URDF: Final = packaged_asset(
     relpath="official/yor/yor.urdf",
     sha256="b5242242eb182ac80af88c1ccafbf042adc82e72112519867bb4e808cf63ce38",
+    size_bytes=24400,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

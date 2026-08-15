@@ -13,6 +13,7 @@ from .sources import menagerie
 UNITREE_G1_MJCF: Final = packaged_asset(
     relpath="menagerie/unitree_g1/g1.xml",
     sha256="3c2616550a31f33e84d3c80b8e913ac5618c8888019b0c9490dae93493e647f3",
+    size_bytes=23446,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=menagerie("unitree_g1/g1.xml", "BSD-3-Clause"),
@@ -21,6 +22,7 @@ UNITREE_G1_MJCF: Final = packaged_asset(
 UNITREE_G1_URDF: Final = packaged_asset(
     relpath="official/unitree_g1/g1_29dof_rev_1_0.urdf",
     sha256="f751dbd8a0cdb653dc705cc8aaa36de6658054d0fb98faf18c0462a6707d20e5",
+    size_bytes=33453,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

@@ -20,6 +20,7 @@ from ._authoring import bounded_layout
 SO101_URDF: Final = packaged_asset(
     relpath="so101/so101.urdf",
     sha256="dd7f789c1aa4b9f82174dd49f6c4d62f5338f0956ec8e59c37576ee161903279",
+    size_bytes=16065,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -34,6 +35,7 @@ SO101_SOURCE_URDF: Final = dataclasses.replace(SO101_URDF, role=AssetRole.OTHER)
 BIMANUAL_SO101_URDF: Final = packaged_asset(
     relpath="so101/bimanual_so101.urdf",
     sha256="df87bae56067a63a5401868c9fd8a97817051e4a2026b14b16085d9bd214c123",
+    size_bytes=30715,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

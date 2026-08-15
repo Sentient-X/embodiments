@@ -19,6 +19,7 @@ from ._authoring import bounded_layout
 SENTIENT_HUMANOID_URDF: Final = packaged_asset(
     relpath="humanoid_pkg/urdf/urdf_robot_acc.urdf",
     sha256="e79678962ede3c9c6def69ac3e40f1ac67e59d41e5205f6356dd294bb88017a6",
+    size_bytes=50397,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -32,6 +33,7 @@ SENTIENT_HUMANOID_URDF: Final = packaged_asset(
 SENTIENT_HUMANOID_MJCF: Final = packaged_asset(
     relpath="humanoid_pkg/mjcf/humanoid_28dof.xml",
     sha256="1276bbfd8731401160abe1698c988a6807fdb95f001c2ad9755f18e856b4c6a4",
+    size_bytes=19218,
     format=AssetFormat.MJCF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

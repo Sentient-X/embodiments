@@ -37,6 +37,7 @@ from .sources import ai_worker
 FFW_BG2_URDF: Final = packaged_asset(
     relpath="ai_worker/ffw_bg2_rev4/ffw_bg2_follower.urdf",
     sha256="86a5d17c23a2fde7e1c2c65ae499386fec4168f007a9526a858106e93d1dd056",
+    size_bytes=61348,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=ai_worker(

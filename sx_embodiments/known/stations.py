@@ -17,6 +17,7 @@ from .piper import PIPER_ARM, PIPER_GRIPPER, PIPER_SOURCE_URDF
 PIPER_STATION_URDF: Final = packaged_asset(
     relpath="official/agilex_piper/piper_station.urdf",
     sha256="0285385fbd97d9f0e25cb38556f4af7194de860354f7b7f081fabd3248b2a607",
+    size_bytes=22394,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
