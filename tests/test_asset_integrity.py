@@ -31,7 +31,7 @@ from sx_embodiments.known.universal_robots import (
     UR10E_URDF,
 )
 from sx_embodiments.known.yor import YOR_MJCF, YOR_URDF
-from sx_embodiments.known.yubi import YUBI_HANDS_URDF
+from sx_embodiments.known.yubi import YUBI_HANDS_URDF, YUBI_MESHES
 
 PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
@@ -66,7 +66,7 @@ PINNED: tuple[PackagedAsset, ...] = (
 )
 
 
-@pytest.mark.parametrize("asset", PINNED, ids=lambda a: a.relpath)
+@pytest.mark.parametrize("asset", (*PINNED, *YUBI_MESHES), ids=lambda a: a.relpath)
 def test_pinned_digest_matches_file(asset: PackagedAsset) -> None:
     on_disk = hashlib.sha256(asset.path().read_bytes()).hexdigest()
     assert on_disk == asset.sha256
@@ -88,6 +88,7 @@ def test_urdf_mesh_references_exist() -> None:
         (SO101_URDF, root / "so101"),
         (BIMANUAL_SO101_URDF, root / "so101"),
         (DAS_GRIPPER_URDF, root / "das_gripper_with_vr"),
+        (YUBI_HANDS_URDF, root / "yubi_description"),
         (SENTIENT_HUMANOID_URDF, root / "humanoid_pkg"),
         (B601_DM_URDF, root / "b601_dm"),
         (BIMANUAL_B601_DM_URDF, root / "b601_dm"),

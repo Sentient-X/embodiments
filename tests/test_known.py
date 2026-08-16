@@ -1,6 +1,6 @@
 """The public registry is the only route from a name to a complete embodiment."""
 
-from sx_embodiments import Embodiment, embodiments
+from sx_embodiments import Embodiment, development_embodiments, embodiments
 from sx_embodiments.identity import EmbodimentKind
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, DevelopmentReason
 
@@ -97,3 +97,11 @@ def test_every_entry_is_complete_and_round_trips() -> None:
         assert embodiment.urdf_path.is_file()
         if embodiment.kind is EmbodimentKind.CAPTURE_RIG:
             assert embodiment.cameras
+
+
+def test_yubi_embodiment_has_only_yubi_description_assets_and_parts() -> None:
+    yubi = development_embodiments["yubi"]
+    assert "das" not in yubi.to_json().lower()
+    assert all(
+        str(asset.asset.logical_path).startswith("yubi_description/") for asset in yubi.assets
+    )

@@ -51,6 +51,17 @@
       </collision>
     </link>
 
+    <!-- The upstream camera mount is already expressed in the camera's RDF
+         optical basis. Give that basis an explicit, symmetric frame name so
+         recordings and the description package name the same frame. -->
+    <joint name="${hand_prefix}_camera_optical_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="${hand_prefix}_hand_cam_link"/>
+      <child link="${hand_prefix}_hand_cam_optical"/>
+    </joint>
+
+    <link name="${hand_prefix}_hand_cam_optical" data-frame-convention="camera_optical"/>
+
     <!-- Primary finger (driven directly by encoder) -->
     <joint name="${hand_prefix}_right_finger_joint" type="revolute">
       <origin xyz="-0.016 ${-finger_offset_y} 0" rpy="0 0 0"/>

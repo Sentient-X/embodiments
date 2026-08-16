@@ -56,8 +56,8 @@ DAS_GRIPPER_URDF: Final = packaged_asset(
 
 DAS_UMI_V4_URDF: Final = packaged_asset(
     relpath="das_gripper_with_vr/urdf/DAS_UMI_V4.urdf",
-    sha256="5d25b310a58b7b737aad45f9bf3cbea266193d3b4b602be1226c9be00a122603",
-    size_bytes=34853,
+    sha256="95656382dc204c38383d2771f3aea5b541fb3b8e081f7808a5b7e519f8a76990",
+    size_bytes=34863,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -72,13 +72,13 @@ DAS_UMI_V4_URDF: Final = packaged_asset(
 
 QUEST_EGO_URDF: Final = packaged_asset(
     relpath="quest_ego/urdf/quest_ego.urdf",
-    sha256="f41d4a9a2d7e10e0e9da0a0f8c00a98cf95073cf6ed6ae852a8087a2590e1c5d",
-    size_bytes=1245,
+    sha256="7174fd1c094adf983a1e568ac240eaef103014fb938648618664d2ffbb23e96f",
+    size_bytes=1260,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
         repository="https://github.com/Sentient-X/sx-embodiments",
-        revision="manifest-v5",
+        revision="manifest-v6",
         path="assets/quest_ego/urdf/quest_ego.urdf",
         license_id="Apache-2.0",
         generator="controller-free headset description with reference-unit optical frames",
@@ -187,7 +187,7 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
         body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
-        sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_camera_optical")),
+        sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_left_camera_optical")),
         sensor_component(
             "head_right",
             QUEST3_HEAD,
@@ -211,7 +211,7 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
         sensor_component(
             "head_left",
             QUEST3_HEAD,
-            RootMount("quest3s_camera_optical"),
+            RootMount("quest3s_left_camera_optical"),
         ),
         sensor_component(
             "head_right",

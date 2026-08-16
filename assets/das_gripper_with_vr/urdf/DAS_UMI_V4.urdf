@@ -11,11 +11,11 @@
       </material>
     </visual>
   </link>
-  <link name="quest3s_camera_optical" data-frame-convention="camera_optical" />
+  <link name="quest3s_left_camera_optical" data-frame-convention="camera_optical" />
   <joint name="quest3s_head_to_left_camera_optical" type="fixed">
     <origin xyz="-0.032 0.075 -0.011" rpy="-1.5707963267948966 0 0" />
     <parent link="quest3s_head" />
-    <child link="quest3s_camera_optical" />
+    <child link="quest3s_left_camera_optical" />
   </joint>
   <link name="quest3s_right_camera_optical" data-frame-convention="camera_optical" />
   <joint name="quest3s_head_to_right_camera_optical" type="fixed">

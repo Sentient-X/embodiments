@@ -159,10 +159,6 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
 
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
     for embodiment in embodiments.values():
-        if embodiment.lineage.family == "yubi":
-            # YUBI records the DAS magnetic-encoder jaw coordinate while its upstream
-            # hand URDF names a different servo-side finger joint (known/yubi.py).
-            continue
         urdf = embodiment.urdf
         movable = {
             joint.get("name")

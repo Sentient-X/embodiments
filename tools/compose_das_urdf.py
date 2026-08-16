@@ -48,7 +48,7 @@ def render() -> bytes:
     material = ET.SubElement(visual, "material", {"name": "quest_shell"})
     ET.SubElement(material, "color", {"rgba": "0.78 0.79 0.82 1"})
     for side, frame, xyz in (
-        ("left", "quest3s_camera_optical", "-0.032 0.075 -0.011"),
+        ("left", "quest3s_left_camera_optical", "-0.032 0.075 -0.011"),
         ("right", "quest3s_right_camera_optical", "0.032 0.075 -0.011"),
     ):
         ET.SubElement(
