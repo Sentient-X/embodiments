@@ -58,3 +58,16 @@ def test_underdeclared_gripper_refuses_instead_of_guessing() -> None:
         bare.aperture_from_drive(0.5)
     with pytest.raises(GripperKinematicsError):
         bare.drive_from_aperture(0.04)
+
+
+def test_yubi_gap_curve_tracks_the_updated_nail_mechanism() -> None:
+    from sx_embodiments.known.yubi import YUBI_JAW
+
+    assert YUBI_JAW.joint_names == ("left_finger",)
+    assert YUBI_JAW.joint_lower == (0.0,)
+    assert YUBI_JAW.joint_upper == (0.785398,)
+    assert YUBI_JAW.aperture_from_drive(0.0) == 0.0
+    assert YUBI_JAW.aperture_from_drive(0.785398) == pytest.approx(0.100083349)
+    for i in range(11):
+        q = YUBI_JAW.joint_upper[0] * i / 10
+        assert YUBI_JAW.drive_from_aperture(YUBI_JAW.aperture_from_drive(q)) == pytest.approx(q)

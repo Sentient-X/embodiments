@@ -174,11 +174,9 @@ def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> N
 
 
 def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
-    """The vendored yubi-sw description: per hand one encoder-driven finger joint
-    with a -1 mimic mirror, hand-camera housings, Quest controller mount frames,
-    and a closed mesh set. It does not fabricate a Quest headset."""
+    """The composed description preserves both complete CAD mechanisms and frames."""
     from sx_embodiments.assets import asset_root
-    from sx_embodiments.known.yubi import YUBI_HANDS_URDF
+    from sx_embodiments.known.yubi import YUBI_HANDS_URDF, YUBI_JAW
 
     root = ET.parse(YUBI_HANDS_URDF.path()).getroot()
     links = {link.get("name") for link in root.iter("link")}
@@ -186,25 +184,60 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         "quest_origin",
         "quest_left_controller",
         "quest_right_controller",
-        "left_hand_cam_link",
-        "right_hand_cam_link",
+        "left_controller_link",
+        "right_controller_link",
+        "left_hand_cam_optical",
+        "right_hand_cam_optical",
     } <= links
 
     revolute = {
         joint.get("name"): joint for joint in root.iter("joint") if joint.get("type") == "revolute"
     }
-    hands = ("left", "right")
-    assert set(revolute) == {f"{hand}_{finger}_finger_joint" for hand in hands for finger in hands}
     for hand in ("left", "right"):
-        driven = revolute[f"{hand}_right_finger_joint"]
+        expected = {
+            f"{hand}_left_finger",
+            *(f"{hand}_{mimic.joint_name}" for mimic in YUBI_JAW.mimic_joints),
+        }
+        assert expected <= set(revolute)
+        driven = revolute[f"{hand}_left_finger"]
         limit = driven.find("limit")
-        assert limit is not None and (limit.get("lower"), limit.get("upper")) == ("0.0", "0.94")
+        assert limit is not None and (limit.get("lower"), limit.get("upper")) == (
+            "0",
+            "0.785398",
+        )
         assert driven.find("mimic") is None
-        mirror = revolute[f"{hand}_left_finger_joint"]
-        declared = mirror.find("mimic")
-        assert declared is not None
-        assert declared.get("joint") == f"{hand}_right_finger_joint"
-        assert float(declared.get("multiplier", "1")) == -1.0
+        for mimic in YUBI_JAW.mimic_joints:
+            declared = revolute[f"{hand}_{mimic.joint_name}"].find("mimic")
+            assert declared is not None
+            assert declared.get("joint") == f"{hand}_{mimic.of}"
+            assert float(declared.get("multiplier", "1")) == mimic.multiplier
+
+        fixed = {joint.get("name"): joint for joint in root.iter("joint")}
+        camera = fixed[f"{hand}_camera_link_frame"]
+        assert camera.find("parent").get("link") == f"{hand}_base_link"  # type: ignore[union-attr]
+        assert camera.find("child").get("link") == f"{hand}_hand_cam_optical"  # type: ignore[union-attr]
+        tracking = fixed[f"{hand}_controller_tracking_frame"]
+        assert tracking.find("parent").get("link") == f"{hand}_controller_link"  # type: ignore[union-attr]
+        assert tracking.find("child").get("link") == f"quest_{hand}_controller"  # type: ignore[union-attr]
+        tracking_origin = tracking.find("origin")
+        assert tracking_origin is not None
+        assert [float(value) for value in tracking_origin.get("rpy", "").split()] == [
+            0.0,
+            0.0,
+            -1.5707963267948966,
+        ]
+
+    parents = {
+        child.get("link"): parent.get("link")
+        for joint in root.iter("joint")
+        if (parent := joint.find("parent")) is not None
+        and (child := joint.find("child")) is not None
+    }
+    assert set(links) - set(parents) == {"quest_origin"}
+    reached = {"quest_origin"}
+    while discovered := {child for child, parent in parents.items() if parent in reached} - reached:
+        reached.update(discovered)
+    assert reached == links
 
     package_root = asset_root()
     meshes = {
@@ -218,6 +251,16 @@ def test_yubi_hands_urdf_matches_upstream_hand_model() -> None:
         if package != "sx-embodiments":
             relative = f"{package}/{relative}"
         assert (package_root / relative).is_file(), f"unresolved mesh {filename}"
+
+
+def test_yubi_composed_urdf_is_regenerated_from_the_vendored_sources() -> None:
+    import runpy
+
+    from sx_embodiments.known.yubi import YUBI_HANDS_URDF
+
+    tool = Path(__file__).parents[1] / "tools/compose_yubi_urdf.py"
+    render = runpy.run_path(str(tool))["render"]
+    assert render() == YUBI_HANDS_URDF.path().read_bytes()
 
 
 def test_yubi_camera_housings_are_not_promoted_as_calibrated_optics() -> None:

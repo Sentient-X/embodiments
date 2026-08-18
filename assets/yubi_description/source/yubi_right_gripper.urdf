@@ -1,0 +1,247 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="right_gripper_corrected_fixed">
+  <link name="world">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_base_link.stl" />
+      </geometry>
+      <material name="link_base_link_material">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_base_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="world_to_base_link" type="fixed">
+    <origin xyz="0.014368 0 0.05331" rpy="-0 0.174533 -0" />
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <link name="base_link">
+    <visual>
+      <origin xyz="-0.00489252905942 -2.58e-10 -0.0549950786074" rpy="0 -0.174533 0" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_housing.stl" />
+      </geometry>
+      <material name="link_housing_material">
+        <color rgba="0.768627 0.886275 0.952941 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.00489252905942 -2.58e-10 -0.0549950786074" rpy="0 -0.174533 0" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_housing.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="camera_link">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+  </link>
+  <joint name="camera_link_frame" type="fixed">
+    <origin xyz="-0.00952825 -0 0.0362439" rpy="-1.74533 0 -1.5708" />
+    <parent link="base_link" />
+    <child link="camera_link" />
+  </joint>
+  <link name="controller_right">
+    <visual>
+      <origin xyz="-0.0549569723485 0.0524019218098 -0.0970644383284" rpy="0.568188752244 0.378595907821 0.847209394003" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_controller_right.stl" />
+      </geometry>
+      <material name="link_controller_right_material">
+        <color rgba="0.627451 0.627451 0.627451 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.0549569723485 0.0524019218098 -0.0970644383284" rpy="0.568188752244 0.378595907821 0.847209394003" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_controller_right.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="controller" type="fixed">
+    <origin rpy="0 -0.7853981633974483 -0.7853981633974483" xyz="-0.063 -0.016 0.0525" />
+    <parent link="base_link" />
+    <child link="controller_right" />
+  </joint>
+  <link name="link_right_finger">
+    <visual>
+      <origin xyz="0.0113326046442 0.0148306803404 -0.0669952330119" rpy="5.88492431824e-09 -0.17453338727 -0.0150921626234" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_finger.stl" />
+      </geometry>
+      <material name="link_right_finger_material">
+        <color rgba="0.823529 0.823529 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.0113326046442 0.0148306803404 -0.0669952330119" rpy="5.88492431824e-09 -0.17453338727 -0.0150921626234" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_finger.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="right_finger_grip">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+  </link>
+  <joint name="right_finger_grip_frame" type="fixed">
+    <origin xyz="0.0646994 -0.00556635 -0.01775" rpy="1e-12 0 0" />
+    <parent link="link_right_finger" />
+    <child link="right_finger_grip" />
+  </joint>
+  <link name="right_nail">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <visual>
+      <origin xyz="-0.0677906209271 0.0479170928351 0.00929985429325" rpy="-4.79711208805e-07 2.86391720998e-08 1.6466237384" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_nail.stl" />
+      </geometry>
+      <material name="link_right_nail_material">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.0677906209271 0.0479170928351 0.00929985429325" rpy="-4.79711208805e-07 2.86391720998e-08 1.6466237384" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_nail.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_nail" type="revolute">
+    <origin xyz="0.0671849851405 0.00763956789707 0.00209999225656" rpy="-2.30027455417e-12 -9.37143695978e-11 0" />
+    <parent link="link_connector_right" />
+    <child link="right_nail" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
+    <mimic joint="left_finger" multiplier="1" offset="0" />
+  </joint>
+  <joint name="right_finger" type="revolute">
+    <origin xyz="-0.01600004037 -0.01500001935 0.01200007658" rpy="0 0 0.0349065753" />
+    <parent link="base_link" />
+    <child link="link_right_finger" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-0.785398" upper="0" />
+    <mimic joint="left_finger" multiplier="-1" offset="0" />
+  </joint>
+  <link name="link_left_finger">
+    <visual>
+      <origin xyz="0.0113084521027 -0.0148491221103 -0.066995230193" rpy="1.62436999413e-09 -0.174533494391 0.0134716603278" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_finger.stl" />
+      </geometry>
+      <material name="link_left_finger_material">
+        <color rgba="0.823529 0.823529 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.0113084521027 -0.0148491221103 -0.066995230193" rpy="1.62436999413e-09 -0.174533494391 0.0134716603278" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_finger.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="left_finger_grip">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+  </link>
+  <joint name="left_finger_grip_frame" type="fixed">
+    <origin xyz="0.0647084 0.00546061 -0.01775" rpy="-1e-12 0 -0" />
+    <parent link="link_left_finger" />
+    <child link="left_finger_grip" />
+  </joint>
+  <link name="left_nail">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <visual>
+      <origin xyz="-0.0681932160561 -0.0473428470456 0.0118996380551" rpy="-3.14158967815 3.13551511213e-08 -1.65506953939" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_nail.stl" />
+      </geometry>
+      <material name="link_left_nail_material">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.0681932160561 -0.0473428470456 0.0118996380551" rpy="-3.14158967815 3.13551511213e-08 -1.65506953939" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_nail.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_nail" type="revolute">
+    <origin xyz="0.0670678187713 -0.00845642917701 -0.00049967119931" rpy="-1.33006886754e-12 8.45202241528e-11 0" />
+    <parent link="link_connector_left" />
+    <child link="left_nail" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
+    <mimic joint="left_finger" multiplier="-1" offset="0" />
+  </joint>
+  <joint name="left_finger" type="revolute">
+    <origin xyz="-0.0159999253 0.01500011285 0.01200007484" rpy="0 0 -0.0349065974" />
+    <parent link="base_link" />
+    <child link="link_left_finger" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="0" upper="0.785398" />
+  </joint>
+  <link name="gripper_tip">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+  </link>
+  <joint name="gripper_tip_frame" type="fixed">
+    <origin xyz="0.0875496611 0 -0.00605006867" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="gripper_tip" />
+  </joint>
+  <link name="link_connector_right">
+    <visual>
+      <origin xyz="0.000742312681243 0.0549949759012 -0.00554514565935" rpy="-2.71742832906e-06 2.64835242635e-06 1.55713202059" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_right.stl" />
+      </geometry>
+      <material name="link_connector_right_material">
+        <color rgba="0.627451 0.627451 0.627451 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.000742312681243 0.0549949759012 -0.00554514565935" rpy="-2.71742832906e-06 2.64835242635e-06 1.55713202059" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_right.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_connector" type="revolute">
+    <origin xyz="-0.016 -0.0549975100834 -0.00379985405918" rpy="-0.00000000382026972 0.000000093109623 0.0245406753" />
+    <parent link="base_link" />
+    <child link="link_connector_right" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
+    <mimic joint="left_finger" multiplier="-1" offset="0" />
+  </joint>
+  <link name="link_connector_left">
+    <visual>
+      <origin xyz="0.0534155864371 -0.0616933264031 -0.0055450213667" rpy="-2.12421134947e-06 -2.59765254499e-06 -1.8206246026" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_left.stl" />
+      </geometry>
+      <material name="link_connector_left_material">
+        <color rgba="0.627451 0.627451 0.627451 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.0534155864371 -0.0616933264031 -0.0055450213667" rpy="-2.12421134947e-06 -2.59765254499e-06 -1.8206246026" />
+      <geometry>
+        <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_left.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_connector" type="revolute">
+    <origin xyz="-0.016 0.0550024899162 -0.00380014595406" rpy="-0.00000000537222922 -0.000000170962516 -0.0157353974" />
+    <parent link="base_link" />
+    <child link="link_connector_left" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
+    <mimic joint="left_finger" multiplier="1" offset="0" />
+  </joint>
+</robot>
