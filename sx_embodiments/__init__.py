@@ -8,10 +8,12 @@ layouts, lineage, kinds) are not exported, so no caller outside this package can
 arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodiments.known``.
 """
 
+from .assemble import assemble, composable_parts
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
 from .embodiment import Embodiment
 from .errors import (
+    AssemblyError,
     AssetDigestMismatchError,
     AssetsUnavailableError,
     ComponentGraphError,
@@ -43,6 +45,7 @@ __all__ = [
     "ActuatorBinding",
     "ActuatorBus",
     "ActuatorModel",
+    "AssemblyError",
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",
@@ -70,6 +73,8 @@ __all__ = [
     "PartValidationError",
     "Unbounded",
     "UnknownEmbodimentError",
+    "assemble",
+    "composable_parts",
     "development_embodiments",
     "embodiments",
     "resolve_asset",

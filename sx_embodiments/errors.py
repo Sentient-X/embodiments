@@ -66,6 +66,14 @@ class CompositionError(EmbodimentError):
         self.name = name
 
 
+class AssemblyError(EmbodimentError):
+    """A wire assembly definition cannot mint a drivable body; the message names why."""
+
+    def __init__(self, subject: str, message: str) -> None:
+        super().__init__(f"{subject}: {message}")
+        self.subject = subject
+
+
 class ComponentGraphError(EmbodimentError):
     """A component id, frame, parent relation, or capability fact is invalid."""
 

@@ -23,6 +23,7 @@ from .parts import (
     ControlRates,
     DeviceSpec,
     ForceTorqueSpec,
+    GraspKind,
     GripperSpec,
     JointGroupSpec,
     MobileBaseSpec,
@@ -413,7 +414,9 @@ def capabilities_for_part(part: object) -> tuple[Capability, ...]:
         return (
             Capability.SPATIAL_MOTION_SE3,
             Capability.GRASP,
-            Capability.GRASP_PARALLEL,
+            Capability.GRASP_DEXTEROUS
+            if part.grasp is GraspKind.DEXTEROUS
+            else Capability.GRASP_PARALLEL,
         )
     if isinstance(part, MobileBaseSpec):
         return (Capability.PLANAR_MOTION_SE2, Capability.LOCOMOTION_PLANAR)

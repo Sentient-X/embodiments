@@ -295,6 +295,18 @@ class JointGroupSpec:
         return _uppers(self.layout)
 
 
+class GraspKind(StrEnum):
+    """How an end-effector closes on an object.
+
+    ``PARALLEL`` is the single-aperture jaw; ``DEXTEROUS`` is a multi-DOF hand whose
+    fingers articulate independently. A "hand" is not a separate part atom — it is a
+    gripper whose grasp is dexterous; layout, mimics, and assets mean the same thing.
+    """
+
+    PARALLEL = "parallel"
+    DEXTEROUS = "dexterous"
+
+
 @dataclass(frozen=True, slots=True)
 class MimicJoint:
     """A passive joint driven by another joint's value (URDF ``<mimic>``)."""
@@ -330,6 +342,7 @@ class GripperSpec:
     gap_curve: Curve1D | None = None
     assets: tuple[PackagedAsset, ...] = ()
     physical: PhysicalSpec | None = None
+    grasp: GraspKind = GraspKind.PARALLEL
 
     def __post_init__(self) -> None:
         if not self.layout.axes:

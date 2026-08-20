@@ -16,6 +16,7 @@ from sx_contracts.assets import (
 from sx_contracts.content import ContentBlob, Sha256Digest
 
 from sx_embodiments import (
+    AssetDigestMismatchError,
     Embodiment,
     EmbodimentId,
     EmbodimentName,
@@ -126,7 +127,7 @@ def test_external_assets_preserve_all_embodiment_facts() -> None:
 
 def test_external_assets_rehash_the_authoritative_urdf() -> None:
     canonical = embodiments["piper"]
-    with pytest.raises(AssetIntegrityError, match="authoritative URDF bytes"):
+    with pytest.raises(AssetDigestMismatchError, match="expected sha256"):
         canonical.with_assets((canonical.urdf,), urdf=b"<robot name='tampered'/>")
 
 

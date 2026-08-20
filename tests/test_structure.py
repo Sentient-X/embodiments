@@ -20,6 +20,13 @@ PUBLIC_SURFACE = frozenset(
         "ActuatorBinding",
         "ActuatorBus",
         "ActuatorModel",
+        # The one authoring door (customer-embodiments plan, Move 2): a validating
+        # entrypoint over an untrusted wire definition, not an open constructor —
+        # construction material stays unexported and the id stays derived. Its first
+        # consumer is the Experience embodiment door.
+        "AssemblyError",
+        "assemble",
+        "composable_parts",
         "AssetDigestMismatchError",
         "AssetsUnavailableError",
         "BaseMount",

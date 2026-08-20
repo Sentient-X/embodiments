@@ -14,7 +14,6 @@ from typing import cast
 from sx_contracts import CapabilityProfile, CapabilitySet, ComponentCapabilities, decode
 from sx_contracts.assets import (
     AssetFormat,
-    AssetIntegrityError,
     AssetProvenance,
     AssetRef,
     AssetRole,
@@ -44,7 +43,12 @@ from .compose import (
     validate_operator_mounts,
 )
 from .curves import Curve1D, Knot
-from .errors import EmbodimentSchemaError, LayoutError, MissingUrdfError
+from .errors import (
+    AssetDigestMismatchError,
+    EmbodimentSchemaError,
+    LayoutError,
+    MissingUrdfError,
+)
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import (
     ActuatorBinding,
@@ -68,6 +72,7 @@ from .parts import (
     DeviceSpec,
     FactSource,
     ForceTorqueSpec,
+    GraspKind,
     GripperSpec,
     JointGroupSpec,
     MimicJoint,
@@ -393,6 +398,7 @@ def _part_to_dict(part: Part) -> dict[str, object]:
     if isinstance(part, GripperSpec):
         return common | {
             "kind": "gripper",
+            "grasp": part.grasp.value,
             "layout": _layout_to_dict(part.layout),
             "travel_m": list(part.travel_m) if part.travel_m is not None else None,
             "grasp_centre_m": (
@@ -514,6 +520,7 @@ def _parse_part(document: decode.Document) -> Part:
         "joint_group": common | {"layout", "home"},
         "gripper": common
         | {
+            "grasp",
             "layout",
             "travel_m",
             "grasp_centre_m",
@@ -547,6 +554,10 @@ def _parse_part(document: decode.Document) -> Part:
                 home=decode.numbers(entry, "home"),
             )
         if kind == "gripper":
+            try:
+                grasp = GraspKind(decode.text(entry, "grasp"))
+            except ValueError as exc:
+                raise EmbodimentSchemaError(f"{entry.where}.grasp is unknown") from exc
             return GripperSpec(
                 part_id=part_id,
                 layout=_parse_layout(entry),
@@ -555,6 +566,7 @@ def _parse_part(document: decode.Document) -> Part:
                 mimic_joints=_parse_mimics(entry),
                 gap_curve=_parse_curve(entry),
                 physical=_parse_physical(entry),
+                grasp=grasp,
             )
         if kind == "camera":
             optics = decode.exactly(
@@ -937,10 +949,10 @@ def _validate_urdf(
         raise MissingUrdfError(str(name), len(urdfs))
     actual = hashlib.sha256(urdf).hexdigest()
     if actual != urdfs[0].sha256:
-        raise AssetIntegrityError(
-            f"{urdfs[0].location}: authoritative URDF bytes have sha256 {actual}, "
-            f"expected {urdfs[0].sha256}"
-        )
+        # AssetDigestMismatchError, not the bare integrity parent: it subclasses
+        # EmbodimentError too, so every boundary that maps this package's refusals to a
+        # typed rejection (the embodiment door's 422) catches the forgery/mistake case.
+        raise AssetDigestMismatchError(urdfs[0].location, urdfs[0].sha256, actual)
     try:
         root = ET.fromstring(urdf)
     except ET.ParseError as exc:
