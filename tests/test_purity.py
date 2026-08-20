@@ -7,8 +7,8 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent.parent / "sx_embodiments"
 _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_contracts", "sx_embodiments"}
 
-# The one sanctioned environment read: assets.py resolves SX_EMBODIMENTS_ASSETS because
-# Deployed workers may override the packaged description tree. Nothing else reads the environment.
+# The sanctioned environment reads live in assets.py alone: the local-tree override,
+# the asset mirror, and its cache root. No other module reads the environment.
 _ENV_ALLOWED = {"assets.py"}
 
 
