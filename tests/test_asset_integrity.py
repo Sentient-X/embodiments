@@ -22,6 +22,7 @@ from sx_embodiments.known.humanoid import SENTIENT_HUMANOID_MJCF, SENTIENT_HUMAN
 from sx_embodiments.known.panda import PANDA_MJCF, PANDA_URDF
 from sx_embodiments.known.piper import PIPER_MJCF, PIPER_URDF
 from sx_embodiments.known.rby1 import RBY1_MJCF, RBY1_URDF
+from sx_embodiments.known.sentient_rwh import SENTIENT_RWH_URDF
 from sx_embodiments.known.so101 import BIMANUAL_SO101_URDF, SO101_URDF
 from sx_embodiments.known.stations import PIPER_STATION_URDF
 from sx_embodiments.known.universal_robots import (
@@ -63,6 +64,7 @@ PINNED: tuple[PackagedAsset, ...] = (
     B601_DM_STATION_URDF,
     PIPER_STATION_URDF,
     FFW_BG2_URDF,
+    SENTIENT_RWH_URDF,
 )
 
 
@@ -94,6 +96,7 @@ def test_urdf_mesh_references_exist() -> None:
         (BIMANUAL_B601_DM_URDF, root / "b601_dm"),
         (B601_DM_STATION_URDF, root / "b601_dm"),
         (FFW_BG2_URDF, root / "ai_worker/ffw_bg2_rev4"),
+        (SENTIENT_RWH_URDF, root / "sentient_rwh"),
     ):
         tree = ET.parse(asset.path())
         for mesh in tree.getroot().iter("mesh"):

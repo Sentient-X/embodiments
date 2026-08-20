@@ -1,0 +1,3088 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="sentient_rwh">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.00556677188242519 0.100204614605816 0.20959162772558"
+        rpy="0 0 0" />
+      <mass
+        value="24.9036765155238" />
+      <inertia
+        ixx="0.720551556304308"
+        ixy="-8.56771719532394E-06"
+        ixz="0.00085980246199951"
+        iyy="0.421154102065008"
+        iyz="0.0990373063327098"
+        izz="0.975537927686948" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.501960784313725 0.501960784313725 0.501960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="RL_tyre">
+    <inertial>
+      <origin
+        xyz="-0.02825 0 -1.66533453693773E-16"
+        rpy="0 0 0" />
+      <mass
+        value="0.0146084058391925" />
+      <inertia
+        ixx="9.14486205533455E-06"
+        ixy="-1.46992868215593E-21"
+        ixz="2.61033064352992E-21"
+        iyy="7.20468315481677E-06"
+        iyz="-6.56450534122082E-22"
+        izz="7.20468315481677E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RL_tyre.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.501960784313725 0.501960784313725 0.501960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RL_tyre.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RL_tyre"
+    type="continuous">
+    <origin
+      xyz="-0.19929976383712 -0.169279908353511 0.0518425299663797"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="RL_tyre" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="FL_tyre">
+    <inertial>
+      <origin
+        xyz="-0.02825 -8.32667268468867E-17 -5.55111512312578E-17"
+        rpy="0 0 0" />
+      <mass
+        value="0.0146084058391925" />
+      <inertia
+        ixx="9.14486205533455E-06"
+        ixy="-1.13949739720291E-21"
+        ixz="1.95073074039298E-21"
+        iyy="7.20468315481677E-06"
+        iyz="-1.64642029122554E-21"
+        izz="7.20468315481677E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/FL_tyre.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.501960784313725 0.501960784313725 0.501960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/FL_tyre.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="FL_tyre"
+    type="continuous">
+    <origin
+      xyz="-0.19929976383712 0.175811319747038 0.051708386666332"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="FL_tyre" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="FR_tyre">
+    <inertial>
+      <origin
+        xyz="0.0374299999999997 0 -5.55111512312578E-17"
+        rpy="0 0 0" />
+      <mass
+        value="0.0146084058391925" />
+      <inertia
+        ixx="9.14486205533455E-06"
+        ixy="-1.54629037505714E-21"
+        ixz="-2.83466529215646E-23"
+        iyy="7.20468315481677E-06"
+        iyz="-2.78925302552881E-22"
+        izz="7.20468315481677E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/FR_tyre.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.501960784313725 0.501960784313725 0.501960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/FR_tyre.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="FR_tyre"
+    type="continuous">
+    <origin
+      xyz="0.191331071127681 0.175811319747038 0.0517083866663321"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="FR_tyre" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="RR_tyre">
+    <inertial>
+      <origin
+        xyz="0.0374299999999997 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.0146084058391925" />
+      <inertia
+        ixx="9.14486205533455E-06"
+        ixy="-8.91053987120734E-22"
+        ixz="-3.27571047156823E-23"
+        iyy="7.20468315481677E-06"
+        iyz="2.73540409294301E-38"
+        izz="7.20468315481677E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RR_tyre.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.501960784313725 0.501960784313725 0.501960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RR_tyre.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RR_tyre"
+    type="continuous">
+    <origin
+      xyz="0.191331071127681 -0.169279908353511 0.0518425299663798"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="RR_tyre" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="Arm_link1">
+    <inertial>
+      <origin
+        xyz="7.0559140274895E-05 1.90876950483115E-05 0.0561719366132416"
+        rpy="0 0 0" />
+      <mass
+        value="2.62419726046561" />
+      <inertia
+        ixx="0.011415402758962"
+        ixy="-3.86534877543538E-07"
+        ixz="-2.62911571792686E-07"
+        iyy="0.015594492830159"
+        iyz="2.04766298492888E-07"
+        izz="0.0120698109890106" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_link1"
+    type="continuous">
+    <origin
+      xyz="-0.00103021621769944 0.0221834384361436 0.291899999999986"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="Arm_link1" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+  <link
+    name="Arm_link2">
+    <inertial>
+      <origin
+        xyz="0.0448357535233628 2.90734160557082E-05 0.208140261945232"
+        rpy="0 0 0" />
+      <mass
+        value="6.36901031917819" />
+      <inertia
+        ixx="0.0959864045354539"
+        ixy="2.64732891960596E-07"
+        ixz="2.02613424153072E-07"
+        iyy="0.0827618757405308"
+        iyz="3.93381527423083E-07"
+        izz="0.021301785455062" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_link2"
+    type="continuous">
+    <origin
+      xyz="-0.0449999999999999 0 0.120454741379323"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_link1" />
+    <child
+      link="Arm_link2" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="Arm_link3">
+    <inertial>
+      <origin
+        xyz="0.0448361664356927 0.00474289141119144 0.166986354575949"
+        rpy="0 0 0" />
+      <mass
+        value="6.38506223687759" />
+      <inertia
+        ixx="0.109279030010345"
+        ixy="-2.02613424105181E-07"
+        ixz="2.64732891999464E-07"
+        iyy="0.109817423363169"
+        iyz="0.000282047953193667"
+        izz="0.0312937850287867" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_link3"
+    type="continuous">
+    <origin
+      xyz="0 0 0.34"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_link2" />
+    <child
+      link="Arm_link3" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="Arm_link4">
+    <inertial>
+      <origin
+        xyz="-0.0437514045110264 1.21538528282811E-05 0.0457351660422908"
+        rpy="0 0 0" />
+      <mass
+        value="4.20793850551472" />
+      <inertia
+        ixx="0.0307856579088206"
+        ixy="2.28291516204093E-07"
+        ixz="2.63879186586056E-07"
+        iyy="0.0261294226497124"
+        iyz="4.12339763577014E-07"
+        izz="0.0105812864134371" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_link4"
+    type="continuous">
+    <origin
+      xyz="0.089 0 0.35"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_link3" />
+    <child
+      link="Arm_link4" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="Arm_link5_torso">
+    <inertial>
+      <origin
+        xyz="-2.65215059012103E-05 0.00389941683740871 0.152174987409686"
+        rpy="0 0 0" />
+      <mass
+        value="8.29099778617377" />
+      <inertia
+        ixx="0.0757315703604605"
+        ixy="7.9076834286782E-06"
+        ixz="-2.17971743883888E-06"
+        iyy="0.139112239456528"
+        iyz="-0.000149849790726122"
+        izz="0.076676460545899" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link5_torso.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/Arm_link5_torso.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Arm_link5_torso"
+    type="continuous">
+    <origin
+      xyz="-0.044 0 0.192000000000001"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_link4" />
+    <child
+      link="Arm_link5_torso" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+  <link
+    name="RA_1">
+    <inertial>
+      <origin
+        xyz="0.0976843780647289 0.00694669391797689 3.10994557974897E-05"
+        rpy="0 0 0" />
+      <mass
+        value="2.72085133010432" />
+      <inertia
+        ixx="0.00527958980568884"
+        ixy="1.37561825289171E-06"
+        ixz="5.01751755255665E-06"
+        iyy="0.0106192336119191"
+        iyz="-4.56554050266048E-06"
+        izz="0.00755048969349609" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_1"
+    type="continuous">
+    <origin
+      xyz="0.167757029016269 0 0.221834933130752"
+      rpy="0 -0.261799387799159 0" />
+    <parent
+      link="Arm_link5_torso" />
+    <child
+      link="RA_1" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="RA_2">
+    <inertial>
+      <origin
+        xyz="2.27468196656311E-06 -0.0419641120431079 -0.111116138192499"
+        rpy="0 0 0" />
+      <mass
+        value="1.46809289436719" />
+      <inertia
+        ixx="0.00525324985204277"
+        ixy="-9.92668413535219E-08"
+        ixz="-1.30845444740309E-07"
+        iyy="0.00653303327770446"
+        iyz="-2.33625344126228E-05"
+        izz="0.00253563897063298" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_2"
+    type="continuous">
+    <origin
+      xyz="0.142000000000015 0.0480000000000047 0"
+      rpy="0 0.261799387799159 0" />
+    <parent
+      link="RA_1" />
+    <child
+      link="RA_2" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_3">
+    <inertial>
+      <origin
+        xyz="0.00331312921677518 0.0251904383421606 -0.0971747318718286"
+        rpy="0 0 0" />
+      <mass
+        value="1.29144832659248" />
+      <inertia
+        ixx="0.00597826751446463"
+        ixy="-0.000112544433385773"
+        ixz="0.000113324046966821"
+        iyy="0.00400368643599345"
+        iyz="0.00144308988917033"
+        izz="0.00289932921055038" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_3"
+    type="continuous">
+    <origin
+      xyz="0 -0.042549999469349 -0.182999999999996"
+      rpy="0 0 0" />
+    <parent
+      link="RA_2" />
+    <child
+      link="RA_3" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="RA_4">
+    <inertial>
+      <origin
+        xyz="-0.0394658353318332 -1.43958896353935E-05 -0.138633773101339"
+        rpy="0 0 0" />
+      <mass
+        value="1.21276534661616" />
+      <inertia
+        ixx="0.00316435714548041"
+        ixy="1.21757883412449E-07"
+        ixz="7.18707149179089E-05"
+        iyy="0.00254630809520474"
+        iyz="-7.56078695541949E-07"
+        izz="0.00245993360463958" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_4"
+    type="continuous">
+    <origin
+      xyz="0.0429821371460617 0.0717698315799493 -0.154814722062616"
+      rpy="0 0 0" />
+    <parent
+      link="RA_3" />
+    <child
+      link="RA_4" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="RA_5">
+    <inertial>
+      <origin
+        xyz="0.00316112170943422 -1.88744713260081E-05 -0.062898355503202"
+        rpy="0 0 0" />
+      <mass
+        value="0.924968251240699" />
+      <inertia
+        ixx="0.00285340089251096"
+        ixy="1.21757883411845E-07"
+        ixz="0.000139748815944695"
+        iyy="0.00217905570788349"
+        iyz="-7.56078695543026E-07"
+        izz="0.00201924886894135" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_5"
+    type="continuous">
+    <origin
+      xyz="-0.0439999999999997 0 -0.0963000002767583"
+      rpy="0 0 0" />
+    <parent
+      link="RA_4" />
+    <child
+      link="RA_5" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+  <link
+    name="RA_6">
+    <inertial>
+      <origin
+        xyz="-0.0233120639086344 0.00103807141638321 -0.0776959069018064"
+        rpy="0 0 0" />
+      <mass
+        value="0.19446063529518" />
+      <inertia
+        ixx="0.00033550804778983"
+        ixy="-2.95277988107246E-08"
+        ixz="-8.51200846446518E-05"
+        iyy="0.000462845838414778"
+        iyz="4.85859797180953E-09"
+        izz="0.000189513037053339" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_6"
+    type="continuous">
+    <origin
+      xyz="0.0327999999999984 0 -0.129700000000002"
+      rpy="0 0 0" />
+    <parent
+      link="RA_5" />
+    <child
+      link="RA_6" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="RA_7">
+    <inertial>
+      <origin
+        xyz="6.7168492989822E-15 -0.0151240728198209 -0.075431048702678"
+        rpy="0 0 0" />
+      <mass
+        value="0.107021891135681" />
+      <inertia
+        ixx="0.000186118285778705"
+        ixy="-3.23513669503056E-21"
+        ixz="2.19364184970891E-21"
+        iyy="0.000175694128776401"
+        iyz="-3.41004489272418E-05"
+        izz="0.000103010986349491" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_7"
+    type="fixed">
+    <origin
+      xyz="-0.0332999999999857 0.0303000000000007 -0.0950000000000005"
+      rpy="0 0 0" />
+    <parent
+      link="RA_6" />
+    <child
+      link="RA_7" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="RA_8">
+    <inertial>
+      <origin
+        xyz="0.00328267837271989 0.00266544773133751 -0.0590352506280807"
+        rpy="0 0 0" />
+      <mass
+        value="0.175647465754887" />
+      <inertia
+        ixx="0.000157356669924338"
+        ixy="-1.40766188576985E-06"
+        ixz="4.80248835727685E-07"
+        iyy="8.57438674290062E-05"
+        iyz="7.03802276293871E-06"
+        izz="8.38111882490757E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_8.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_8.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_8"
+    type="continuous">
+    <origin
+      xyz="0 -0.0328 -0.115000000000016"
+      rpy="0 0 0" />
+    <parent
+      link="RA_7" />
+    <child
+      link="RA_8" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="RA_THUMB_1">
+    <inertial>
+      <origin
+        xyz="0.000124901640696673 0.010842669430853 0.00957579251112678"
+        rpy="0 0 0" />
+      <mass
+        value="0.0056523740561367" />
+      <inertia
+        ixx="7.77708166318622E-07"
+        ixy="-4.56179952932625E-08"
+        ixz="-2.26661790081507E-07"
+        iyy="7.69089319857645E-07"
+        iyz="-6.87966001534065E-08"
+        izz="6.54515935485735E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_THUMB_1"
+    type="continuous">
+    <origin
+      xyz="0.00549999999999812 0.0496384666685034 -0.0499392996496377"
+      rpy="0.261799387799149 0 0" />
+    <parent
+      link="RA_8" />
+    <child
+      link="RA_THUMB_1" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="RA_THUMB_2">
+    <inertial>
+      <origin
+        xyz="-0.0129708472296235 0.0184008964008613 -0.0132420562689372"
+        rpy="0 0 0" />
+      <mass
+        value="0.0273865795031186" />
+      <inertia
+        ixx="3.15686887205406E-06"
+        ixy="1.14611860345273E-07"
+        ixz="5.19619367464534E-08"
+        iyy="2.52264877171517E-06"
+        iyz="7.85876990806164E-08"
+        izz="2.58790094649274E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.262745098039216 0.282352941176471 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_THUMB_2"
+    type="continuous">
+    <origin
+      xyz="0.00895000000000362 0.0195021516464511 0.011153213400004"
+      rpy="-0.261799387799149 0 0" />
+    <parent
+      link="RA_THUMB_1" />
+    <child
+      link="RA_THUMB_2" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="RA_THUMB_3">
+    <inertial>
+      <origin
+        xyz="0.000180758101389233 0.0113071136470416 -0.0242568994032677"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800312110514" />
+      <inertia
+        ixx="1.55193877391324E-06"
+        ixy="-8.17844151094296E-09"
+        ixz="-2.114166617774E-08"
+        iyy="1.45102302771592E-06"
+        iyz="-5.84894610085577E-08"
+        izz="8.06315249989547E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_THUMB_3"
+    type="continuous">
+    <origin
+      xyz="-0.00829796314093539 0.0190547622741941 -0.0398653766852557"
+      rpy="0.273815319566918 -0.154319079701352 0.500732642205018" />
+    <parent
+      link="RA_THUMB_2" />
+    <child
+      link="RA_THUMB_3" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="RA_THUMB_4">
+    <inertial>
+      <origin
+        xyz="0.000893959873321637 0.0100904745614573 -0.0222763683967785"
+        rpy="0 0 0" />
+      <mass
+        value="0.0120695571103062" />
+      <inertia
+        ixx="1.52009492766628E-06"
+        ixy="-5.06673054538808E-08"
+        ixz="2.15514790423236E-07"
+        iyy="1.20415128094022E-06"
+        iyz="1.62745928477549E-07"
+        izz="7.96040514546163E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_THUMB_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_THUMB_4"
+    type="continuous">
+    <origin
+      xyz="0 -0.000350000000001266 -0.0355000000000022"
+      rpy="0 0 0" />
+    <parent
+      link="RA_THUMB_3" />
+    <child
+      link="RA_THUMB_4" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="RA_Finger1_1">
+    <inertial>
+      <origin
+        xyz="0.00788032865441091 0.000398790570159846 -0.0193884985877681"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763969266998" />
+      <inertia
+        ixx="1.33034440855323E-06"
+        ixy="7.64321184390519E-08"
+        ixz="2.54727877248886E-08"
+        iyy="1.91010370637145E-06"
+        iyz="-8.07596065420033E-09"
+        izz="1.93010865636597E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger1_1"
+    type="continuous">
+    <origin
+      xyz="-0.00630000000000186 0.0331 -0.0871499999999844"
+      rpy="0 0 0" />
+    <parent
+      link="RA_8" />
+    <child
+      link="RA_Finger1_1" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="RA_Finger1_2">
+    <inertial>
+      <origin
+        xyz="-0.000180758789175395 -0.0113071192699049 -0.0242569289510666"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800100557177" />
+      <inertia
+        ixx="1.55193862889333E-06"
+        ixy="-8.17844313398439E-09"
+        ixz="2.11418319569025E-08"
+        iyy="1.45102286112439E-06"
+        iyz="5.84893457195239E-08"
+        izz="8.06315159451561E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger1_2"
+    type="continuous">
+    <origin
+      xyz="-0.00354999999999661 0.0127999999999986 -0.0235"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger1_1" />
+    <child
+      link="RA_Finger1_2" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger1_3">
+    <inertial>
+      <origin
+        xyz="-0.000337511738571938 -0.0119530717428017 -0.0135808572145971"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537492692964" />
+      <inertia
+        ixx="5.61121162349467E-07"
+        ixy="3.29031171918093E-08"
+        ixz="-1.80931392401436E-08"
+        iyy="6.16930314875789E-07"
+        iyz="3.89365870865224E-08"
+        izz="1.99969874866343E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger1_3"
+    type="continuous">
+    <origin
+      xyz="0 0.000349999999999906 -0.0355"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger1_2" />
+    <child
+      link="RA_Finger1_3" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger1_4">
+    <inertial>
+      <origin
+        xyz="-0.000552066476262492 -0.00846878235933463 -0.00989043111841828"
+        rpy="0 0 0" />
+      <mass
+        value="0.00893784448216938" />
+      <inertia
+        ixx="1.28772531071851E-06"
+        ixy="2.02136979787469E-10"
+        ixz="8.52019558169088E-08"
+        iyy="1.23513892377273E-06"
+        iyz="-5.58854629844044E-10"
+        izz="4.10228126651829E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger1_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger1_4"
+    type="continuous">
+    <origin
+      xyz="0.000936999999999633 -0.00135000000000018 -0.0329867474509269"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger1_3" />
+    <child
+      link="RA_Finger1_4" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="RA_Finger2_1">
+    <inertial>
+      <origin
+        xyz="0.00788032865441135 0.000398790570162982 -0.0193884985877706"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763969266998" />
+      <inertia
+        ixx="1.33034440855323E-06"
+        ixy="7.64321184390515E-08"
+        ixz="2.54727877248893E-08"
+        iyy="1.91010370637145E-06"
+        iyz="-8.07596065420096E-09"
+        izz="1.93010865636597E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger2_1"
+    type="continuous">
+    <origin
+      xyz="-0.0063000000000013 0.00249999999999895 -0.0921499999999844"
+      rpy="0 0 0" />
+    <parent
+      link="RA_8" />
+    <child
+      link="RA_Finger2_1" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger2_2">
+    <inertial>
+      <origin
+        xyz="-0.000180758789175117 -0.0113071192698944 -0.024256928951073"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800100557177" />
+      <inertia
+        ixx="1.55193862889334E-06"
+        ixy="-8.17844313398345E-09"
+        ixz="2.11418319569027E-08"
+        iyy="1.4510228611244E-06"
+        iyz="5.84893457195237E-08"
+        izz="8.06315159451563E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger2_2"
+    type="continuous">
+    <origin
+      xyz="-0.00354999999999728 0.0127999999999948 -0.0234999999999975"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger2_1" />
+    <child
+      link="RA_Finger2_2" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger2_3">
+    <inertial>
+      <origin
+        xyz="-0.000337511736316243 -0.0119530717327537 -0.0135808572332003"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537492197284" />
+      <inertia
+        ixx="5.61121160854549E-07"
+        ixy="3.29031172436807E-08"
+        ixz="-1.80931394067869E-08"
+        iyy="6.16930313440186E-07"
+        iyz="3.89365868927676E-08"
+        izz="1.99969874895301E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger2_3"
+    type="continuous">
+    <origin
+      xyz="0 0.000350000000000739 -0.0355000000000005"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger2_2" />
+    <child
+      link="RA_Finger2_3" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger2_4">
+    <inertial>
+      <origin
+        xyz="-0.000552068903685199 -0.00846878222382466 -0.00989043748477114"
+        rpy="0 0 0" />
+      <mass
+        value="0.0089378497951922" />
+      <inertia
+        ixx="1.28772555248935E-06"
+        ixy="2.02134432108084E-10"
+        ixz="8.52019287057066E-08"
+        iyy="1.23513907180912E-06"
+        iyz="-5.58877060725436E-10"
+        izz="4.10228249048513E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger2_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger2_4"
+    type="continuous">
+    <origin
+      xyz="0.000936999999999633 -0.00135000000000027 -0.032986747450927"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger2_3" />
+    <child
+      link="RA_Finger2_4" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="RA_Finger3_1">
+    <inertial>
+      <origin
+        xyz="0.00788032865441135 0.000398790570165106 -0.0193884985877719"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763969266998" />
+      <inertia
+        ixx="1.33034440855323E-06"
+        ixy="7.64321184390521E-08"
+        ixz="2.54727877248882E-08"
+        iyy="1.91010370637146E-06"
+        iyz="-8.07596065420085E-09"
+        izz="1.93010865636597E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.301960784313725 0.301960784313725 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger3_1"
+    type="continuous">
+    <origin
+      xyz="-0.00630000000000136 -0.0281000000000012 -0.0871499999999844"
+      rpy="0 0 0" />
+    <parent
+      link="RA_8" />
+    <child
+      link="RA_Finger3_1" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="RA_Finger3_2">
+    <inertial>
+      <origin
+        xyz="-0.000180758789174784 -0.0113071192698988 -0.0242569289510726"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800100557177" />
+      <inertia
+        ixx="1.55193862889333E-06"
+        ixy="-8.17844313398415E-09"
+        ixz="2.11418319569027E-08"
+        iyy="1.4510228611244E-06"
+        iyz="5.84893457195234E-08"
+        izz="8.06315159451563E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.301960784313725 0.301960784313725 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger3_2"
+    type="continuous">
+    <origin
+      xyz="-0.00354999999999717 0.0127999999999985 -0.0234999999999985"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger3_1" />
+    <child
+      link="RA_Finger3_2" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger3_3">
+    <inertial>
+      <origin
+        xyz="-0.00033751173509422 -0.011953071724542 -0.0135808572500585"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537491756371" />
+      <inertia
+        ixx="5.61121159375121E-07"
+        ixy="3.29031172787753E-08"
+        ixz="-1.80931394643152E-08"
+        iyy="6.16930312022284E-07"
+        iyz="3.89365866748632E-08"
+        izz="1.99969874910254E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger3_3"
+    type="continuous">
+    <origin
+      xyz="0 0.000349999999999906 -0.0355000000000001"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger3_2" />
+    <child
+      link="RA_Finger3_3" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="RA_Finger3_4">
+    <inertial>
+      <origin
+        xyz="-0.000552066893854286 -0.00846877825065143 -0.00989043273450724"
+        rpy="0 0 0" />
+      <mass
+        value="0.00893784466433596" />
+      <inertia
+        ixx="1.28772533993389E-06"
+        ixy="2.02060901191372E-10"
+        ixz="8.52019712594042E-08"
+        iyy="1.23513896805817E-06"
+        iyz="-5.59033525614802E-10"
+        izz="4.10228092909375E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/RA_Finger3_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RA_Finger3_4"
+    type="continuous">
+    <origin
+      xyz="0.000937000000001187 -0.00135000000000007 -0.0329867474509291"
+      rpy="0 0 0" />
+    <parent
+      link="RA_Finger3_3" />
+    <child
+      link="RA_Finger3_4" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_1">
+    <inertial>
+      <origin
+        xyz="-0.0942570801042138 0.00693641482530674 0.0252562906192353"
+        rpy="0 0 0" />
+      <mass
+        value="2.72085133010433" />
+      <inertia
+        ixx="0.00545254048255267"
+        ixy="4.89783439518177E-06"
+        ixz="0.00056133376605953"
+        iyy="0.0106192293578446"
+        iyz="5.92518286381201E-06"
+        izz="0.00737753456896205" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_1"
+    type="continuous">
+    <origin
+      xyz="-0.167757029016264 0 0.221834933130753"
+      rpy="0 0 0" />
+    <parent
+      link="Arm_link5_torso" />
+    <child
+      link="LA_1" />
+    <axis
+      xyz="0.965925826289068 0 -0.258819045102521" />
+  </joint>
+  <link
+    name="LA_2">
+    <inertial>
+      <origin
+        xyz="2.22189995024991E-06 -0.0419641657490422 -0.111116140048826"
+        rpy="0 0 0" />
+      <mass
+        value="1.46809480637808" />
+      <inertia
+        ixx="0.00525303312960981"
+        ixy="3.62256048621502E-08"
+        ixz="-1.31931932431026E-07"
+        iyy="0.00653325124921984"
+        iyz="-2.33630555443735E-05"
+        izz="0.00253564144622246" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_2"
+    type="continuous">
+    <origin
+      xyz="-0.13716146733308 0.0479999999999902 0.0367523044045521"
+      rpy="0 0 0" />
+    <parent
+      link="LA_1" />
+    <child
+      link="LA_2" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="LA_3">
+    <inertial>
+      <origin
+        xyz="-0.00373254348659025 0.023581157633315 -0.0952480716867461"
+        rpy="0 0 0" />
+      <mass
+        value="1.23988591552652" />
+      <inertia
+        ixx="0.00580625065668669"
+        ixy="0.000203227839816329"
+        ixz="-0.000218365033369591"
+        iyy="0.00399440492371414"
+        iyz="0.00141541390884257"
+        izz="0.00285657681274501" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_3"
+    type="continuous">
+    <origin
+      xyz="0 -0.0425500002538893 -0.182999999999992"
+      rpy="0 0 0" />
+    <parent
+      link="LA_2" />
+    <child
+      link="LA_3" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="LA_4">
+    <inertial>
+      <origin
+        xyz="0.0394658353318624 1.43958896244578E-05 -0.138633773101337"
+        rpy="0 0 0" />
+      <mass
+        value="1.21276534661616" />
+      <inertia
+        ixx="0.00316422183609487"
+        ixy="-9.35857700473069E-08"
+        ixz="-7.18707149179074E-05"
+        iyy="0.00254644340459027"
+        iyz="7.56078695543275E-07"
+        izz="0.00245993360463958" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_4"
+    type="continuous">
+    <origin
+      xyz="-0.0430178623745697 0.0717698314585588 -0.154814722062615"
+      rpy="0 0 0" />
+    <parent
+      link="LA_3" />
+    <child
+      link="LA_4" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="LA_5">
+    <inertial>
+      <origin
+        xyz="-0.00272878877848398 1.62930915935944E-05 -0.0529411423403647"
+        rpy="0 0 0" />
+      <mass
+        value="1.07151467441048" />
+      <inertia
+        ixx="0.0029509976928548"
+        ixy="-9.35857700477796E-08"
+        ixz="-0.000139748815944694"
+        iyy="0.0022769231269984"
+        iyz="7.56078695544194E-07"
+        izz="0.0022098412643295" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_5"
+    type="continuous">
+    <origin
+      xyz="0.0440000000000076 0 -0.0963000002767525"
+      rpy="0 0 0" />
+    <parent
+      link="LA_4" />
+    <child
+      link="LA_5" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+  <link
+    name="LA_6">
+    <inertial>
+      <origin
+        xyz="0.0236916199067346 0.00103807141640008 -0.0776959069018037"
+        rpy="0 0 0" />
+      <mass
+        value="0.194460635295181" />
+      <inertia
+        ixx="0.000335508047789831"
+        ixy="-2.95277988108777E-08"
+        ixz="8.53673394888699E-05"
+        iyy="0.000462845838414779"
+        iyz="4.8585979718979E-09"
+        izz="0.000189513037053342" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_6"
+    type="continuous">
+    <origin
+      xyz="-0.0330000000000016 0 -0.129700000000008"
+      rpy="0 0 0" />
+    <parent
+      link="LA_5" />
+    <child
+      link="LA_6" />
+    <axis
+      xyz="1 0 0" />
+  </joint>
+  <link
+    name="LA_7">
+    <inertial>
+      <origin
+        xyz="1.68753899743024E-14 -0.0153240728198056 -0.0754310487026753"
+        rpy="0 0 0" />
+      <mass
+        value="0.107021891135681" />
+      <inertia
+        ixx="0.000186118285778705"
+        ixy="7.14655439664929E-22"
+        ixz="3.17326308894733E-20"
+        iyy="0.000175694128776401"
+        iyz="-3.41004489272418E-05"
+        izz="0.000103010986349491" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_7"
+    type="continuous">
+    <origin
+      xyz="0.0334999999999867 0.0305 -0.0949999999999999"
+      rpy="0 0 0" />
+    <parent
+      link="LA_6" />
+    <child
+      link="LA_7" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="LA_8_wrist">
+    <inertial>
+      <origin
+        xyz="0.013727461778549 0.0289528519438147 -0.0589303801358431"
+        rpy="0 0 0" />
+      <mass
+        value="0.175652921321818" />
+      <inertia
+        ixx="0.000157364232252204"
+        ixy="1.46065980931341E-06"
+        ixz="-4.94655480716866E-07"
+        iyy="8.58181670145742E-05"
+        iyz="6.79982681657879E-06"
+        izz="8.37449056154636E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_8_wrist.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_8_wrist.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_8_wrist"
+    type="continuous">
+    <origin
+      xyz="0 -0.0330000000000072 -0.115000000000002"
+      rpy="0 0 0" />
+    <parent
+      link="LA_7" />
+    <child
+      link="LA_8_wrist" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="LA_Thumb_1">
+    <inertial>
+      <origin
+        xyz="-0.000124916934436559 0.0108426657331362 -0.00957579730962638"
+        rpy="0 0 0" />
+      <mass
+        value="0.00565236603342742" />
+      <inertia
+        ixx="7.7770726081092E-07"
+        ixy="4.56175442117904E-08"
+        ixz="-2.26661212552289E-07"
+        iyy="7.69087923978601E-07"
+        iyz="6.87965510883664E-08"
+        izz="6.54515216122552E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Thumb_1"
+    type="continuous">
+    <origin
+      xyz="0.011510021081739 0.0692373620296531 -0.0252115984966532"
+      rpy="0.26179938779915 0 0" />
+    <parent
+      link="LA_8_wrist" />
+    <child
+      link="LA_Thumb_1" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+  <link
+    name="LA_Thumb_2">
+    <inertial>
+      <origin
+        xyz="-0.01169104414754 0.0184327603265361 -0.0132883708961791"
+        rpy="0 0 0" />
+      <mass
+        value="0.0273865720896724" />
+      <inertia
+        ixx="3.14281488166777E-06"
+        ixy="2.00587732677935E-08"
+        ixz="-1.04996807286943E-07"
+        iyy="2.52321263465045E-06"
+        iyz="9.94895843854896E-08"
+        izz="2.60138359429181E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.301960784313725 0.301960784313725 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Thumb_2"
+    type="continuous">
+    <origin
+      xyz="0.0134500000000001 0.0195021516464539 -0.0111532134000011"
+      rpy="-0.26179938779915 0 0" />
+    <parent
+      link="LA_Thumb_1" />
+    <child
+      link="LA_Thumb_2" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="LA_Thumb_3">
+    <inertial>
+      <origin
+        xyz="0.00018075769817899 0.0113071161214311 -0.0242568927263106"
+        rpy="0 0 0" />
+      <mass
+        value="0.013580028660329" />
+      <inertia
+        ixx="1.55193818976885E-06"
+        ixy="-8.17845575807455E-09"
+        ixz="-2.11416840922602E-08"
+        iyy="1.45102261313153E-06"
+        iyz="-5.8489194410895E-08"
+        izz="8.06315181956042E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.301960784313725 0.301960784313725 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Thumb_3"
+    type="continuous">
+    <origin
+      xyz="-0.017152443423684 0.019340239276016 -0.0399027939342755"
+      rpy="0.273815319560691 0.154319079558752 -0.500732642245549" />
+    <parent
+      link="LA_Thumb_2" />
+    <child
+      link="LA_Thumb_3" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Thumb_4">
+    <inertial>
+      <origin
+        xyz="-0.000893966724205497 0.0123095341672511 -0.0222763949185859"
+        rpy="0 0 0" />
+      <mass
+        value="0.0120694949027566" />
+      <inertia
+        ixx="1.52009812865893E-06"
+        ixy="-5.06654025621619E-08"
+        ixz="-2.15515164725916E-07"
+        iyy="1.20415656364489E-06"
+        iyz="-1.62741811102486E-07"
+        izz="7.96037334037671E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Thumb_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Thumb_4"
+    type="continuous">
+    <origin
+      xyz="0 -0.000350000000000378 -0.0355000000000006"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Thumb_3" />
+    <child
+      link="LA_Thumb_4" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger1_1">
+    <inertial>
+      <origin
+        xyz="-0.00788032865438293 -0.000398790570153545 -0.0193884985877672"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763969266998" />
+      <inertia
+        ixx="1.33034440855323E-06"
+        ixy="7.64321184390513E-08"
+        ixz="-2.54727877248897E-08"
+        iyy="1.91010370637145E-06"
+        iyz="8.07596065419996E-09"
+        izz="1.93010865636597E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger1_1"
+    type="continuous">
+    <origin
+      xyz="0.02331002108174 0.0593246629157757 -0.0871500000000001"
+      rpy="0 0 0" />
+    <parent
+      link="LA_8_wrist" />
+    <child
+      link="LA_Finger1_1" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="LA_Finger1_2">
+    <inertial>
+      <origin
+        xyz="0.000180758789192437 0.0113071192699075 -0.0242569289510615"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800100557178" />
+      <inertia
+        ixx="1.55193862889334E-06"
+        ixy="-8.17844313398417E-09"
+        ixz="-2.11418319569018E-08"
+        iyy="1.4510228611244E-06"
+        iyz="-5.84893457195255E-08"
+        izz="8.06315159451566E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.301960784313725 0.301960784313725 0.301960784313725 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger1_2"
+    type="continuous">
+    <origin
+      xyz="0.00355000000000932 -0.0127999999999947 -0.0235000000000038"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger1_1" />
+    <child
+      link="LA_Finger1_2" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger1_3">
+    <inertial>
+      <origin
+        xyz="0.000337511736333174 0.0119530717327537 -0.013580857233191"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537492197288" />
+      <inertia
+        ixx="5.61121160854508E-07"
+        ixy="3.29031172436811E-08"
+        ixz="1.80931394067904E-08"
+        iyy="6.16930313440192E-07"
+        iyz="-3.89365868927712E-08"
+        izz="1.99969874895259E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger1_3"
+    type="continuous">
+    <origin
+      xyz="0 -0.000349999999990802 -0.0355000000000001"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger1_2" />
+    <child
+      link="LA_Finger1_3" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger1_4">
+    <inertial>
+      <origin
+        xyz="0.000552065652487888 0.00846878362494705 -0.00989042894559519"
+        rpy="0 0 0" />
+      <mass
+        value="0.00893784193582703" />
+      <inertia
+        ixx="1.28772518831686E-06"
+        ixy="2.02158736274858E-10"
+        ixz="-8.52019736370559E-08"
+        iyy="1.23513886006185E-06"
+        iyz="5.58811366818384E-10"
+        izz="4.10228044465986E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger1_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger1_4"
+    type="continuous">
+    <origin
+      xyz="-0.000936999999999077 0.00134999999999999 -0.0329867474509245"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger1_3" />
+    <child
+      link="LA_Finger1_4" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="LA_Finger2_1">
+    <inertial>
+      <origin
+        xyz="-0.0078803318163938 -0.000398789331199467 -0.0193884976634425"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763929302939" />
+      <inertia
+        ixx="1.33034429400702E-06"
+        ixy="7.64318730551659E-08"
+        ixz="-2.54727978808475E-08"
+        iyy="1.91010316328146E-06"
+        iyz="8.07596509139605E-09"
+        izz="1.93010800620107E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger2_1"
+    type="continuous">
+    <origin
+      xyz="0.0233100210817391 0.0287246629157741 -0.09215"
+      rpy="0 0 0" />
+    <parent
+      link="LA_8_wrist" />
+    <child
+      link="LA_Finger2_1" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="LA_Finger2_2">
+    <inertial>
+      <origin
+        xyz="0.000180758789192714 0.0113071192699259 -0.0242569289510721"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800100557177" />
+      <inertia
+        ixx="1.55193862889334E-06"
+        ixy="-8.17844313398516E-09"
+        ixz="-2.11418319569014E-08"
+        iyy="1.4510228611244E-06"
+        iyz="-5.84893457195243E-08"
+        izz="8.0631515945157E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger2_2"
+    type="continuous">
+    <origin
+      xyz="0.00355000000000938 -0.0128000000000016 -0.0234999999999995"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger2_1" />
+    <child
+      link="LA_Finger2_2" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger2_3">
+    <inertial>
+      <origin
+        xyz="0.000337511734937401 0.0119530717247603 -0.0135808572499307"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537491780323" />
+      <inertia
+        ixx="5.61121159377565E-07"
+        ixy="3.29031172807476E-08"
+        ixz="1.809313946803E-08"
+        iyy="6.16930312032468E-07"
+        iyz="-3.89365866758482E-08"
+        izz="1.99969874919749E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger2_3"
+    type="continuous">
+    <origin
+      xyz="0 -0.000349999999987166 -0.0355000000000001"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger2_2" />
+    <child
+      link="LA_Finger2_3" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger2_4">
+    <inertial>
+      <origin
+        xyz="0.000552065671163393 0.00846878087385489 -0.00989042917301347"
+        rpy="0 0 0" />
+      <mass
+        value="0.0089378422561665" />
+      <inertia
+        ixx="1.28772521028717E-06"
+        ixy="2.02112653305017E-10"
+        ixz="-8.52019881414701E-08"
+        iyy="1.23513886735865E-06"
+        iyz="5.58918469001352E-10"
+        izz="4.10228050255745E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger2_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger2_4"
+    type="continuous">
+    <origin
+      xyz="-0.000936999999998911 0.00135000000000315 -0.032986747450926"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger2_3" />
+    <child
+      link="LA_Finger2_4" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="LA_Finger3_1">
+    <inertial>
+      <origin
+        xyz="-0.00788032865438143 -0.000398790570148133 -0.0193884985877689"
+        rpy="0 0 0" />
+      <mass
+        value="0.0177763969266998" />
+      <inertia
+        ixx="1.33034440855323E-06"
+        ixy="7.64321184390524E-08"
+        ixz="-2.54727877248894E-08"
+        iyy="1.91010370637144E-06"
+        iyz="8.0759606542011E-09"
+        izz="1.93010865636596E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger3_1"
+    type="continuous">
+    <origin
+      xyz="0.0233100210817395 -0.00187533708422494 -0.08715"
+      rpy="0 0 0" />
+    <parent
+      link="LA_8_wrist" />
+    <child
+      link="LA_Finger3_1" />
+    <axis
+      xyz="-1 0 0" />
+  </joint>
+  <link
+    name="LA_Finger3_2">
+    <inertial>
+      <origin
+        xyz="0.000180758844238182 0.011307120676426 -0.0242569248725354"
+        rpy="0 0 0" />
+      <mass
+        value="0.0135800060545937" />
+      <inertia
+        ixx="1.55193797868076E-06"
+        ixy="-8.17843872628786E-09"
+        ixz="-2.11418217270279E-08"
+        iyy="1.45102231786146E-06"
+        iyz="-5.84891003527376E-08"
+        izz="8.06315044766109E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger3_2"
+    type="continuous">
+    <origin
+      xyz="0.0035500000000091 -0.0127999999999966 -0.023499999999996"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger3_1" />
+    <child
+      link="LA_Finger3_2" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger3_3">
+    <inertial>
+      <origin
+        xyz="0.000337511735560958 0.011953071723594 -0.013580857250309"
+        rpy="0 0 0" />
+      <mass
+        value="0.00465537491759979" />
+      <inertia
+        ixx="5.61121159371473E-07"
+        ixy="3.29031172775292E-08"
+        ixz="1.80931394610209E-08"
+        iyy="6.16930312015648E-07"
+        iyz="-3.89365866734367E-08"
+        izz="1.99969874905435E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger3_3"
+    type="continuous">
+    <origin
+      xyz="0 -0.000350000000000017 -0.0355"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger3_2" />
+    <child
+      link="LA_Finger3_3" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="LA_Finger3_4">
+    <inertial>
+      <origin
+        xyz="0.000552067746200979 0.00846878113920832 -0.00989043359504341"
+        rpy="0 0 0" />
+      <mass
+        value="0.00893784703569053" />
+      <inertia
+        ixx="1.28772540313133E-06"
+        ixy="2.02115299894773E-10"
+        ixz="-8.52019344389254E-08"
+        iyy="1.23513896325469E-06"
+        iyz="5.58904124254804E-10"
+        izz="4.10228191338998E-07" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sentient_rwh/meshes/LA_Finger3_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LA_Finger3_4"
+    type="continuous">
+    <origin
+      xyz="-0.000937000000000077 0.00134999999999999 -0.0329867474509274"
+      rpy="0 0 0" />
+    <parent
+      link="LA_Finger3_3" />
+    <child
+      link="LA_Finger3_4" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+</robot>

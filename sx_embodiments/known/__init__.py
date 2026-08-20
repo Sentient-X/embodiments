@@ -19,6 +19,7 @@ from .insta360 import INSTA360_UMI_SPEC
 from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
+from .sentient_rwh import SENTIENT_RWH_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
 from .stations import PIPERX_STATION_SPEC
 from .universal_robots import UR5E_SPEC, UR10E_SPEC
@@ -52,6 +53,7 @@ class DevelopmentReason(StrEnum):
     MISSING_AUTHORITATIVE_DESCRIPTION = "missing_authoritative_description"
     MISSING_CAMERA_CALIBRATION = "missing_camera_calibration"
     MISSING_CAMERA_INSTALLATION = "missing_camera_installation"
+    MISSING_JOINT_LIMITS = "missing_joint_limits"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,10 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
     FFW_BG2_SPEC.name: DevelopmentEmbodiment(
         spec=FFW_BG2_SPEC,
         reason=DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+    ),
+    SENTIENT_RWH_SPEC.name: DevelopmentEmbodiment(
+        spec=SENTIENT_RWH_SPEC,
+        reason=DevelopmentReason.MISSING_JOINT_LIMITS,
     ),
 }
 
@@ -124,7 +130,8 @@ development_embodiments: Final = EmbodimentRegistry(
 """The same objects, from the registry that says they are not conformant yet.
 
 `DEVELOPMENT_EMBODIMENTS` records *why* each of these is held back — a missing camera
-calibration or installation — but held back from what? Without this it was held back from
+calibration or installation, or in the RWH's case a description that declares no joint
+limits at all — but held back from what? Without this it was held back from
 being resolvable at all, and the consumers that already ran on these bodies simply broke:
 sxd's UMI episode emitter is production, it emits `das-umi-v4` episodes daily, and the
 factory seeds a `piperx-station` pod.

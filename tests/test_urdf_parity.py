@@ -157,6 +157,75 @@ def test_sentient_humanoid_executed_groups_match_hardware_urdf() -> None:
     assert {"neck_yaw_joint", "head_joint"}.isdisjoint(executed)  # no motor assignment
 
 
+def test_sentient_rwh_layout_mirrors_the_export_and_pins_why_it_is_development_only() -> None:
+    """The RWH's held-back facts are asserted, not just described in its docstring.
+
+    Each assertion here is a tripwire on the *next* CAD export: when the limit table
+    lands, or the ``RA_7`` mate is repaired, this test fails and forces the registry to
+    catch up rather than silently keeping a stale shape.
+    """
+    from sx_embodiments.identity import EmbodimentName
+    from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, DevelopmentReason
+    from sx_embodiments.known.sentient_rwh import (
+        SENTIENT_RWH_BASE,
+        SENTIENT_RWH_LEFT_ARM,
+        SENTIENT_RWH_RIGHT_ARM,
+        SENTIENT_RWH_TORSO,
+        SENTIENT_RWH_URDF,
+    )
+
+    entry = DEVELOPMENT_EMBODIMENTS[EmbodimentName("sentient-rwh")]
+    assert entry.reason is DevelopmentReason.MISSING_JOINT_LIMITS
+    assert "sentient-rwh" not in set(embodiments)  # never production while limits are absent
+
+    root = ET.parse(SENTIENT_RWH_URDF.path()).getroot()
+    joints = {
+        name: joint for joint in root.iter("joint") if (name := joint.get("name")) is not None
+    }
+    movable = {name: j for name, j in joints.items() if j.get("type") not in (None, "fixed")}
+
+    # 1. NO joint declares a limit — the fact that holds this body in development.
+    assert len(movable) == 56
+    assert all(j.get("type") == "continuous" for j in movable.values())
+    articulated = [j for n, j in movable.items() if not n.endswith("_tyre")]
+    assert all(j.find("limit") is None for j in articulated)
+
+    # 2. Every declared channel is a movable joint of the description, in export order.
+    declared = (
+        *SENTIENT_RWH_BASE.channel_names,
+        *SENTIENT_RWH_TORSO.joint_names,
+        *SENTIENT_RWH_RIGHT_ARM.joint_names,
+        *SENTIENT_RWH_LEFT_ARM.joint_names,
+    )
+    assert set(declared) <= set(movable)
+    assert len(declared) == 24
+    assert [name for name in movable if name in set(declared)] == list(declared)
+
+    # 3. The arm asymmetry: RA_7 is fixed, its mirror LA_7 is not.
+    assert joints["RA_7"].get("type") == "fixed"
+    assert joints["LA_7"].get("type") == "continuous"
+    assert SENTIENT_RWH_RIGHT_ARM.dof == 7 and SENTIENT_RWH_LEFT_ARM.dof == 8
+    assert "RA_7" not in SENTIENT_RWH_RIGHT_ARM.joint_names
+
+    # 4. The tilted left shoulder against the plain right one.
+    assert joints["RA_1"].find("axis").get("xyz") == "-1 0 0"  # type: ignore[union-attr]
+    left_axis = [float(v) for v in joints["LA_1"].find("axis").get("xyz", "").split()]  # type: ignore[union-attr]
+    assert abs(left_axis[0] - 0.965925826289068) < 1e-12
+    assert abs(left_axis[2] + 0.258819045102521) < 1e-12
+
+    # 5. Both 16-DOF hands are complete in the description and absent from the layout.
+    for side, wrist in (("RA", "RA_8"), ("LA", "LA_8_wrist")):
+        prefixes = (f"{side}_Finger", f"{side}_THUMB", f"{side}_Thumb")
+        hand = {n for n in movable if n.startswith(prefixes)}
+        assert len(hand) == 16, side
+        assert hand.isdisjoint(declared)  # a GripperSpec needs bounds these joints lack
+        assert wrist in declared  # but the wrist carrying them is an executed channel
+
+    # 6. The four drive wheels are unbounded because `continuous` is complete for them.
+    assert SENTIENT_RWH_BASE.channel_names == ("RL_tyre", "FL_tyre", "FR_tyre", "RR_tyre")
+    assert all(joints[name].get("type") == "continuous" for name in SENTIENT_RWH_BASE.channel_names)
+
+
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
     for embodiment in embodiments.values():
         urdf = embodiment.urdf
