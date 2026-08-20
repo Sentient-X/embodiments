@@ -14,6 +14,12 @@ from sx_embodiments.compose import ComponentKind, ComponentRole, MountedOn, Root
 # hands a second source of truth to every consumer.
 PUBLIC_SURFACE = frozenset(
     {
+        # Actuation vocabulary is read-only drive facts on an axis, not construction
+        # material: parts and layouts stay unexported, so Embodiment(...) stays sealed.
+        # Widened 2026-08 for the sx-drivers bus-driver derivation (its first consumer).
+        "ActuatorBinding",
+        "ActuatorBus",
+        "ActuatorModel",
         "AssetDigestMismatchError",
         "AssetsUnavailableError",
         "BaseMount",

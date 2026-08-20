@@ -46,7 +46,17 @@ from .compose import (
 from .curves import Curve1D, Knot
 from .errors import EmbodimentSchemaError, LayoutError, MissingUrdfError
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
-from .layout import Bounds, CoordinateUnit, JointAxis, JointLayout, StateSpace, Unbounded
+from .layout import (
+    ActuatorBinding,
+    ActuatorBus,
+    ActuatorModel,
+    Bounds,
+    CoordinateUnit,
+    JointAxis,
+    JointLayout,
+    StateSpace,
+    Unbounded,
+)
 from .parts import (
     ArmSpec,
     CameraBinding,
@@ -67,7 +77,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +86,7 @@ class Embodiment:
 
     The component graph is the sole morphology. State order, roles, camera bindings,
     capabilities, and single-arm projections are derived from it. Friendly names are
-    catalog aliases; ``id`` is the digest of the complete schema-12 document.
+    catalog aliases; ``id`` is the digest of the complete schema-13 document.
 
     **Construction is registry-internal.** Outside this package an embodiment is obtained,
     never assembled: ``embodiments[name]`` for a registered revision, ``from_dict``/
@@ -439,7 +449,19 @@ def _layout_to_dict(layout: JointLayout) -> list[dict[str, object]]:
             }
         else:
             bounds = {"kind": "unbounded"}
-        rows.append({"name": axis.name, "unit": axis.unit.value, "bounds": bounds})
+        actuator: dict[str, object] | None = None
+        if axis.actuator is not None:
+            actuator = {
+                "model": axis.actuator.model.value,
+                "bus": axis.actuator.bus.value,
+                "bus_id": axis.actuator.bus_id,
+                "sign": axis.actuator.sign,
+                "zero_offset": axis.actuator.zero_offset,
+                "reduction": axis.actuator.reduction,
+            }
+        rows.append(
+            {"name": axis.name, "unit": axis.unit.value, "bounds": bounds, "actuator": actuator}
+        )
     return rows
 
 
@@ -590,7 +612,7 @@ def _parse_part(document: decode.Document) -> Part:
 def _parse_layout(document: decode.Document) -> JointLayout:
     axes: list[JointAxis] = []
     for axis in decode.documents(document, "layout"):
-        entry = decode.exactly(axis, {"name", "unit", "bounds"})
+        entry = decode.exactly(axis, {"name", "unit", "bounds", "actuator"})
         try:
             unit = CoordinateUnit(decode.text(entry, "unit"))
         except ValueError as exc:
@@ -605,8 +627,39 @@ def _parse_layout(document: decode.Document) -> JointLayout:
             bounds = Unbounded()
         else:
             raise EmbodimentSchemaError(f"{bounds_entry.where}.kind is unknown: {bounds_kind!r}")
-        axes.append(JointAxis(decode.text(entry, "name"), unit, bounds))
+        axes.append(JointAxis(decode.text(entry, "name"), unit, bounds, _parse_actuator(entry)))
     return JointLayout(tuple(axes))
+
+
+def _parse_actuator(entry: decode.Document) -> ActuatorBinding | None:
+    if entry["actuator"] is None:
+        return None
+    binding = decode.exactly(
+        decode.mapping(entry, "actuator"),
+        {"model", "bus", "bus_id", "sign", "zero_offset", "reduction"},
+    )
+    try:
+        model = ActuatorModel(decode.text(binding, "model"))
+    except ValueError as exc:
+        # An unknown model on the wire is an unqualified motor: fail closed, and say
+        # what the qualified vocabulary is — that message is the product boundary.
+        qualified = ", ".join(sorted(member.value for member in ActuatorModel))
+        raise EmbodimentSchemaError(
+            f"{binding.where}.model names an unqualified actuator; qualified models are:"
+            f" {qualified}"
+        ) from exc
+    try:
+        bus = ActuatorBus(decode.text(binding, "bus"))
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"{binding.where}.bus is unknown") from exc
+    return ActuatorBinding(
+        model=model,
+        bus=bus,
+        bus_id=decode.integer(binding, "bus_id"),
+        sign=decode.integer(binding, "sign"),
+        zero_offset=decode.number(binding, "zero_offset"),
+        reduction=decode.number(binding, "reduction"),
+    )
 
 
 def _physical_to_dict(value: PhysicalSpec | None) -> dict[str, float | None] | None:

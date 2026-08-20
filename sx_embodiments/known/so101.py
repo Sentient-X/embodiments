@@ -13,9 +13,24 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import Component, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import CoordinateUnit
+from ..layout import ActuatorBinding, ActuatorBus, ActuatorModel, CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
 from ._authoring import bounded_layout
+
+
+def _sts3215(bus_id: int) -> ActuatorBinding:
+    """One calibrated STS3215 address on the arm's Feetech daisy chain.
+
+    Both bimanual sides reuse the same per-chain addresses: each side is its own
+    serial adapter, so the chain — not the body — scopes the id space.
+    """
+
+    return ActuatorBinding(
+        model=ActuatorModel.FEETECH_STS3215,
+        bus=ActuatorBus.FEETECH_SERIAL,
+        bus_id=bus_id,
+    )
+
 
 SO101_URDF: Final = packaged_asset(
     relpath="so101/so101.urdf",
@@ -55,6 +70,7 @@ SO101_ARM: Final = ArmSpec(
         units=(CoordinateUnit.RADIAN,) * 5,
         lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385),
         upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
+        actuators=tuple(_sts3215(bus_id) for bus_id in (1, 2, 3, 4, 5)),
     ),
     home=(0.0, 0.0, 0.0, 0.0, 0.0),
 )
@@ -66,6 +82,7 @@ SO101_JAW: Final = GripperSpec(
         units=(CoordinateUnit.RADIAN,),
         lower=(-0.174533,),
         upper=(2.0944,),
+        actuators=(_sts3215(6),),
     ),
     # aperture-in-meters not yet measured; episodes carry the joint value
 )

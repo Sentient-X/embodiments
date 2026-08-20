@@ -92,7 +92,7 @@ def test_every_entry_is_complete_and_round_trips() -> None:
         assert isinstance(embodiment, Embodiment)
         assert str(embodiment.name) == name
         assert len(embodiment.id) == 64
-        assert embodiment.schema_version == 12
+        assert embodiment.schema_version == 13
         assert Embodiment.from_json(embodiment.to_json()) == embodiment
         assert embodiment.urdf_path.is_file()
         if embodiment.kind is EmbodimentKind.CAPTURE_RIG:

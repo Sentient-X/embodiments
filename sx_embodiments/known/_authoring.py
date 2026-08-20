@@ -1,6 +1,6 @@
 """Private adapters from manufacturer tables into canonical joint layouts."""
 
-from ..layout import Bounds, CoordinateUnit, JointAxis, JointLayout, Unbounded
+from ..layout import ActuatorBinding, Bounds, CoordinateUnit, JointAxis, JointLayout, Unbounded
 
 
 def bounded_layout(
@@ -9,15 +9,25 @@ def bounded_layout(
     units: tuple[CoordinateUnit, ...],
     lower: tuple[float, ...],
     upper: tuple[float, ...],
+    actuators: tuple[ActuatorBinding, ...] | None = None,
 ) -> JointLayout:
-    """Zip one source table into axes immediately; no parallel vectors escape."""
+    """Zip one source table into axes immediately; no parallel vectors escape.
+
+    ``actuators`` is the per-axis drive column for bodies whose motors are qualified
+    products on a shared bus; integrated vendor arms omit it.
+    """
 
     if not (len(names) == len(units) == len(lower) == len(upper)):
         raise ValueError("joint source columns must have equal lengths")
+    if actuators is not None and len(actuators) != len(names):
+        raise ValueError("joint source columns must have equal lengths")
+    bindings = actuators if actuators is not None else (None,) * len(names)
     return JointLayout(
         tuple(
-            JointAxis(name=name, unit=unit, bounds=Bounds(lo, hi))
-            for name, unit, lo, hi in zip(names, units, lower, upper, strict=True)
+            JointAxis(name=name, unit=unit, bounds=Bounds(lo, hi), actuator=binding)
+            for name, unit, lo, hi, binding in zip(
+                names, units, lower, upper, bindings, strict=True
+            )
         )
     )
 

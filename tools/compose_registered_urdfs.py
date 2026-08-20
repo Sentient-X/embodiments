@@ -163,9 +163,7 @@ def _piper_description(source_path: Path, target_path: Path) -> None:
         {"joint": "joint7", "multiplier": "-1", "offset": "0"},
     )
     ET.indent(robot, space="  ")
-    target_path.write_bytes(
-        ET.tostring(robot, encoding="utf-8", xml_declaration=True) + b"\n"
-    )
+    target_path.write_bytes(ET.tostring(robot, encoding="utf-8", xml_declaration=True) + b"\n")
 
 
 def render() -> None:

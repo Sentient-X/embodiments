@@ -52,13 +52,65 @@ class Bounds:
 CoordinateBounds = Unbounded | Bounds
 
 
+class ActuatorModel(StrEnum):
+    """The closed, qualified actuator-product vocabulary (byte-equal to purchasable products).
+
+    Growing it is a first-party decision that carries a qualification obligation: bench
+    drivability and safe-stop/torque-off semantics on the station. This enum is the
+    product's "clear motor restrictions": a body whose every actuated axis binds to a
+    qualified model is drivable by construction; anything else fails closed at authoring.
+    """
+
+    FEETECH_STS3215 = "feetech_sts3215"
+
+
+class ActuatorBus(StrEnum):
+    """The closed transport vocabulary qualified actuators are driven over."""
+
+    FEETECH_SERIAL = "feetech_serial"
+
+
+@dataclass(frozen=True, slots=True)
+class ActuatorBinding:
+    """How one joint axis is physically driven: a qualified product on a shared bus.
+
+    ``bus_id`` is the actuator's address on its daisy chain; the same address may recur
+    across chains (each bimanual side is its own serial adapter), never within one
+    layout. ``sign``, ``zero_offset``, and ``reduction`` map the governed joint
+    coordinate onto the actuator's own axis where the drive is not identity:
+    ``actuator = sign * (joint - zero_offset) * reduction``.
+    """
+
+    model: ActuatorModel
+    bus: ActuatorBus
+    bus_id: int
+    sign: int = 1
+    zero_offset: float = 0.0
+    reduction: float = 1.0
+
+    def __post_init__(self) -> None:
+        if type(self.bus_id) is not int or self.bus_id < 1:
+            raise LayoutError("actuator", "bus_id must be a positive integer")
+        if self.sign not in (-1, 1):
+            raise LayoutError("actuator", "sign must be +1 or -1")
+        if not math.isfinite(self.zero_offset):
+            raise LayoutError("actuator", "zero_offset must be finite")
+        if not math.isfinite(self.reduction) or self.reduction <= 0.0:
+            raise LayoutError("actuator", "reduction must be a positive finite ratio")
+
+
 @dataclass(frozen=True, slots=True)
 class JointAxis:
-    """One joint coordinate; name, unit, and bounds cannot drift apart."""
+    """One joint coordinate; name, unit, bounds, and actuation cannot drift apart.
+
+    ``actuator`` is a truthful optional fact: an axis of an integrated vendor arm is
+    driven behind the vendor's own controller and carries no per-axis bus binding.
+    """
 
     name: str
     unit: CoordinateUnit
     bounds: CoordinateBounds
+    actuator: ActuatorBinding | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -75,6 +127,13 @@ class JointLayout:
         names = tuple(axis.name for axis in self.axes)
         if len(set(names)) != len(names):
             raise LayoutError("joint", "axis names must be unique")
+        addresses = [
+            (axis.actuator.bus, axis.actuator.bus_id)
+            for axis in self.axes
+            if axis.actuator is not None
+        ]
+        if len(set(addresses)) != len(addresses):
+            raise LayoutError("joint", "actuator bus addresses must be unique within a layout")
 
     @property
     def width(self) -> int:

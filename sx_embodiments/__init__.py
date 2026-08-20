@@ -27,10 +27,22 @@ from .errors import (
 )
 from .identity import EmbodimentId, EmbodimentName
 from .known import development_embodiments, embodiments
-from .layout import Bounds, ChannelKind, CoordinateBounds, CoordinateUnit, Unbounded
+from .layout import (
+    ActuatorBinding,
+    ActuatorBus,
+    ActuatorModel,
+    Bounds,
+    ChannelKind,
+    CoordinateBounds,
+    CoordinateUnit,
+    Unbounded,
+)
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 
 __all__ = [
+    "ActuatorBinding",
+    "ActuatorBus",
+    "ActuatorModel",
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",

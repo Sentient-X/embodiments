@@ -86,5 +86,5 @@ def test_ffw_bg2_is_development_tier_until_cameras_are_calibrated() -> None:
 def test_ffw_bg2_id_is_byte_stable() -> None:
     assert (
         development_embodiments["ffw-bg2"].id
-        == "395ea05c86939a1849ed20c5a4f4a3a3f490cd5d141f7b54f629f56fa60d2c7f"
+        == "3480b2811aa2fe2c7bd3a5d9c4b472fa2b6255ea1031d540c590a141c8e861f9"
     )

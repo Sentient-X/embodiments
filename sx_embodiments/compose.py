@@ -14,7 +14,7 @@ from sx_contracts import Capability, ComponentId
 from .assets import PackagedAsset
 from .errors import ComponentGraphError, CompositionError, LayoutError
 from .identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from .layout import ChannelKind, StateCoordinate, StateSpace
+from .layout import ActuatorBus, ChannelKind, StateCoordinate, StateSpace
 from .parts import (
     ArmSpec,
     CameraBinding,
@@ -309,6 +309,43 @@ def validate_components(name: str, kind: EmbodimentKind, components: tuple[Compo
         component.role is ComponentRole.BODY for component in components
     ):
         raise CompositionError(name, "a robot needs at least one body component")
+    _validate_actuator_addresses(name, components)
+
+
+def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -> None:
+    """One mounted assembly is one physical daisy chain: its bus addresses are unique.
+
+    Separately rooted assemblies (each bimanual side on its own root) are separate
+    chains and may reuse addresses; an arm and the jaw mounted on it share one chain
+    and may not. This is the authoring-time half of the drivability promise — the
+    driver derives the same trees at connect time.
+    """
+
+    roots: dict[str, str] = {}
+    addresses: dict[tuple[str, ActuatorBus, int], str] = {}
+    for component in components:
+        mount = component.mount
+        roots[component.instance] = (
+            component.instance if not isinstance(mount, MountedOn) else roots[mount.parent]
+        )
+        if component.role is not ComponentRole.BODY:
+            continue
+        part = component.part
+        if not isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
+            continue
+        for axis in part.layout.axes:
+            if axis.actuator is None:
+                continue
+            key = (roots[component.instance], axis.actuator.bus, axis.actuator.bus_id)
+            holder = f"{component.instance}/{axis.name}"
+            if key in addresses:
+                raise CompositionError(
+                    name,
+                    f"actuator bus id {axis.actuator.bus_id} on {axis.actuator.bus.value!r}"
+                    f" drives both {addresses[key]!r} and {holder!r} within one mounted"
+                    " chain",
+                )
+            addresses[key] = holder
 
 
 def validate_operator_mounts(

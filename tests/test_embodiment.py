@@ -74,7 +74,7 @@ def test_from_bytes_hashes_content() -> None:
 def test_embodiment_round_trips_identity_and_assets() -> None:
     embodiment = embodiments["piper"]
     wire = embodiment.to_dict()
-    assert wire["schema_version"] == 12
+    assert wire["schema_version"] == 13
     assert wire["id"] == str(embodiment.id)
     assert wire["name"] == "piper"
     assert wire["kind"] == "robot"
