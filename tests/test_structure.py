@@ -25,8 +25,11 @@ PUBLIC_SURFACE = frozenset(
         # construction material stays unexported and the id stays derived. Its first
         # consumer is the Experience embodiment door.
         "AssemblyError",
+        "admit_part",
         "assemble",
         "composable_parts",
+        "part_from_dict",
+        "part_to_dict",
         "AssetDigestMismatchError",
         "AssetsUnavailableError",
         "BaseMount",

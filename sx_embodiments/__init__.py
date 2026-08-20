@@ -8,7 +8,7 @@ layouts, lineage, kinds) are not exported, so no caller outside this package can
 arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodiments.known``.
 """
 
-from .assemble import assemble, composable_parts
+from .assemble import admit_part, assemble, composable_parts, part_from_dict, part_to_dict
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
 from .embodiment import Embodiment
@@ -73,9 +73,12 @@ __all__ = [
     "PartValidationError",
     "Unbounded",
     "UnknownEmbodimentError",
+    "admit_part",
     "assemble",
     "composable_parts",
     "development_embodiments",
     "embodiments",
+    "part_from_dict",
+    "part_to_dict",
     "resolve_asset",
 ]
