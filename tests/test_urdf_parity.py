@@ -226,6 +226,39 @@ def test_sentient_rwh_layout_mirrors_the_export_and_pins_why_it_is_development_o
     assert all(joints[name].get("type") == "continuous" for name in SENTIENT_RWH_BASE.channel_names)
 
 
+def test_sentient_rwh_collides_against_convex_parts_not_its_visual_meshes() -> None:
+    """Collision geometry is the derived decomposition, and stays that way.
+
+    The SolidWorks export pointed every `<collision>` at the full-detail visual mesh
+    (1,408,259 triangles). Upstream's generator replaced that, and re-vendoring the raw
+    export would silently undo it -- which no other check would notice, because the
+    kinematics would still be identical.
+    """
+    from sx_embodiments.known.sentient_rwh import SENTIENT_RWH_URDF
+
+    root = ET.parse(SENTIENT_RWH_URDF.path()).getroot()
+    links = root.findall("link")
+    assert len(links) == 58
+
+    visual = [
+        mesh.get("filename", "") for link in links for mesh in link.findall("visual/geometry/mesh")
+    ]
+    collision = [
+        mesh.get("filename", "")
+        for link in links
+        for mesh in link.findall("collision/geometry/mesh")
+    ]
+    assert len(visual) == 58
+    assert all(name.startswith("package://sentient_rwh/meshes/") for name in visual)
+    assert all(name.endswith(".STL") for name in visual)  # the exporter's own meshes
+
+    # Every link collides, and against convex parts only -- never against a visual mesh.
+    assert all(link.findall("collision") for link in links)
+    assert len(collision) == 1366
+    assert all(name.startswith("package://sentient_rwh/meshes/collision/") for name in collision)
+    assert set(visual).isdisjoint(collision)
+
+
 def test_every_episode_ready_layout_is_declared_by_its_authoritative_urdf() -> None:
     for embodiment in embodiments.values():
         urdf = embodiment.urdf

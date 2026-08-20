@@ -31,10 +31,18 @@ Joint names are the exported CAD part names, deliberately unrenamed. ``Arm_link1
 instances (``torso``, ``right_arm``) rather than in a rewritten description, so the next
 export diffs cleanly against this one and nothing is renamed twice when the limits land.
 
-The vendored description differs from ``v3/urdf/v3.urdf`` by a package rename only: the ROS
-package and robot name ``v3`` become ``sentient_rwh``, so mesh references read
-``package://sentient_rwh/meshes/`` (the ``humanoid_pkg`` vendoring precedent — a vendored ROS
-export keeps ROS-native addressing). No kinematic value is patched.
+The vendored description is upstream's ``urdf/sentient_rwh.urdf`` byte-for-byte — there is no
+vendoring patch here. That file is itself derived upstream from the raw ``urdf/v3.urdf``
+export by ``tools/make_collision.py``, which performs the ``v3`` → ``sentient_rwh`` package
+rename and, more importantly, replaces the export's collision geometry: the exporter pointed
+``<collision>`` at the full-detail visual mesh (1,408,259 triangles across 58 links,
+``base_link`` alone at 95,859), and the derived description points it at a CoACD convex
+decomposition instead (80,202 triangles, 18x cheaper, 97-99.5% of each link's original
+surface points still inside its parts). Kinematics and inertials are the export's, verbatim.
+
+That generator is deliberately not reproducible here: CoACD's MCTS ignores its ``seed``, so
+regenerating yields equivalent-but-different geometry. The artifacts are pinned by digest
+instead — do not add a regenerate-and-compare test the way ``yubi`` has one.
 """
 
 from typing import Final
@@ -48,14 +56,14 @@ from ._authoring import unbounded_layout
 
 SENTIENT_RWH_URDF: Final = packaged_asset(
     relpath="sentient_rwh/urdf/sentient_rwh.urdf",
-    sha256="b960e38c1034537f93c4364548272a6f9bdeb0fdfddd7cf735a926c2244324ad",
-    size_bytes=77370,
+    sha256="3bef45d490b7de8ba2a8c6759b82a5405cef769b47282c40349cb60bf11cbdfe",
+    size_bytes=333157,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
         repository="https://github.com/Sentient-X/sentient-rwh",
-        revision="b846911b0c877d2b8e80aebc030280852ccfcfc4",
-        path="urdf/v3.urdf",
+        revision="e5f23a77a4a942f0222eaaffd5dbbb2bc2565807",
+        path="urdf/sentient_rwh.urdf",
         license_id="LicenseRef-Sentient-Proprietary",
     ),
     media_type="application/xml",
