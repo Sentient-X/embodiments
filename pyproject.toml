@@ -8,6 +8,8 @@ license = { text = "Apache-2.0" }
 dependencies = ["sx-contracts>=0.1.0"]
 
 [tool.uv.sources]
+# `sx-contracts` is resolved only by the private `sx` superproject's one lock and trusted
+# pin-advance gate. It is intentionally not published or mirrored here; see README.md.
 sx-contracts = { workspace = true }
 
 [dependency-groups]
