@@ -168,30 +168,18 @@ class PackagedAsset:
         return str(self.content.sha256)
 
     def path(self) -> Path:
-        """Resolve the on-disk file: the local tree, else the digest-verified mirror cache."""
-        root = _local_root()
-        if root is not None:
-            resolved = root / self.relpath
-            if resolved.is_file():
-                return resolved
-        return _fetched(self.relpath, self.sha256, self.content.size_bytes)
+        """Resolve and verify the declared bytes from the local tree or mirror cache."""
+
+        return resolve_asset(self.ref())
 
     def ref(self) -> AssetRef:
         """Project to a portable :class:`AssetRef` at an explicit wiring site.
 
-        The URI names the package-relative asset, not its checkout path. Consumers use
-        :meth:`path` when they need local bytes; the stable URI keeps embodiment content
-        identity byte-equal across machines and deployment layouts.
+        The URI names the package-relative asset, not its checkout path. This projection
+        uses only the authored content identity; consumers use :meth:`path` when they
+        need verified bytes. The stable URI keeps embodiment identity byte-equal across
+        machines and deployment layouts, including runtimes that carry no geometry.
         """
-        resolved = self.path()
-        actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
-        if actual != self.sha256:
-            raise AssetDigestMismatchError(self.relpath, self.sha256, actual)
-        actual_size = resolved.stat().st_size
-        if actual_size != self.content.size_bytes:
-            raise AssetIntegrityError(
-                f"{self.relpath}: expected {self.content.size_bytes} bytes, got {actual_size}"
-            )
         return AssetRef(
             location=f"package://sx-embodiments/{self.relpath}",
             content=self.content,
@@ -226,10 +214,10 @@ def packaged_asset(
     capped at 32 MiB, so it cannot carry the 492 MB tree and could not import the
     registry at all.
 
-    Declaring the size is not weaker than measuring it. `path()` and `ref()` still
-    resolve through `asset_root()` and still fail closed, and the per-asset suite pins
-    every declared digest *and* size against the bytes on disk, so a wrong number here
-    is a failing test rather than a fact nobody checks.
+    Declaring the size is not weaker than measuring it. `ref()` is the pure projection
+    of that declaration; `path()` resolves and verifies the declared digest and size,
+    and the per-asset suite pins both against the bytes on disk. A wrong number here is
+    therefore a failing test rather than a fact nobody checks.
     """
 
     validate_logical_path(PurePosixPath(relpath))

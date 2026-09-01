@@ -189,7 +189,15 @@ class Embodiment:
     def urdf_path(self) -> Path:
         """Verified local path of the authoritative packaged description."""
 
-        return resolve_asset(self.urdf.asset)
+        path = resolve_asset(self.urdf.asset)
+        _validate_urdf(
+            self.name,
+            tuple(asset.asset for asset in self.assets),
+            path.read_bytes(),
+            components=self.components,
+            operator_mounts=self.operator_mounts,
+        )
+        return path
 
     @property
     def urdf_bytes(self) -> bytes:
@@ -887,15 +895,6 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         if key not in seen:
             assets.append(packaged.provenanced_asset())
             seen.add(key)
-    urdf = authoritative_urdf(definition)
-    refs = tuple(asset.asset for asset in assets)
-    _validate_urdf(
-        definition.name,
-        refs,
-        urdf.path().read_bytes(),
-        components=definition.attachments,
-        operator_mounts=definition.operator_mounts,
-    )
     return Embodiment(
         name=definition.name,
         label=definition.label,
@@ -907,19 +906,6 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         base_mount=definition.base_mount,
         operator_mounts=definition.operator_mounts,
     )
-
-
-def authoritative_urdf(definition: EmbodimentDefinition) -> PackagedAsset:
-    matches = tuple(
-        {
-            (asset.relpath, asset.sha256): asset
-            for asset in _packaged_assets(definition)
-            if asset.format is AssetFormat.URDF and asset.role is AssetRole.DESCRIPTION
-        }.values()
-    )
-    if len(matches) != 1:
-        raise MissingUrdfError(str(definition.name), len(matches))
-    return matches[0]
 
 
 def _packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
