@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sx_contracts.assets import AssetFormat
+from sx_contracts.assets import AssetFormat, AssetIntegrityError
 
 from sx_embodiments import AssetDigestMismatchError, AssetsUnavailableError, resolve_asset
 from sx_embodiments.assets import PackagedAsset, asset_root
@@ -81,6 +81,44 @@ def test_description_parses_and_ref_projects(asset: PackagedAsset) -> None:
     assert ref.sha256 == asset.sha256
     assert ref.uri == f"package://sx-embodiments/{asset.relpath}"
     assert ref.byte_size == asset.path().stat().st_size
+
+
+def test_ref_projects_declared_identity_without_asset_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    empty = tmp_path / "no-assets"
+    empty.mkdir()
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(empty))
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_MIRROR", raising=False)
+
+    ref = SO101_URDF.ref()
+
+    assert ref.sha256 == SO101_URDF.sha256
+    assert ref.byte_size == SO101_URDF.content.size_bytes
+    assert ref.uri == f"package://sx-embodiments/{SO101_URDF.relpath}"
+
+
+def test_packaged_asset_path_verifies_local_digest_and_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    original = (asset_root() / SO101_URDF.relpath).read_bytes()
+    local = tmp_path / "assets"
+    candidate = local / SO101_URDF.relpath
+    candidate.parent.mkdir(parents=True)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(local))
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_MIRROR", raising=False)
+
+    candidate.write_bytes(original + b"tampered")
+    with pytest.raises(AssetDigestMismatchError):
+        SO101_URDF.path()
+
+    candidate.write_bytes(original)
+    wrong_size = replace(
+        SO101_URDF,
+        content=replace(SO101_URDF.content, size_bytes=SO101_URDF.content.size_bytes + 1),
+    )
+    with pytest.raises(AssetIntegrityError, match="expected"):
+        wrong_size.path()
 
 
 def test_urdf_mesh_references_exist() -> None:
@@ -171,16 +209,15 @@ def test_resolve_asset_fails_closed() -> None:
         )
 
 
-def test_importing_the_registry_does_not_require_the_asset_tree() -> None:
-    """A declaration is authored, not measured, so import touches no asset file.
+def test_materializing_the_registry_does_not_require_the_asset_tree() -> None:
+    """Declarations and refs are authored, so naming a robot touches no asset file.
 
     This package is imported by four pillars, and its `known/` modules build every
-    PackagedAsset at module scope. While `packaged_asset` stat()ed the file to learn its
-    size, that made `import sx_embodiments` a hard dependency on all 632 asset files —
-    and an image that legitimately ships none of them, like the GPU step runtime whose
-    build context is capped at 32 MiB, died inside the import machinery with
-    `AssetsUnavailableError: packaged asset missing on disk: quest_ego/meshes/
-    quest3mesh.obj`. Absence must surface where the bytes are actually asked for.
+    PackagedAsset at module scope. Materializing one robot projects those declarations
+    into AssetRefs. Neither operation may make the registry a hard dependency on all
+    632 asset files: an image that legitimately ships none of them, like the GPU step
+    runtime whose build context is capped at 32 MiB, must still be able to name the
+    robot and carry its content identity. Absence surfaces where bytes are requested.
 
     A fresh interpreter is the only honest check: the registry is a module-level
     singleton, so an in-process import would already be cached and prove nothing.
@@ -188,22 +225,23 @@ def test_importing_the_registry_does_not_require_the_asset_tree() -> None:
     env = {**os.environ, "SX_EMBODIMENTS_ASSETS": str(Path("/nonexistent-asset-root"))}
     probe = (
         "import sx_embodiments;"
+        "e = sx_embodiments.embodiments['franka'];"
         "from sx_embodiments.known.das import QUEST3_HEADSET_MESH as m;"
-        "print(len(list(sx_embodiments.embodiments)), m.content.size_bytes)"
+        "print(len(list(sx_embodiments.embodiments)), len(e.assets), e.id, m.content.size_bytes)"
     )
     done = subprocess.run(
         [sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=False
     )
     assert done.returncode == 0, done.stderr
-    count, size = done.stdout.split()
-    assert int(count) > 0 and int(size) > 0
+    count, asset_count, embodiment_id, size = done.stdout.split()
+    assert int(count) > 0 and int(asset_count) > 0 and len(embodiment_id) == 64 and int(size) > 0
 
     # ...and the same interpreter still refuses to hand out bytes it cannot verify.
     denied = subprocess.run(
         [
             sys.executable,
             "-c",
-            "from sx_embodiments.known.das import QUEST3_HEADSET_MESH as m; m.path()",
+            "from sx_embodiments import embodiments; embodiments['franka'].urdf_path",
         ],
         env=env,
         capture_output=True,
