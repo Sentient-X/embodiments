@@ -11,7 +11,13 @@ from pathlib import Path
 import pytest
 from sx_contracts.assets import AssetFormat
 
-from sx_embodiments import AssetDigestMismatchError, AssetsUnavailableError, resolve_asset
+from sx_embodiments import (
+    AssetDigestMismatchError,
+    AssetsUnavailableError,
+    Embodiment,
+    embodiments,
+    resolve_asset,
+)
 from sx_embodiments.assets import PackagedAsset, asset_root
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.b601 import B601_DM_STATION_URDF, B601_DM_URDF, BIMANUAL_B601_DM_URDF
@@ -81,6 +87,20 @@ def test_description_parses_and_ref_projects(asset: PackagedAsset) -> None:
     assert ref.sha256 == asset.sha256
     assert ref.uri == f"package://sx-embodiments/{asset.relpath}"
     assert ref.byte_size == asset.path().stat().st_size
+
+
+@pytest.mark.parametrize(
+    "embodiment",
+    tuple(embodiments.values()),
+    ids=lambda embodiment: str(embodiment.name),
+)
+def test_every_registered_embodiment_validates_its_authoritative_urdf(
+    embodiment: Embodiment,
+) -> None:
+    """The asset-backed conformance audit stays exhaustive, outside registry lookup."""
+
+    checked = embodiment.with_assets(embodiment.assets, urdf=embodiment.urdf_bytes)
+    assert checked == embodiment
 
 
 def test_urdf_mesh_references_exist() -> None:
@@ -188,15 +208,16 @@ def test_importing_the_registry_does_not_require_the_asset_tree() -> None:
     env = {**os.environ, "SX_EMBODIMENTS_ASSETS": str(Path("/nonexistent-asset-root"))}
     probe = (
         "import sx_embodiments;"
+        "e = sx_embodiments.embodiments['franka'];"
         "from sx_embodiments.known.das import QUEST3_HEADSET_MESH as m;"
-        "print(len(list(sx_embodiments.embodiments)), m.content.size_bytes)"
+        "print(len(list(sx_embodiments.embodiments)), m.content.size_bytes, e.id)"
     )
     done = subprocess.run(
         [sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=False
     )
     assert done.returncode == 0, done.stderr
-    count, size = done.stdout.split()
-    assert int(count) > 0 and int(size) > 0
+    count, size, identity = done.stdout.split()
+    assert int(count) > 0 and int(size) > 0 and len(identity) == 64
 
     # ...and the same interpreter still refuses to hand out bytes it cannot verify.
     denied = subprocess.run(

@@ -192,6 +192,11 @@ class PackagedAsset:
             raise AssetIntegrityError(
                 f"{self.relpath}: expected {self.content.size_bytes} bytes, got {actual_size}"
             )
+        return self._declared_ref()
+
+    def _declared_ref(self) -> AssetRef:
+        """Project the authored identity without resolving its bytes."""
+
         return AssetRef(
             location=f"package://sx-embodiments/{self.relpath}",
             content=self.content,
@@ -202,7 +207,11 @@ class PackagedAsset:
         )
 
     def provenanced_asset(self) -> ProvenancedAsset:
-        return ProvenancedAsset(self.ref(), self.provenance)
+        # Registry objects carry immutable authored identity, not an eagerly verified
+        # local path. `ref()` remains the explicit verify-now projection for callers
+        # that require bytes; `resolve_asset()` verifies this declared reference when
+        # the portable Embodiment eventually crosses that byte boundary.
+        return ProvenancedAsset(self._declared_ref(), self.provenance)
 
 
 def packaged_asset(

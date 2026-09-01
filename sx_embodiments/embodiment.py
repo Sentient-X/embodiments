@@ -887,15 +887,12 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         if key not in seen:
             assets.append(packaged.provenanced_asset())
             seen.add(key)
-    urdf = authoritative_urdf(definition)
-    refs = tuple(asset.asset for asset in assets)
-    _validate_urdf(
-        definition.name,
-        refs,
-        urdf.path().read_bytes(),
-        components=definition.attachments,
-        operator_mounts=definition.operator_mounts,
-    )
+    # Registry lookup projects authored facts and content identities; it does not ask
+    # the host for asset bytes. The Embodiment constructor checks the declared asset
+    # cardinality and graph, while resolve_asset()/urdf_bytes and with_assets() remain
+    # the fail-closed byte boundaries. The asset-integrity suite exercises the latter
+    # for every registered definition, so removing this eager read moves validation to
+    # the operation that actually requires bytes without weakening the source audit.
     return Embodiment(
         name=definition.name,
         label=definition.label,
