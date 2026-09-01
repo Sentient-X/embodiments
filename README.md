@@ -63,3 +63,27 @@ installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailabl
 The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
 Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.
 Declaration order is the native physical coordinate order and is pinned against each URDF.
+
+## Development and validation
+
+This repository is mounted at `packages/sx-embodiments` in the private `sx` superproject.
+`sx-contracts` is an internal workspace package: it is deliberately declared with
+`workspace = true`, is not published as a separate distribution, and must not be replaced by a
+Git, path, or package-index fallback here.
+
+Consequently, an embodiment commit becomes admissible only through an `sx` submodule pin
+advance. The trusted `sx` workflow checks that the pinned commit is on this repository's `main`
+branch, resolves the one workspace lock, runs strict typing, and executes this package's full
+test suite against the exact pinned bytes. The useful local equivalent is run from the `sx`
+checkout:
+
+```bash
+uv sync --locked
+uv run pyright -p packages/sx-embodiments/pyproject.toml
+uv run --package sx-embodiments pytest packages/sx-embodiments/tests -q
+```
+
+This repository intentionally has no standalone Python behavior workflow. Such a workflow cannot
+resolve the private workspace dependency from this public repository, and a substitute contract
+copy would create a second source of truth. Repository-local review protects this source history;
+the exact `sx` pin-advance workflow is the executable integration gate.
