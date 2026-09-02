@@ -4,6 +4,7 @@ import hashlib
 import os
 import urllib.request
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
@@ -116,6 +117,27 @@ def _fetched(relpath: str, sha256: str, size_bytes: int) -> Path:
     partial.write_bytes(data)
     os.replace(partial, cached)
     return cached
+
+
+class AssetAudience(StrEnum):
+    """Who may receive an asset's bytes.
+
+    Derived from the asset's own ``license_id``, never from a hand-kept path list: a
+    list would have to be edited in a second place every time a robot is added, and the
+    edit that is forgotten is the one that leaks. SPDX reserves the ``LicenseRef-``
+    prefix for licences that are not public SPDX identifiers, which is exactly the
+    "governed by a private agreement" case — so the prefix *is* the entitlement fact.
+    """
+
+    PUBLIC = "public"
+    ENTITLED = "entitled"
+
+
+def audience(license_id: str) -> AssetAudience:
+    """Classify one declared licence into the audience allowed to receive its bytes."""
+    if not license_id.strip():
+        raise AssetIntegrityError("asset licence id must not be empty to classify audience")
+    return AssetAudience.ENTITLED if license_id.startswith("LicenseRef-") else AssetAudience.PUBLIC
 
 
 _PACKAGE_URI_PREFIX = "package://sx-embodiments/"

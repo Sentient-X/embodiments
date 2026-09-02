@@ -890,7 +890,7 @@ def _portable_component(component: Component) -> Component:
 def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
     assets: list[ProvenancedAsset] = []
     seen: set[tuple[str, str]] = set()
-    for packaged in _packaged_assets(definition):
+    for packaged in packaged_assets(definition):
         key = (packaged.relpath, packaged.sha256)
         if key not in seen:
             assets.append(packaged.provenanced_asset())
@@ -908,7 +908,14 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
     )
 
 
-def _packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
+def packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
+    """Every asset a definition declares, still carrying its declared provenance.
+
+    Public because the audience of an asset directory is read off the declarations
+    themselves (`known.asset_audiences`), and a declaration's licence survives only on
+    the `PackagedAsset` — `Embodiment.assets` has already been flattened to portable
+    refs by then. Duplicates are kept: deduplication is the caller's law, not this one's.
+    """
     assets: list[PackagedAsset] = []
     for component in definition.attachments:
         part = component.part

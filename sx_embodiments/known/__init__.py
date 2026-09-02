@@ -3,10 +3,14 @@
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Final
 
+from sx_contracts.assets import AssetIntegrityError
+
+from ..assets import AssetAudience, audience
 from ..compose import EmbodimentDefinition
-from ..embodiment import Embodiment, embodiment_from_definition
+from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
 from ..errors import UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
 from .aloha import ALOHA_SPEC
@@ -141,3 +145,35 @@ these reads it from here, and the call site then says out loud that the body it 
 has a fact still under construction. Promotion is one line: move the spec into
 `_ALL_SPECS`, and every `development_embodiments[...]` that should follow it fails loudly.
 """
+
+
+def asset_audiences() -> Mapping[str, AssetAudience]:
+    """The audience of every top-level directory in the asset tree.
+
+    Publication works in whole directories because only a *declared* asset carries a
+    licence: a URDF names its meshes, but those thousands of mesh files have no
+    declaration of their own. A robot's directory is the smallest unit whose audience is
+    knowable, and it is the natural one — a description and the meshes it references are
+    one indivisible thing.
+
+    Two typed refusals rather than a guess. A directory whose declared assets disagree
+    about their audience cannot be published either way, and is a registry mistake worth
+    failing on. A directory that no declaration claims is unclassifiable, which the
+    publication tooling must treat as fatal — the safe reading of "nobody said" is never
+    "public".
+    """
+    audiences: dict[str, AssetAudience] = {}
+    for definition in (
+        *_ALL_SPECS,
+        *(entry.spec for entry in DEVELOPMENT_EMBODIMENTS.values()),
+    ):
+        for packaged in packaged_assets(definition):
+            directory = PurePosixPath(packaged.relpath).parts[0]
+            declared = audience(packaged.provenance.license_id)
+            established = audiences.setdefault(directory, declared)
+            if established is not declared:
+                raise AssetIntegrityError(
+                    f"{directory}: declared both {established} and {declared}; "
+                    "an asset directory has one audience or it cannot be published"
+                )
+    return audiences
