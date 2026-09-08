@@ -130,6 +130,7 @@ import dataclasses
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
     Component,
     EmbodimentDefinition,
@@ -147,6 +148,7 @@ from ..parts import (
     MimicJoint,
 )
 from ._authoring import bounded_layout
+from .sources import capture_source
 
 B601_DM_URDF: Final = packaged_asset(
     relpath="b601_dm/reBot_B601_DM_with_gripper.urdf",
@@ -268,6 +270,35 @@ BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
 )
 
 B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.TELEOP,
+        description="A bimanual leader/follower collection station with wrist and overhead video.",
+        devices=(
+            CollectionDevice(
+                CollectionDeviceKind.CAMERA,
+                "RealSense D405",
+                2,
+                "Left and right wrist",
+                "The capture adapter records RGB. A depth-capable camera does not imply a "
+                "recorded depth stream.",
+                capture_source("experience/data-factory/pod-agent/teleop_camera_ports.py"),
+            ),
+            CollectionDevice(
+                CollectionDeviceKind.CAMERA,
+                "RealSense D435i",
+                1,
+                "Overhead",
+                "Top RGB view. Depth and IMU recording are not declared by this capture setup.",
+                capture_source("experience/data-factory/pod-agent/teleop_camera_ports.py"),
+            ),
+        ),
+        notes=(
+            "Camera products are declared by the capture wiring configuration. Intrinsics, "
+            "mounts, resolution, and frame rate must come from the actual station and recording.",
+            "Gripper motor angle and finger travel are different quantities. Their conversion "
+            "has not been verified; encoder part numbers are not documented.",
+        ),
+    ),
     name=EmbodimentName("b601-dm-station"),
     label="Seeed Studio reBot B601-DM bimanual teleop station",
     kind=EmbodimentKind.TELEOP_STATION,

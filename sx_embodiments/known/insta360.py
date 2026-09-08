@@ -10,9 +10,11 @@ honest jaw signal is the normalized encoder aperture travelling with the capture
 
 from typing import Final
 
+from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import EmbodimentDefinition, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
+from .sources import capture_source
 
 INSTA360_UMI_JAW: Final = DeviceSpec(
     part_id=PartId("insta360-umi-jaw"),
@@ -21,6 +23,33 @@ INSTA360_UMI_JAW: Final = DeviceSpec(
 )
 
 INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.UMI,
+        description="Handheld grippers carrying dual-fisheye cameras and absolute jaw encoders.",
+        devices=(
+            CollectionDevice(
+                CollectionDeviceKind.CAMERA,
+                "Insta360 X5",
+                2,
+                "Left and right gripper",
+                "Two camera units, each with two fisheye lenses. The collection converter uses "
+                "the gripper-facing lens from each unit.",
+                capture_source("experience/data-pipeline/sxd/umico/converters/insta360.py"),
+            ),
+            CollectionDevice(
+                CollectionDeviceKind.ENCODER,
+                "AMT212A-V absolute encoder",
+                2,
+                "Left and right jaw",
+                "12-bit position, mapped to normalized jaw aperture by bench calibration.",
+                capture_source("experience/data-pipeline/sxd/umico/converters/insta360.py"),
+            ),
+        ),
+        notes=(
+            "X5 optics, camera mounting transforms, and physical jaw widths are not yet verified. "
+            "Normalized aperture must not be presented as measured millimeters.",
+        ),
+    ),
     name=EmbodimentName("insta360-umi"),
     label="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
     kind=EmbodimentKind.CAPTURE_RIG,

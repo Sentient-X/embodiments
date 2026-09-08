@@ -3,6 +3,7 @@
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
+from ..collection import CollectionMethod, CollectionSetup
 from ..compose import (
     EmbodimentDefinition,
     MountedOn,
@@ -31,6 +32,17 @@ PIPER_STATION_URDF: Final = packaged_asset(
 )
 
 PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.TELEOP,
+        description="A leader arm guides a Piper follower to collect manipulation demonstrations.",
+        devices=(),
+        notes=(
+            "Camera models, counts, and mounting positions are not verified for this station. "
+            "The arm description alone does not establish a camera setup.",
+            "Leader and follower joint state can describe motion; encoder part numbers and "
+            "the recorded channel configuration are not documented here.",
+        ),
+    ),
     name=EmbodimentName("piperx-station"),
     label="PiperX single-arm teleop station",
     kind=EmbodimentKind.TELEOP_STATION,

@@ -12,6 +12,7 @@ from enum import StrEnum
 from sx_contracts import Capability, ComponentId
 
 from .assets import PackagedAsset
+from .collection import CollectionDevice, CollectionDeviceKind, CollectionSetup
 from .errors import ComponentGraphError, CompositionError, LayoutError
 from .identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import ActuatorBus, ChannelKind, StateCoordinate, StateSpace
@@ -247,6 +248,9 @@ class EmbodimentDefinition:
     extra_assets: tuple[PackagedAsset, ...] = ()
     base_mount: BaseMount | None = None
     operator_mounts: tuple[OperatorMount, ...] = ()
+    # Catalog intent can exist before a complete, executable revision. It does
+    # not participate in that revision's physical identity or qualify its sensors.
+    collection: CollectionSetup | None = None
 
     def __post_init__(self) -> None:
         name = str(self.name)
@@ -261,6 +265,26 @@ class EmbodimentDefinition:
 
     def body_attachments(self) -> tuple[Component, ...]:
         return tuple(a for a in self.attachments if a.role is ComponentRole.BODY)
+
+    @property
+    def collection_devices(self) -> tuple[CollectionDevice, ...]:
+        """Documented extra devices plus cameras already defined by the component graph."""
+        if self.collection is None:
+            return ()
+        return self.collection.devices + tuple(
+            CollectionDevice(
+                kind=CollectionDeviceKind.CAMERA,
+                label=part.model.value.replace("_", " "),
+                quantity=1,
+                placement=str(component.component_id).replace("_", " "),
+                details=f"{part.modality.value.upper()} camera. Optics are "
+                f"{part.optics.authority.value.replace('_', ' ')}; recording settings "
+                "and per-unit calibration must come from the actual recording.",
+                source=part.optics.source,
+            )
+            for component in self.attachments
+            if isinstance((part := component.part), CameraSpec)
+        )
 
     def layout_declared(self) -> bool:
         """False when any body part's channel contribution is unknown (a DeviceSpec)."""

@@ -126,6 +126,22 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
         return len(self._definitions)
 
 
+def collection_definitions() -> tuple[EmbodimentDefinition, ...]:
+    """Collection catalog, including equipment whose physical model is incomplete.
+
+    Reads definitions only: inventory discovery does not load meshes, parse URDFs,
+    or promote a development revision to an executable embodiment.
+    """
+    return tuple(
+        definition
+        for definition in (
+            *_ALL_SPECS,
+            *(entry.spec for entry in DEVELOPMENT_EMBODIMENTS.values()),
+        )
+        if definition.collection is not None
+    )
+
+
 embodiments: Final = EmbodimentRegistry(_DEFINITIONS)
 
 development_embodiments: Final = EmbodimentRegistry(

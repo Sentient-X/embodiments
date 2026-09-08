@@ -16,6 +16,7 @@ from typing import Final
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import packaged_asset
+from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
     EmbodimentDefinition,
     OperatorMount,
@@ -180,6 +181,41 @@ QUEST3_HEAD: Final = CameraSpec(
 )
 
 DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.UMI,
+        description="Quest-tracked handheld grippers with wrist and first-person video.",
+        devices=(
+            CollectionDevice(
+                CollectionDeviceKind.CAMERA,
+                "Wrist camera",
+                2,
+                "Left and right gripper",
+                "Two wrist views. Camera and lens models are unverified.",
+                FactSource(
+                    "https://github.com/Sentient-X/embodiments",
+                    "4e312b669ce3181aef46ef848f3c65deb7ad7b8d",
+                    "sx_embodiments/known/das.py",
+                ),
+            ),
+            CollectionDevice(
+                CollectionDeviceKind.TRACKING,
+                "Quest controllers",
+                2,
+                "Left and right gripper",
+                "Handheld pose tracking.",
+                FactSource(
+                    "https://github.com/Sentient-X/embodiments",
+                    "4e312b669ce3181aef46ef848f3c65deb7ad7b8d",
+                    "sx_embodiments/known/das.py",
+                ),
+            ),
+        ),
+        notes=(
+            "Gripper encoder model and calibration are unverified for this revision.",
+            "Jaw travel derived from CAD does not establish encoder calibration. Camera optics and "
+            "installation transforms still need measurement.",
+        ),
+    ),
     name=EmbodimentName("das-umi-v4"),
     label="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
     kind=EmbodimentKind.CAPTURE_RIG,
@@ -203,6 +239,14 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
 )
 
 QUEST_EGO_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.EGO,
+        description="Headset collection for first-person demonstrations without handheld grippers.",
+        devices=(),
+        notes=(
+            "Confirm headset model, recording mode, and per-unit calibration before collection.",
+        ),
+    ),
     name=EmbodimentName("quest-ego"),
     label="Quest 3 egocentric headset (stereo passthrough, no controllers)",
     kind=EmbodimentKind.CAPTURE_RIG,

@@ -16,6 +16,7 @@ from typing import Final
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import PackagedAsset, packaged_asset
+from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
     EmbodimentDefinition,
     OperatorMount,
@@ -28,6 +29,7 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import GripperSpec, MimicJoint
 from ._authoring import bounded_layout
+from .sources import capture_source
 
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
@@ -189,6 +191,41 @@ YUBI_JAW: Final = GripperSpec(
 )
 
 YUBI_SPEC: Final = EmbodimentDefinition(
+    collection=CollectionSetup(
+        method=CollectionMethod.UMI,
+        description="Handheld grippers for demonstrations with wrist video and jaw sensing.",
+        devices=(
+            CollectionDevice(
+                CollectionDeviceKind.CAMERA,
+                "UVC wrist camera",
+                2,
+                "Left and right gripper",
+                "Wrist video. Exact camera model and lens are not documented; optics and mounts "
+                "must be measured for each unit.",
+                capture_source("experience/data-factory/pod/src/capture.rs"),
+            ),
+            CollectionDevice(
+                CollectionDeviceKind.ENCODER,
+                "AS5601 magnetic encoder",
+                2,
+                "Left and right jaw",
+                "Jaw angle over USB serial. Zero and jaw-aperture calibration are per unit.",
+                capture_source("experience/data-factory/pod/src/capture.rs"),
+            ),
+            CollectionDevice(
+                CollectionDeviceKind.TRACKING,
+                "Quest headset and controllers",
+                1,
+                "Operator head and hands",
+                "Head and hand tracking. Headset model and available "
+                "video streams depend on the installation.",
+                capture_source("experience/data-factory/docs/COLLECTING-YUBI-DATA.md"),
+            ),
+        ),
+        notes=(
+            "Camera calibration and mounting transforms are incomplete in the hardware registry.",
+        ),
+    ),
     name=EmbodimentName("yubi"),
     label="YUBI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
