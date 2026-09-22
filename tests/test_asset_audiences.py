@@ -30,7 +30,7 @@ def test_the_companys_own_robots_are_entitled_only() -> None:
     entitled = {
         name for name, value in asset_audiences().items() if value is AssetAudience.ENTITLED
     }
-    assert entitled == {"sentient_rwh", "yubi_description"}
+    assert entitled == {"sentient_rwh", "yubi_description", "piper_umi_description"}
 
 
 def test_every_directory_on_disk_is_claimed_by_a_declaration() -> None:

@@ -1,0 +1,2282 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="piper_umi_hands">
+  <link name="quest_origin" />
+  <link name="left_ajktns5_70__ajktns5_70">
+    <inertial>
+      <mass value="3.95971e-06" />
+      <origin xyz="1.63638e-14 0.00246049 0.0139541" rpy="0 -0 0" />
+      <inertia ixx="3.31267e-09" ixy="0" ixz="0" iyy="3.21508e-09" iyz="-5.53483e-10" izz="1.73715e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-8.15736e-18 0.0170949 0.102709" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/AJKTNS5_70__AJKTNS5_70.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_block_sse2bz_mx10_115__lpattern2">
+    <inertial>
+      <mass value="3.7028e-06" />
+      <origin xyz="-1.13952e-18 0.00241176 -0.00477" rpy="0 -0 0" />
+      <inertia ixx="1.57819e-10" ixy="0" ixz="0" iyy="4.1507e-10" iyz="0" izz="2.90814e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.00407 -0.00477" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/BLOCK_SSE2BZ_MX10_115__LPattern2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_block_sse2bz_mx10_115__lpattern2_1">
+    <inertial>
+      <mass value="3.7028e-06" />
+      <origin xyz="-1.13952e-18 0.00241176 -0.00477" rpy="0 -0 0" />
+      <inertia ixx="1.57819e-10" ixy="0" ixz="0" iyy="4.1507e-10" iyz="0" izz="2.90814e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.00407 -0.00477" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/BLOCK_SSE2BZ_MX10_115__LPattern2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_bracket_camera__bracket_camera">
+    <inertial>
+      <mass value="5.10873e-06" />
+      <origin xyz="-0.000402622 -0.00635799 0.0173209" rpy="0 -0 0" />
+      <inertia ixx="1.18609e-09" ixy="1.084e-11" ixz="3.94122e-11" iyy="1.48218e-09" iyz="2.9563e-12" izz="5.64733e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.014 -0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/BRACKET_CAMERA__BRACKET_CAMERA.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_camera_link" data-frame-convention="camera_optical">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_encoder__boss_extrude2">
+    <inertial>
+      <mass value="3.81897e-07" />
+      <origin xyz="0.000776185 -4.5054e-19 -0.0085" rpy="0 -0 0" />
+      <inertia ixx="1.59108e-11" ixy="0" ixz="0" iyy="9.30642e-12" iyz="0" izz="6.76376e-12" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.0085" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/encoder__Boss_Extrude2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_grip__grip">
+    <inertial>
+      <mass value="1.77996e-05" />
+      <origin xyz="0.00467229 -0.0065475 -0.0381094" rpy="0 -0 0" />
+      <inertia ixx="9.75267e-09" ixy="0" ixz="0" iyy="9.18651e-09" iyz="-1.47408e-09" izz="1.11737e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0.00467229 0.00380428 0.0245292" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/GRIP__GRIP.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_grip_link">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_hntt5_5__hntt5_5_1_">
+    <inertial>
+      <mass value="2.38577e-07" />
+      <origin xyz="-1.23155e-14 -0.000363429 -0.00206111" rpy="0 -0 0" />
+      <inertia ixx="2.77419e-12" ixy="0" ixz="0" iyy="1.92569e-12" iyz="3.80769e-13" izz="4.018e-12" />
+    </inertial>
+    <visual>
+      <origin xyz="-6.87783e-18 0.00240431 0.0193943" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/HNTT5_5__HNTT5_5_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_holder_quest_l__holder_quest_45deg_v3_l">
+    <inertial>
+      <mass value="2.89583e-05" />
+      <origin xyz="0.00498673 -0.0221055 -0.00604551" rpy="0 -0 0" />
+      <inertia ixx="9.64298e-09" ixy="-1.96791e-09" ixz="-1.18827e-10" iyy="1.12447e-08" iyz="-3.10812e-10" izz="1.86015e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.024 -0.005 -0.017" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/HOLDER_Quest_L__HOLDER_Quest_45deg_v3_L.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_base_link">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_left_gripper">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_left_gripper_jaw1">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_left_gripper_jaw2">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_left_gripper_tip">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_left_jaw__none">
+    <inertial>
+      <mass value="2.62035e-05" />
+      <origin xyz="0.0202501 -0.00700303 0.00830939" rpy="0 -0 0" />
+      <inertia ixx="7.36198e-09" ixy="-2.76967e-10" ixz="2.40043e-09" iyy="1.44525e-08" iyz="3.86904e-10" izz="1.8532e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.005 0.00559997 0.0429114" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/left_jaw__NONE.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_vrcontroller">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_main_mount__cut_extrude10">
+    <inertial>
+      <mass value="7.27602e-05" />
+      <origin xyz="0.000715507 2.59045e-05 0.0113203" rpy="0 -0 0" />
+      <inertia ixx="7.47775e-08" ixy="7.22274e-12" ixz="-1.31159e-09" iyy="2.75268e-08" iyz="1.03496e-11" izz="5.85131e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/main_mount__Cut_Extrude10.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_marker_plate_left__cbore_for_m2_cross_recess_pan_head_screw1">
+    <inertial>
+      <mass value="1.35619e-06" />
+      <origin xyz="-0.0126783 -0.00482166 0.000890417" rpy="0 -0 0" />
+      <inertia ixx="1.31699e-10" ixy="2.74716e-11" ixz="-2.51867e-12" iyy="7.04507e-11" iyz="5.95138e-12" izz="1.99783e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.0111878 -0.00987812 0.000500322" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/marker_plate_left__CBORE_for_M2_Cross_Recess_Pan_Head_Screw1.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_marker_plate_right___marker_plate_left___cbore_for_m2_cross_recess_pan_head_screw1_">
+    <inertial>
+      <mass value="1.3562e-06" />
+      <origin xyz="-0.0126783 -0.00482158 -0.000890416" rpy="0 -0 0" />
+      <inertia ixx="1.317e-10" ixy="2.74726e-11" ixz="2.51869e-12" iyy="7.04516e-11" iyz="-5.95138e-12" izz="1.99785e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.0111878 -0.00987812 -0.000500322" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/marker_plate_right___marker_plate_left___CBORE_for_M2_Cross_Recess_Pan_Head_Screw1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_part3__boss_extrude3">
+    <inertial>
+      <mass value="6.15625e-06" />
+      <origin xyz="0.00233991 0.00503878 -0.00156774" rpy="0 -0 0" />
+      <inertia ixx="8.72128e-10" ixy="-3.75859e-12" ixz="1.81433e-10" iyy="6.89254e-10" iyz="1.5357e-12" izz="7.30643e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.005 0.005 0.0026" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/Part3__Boss_Extrude3.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_part3__boss_extrude3_1">
+    <inertial>
+      <mass value="6.15625e-06" />
+      <origin xyz="0.00233991 -0.00496122 -0.0165677" rpy="0 -0 0" />
+      <inertia ixx="8.72128e-10" ixy="-3.75859e-12" ixz="1.81433e-10" iyy="6.89254e-10" iyz="1.5357e-12" izz="7.30643e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.005 -0.005 -0.0124" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/Part3__Boss_Extrude3.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_pinion_gear__bore_1_">
+    <inertial>
+      <mass value="1.80946e-06" />
+      <origin xyz="0.00378004 -6.53658e-18 -1.48098e-18" rpy="0 -0 0" />
+      <inertia ixx="5.08285e-11" ixy="0" ixz="0" iyy="5.03155e-11" iyz="0" izz="5.03155e-11" />
+    </inertial>
+    <visual>
+      <origin xyz="0.001 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/pinion_gear__Bore_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_rack__teethcuts_1_">
+    <inertial>
+      <mass value="3.38836e-06" />
+      <origin xyz="-0.0404346 0.00249917 -8.67362e-19" rpy="0 -0 0" />
+      <inertia ixx="2.61618e-11" ixy="-2.79653e-12" ixz="0" iyy="2.29205e-09" iyz="0" izz="2.28158e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.085 -3.06162e-20 0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/rack__TeethCuts_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_rack__teethcuts_1__1">
+    <inertial>
+      <mass value="3.38836e-06" />
+      <origin xyz="-0.0404346 0.00249917 -8.67362e-19" rpy="0 -0 0" />
+      <inertia ixx="2.61618e-11" ixy="-2.79653e-12" ixz="0" iyy="2.29205e-09" iyz="0" izz="2.28158e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.085 -3.06162e-20 0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/rack__TeethCuts_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_rail_holder__cut_extrude2">
+    <inertial>
+      <mass value="9.48016e-06" />
+      <origin xyz="-0.000571098 -0.07 0.00054478" rpy="0 -0 0" />
+      <inertia ixx="2.34936e-08" ixy="0" ixz="8.81619e-12" iyy="6.98574e-10" iyz="0" izz="2.34144e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.008 -0.07 7.37841e-18" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/RAIL_HOLDER__Cut_Extrude2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_rail_sse2bz_mx10_115__chamfer2">
+    <inertial>
+      <mass value="6.20215e-06" />
+      <origin xyz="-0.07 0.00256737 2.02448e-18" rpy="0 -0 0" />
+      <inertia ixx="5.74742e-11" ixy="0" ixz="0" iyy="1.23642e-08" iyz="0" izz="1.23387e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 0 4.24044e-19" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/RAIL_SSE2BZ_MX10_115__Chamfer2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_right_gripper">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_right_gripper_jaw1">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_right_gripper_jaw2">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_right_gripper_tip">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="left_right_jaw__none">
+    <inertial>
+      <mass value="2.48931e-05" />
+      <origin xyz="0.0217885 0.00557959 0.013506" rpy="0 -0 0" />
+      <inertia ixx="6.58826e-09" ixy="-2.03843e-09" ixz="-2.22498e-09" iyy="1.30337e-08" iyz="-5.98673e-10" izz="1.67661e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.005 0.0206 0.0725114" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/right_jaw__NONE.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_hand_root" />
+  <link name="left_usb_camera__usb_camera_elp_usbfhd01m_l180">
+    <inertial>
+      <mass value="5.15731e-06" />
+      <origin xyz="0.0142908 -0.00289375 -0.0155236" rpy="0 -0 0" />
+      <inertia ixx="4.07452e-10" ixy="-1.59354e-11" ixz="1.65564e-11" iyy="4.32501e-10" iyz="4.65295e-11" izz="3.79203e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0.014 -0.00252094 -0.0440456" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/USB_CAMERA__USB_CAMERA_ELP_USBFHD01M_L180.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_26__対称移動_26">
+    <inertial>
+      <mass value="0.000110985" />
+      <origin xyz="0.0366432 0.0626561 0.0422541" rpy="0 -0 0" />
+      <inertia ixx="1.94173e-09" ixy="3.43173e-10" ixz="-2.99099e-10" iyy="1.49371e-09" iyz="4.95218e-10" izz="8.9509e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____26_______26.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_27__対称移動_27">
+    <inertial>
+      <mass value="0.00144327" />
+      <origin xyz="0.0257442 0.0178572 0.0415808" rpy="0 -0 0" />
+      <inertia ixx="1.66796e-07" ixy="-4.12787e-08" ixz="2.39709e-08" iyy="1.93934e-07" iyz="-2.37551e-08" izz="1.47985e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____27_______27.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_29__対称移動_29">
+    <inertial>
+      <mass value="0.00632643" />
+      <origin xyz="0.0269307 0.0369466 0.0113458" rpy="0 -0 0" />
+      <inertia ixx="8.24046e-06" ixy="-9.00132e-07" ixz="7.89172e-07" iyy="8.09756e-06" iyz="1.25465e-06" izz="2.26203e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____29_______29.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_30__対称移動_30">
+    <inertial>
+      <mass value="0.00384825" />
+      <origin xyz="0.00915366 0.0439876 0.0404049" rpy="0 -0 0" />
+      <inertia ixx="1.68744e-06" ixy="-4.14751e-07" ixz="-4.13689e-07" iyy="1.59858e-06" iyz="3.69659e-07" izz="1.59292e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____30_______30.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_31__対称移動_31">
+    <inertial>
+      <mass value="0.000740786" />
+      <origin xyz="-0.00265068 0.00651028 0.00476826" rpy="0 -0 0" />
+      <inertia ixx="5.03459e-08" ixy="1.64264e-08" ixz="-5.70503e-09" iyy="4.14768e-08" iyz="8.48464e-09" izz="4.42082e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.011081 -0.0326202 0.004587" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____31_______31.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_32__対称移動_32">
+    <inertial>
+      <mass value="0.00299742" />
+      <origin xyz="0.0247016 0.0658149 -0.012156" rpy="0 -0 0" />
+      <inertia ixx="2.09516e-06" ixy="6.39749e-08" ixz="-1.14705e-07" iyy="2.20701e-06" iyz="-9.42999e-08" izz="2.49513e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____32_______32.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_33__対称移動_33">
+    <inertial>
+      <mass value="0.00353392" />
+      <origin xyz="0.00813077 0.0481906 -0.015282" rpy="0 -0 0" />
+      <inertia ixx="2.38692e-06" ixy="-5.88627e-09" ixz="4.49074e-07" iyy="2.06214e-06" iyz="3.03158e-07" izz="7.52278e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____33_______33.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_34__対称移動_34">
+    <inertial>
+      <mass value="0.000351621" />
+      <origin xyz="0.0225658 0.0500783 0.0480026" rpy="0 -0 0" />
+      <inertia ixx="1.00042e-08" ixy="-1.7754e-09" ixz="-1.82493e-09" iyy="1.02517e-08" iyz="1.95554e-09" izz="1.0357e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____34_______34.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_35__対称移動_35">
+    <inertial>
+      <mass value="3.18307e-05" />
+      <origin xyz="0.0201634 0.0526279 0.0505091" rpy="0 -0 0" />
+      <inertia ixx="2.95678e-10" ixy="-7.31701e-11" ixz="-7.45675e-11" iyy="3.05272e-10" iyz="7.94179e-11" izz="3.09576e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____35_______35.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_36__対称移動_36">
+    <inertial>
+      <mass value="0.000284944" />
+      <origin xyz="0.0190628 0.0537865 0.0517794" rpy="0 -0 0" />
+      <inertia ixx="5.45544e-09" ixy="-1.12527e-09" ixz="-1.14569e-09" iyy="5.63633e-09" iyz="1.23534e-09" izz="5.68613e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____36_______36.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_37__対称移動_37">
+    <inertial>
+      <mass value="0.000114434" />
+      <origin xyz="0.0179271 0.0619823 0.0330676" rpy="0 -0 0" />
+      <inertia ixx="1.10869e-09" ixy="-2.54398e-10" ixz="-2.58197e-10" iyy="1.13009e-09" iyz="2.70896e-10" izz="1.13853e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____37_______37.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_38__対称移動_38">
+    <inertial>
+      <mass value="0.000183754" />
+      <origin xyz="0.00417168 0.0376927 0.0451883" rpy="0 -0 0" />
+      <inertia ixx="2.58963e-09" ixy="-4.76866e-10" ixz="-4.7742e-10" iyy="2.58996e-09" iyz="4.99767e-10" izz="2.6024e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____38_______38.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_39__対称移動_39">
+    <inertial>
+      <mass value="0.00210511" />
+      <origin xyz="0.0109976 0.0431768 0.0417697" rpy="0 -0 0" />
+      <inertia ixx="4.96703e-07" ixy="-1.15496e-07" ixz="-1.09651e-07" iyy="4.47275e-07" iyz="1.28432e-07" izz="4.74765e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____39_______39.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_40__対称移動_40">
+    <inertial>
+      <mass value="0.000196147" />
+      <origin xyz="0.0204701 0.0402686 -0.0380614" rpy="0 -0 0" />
+      <inertia ixx="1.27607e-08" ixy="5.18619e-10" ixz="-4.53322e-10" iyy="1.15046e-08" iyz="2.95997e-09" izz="1.74387e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____40_______40.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_42__対称移動_42">
+    <inertial>
+      <mass value="0.00121849" />
+      <origin xyz="0.0310015 0.0591305 0.00202584" rpy="0 -0 0" />
+      <inertia ixx="8.38291e-07" ixy="7.48658e-09" ixz="-2.50155e-08" iyy="8.31818e-07" iyz="-2.05031e-08" izz="2.18055e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____42_______42.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_43__対称移動_43">
+    <inertial>
+      <mass value="0.000331566" />
+      <origin xyz="0.0124264 0.0657502 -0.0195179" rpy="0 -0 0" />
+      <inertia ixx="1.62918e-07" ixy="2.84339e-09" ixz="1.78394e-08" iyy="1.59621e-07" iyz="-1.74534e-08" izz="8.63828e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____43_______43.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_44__対称移動_44">
+    <inertial>
+      <mass value="0.000137398" />
+      <origin xyz="0.0228608 0.0363964 -0.0306415" rpy="0 -0 0" />
+      <inertia ixx="2.73005e-08" ixy="8.93824e-12" ixz="3.42137e-10" iyy="2.64197e-08" iyz="4.74852e-09" izz="1.12818e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____44_______44.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_45__対称移動_45">
+    <inertial>
+      <mass value="0.000134583" />
+      <origin xyz="0.0227791 0.0543926 -0.0459161" rpy="0 -0 0" />
+      <inertia ixx="3.93035e-09" ixy="2.19248e-10" ixz="2.15313e-10" iyy="3.43473e-09" iyz="1.37067e-10" izz="6.99279e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____45_______45.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_46__対称移動_46">
+    <inertial>
+      <mass value="0.000620988" />
+      <origin xyz="0.0147371 0.0411387 0.0435285" rpy="0 -0 0" />
+      <inertia ixx="4.19159e-07" ixy="-8.12212e-08" ixz="-1.05841e-07" iyy="3.94063e-07" iyz="1.04718e-07" izz="3.67261e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____46_______46.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_47__対称移動_47">
+    <inertial>
+      <mass value="0.00245039" />
+      <origin xyz="0.0178206 0.0294685 0.0382274" rpy="0 -0 0" />
+      <inertia ixx="4.54904e-07" ixy="-9.05893e-08" ixz="-3.20108e-09" iyy="5.0226e-07" iyz="2.5082e-08" izz="3.19855e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____47_______47.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_48__対称移動_48">
+    <inertial>
+      <mass value="0.000231587" />
+      <origin xyz="0.0210236 0.0511501 -0.050385" rpy="0 -0 0" />
+      <inertia ixx="5.17516e-09" ixy="1.62704e-09" ixz="1.16312e-10" iyy="2.26739e-09" iyz="-5.05253e-10" izz="5.92642e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____48_______48.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_49__対称移動_49">
+    <inertial>
+      <mass value="0.000184101" />
+      <origin xyz="0.00651371 0.0503851 0.0349048" rpy="0 -0 0" />
+      <inertia ixx="2.59748e-09" ixy="-4.79292e-10" ixz="-4.77851e-10" iyy="2.59477e-09" iyz="5.02683e-10" izz="2.6125e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____49_______49.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_対称移動_50__対称移動_50">
+    <inertial>
+      <mass value="1.94586e-05" />
+      <origin xyz="-0.0100619 0.0242076 0.0388574" rpy="0 -0 0" />
+      <inertia ixx="1.40987e-10" ixy="1.11165e-11" ixz="-4.03678e-11" iyy="1.36169e-10" iyz="4.18272e-11" izz="3.46706e-11" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/left/_____50_______50.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_camera_link" type="fixed">
+    <origin xyz="0.013999999999999974 -0.0089926909146001502 -0.015801650662099095" rpy="-1.7453292519944341 0 -3.1415926535897931" />
+    <axis xyz="0 0 1" />
+    <parent link="left_usb_camera__usb_camera_elp_usbfhd01m_l180" />
+    <child link="left_camera_link" />
+  </joint>
+  <joint name="left_fastened_1" type="fixed">
+    <origin xyz="-0.003 -3.64292e-17 0.0355" rpy="-3.31523e-16 3.31523e-16 -1.5708" />
+    <axis xyz="0 0 -1" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_bracket_camera__bracket_camera" />
+  </joint>
+  <joint name="left_fastened_10" type="fixed">
+    <origin xyz="0.005 0.00593 0.00273" rpy="1.68563e-24 8.67362e-17 -1.5708" />
+    <axis xyz="1 -0 -0" />
+    <parent link="left_block_sse2bz_mx10_115__lpattern2" />
+    <child link="left_part3__boss_extrude3_1" />
+  </joint>
+  <joint name="left_fastened_11" type="fixed">
+    <origin xyz="0.005 0.00593 0.00273" rpy="-3.14159 8.67362e-17 -1.5708" />
+    <axis xyz="1 0 0" />
+    <parent link="left_block_sse2bz_mx10_115__lpattern2_1" />
+    <child link="left_part3__boss_extrude3" />
+  </joint>
+  <joint name="left_fastened_12" type="fixed">
+    <origin xyz="0.015 0.0048 -0.0205" rpy="1.5708 -0 1.5708" />
+    <axis xyz="0 -1 0" />
+    <parent link="left_part3__boss_extrude3_1" />
+    <child link="left_rack__teethcuts_1__1" />
+  </joint>
+  <joint name="left_fastened_13" type="fixed">
+    <origin xyz="0.015 0.0148 -0.0055" rpy="1.5708 -0 1.5708" />
+    <axis xyz="0 -1 0" />
+    <parent link="left_part3__boss_extrude3" />
+    <child link="left_rack__teethcuts_1_" />
+  </joint>
+  <joint name="left_fastened_14" type="fixed">
+    <origin xyz="0.00467229 -0.0132907 -0.0781798" rpy="0.349066 7.97666e-17 3.14159" />
+    <axis xyz="-6.93889e-17 0.173648 0.984808" />
+    <parent link="left_grip__grip" />
+    <child link="left_ajktns5_70__ajktns5_70" />
+  </joint>
+  <joint name="left_fastened_15" type="fixed">
+    <origin xyz="-0.0086842 0.00482944 -0.026" rpy="0.174533 2.48412e-15 -1.5708" />
+    <axis xyz="-0 0.173648 0.984808" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_grip__grip" />
+  </joint>
+  <joint name="left_fastened_16" type="fixed">
+    <origin xyz="-0.014 -0.0114791 0.0400456" rpy="-1.09763e-28 -9.82132e-29 3.895e-30" />
+    <axis xyz="0 0.984808 0.173648" />
+    <parent link="left_bracket_camera__bracket_camera" />
+    <child link="left_usb_camera__usb_camera_elp_usbfhd01m_l180" />
+  </joint>
+  <joint name="left_fastened_17" type="fixed">
+    <origin xyz="2.42861e-17 0.0146906 0.0833147" rpy="0.349066 -1.07535e-16 -3.14159" />
+    <axis xyz="1.51744e-16 0.173648 0.984808" />
+    <parent link="left_ajktns5_70__ajktns5_70" />
+    <child link="left_hntt5_5__hntt5_5_1_" />
+  </joint>
+  <joint name="left_fastened_18" type="fixed">
+    <origin xyz="3.46945e-18 -1.73472e-18 0.0087" rpy="0 -0 -3.14159" />
+    <axis xyz="0 1 0" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_encoder__boss_extrude2" />
+  </joint>
+  <joint name="left_fastened_2" type="fixed">
+    <origin xyz="0.005 -9.29812e-16 2.4503e-17" rpy="3.14159 -9.57726e-29 1.5708" />
+    <axis xyz="0 -1 -1.22465e-16" />
+    <parent link="left_rail_holder__cut_extrude2" />
+    <child link="left_rail_sse2bz_mx10_115__chamfer2" />
+  </joint>
+  <joint name="left_fastened_3" type="fixed">
+    <origin xyz="0.010176 -0.00936292 -0.00189731" rpy="0.175002 0.0395246 -3.06033" />
+    <axis xyz="-0.726366 0.55668 -0.403113" />
+    <parent link="left_holder_quest_l__holder_quest_45deg_v3_l" />
+    <child link="left_対称移動_31__対称移動_31" />
+  </joint>
+  <joint name="left_fastened_4" type="fixed">
+    <origin xyz="0.01 -0.01705 0.036" rpy="0 -0 1.5708" />
+    <axis xyz="-0 1 -0" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_holder_quest_l__holder_quest_45deg_v3_l" />
+  </joint>
+  <joint name="left_fastened_5" type="fixed">
+    <origin xyz="0.0423122 -0.0225 0.00648485" rpy="-1.5708 -1.8242e-16 3.14159" />
+    <axis xyz="1.27966e-16 0 -1" />
+    <parent link="left_left_jaw__none" />
+    <child link="left_marker_plate_left__cbore_for_m2_cross_recess_pan_head_screw1" />
+  </joint>
+  <joint name="left_fastened_6" type="fixed">
+    <origin xyz="0.0423122 -0.00750003 0.0151152" rpy="1.5708 -5.04871e-29 3.14159" />
+    <axis xyz="1.27966e-16 -0 1" />
+    <parent link="left_right_jaw__none" />
+    <child link="left_marker_plate_right___marker_plate_left___cbore_for_m2_cross_recess_pan_head_screw1_" />
+  </joint>
+  <joint name="left_fastened_7" type="fixed">
+    <origin xyz="-0.017 0.07 2.08167e-17" rpy="-3.14159 4.5606e-31 3.14159" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_rail_holder__cut_extrude2" />
+  </joint>
+  <joint name="left_fastened_8" type="fixed">
+    <origin xyz="-0.005 0.0058 1.04368e-12" rpy="-1.5708 5.02337e-16 3.14159" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="left_part3__boss_extrude3_1" />
+    <child link="left_right_jaw__none" />
+  </joint>
+  <joint name="left_fastened_9" type="fixed">
+    <origin xyz="-0.005 -0.0058 0.015" rpy="1.5708 2.05937e-17 3.14159" />
+    <axis xyz="-1 0 0" />
+    <parent link="left_part3__boss_extrude3" />
+    <child link="left_left_jaw__none" />
+  </joint>
+  <joint name="left_fixed_node_to_root_joint" type="fixed">
+    <origin xyz="0.0192419 -0.0081836 0.00174604" rpy="5.87288e-16 -1.94289e-16 -1.78511e-17" />
+    <axis xyz="0 0 1" />
+    <parent link="left_hand_root" />
+    <child link="left_main_mount__cut_extrude10" />
+  </joint>
+  <joint name="left_grip_link" type="fixed">
+    <origin xyz="0.00467229 -0.0161086 -0.0365737" rpy="2.779283512e-17 -0.174533 -1.5708" />
+    <axis xyz="0 0 1" />
+    <parent link="left_grip__grip" />
+    <child link="left_grip_link" />
+  </joint>
+  <joint name="left_group_1_fastened_joint" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="0 0 1" />
+    <parent link="left_対称移動_30__対称移動_30" />
+    <child link="left_対称移動_29__対称移動_29" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_1" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="0 0 1" />
+    <parent link="left_対称移動_29__対称移動_29" />
+    <child link="left_対称移動_27__対称移動_27" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_10" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_45__対称移動_45" />
+    <child link="left_対称移動_46__対称移動_46" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_11" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="0 0 1" />
+    <parent link="left_対称移動_27__対称移動_27" />
+    <child link="left_対称移動_26__対称移動_26" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_12" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_32__対称移動_32" />
+    <child link="left_対称移動_33__対称移動_33" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_13" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_37__対称移動_37" />
+    <child link="left_対称移動_38__対称移動_38" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_14" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_46__対称移動_46" />
+    <child link="left_対称移動_47__対称移動_47" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_15" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_42__対称移動_42" />
+    <child link="left_対称移動_43__対称移動_43" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_16" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_35__対称移動_35" />
+    <child link="left_対称移動_36__対称移動_36" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_17" type="fixed">
+    <origin xyz="-0.011081 -0.0326202 0.004587" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_31__対称移動_31" />
+    <child link="left_対称移動_32__対称移動_32" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_18" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_36__対称移動_36" />
+    <child link="left_対称移動_37__対称移動_37" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_19" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_43__対称移動_43" />
+    <child link="left_対称移動_44__対称移動_44" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_2" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_40__対称移動_40" />
+    <child link="left_対称移動_42__対称移動_42" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_20" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_44__対称移動_44" />
+    <child link="left_対称移動_45__対称移動_45" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_21" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_38__対称移動_38" />
+    <child link="left_対称移動_39__対称移動_39" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_3" type="fixed">
+    <origin xyz="-0.011081 -0.0326202 0.004587" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="0 0 1" />
+    <parent link="left_対称移動_31__対称移動_31" />
+    <child link="left_対称移動_30__対称移動_30" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_4" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_39__対称移動_39" />
+    <child link="left_対称移動_40__対称移動_40" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_5" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_48__対称移動_48" />
+    <child link="left_対称移動_49__対称移動_49" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_6" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_49__対称移動_49" />
+    <child link="left_対称移動_50__対称移動_50" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_7" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_47__対称移動_47" />
+    <child link="left_対称移動_48__対称移動_48" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_8" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_34__対称移動_34" />
+    <child link="left_対称移動_35__対称移動_35" />
+  </joint>
+  <joint name="left_group_1_fastened_joint_9" type="fixed">
+    <origin xyz="0 0 6.93889e-18" rpy="-1.38778e-17 6.93889e-18 9.97466e-18" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="left_対称移動_33__対称移動_33" />
+    <child link="left_対称移動_34__対称移動_34" />
+  </joint>
+  <joint name="left_base_link" type="fixed">
+    <origin xyz="-0.0135653 -3.46945e-18 -0.019" rpy="3.20379e-48 1.89243e-15 -3.14159" />
+    <axis xyz="0 0 1" />
+    <parent link="left_main_mount__cut_extrude10" />
+    <child link="left_base_link" />
+  </joint>
+  <joint name="left_left_gripper" type="fixed">
+    <origin xyz="3.107659963e-12 -0.003953620003 0.0108" rpy="1.5708 4.633220552e-16 2.954929494e-16" />
+    <axis xyz="0 0 1" />
+    <parent link="left_left_jaw__none" />
+    <child link="left_left_gripper" />
+  </joint>
+  <joint name="left_left_gripper_jaw1" type="fixed">
+    <origin xyz="0.0649192 -0.01736141697 0.003546323772" rpy="0 -1.270549421e-21 -8.027852468e-23" />
+    <axis xyz="0 0 1" />
+    <parent link="left_left_gripper" />
+    <child link="left_left_gripper_jaw1" />
+  </joint>
+  <joint name="left_left_gripper_jaw2" type="fixed">
+    <origin xyz="0.0400692 -0.007373805321 0.003996257086" rpy="0 -1.987351052e-17 9.127421072e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="left_left_gripper" />
+    <child link="left_left_gripper_jaw2" />
+  </joint>
+  <joint name="left_left_gripper_tip" type="fixed">
+    <origin xyz="0.0760001 -0.01736141697 0.003546443772" rpy="0 -1.270549421e-21 -8.027852468e-23" />
+    <axis xyz="0 0 1" />
+    <parent link="left_left_gripper" />
+    <child link="left_left_gripper_tip" />
+  </joint>
+  <joint name="left_vrcontroller" type="fixed">
+    <origin xyz="-0.050565239103824301 0.0090502792797286201 0.1025000838231887" rpy="0.78539882623671253 -6.058253856355833e-07 -0.78539760457350793" />
+    <axis xyz="0 0 1" />
+    <parent link="left_base_link" />
+    <child link="left_vrcontroller" />
+  </joint>
+  <joint name="left_revolute_1" type="continuous">
+    <origin xyz="-0.005 -0.07 2.66714e-17" rpy="-0.87037469282041346 2.2204460492503131e-16 0" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="left_rail_holder__cut_extrude2" />
+    <child link="left_pinion_gear__bore_1_" />
+    <mimic joint="left_slider_1" multiplier="-100" offset="0" />
+  </joint>
+  <joint name="left_right_gripper" type="fixed">
+    <origin xyz="1.172006936e-12 0.0111069 0.0111539" rpy="1.5708 4.742289124e-15 -3.829664653e-16" />
+    <axis xyz="0 0 1" />
+    <parent link="left_right_jaw__none" />
+    <child link="left_right_gripper" />
+  </joint>
+  <joint name="left_right_gripper_jaw1" type="fixed">
+    <origin xyz="0.0649192 0.01700751325 0.003606517528" rpy="-8.470329473e-22 -8.470329473e-22 7.010250678e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="left_right_gripper" />
+    <child link="left_right_gripper_jaw1" />
+  </joint>
+  <joint name="left_right_gripper_jaw2" type="fixed">
+    <origin xyz="0.0387761 0.006543915867 0.004319625963" rpy="-8.470329473e-22 4.464710665e-17 -1.111517486e-21" />
+    <axis xyz="0 0 1" />
+    <parent link="left_right_gripper" />
+    <child link="left_right_gripper_jaw2" />
+  </joint>
+  <joint name="left_right_gripper_tip" type="fixed">
+    <origin xyz="0.0760001 0.01700751325 0.003607407528" rpy="-8.470329473e-22 -8.470329473e-22 7.010250678e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="left_right_gripper" />
+    <child link="left_right_gripper_tip" />
+  </joint>
+  <joint name="left_slider_1" type="prismatic">
+    <origin xyz="-0.087500000000000008 0.0040699999999999981 0.004769999999999967" rpy="2.29474e-28 6.63046e-16 -3.22328e-17" />
+    <axis xyz="-1 0 0" />
+    <parent link="left_rail_sse2bz_mx10_115__chamfer2" />
+    <child link="left_block_sse2bz_mx10_115__lpattern2_1" />
+    <limit effort="1" velocity="1" lower="0" upper="0.05" />
+  </joint>
+  <joint name="left_slider_2" type="prismatic">
+    <origin xyz="-0.052500000000000005 0.0040700000000000016 0.0047699999999999835" rpy="3.31523e-16 -3.31523e-16 -3.22328e-17" />
+    <axis xyz="-1 0 0" />
+    <parent link="left_rail_sse2bz_mx10_115__chamfer2" />
+    <child link="left_block_sse2bz_mx10_115__lpattern2" />
+    <limit effort="1" velocity="1" lower="-0.05" upper="0" />
+    <mimic joint="left_slider_1" multiplier="-1" offset="0" />
+  </joint>
+  <link name="left_controller_holder" />
+  <joint name="left_controller_holder_frame" type="fixed">
+    <origin xyz="0.016500000000000001 -0.002 0.0089999999999999976" rpy="0 0 1.5707963267948966" />
+    <parent link="left_holder_quest_l__holder_quest_45deg_v3_l" />
+    <child link="left_controller_holder" />
+  </joint>
+  <joint name="quest_origin_to_left" type="floating">
+    <parent link="quest_origin" />
+    <child link="left_hand_root" />
+  </joint>
+  <link name="right_ajktns5_70__ajktns5_70">
+    <inertial>
+      <mass value="3.95971e-06" />
+      <origin xyz="1.63638e-14 0.00246049 0.0139541" rpy="0 -0 0" />
+      <inertia ixx="3.31267e-09" ixy="0" ixz="0" iyy="3.21508e-09" iyz="-5.53483e-10" izz="1.73715e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-8.15736e-18 0.0170949 0.102709" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/AJKTNS5_70__AJKTNS5_70.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_block_sse2bz_mx10_115__lpattern2">
+    <inertial>
+      <mass value="3.7028e-06" />
+      <origin xyz="-1.13952e-18 0.00241176 -0.00477" rpy="0 -0 0" />
+      <inertia ixx="1.57819e-10" ixy="0" ixz="0" iyy="4.1507e-10" iyz="0" izz="2.90814e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.00407 -0.00477" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/BLOCK_SSE2BZ_MX10_115__LPattern2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_block_sse2bz_mx10_115__lpattern2_1">
+    <inertial>
+      <mass value="3.7028e-06" />
+      <origin xyz="-1.13952e-18 0.00241176 -0.00477" rpy="0 -0 0" />
+      <inertia ixx="1.57819e-10" ixy="0" ixz="0" iyy="4.1507e-10" iyz="0" izz="2.90814e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.00407 -0.00477" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/BLOCK_SSE2BZ_MX10_115__LPattern2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_bracket_camera__bracket_camera">
+    <inertial>
+      <mass value="5.10873e-06" />
+      <origin xyz="-0.000402622 -0.00635799 0.0173209" rpy="0 -0 0" />
+      <inertia ixx="1.18609e-09" ixy="1.084e-11" ixz="3.94122e-11" iyy="1.48218e-09" iyz="2.9563e-12" izz="5.64733e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.014 -0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/BRACKET_CAMERA__BRACKET_CAMERA.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_camera_link" data-frame-convention="camera_optical">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_encoder__boss_extrude2">
+    <inertial>
+      <mass value="3.81897e-07" />
+      <origin xyz="0.000776185 -4.5054e-19 -0.0085" rpy="0 -0 0" />
+      <inertia ixx="1.59108e-11" ixy="0" ixz="0" iyy="9.30642e-12" iyz="0" izz="6.76376e-12" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.0085" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/encoder__Boss_Extrude2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_grip__grip">
+    <inertial>
+      <mass value="1.77996e-05" />
+      <origin xyz="0.00467229 -0.0065475 -0.0381094" rpy="0 -0 0" />
+      <inertia ixx="9.75267e-09" ixy="0" ixz="0" iyy="9.18651e-09" iyz="-1.47408e-09" izz="1.11737e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0.00467229 0.00380428 0.0245292" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/GRIP__GRIP.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_grip_link">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_hntt5_5__hntt5_5_1_">
+    <inertial>
+      <mass value="2.38577e-07" />
+      <origin xyz="-1.23155e-14 -0.000363429 -0.00206111" rpy="0 -0 0" />
+      <inertia ixx="2.77419e-12" ixy="0" ixz="0" iyy="1.92569e-12" iyz="3.80769e-13" izz="4.018e-12" />
+    </inertial>
+    <visual>
+      <origin xyz="-6.87783e-18 0.00240431 0.0193943" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/HNTT5_5__HNTT5_5_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_holder_quest_r__holder_quest_45deg_v3_r">
+    <inertial>
+      <mass value="2.91479e-05" />
+      <origin xyz="0.0291596 -0.0222697 -0.00587211" rpy="0 -0 0" />
+      <inertia ixx="9.73711e-09" ixy="2.10619e-09" ixz="-4.39287e-11" iyy="1.1386e-08" iyz="-1.07454e-10" izz="1.88736e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.01 -0.005 -0.017" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/HOLDER_Quest_R__HOLDER_Quest_45deg_v3_R.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_left_gripper">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_left_gripper_jaw1">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_left_gripper_jaw2">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_left_gripper_tip">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_left_jaw__none">
+    <inertial>
+      <mass value="2.62035e-05" />
+      <origin xyz="0.0202501 -0.00700303 0.00830939" rpy="0 -0 0" />
+      <inertia ixx="7.36198e-09" ixy="-2.76967e-10" ixz="2.40043e-09" iyy="1.44525e-08" iyz="3.86904e-10" izz="1.8532e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.005 0.00559997 0.0429114" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/left_jaw__NONE.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_main_mount__cut_extrude10">
+    <inertial>
+      <mass value="7.27602e-05" />
+      <origin xyz="0.000715507 2.59045e-05 0.0113203" rpy="0 -0 0" />
+      <inertia ixx="7.47775e-08" ixy="7.22274e-12" ixz="-1.31159e-09" iyy="2.75268e-08" iyz="1.03496e-11" izz="5.85131e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/main_mount__Cut_Extrude10.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_marker_plate_left__cbore_for_m2_cross_recess_pan_head_screw1">
+    <inertial>
+      <mass value="1.35619e-06" />
+      <origin xyz="-0.0126783 -0.00482166 0.000890417" rpy="0 -0 0" />
+      <inertia ixx="1.31699e-10" ixy="2.74716e-11" ixz="-2.51867e-12" iyy="7.04507e-11" iyz="5.95138e-12" izz="1.99783e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.0111878 -0.00987812 0.000500322" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/marker_plate_left__CBORE_for_M2_Cross_Recess_Pan_Head_Screw1.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_marker_plate_right___marker_plate_left___cbore_for_m2_cross_recess_pan_head_screw1_">
+    <inertial>
+      <mass value="1.3562e-06" />
+      <origin xyz="-0.0126783 -0.00482158 -0.000890416" rpy="0 -0 0" />
+      <inertia ixx="1.317e-10" ixy="2.74726e-11" ixz="2.51869e-12" iyy="7.04516e-11" iyz="-5.95138e-12" izz="1.99785e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.0111878 -0.00987812 -0.000500322" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/marker_plate_right___marker_plate_left___CBORE_for_M2_Cross_Recess_Pan_Head_Screw1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_part3__boss_extrude3">
+    <inertial>
+      <mass value="6.15625e-06" />
+      <origin xyz="0.00233991 0.00503878 -0.00156774" rpy="0 -0 0" />
+      <inertia ixx="8.72128e-10" ixy="-3.75859e-12" ixz="1.81433e-10" iyy="6.89254e-10" iyz="1.5357e-12" izz="7.30643e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.005 0.005 0.0026" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/Part3__Boss_Extrude3.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_part3__boss_extrude3_1">
+    <inertial>
+      <mass value="6.15625e-06" />
+      <origin xyz="0.00233991 -0.00496122 -0.0165677" rpy="0 -0 0" />
+      <inertia ixx="8.72128e-10" ixy="-3.75859e-12" ixz="1.81433e-10" iyy="6.89254e-10" iyz="1.5357e-12" izz="7.30643e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.005 -0.005 -0.0124" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/Part3__Boss_Extrude3.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_pinion_gear__bore_1_">
+    <inertial>
+      <mass value="1.80946e-06" />
+      <origin xyz="0.00378004 -6.53658e-18 -1.48098e-18" rpy="0 -0 0" />
+      <inertia ixx="5.08285e-11" ixy="0" ixz="0" iyy="5.03155e-11" iyz="0" izz="5.03155e-11" />
+    </inertial>
+    <visual>
+      <origin xyz="0.001 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/pinion_gear__Bore_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_rack__teethcuts_1_">
+    <inertial>
+      <mass value="3.38836e-06" />
+      <origin xyz="-0.0404346 0.00249917 -8.67362e-19" rpy="0 -0 0" />
+      <inertia ixx="2.61618e-11" ixy="-2.79653e-12" ixz="0" iyy="2.29205e-09" iyz="0" izz="2.28158e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.085 -3.06162e-20 0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/rack__TeethCuts_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_rack__teethcuts_1__1">
+    <inertial>
+      <mass value="3.38836e-06" />
+      <origin xyz="-0.0404346 0.00249917 -8.67362e-19" rpy="0 -0 0" />
+      <inertia ixx="2.61618e-11" ixy="-2.79653e-12" ixz="0" iyy="2.29205e-09" iyz="0" izz="2.28158e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.085 -3.06162e-20 0.004" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/rack__TeethCuts_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_rail_holder__cut_extrude2">
+    <inertial>
+      <mass value="9.48016e-06" />
+      <origin xyz="-0.000571098 -0.07 0.00054478" rpy="0 -0 0" />
+      <inertia ixx="2.34936e-08" ixy="0" ixz="8.81619e-12" iyy="6.98574e-10" iyz="0" izz="2.34144e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.008 -0.07 7.37841e-18" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/RAIL_HOLDER__Cut_Extrude2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_rail_sse2bz_mx10_115__chamfer2">
+    <inertial>
+      <mass value="6.20215e-06" />
+      <origin xyz="-0.07 0.00256737 2.02448e-18" rpy="0 -0 0" />
+      <inertia ixx="5.74742e-11" ixy="0" ixz="0" iyy="1.23642e-08" iyz="0" izz="1.23387e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 0 4.24044e-19" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/RAIL_SSE2BZ_MX10_115__Chamfer2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_base_link">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_right_gripper">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_right_gripper_jaw1">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_right_gripper_jaw2">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_right_gripper_tip">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_right_jaw__none">
+    <inertial>
+      <mass value="2.48931e-05" />
+      <origin xyz="0.0217885 0.00557959 0.013506" rpy="0 -0 0" />
+      <inertia ixx="6.58826e-09" ixy="-2.03843e-09" ixz="-2.22498e-09" iyy="1.30337e-08" iyz="-5.98673e-10" izz="1.67661e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.005 0.0206 0.0725114" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/right_jaw__NONE.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_hand_root" />
+  <link name="right_usb_camera__usb_camera_elp_usbfhd01m_l180">
+    <inertial>
+      <mass value="5.15731e-06" />
+      <origin xyz="0.0142908 -0.00289375 -0.0155236" rpy="0 -0 0" />
+      <inertia ixx="4.07452e-10" ixy="-1.59354e-11" ixz="1.65564e-11" iyy="4.32501e-10" iyz="4.65295e-11" izz="3.79203e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0.014 -0.00252094 -0.0440456" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/USB_CAMERA__USB_CAMERA_ELP_USBFHD01M_L180.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_vrcontroller">
+    <inertial>
+      <mass value="1e-09" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <inertia ixx="4e-14" ixy="0" ixz="0" iyy="4e-14" iyz="0" izz="4e-14" />
+    </inertial>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_10__ｽｹｰﾘﾝｸﾞ_10">
+    <inertial>
+      <mass value="3.18307e-05" />
+      <origin xyz="-0.0201639 0.0526279 0.0505091" rpy="0 -0 0" />
+      <inertia ixx="2.95678e-10" ixy="7.31701e-11" ixz="7.45675e-11" iyy="3.05272e-10" iyz="7.94179e-11" izz="3.09576e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________10__________10.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_11__ｽｹｰﾘﾝｸﾞ_11">
+    <inertial>
+      <mass value="0.000284944" />
+      <origin xyz="-0.0190633 0.0537865 0.0517794" rpy="0 -0 0" />
+      <inertia ixx="5.45544e-09" ixy="1.12527e-09" ixz="1.14569e-09" iyy="5.63633e-09" iyz="1.23534e-09" izz="5.68613e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________11__________11.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_12__ｽｹｰﾘﾝｸﾞ_12">
+    <inertial>
+      <mass value="0.000114434" />
+      <origin xyz="-0.0179276 0.0619823 0.0330676" rpy="0 -0 0" />
+      <inertia ixx="1.10869e-09" ixy="2.54398e-10" ixz="2.58197e-10" iyy="1.13009e-09" iyz="2.70896e-10" izz="1.13853e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________12__________12.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_13__ｽｹｰﾘﾝｸﾞ_13">
+    <inertial>
+      <mass value="0.000183754" />
+      <origin xyz="-0.00417219 0.0376927 0.0451883" rpy="0 -0 0" />
+      <inertia ixx="2.58963e-09" ixy="4.76866e-10" ixz="4.7742e-10" iyy="2.58996e-09" iyz="4.99767e-10" izz="2.6024e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________13__________13.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_14__ｽｹｰﾘﾝｸﾞ_14">
+    <inertial>
+      <mass value="0.00210511" />
+      <origin xyz="-0.0109981 0.0431768 0.0417697" rpy="0 -0 0" />
+      <inertia ixx="4.96703e-07" ixy="1.15496e-07" ixz="1.09651e-07" iyy="4.47275e-07" iyz="1.28432e-07" izz="4.74765e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________14__________14.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_15__ｽｹｰﾘﾝｸﾞ_15">
+    <inertial>
+      <mass value="0.000196147" />
+      <origin xyz="-0.0204706 0.0402686 -0.0380614" rpy="0 -0 0" />
+      <inertia ixx="1.27607e-08" ixy="-5.18619e-10" ixz="4.53322e-10" iyy="1.15046e-08" iyz="2.95997e-09" izz="1.74387e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________15__________15.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_17__ｽｹｰﾘﾝｸﾞ_17">
+    <inertial>
+      <mass value="0.00121849" />
+      <origin xyz="-0.031002 0.0591305 0.00202584" rpy="0 -0 0" />
+      <inertia ixx="8.38291e-07" ixy="-7.48658e-09" ixz="2.50155e-08" iyy="8.31818e-07" iyz="-2.05031e-08" izz="2.18055e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________17__________17.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_18__ｽｹｰﾘﾝｸﾞ_18">
+    <inertial>
+      <mass value="0.000331566" />
+      <origin xyz="-0.0124269 0.0657502 -0.0195179" rpy="0 -0 0" />
+      <inertia ixx="1.62918e-07" ixy="-2.84339e-09" ixz="-1.78394e-08" iyy="1.59621e-07" iyz="-1.74534e-08" izz="8.63827e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________18__________18.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_19__ｽｹｰﾘﾝｸﾞ_19">
+    <inertial>
+      <mass value="0.000137398" />
+      <origin xyz="-0.0228613 0.0363964 -0.0306415" rpy="0 -0 0" />
+      <inertia ixx="2.73005e-08" ixy="-8.93824e-12" ixz="-3.42137e-10" iyy="2.64197e-08" iyz="4.74852e-09" izz="1.12818e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________19__________19.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_1__ｽｹｰﾘﾝｸﾞ_1">
+    <inertial>
+      <mass value="0.000110985" />
+      <origin xyz="-0.0366437 0.0626561 0.0422541" rpy="0 -0 0" />
+      <inertia ixx="1.94173e-09" ixy="-3.43173e-10" ixz="2.99099e-10" iyy="1.49371e-09" iyz="4.95218e-10" izz="8.9509e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________1__________1.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_20__ｽｹｰﾘﾝｸﾞ_20">
+    <inertial>
+      <mass value="0.000134583" />
+      <origin xyz="-0.0227797 0.0543926 -0.0459161" rpy="0 -0 0" />
+      <inertia ixx="3.93035e-09" ixy="-2.19248e-10" ixz="-2.15313e-10" iyy="3.43473e-09" iyz="1.37067e-10" izz="6.99279e-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________20__________20.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_21__ｽｹｰﾘﾝｸﾞ_21">
+    <inertial>
+      <mass value="0.000620988" />
+      <origin xyz="-0.0147376 0.0411387 0.0435285" rpy="0 -0 0" />
+      <inertia ixx="4.19159e-07" ixy="8.12212e-08" ixz="1.05841e-07" iyy="3.94063e-07" iyz="1.04718e-07" izz="3.67261e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________21__________21.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_22__ｽｹｰﾘﾝｸﾞ_22">
+    <inertial>
+      <mass value="0.00245039" />
+      <origin xyz="-0.0178211 0.0294685 0.0382274" rpy="0 -0 0" />
+      <inertia ixx="4.54904e-07" ixy="9.05893e-08" ixz="3.20108e-09" iyy="5.0226e-07" iyz="2.5082e-08" izz="3.19855e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________22__________22.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_23__ｽｹｰﾘﾝｸﾞ_23">
+    <inertial>
+      <mass value="0.000231587" />
+      <origin xyz="-0.0210241 0.0511501 -0.050385" rpy="0 -0 0" />
+      <inertia ixx="5.17516e-09" ixy="-1.62704e-09" ixz="-1.16312e-10" iyy="2.26739e-09" iyz="-5.05253e-10" izz="5.92642e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________23__________23.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_24__ｽｹｰﾘﾝｸﾞ_24">
+    <inertial>
+      <mass value="0.000184101" />
+      <origin xyz="-0.00651422 0.0503851 0.0349048" rpy="0 -0 0" />
+      <inertia ixx="2.59748e-09" ixy="4.79292e-10" ixz="4.77851e-10" iyy="2.59477e-09" iyz="5.02683e-10" izz="2.6125e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________24__________24.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_25__ｽｹｰﾘﾝｸﾞ_25">
+    <inertial>
+      <mass value="1.94586e-05" />
+      <origin xyz="0.0100614 0.0242076 0.0388574" rpy="0 -0 0" />
+      <inertia ixx="1.40987e-10" ixy="-1.11165e-11" ixz="4.03678e-11" iyy="1.36169e-10" iyz="4.18272e-11" izz="3.46706e-11" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________25__________25.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_2__ｽｹｰﾘﾝｸﾞ_2">
+    <inertial>
+      <mass value="0.00144327" />
+      <origin xyz="-0.0257447 0.0178572 0.0415808" rpy="0 -0 0" />
+      <inertia ixx="1.66796e-07" ixy="4.12787e-08" ixz="-2.39709e-08" iyy="1.93934e-07" iyz="-2.37551e-08" izz="1.47985e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________2__________2.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_4__ｽｹｰﾘﾝｸﾞ_4">
+    <inertial>
+      <mass value="0.00632643" />
+      <origin xyz="-0.0269312 0.0369466 0.0113458" rpy="0 -0 0" />
+      <inertia ixx="8.24046e-06" ixy="9.00132e-07" ixz="-7.89172e-07" iyy="8.09756e-06" iyz="1.25465e-06" izz="2.26203e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________4__________4.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_5__ｽｹｰﾘﾝｸﾞ_5">
+    <inertial>
+      <mass value="0.00384825" />
+      <origin xyz="-0.00915416 0.0439876 0.0404049" rpy="0 -0 0" />
+      <inertia ixx="1.68744e-06" ixy="4.14751e-07" ixz="4.13689e-07" iyy="1.59858e-06" iyz="3.69659e-07" izz="1.59292e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________5__________5.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_6__ｽｹｰﾘﾝｸﾞ_6">
+    <inertial>
+      <mass value="0.000740786" />
+      <origin xyz="0.00227635 0.0067662 0.00436198" rpy="0 -0 0" />
+      <inertia ixx="5.03459e-08" ixy="-1.64264e-08" ixz="5.70503e-09" iyy="4.14768e-08" iyz="8.48464e-09" izz="4.42082e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0.0107071 -0.0323643 0.00418072" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________6__________6.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_7__ｽｹｰﾘﾝｸﾞ_7">
+    <inertial>
+      <mass value="0.00299742" />
+      <origin xyz="-0.0247021 0.0658149 -0.012156" rpy="0 -0 0" />
+      <inertia ixx="2.09516e-06" ixy="-6.39749e-08" ixz="1.14705e-07" iyy="2.20701e-06" iyz="-9.42999e-08" izz="2.49513e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________7__________7.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_8__ｽｹｰﾘﾝｸﾞ_8">
+    <inertial>
+      <mass value="0.00353392" />
+      <origin xyz="-0.00813127 0.0481906 -0.015282" rpy="0 -0 0" />
+      <inertia ixx="2.38692e-06" ixy="5.88627e-09" ixz="-4.49074e-07" iyy="2.06214e-06" iyz="3.03158e-07" izz="7.52278e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________8__________8.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_ｽｹｰﾘﾝｸﾞ_9__ｽｹｰﾘﾝｸﾞ_9">
+    <inertial>
+      <mass value="0.000351621" />
+      <origin xyz="-0.0225663 0.0500783 0.0480026" rpy="0 -0 0" />
+      <inertia ixx="1.00042e-08" ixy="1.7754e-09" ixz="1.82493e-09" iyy="1.02517e-08" iyz="1.95554e-09" izz="1.0357e-08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://piper_umi_description/meshes/right/________9__________9.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_0.952941_0.996078_0.694118_0.000000_0.000000">
+        <color rgba="0.952941 0.996078 0.694118 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_camera_link" type="fixed">
+    <origin xyz="0.013999999999999974 -0.0089926909146001502 -0.015801650662099095" rpy="-1.7453292519944341 0 -3.1415926535897931" />
+    <axis xyz="0 0 1" />
+    <parent link="right_usb_camera__usb_camera_elp_usbfhd01m_l180" />
+    <child link="right_camera_link" />
+  </joint>
+  <joint name="right_fastened_1" type="fixed">
+    <origin xyz="-0.003 -3.64292e-17 0.0355" rpy="-3.31523e-16 3.31523e-16 -1.5708" />
+    <axis xyz="0 0 -1" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_bracket_camera__bracket_camera" />
+  </joint>
+  <joint name="right_fastened_10" type="fixed">
+    <origin xyz="0.005 0.00593 0.00273" rpy="1.68563e-24 8.67362e-17 -1.5708" />
+    <axis xyz="1 -0 -0" />
+    <parent link="right_block_sse2bz_mx10_115__lpattern2" />
+    <child link="right_part3__boss_extrude3_1" />
+  </joint>
+  <joint name="right_fastened_11" type="fixed">
+    <origin xyz="0.005 0.00593 0.00273" rpy="-3.14159 8.67362e-17 -1.5708" />
+    <axis xyz="1 0 0" />
+    <parent link="right_block_sse2bz_mx10_115__lpattern2_1" />
+    <child link="right_part3__boss_extrude3" />
+  </joint>
+  <joint name="right_fastened_12" type="fixed">
+    <origin xyz="0.015 0.0048 -0.0205" rpy="1.5708 -0 1.5708" />
+    <axis xyz="0 -1 0" />
+    <parent link="right_part3__boss_extrude3_1" />
+    <child link="right_rack__teethcuts_1__1" />
+  </joint>
+  <joint name="right_fastened_13" type="fixed">
+    <origin xyz="0.015 0.0148 -0.0055" rpy="1.5708 -0 1.5708" />
+    <axis xyz="0 -1 0" />
+    <parent link="right_part3__boss_extrude3" />
+    <child link="right_rack__teethcuts_1_" />
+  </joint>
+  <joint name="right_fastened_14" type="fixed">
+    <origin xyz="0.00467229 -0.0132907 -0.0781798" rpy="0.349066 7.97666e-17 3.14159" />
+    <axis xyz="-6.93889e-17 0.173648 0.984808" />
+    <parent link="right_grip__grip" />
+    <child link="right_ajktns5_70__ajktns5_70" />
+  </joint>
+  <joint name="right_fastened_15" type="fixed">
+    <origin xyz="-0.0086842 0.00482944 -0.026" rpy="0.174533 2.48412e-15 -1.5708" />
+    <axis xyz="-0 0.173648 0.984808" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_grip__grip" />
+  </joint>
+  <joint name="right_fastened_16" type="fixed">
+    <origin xyz="-0.014 -0.0114791 0.0400456" rpy="-1.09763e-28 -9.82132e-29 3.895e-30" />
+    <axis xyz="0 0.984808 0.173648" />
+    <parent link="right_bracket_camera__bracket_camera" />
+    <child link="right_usb_camera__usb_camera_elp_usbfhd01m_l180" />
+  </joint>
+  <joint name="right_fastened_17" type="fixed">
+    <origin xyz="2.42861e-17 0.0146906 0.0833147" rpy="0.349066 -1.07535e-16 -3.14159" />
+    <axis xyz="1.51744e-16 0.173648 0.984808" />
+    <parent link="right_ajktns5_70__ajktns5_70" />
+    <child link="right_hntt5_5__hntt5_5_1_" />
+  </joint>
+  <joint name="right_fastened_18" type="fixed">
+    <origin xyz="3.46945e-18 -1.73472e-18 0.0087" rpy="0 -0 -3.14159" />
+    <axis xyz="0 1 0" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_encoder__boss_extrude2" />
+  </joint>
+  <joint name="right_fastened_2" type="fixed">
+    <origin xyz="0.005 -9.29812e-16 2.4503e-17" rpy="3.14159 -9.57726e-29 1.5708" />
+    <axis xyz="0 -1 -1.22465e-16" />
+    <parent link="right_rail_holder__cut_extrude2" />
+    <child link="right_rail_sse2bz_mx10_115__chamfer2" />
+  </joint>
+  <joint name="right_fastened_3" type="fixed">
+    <origin xyz="0.023824 -0.00936292 -0.00189731" rpy="0.175771 -0.0438507 3.05141" />
+    <axis xyz="0.719516 0.562323 -0.40754" />
+    <parent link="right_holder_quest_r__holder_quest_45deg_v3_r" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_6__ｽｹｰﾘﾝｸﾞ_6" />
+  </joint>
+  <joint name="right_fastened_4" type="fixed">
+    <origin xyz="0.01 -0.01705 0.036" rpy="2.31625e-18 -1.74499e-18 1.5708" />
+    <axis xyz="-0 1 -0" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_holder_quest_r__holder_quest_45deg_v3_r" />
+  </joint>
+  <joint name="right_fastened_5" type="fixed">
+    <origin xyz="0.0423122 -0.0225 0.00648485" rpy="-1.5708 -1.8242e-16 3.14159" />
+    <axis xyz="1.27966e-16 0 -1" />
+    <parent link="right_left_jaw__none" />
+    <child link="right_marker_plate_left__cbore_for_m2_cross_recess_pan_head_screw1" />
+  </joint>
+  <joint name="right_fastened_6" type="fixed">
+    <origin xyz="0.0423122 -0.00750003 0.0151152" rpy="1.5708 -5.04871e-29 3.14159" />
+    <axis xyz="1.27966e-16 -0 1" />
+    <parent link="right_right_jaw__none" />
+    <child link="right_marker_plate_right___marker_plate_left___cbore_for_m2_cross_recess_pan_head_screw1_" />
+  </joint>
+  <joint name="right_fastened_7" type="fixed">
+    <origin xyz="-0.017 0.07 2.08167e-17" rpy="-3.14159 4.5606e-31 3.14159" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_rail_holder__cut_extrude2" />
+  </joint>
+  <joint name="right_fastened_8" type="fixed">
+    <origin xyz="-0.005 0.0058 1.04368e-12" rpy="-1.5708 5.02337e-16 3.14159" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="right_part3__boss_extrude3_1" />
+    <child link="right_right_jaw__none" />
+  </joint>
+  <joint name="right_fastened_9" type="fixed">
+    <origin xyz="-0.005 -0.0058 0.015" rpy="1.5708 2.05937e-17 3.14159" />
+    <axis xyz="-1 0 0" />
+    <parent link="right_part3__boss_extrude3" />
+    <child link="right_left_jaw__none" />
+  </joint>
+  <joint name="right_fixed_node_to_root_joint" type="fixed">
+    <origin xyz="0.0192419 -0.0081836 0.00174604" rpy="5.87288e-16 -1.94289e-16 -1.78511e-17" />
+    <axis xyz="0 0 1" />
+    <parent link="right_hand_root" />
+    <child link="right_main_mount__cut_extrude10" />
+  </joint>
+  <joint name="right_grip_link" type="fixed">
+    <origin xyz="0.00467229 -0.0161086 -0.0365737" rpy="2.779283512e-17 -0.174533 -1.5708" />
+    <axis xyz="0 0 1" />
+    <parent link="right_grip__grip" />
+    <child link="right_grip_link" />
+  </joint>
+  <joint name="right_group_1_fastened_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_24__ｽｹｰﾘﾝｸﾞ_24" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_23__ｽｹｰﾘﾝｸﾞ_23" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_1" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_1__ｽｹｰﾘﾝｸﾞ_1" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_19__ｽｹｰﾘﾝｸﾞ_19" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_10" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_12__ｽｹｰﾘﾝｸﾞ_12" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_11__ｽｹｰﾘﾝｸﾞ_11" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_11" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_23__ｽｹｰﾘﾝｸﾞ_23" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_22__ｽｹｰﾘﾝｸﾞ_22" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_12" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_7__ｽｹｰﾘﾝｸﾞ_7" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_8__ｽｹｰﾘﾝｸﾞ_8" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_13" type="fixed">
+    <origin xyz="0.0107071 -0.0323643 0.00418072" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_6__ｽｹｰﾘﾝｸﾞ_6" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_5__ｽｹｰﾘﾝｸﾞ_5" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_14" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_22__ｽｹｰﾘﾝｸﾞ_22" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_21__ｽｹｰﾘﾝｸﾞ_21" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_15" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_8__ｽｹｰﾘﾝｸﾞ_8" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_9__ｽｹｰﾘﾝｸﾞ_9" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_16" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_13__ｽｹｰﾘﾝｸﾞ_13" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_12__ｽｹｰﾘﾝｸﾞ_12" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_17" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_5__ｽｹｰﾘﾝｸﾞ_5" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_4__ｽｹｰﾘﾝｸﾞ_4" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_18" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_4__ｽｹｰﾘﾝｸﾞ_4" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_2__ｽｹｰﾘﾝｸﾞ_2" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_19" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_14__ｽｹｰﾘﾝｸﾞ_14" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_13__ｽｹｰﾘﾝｸﾞ_13" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_2" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_11__ｽｹｰﾘﾝｸﾞ_11" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_10__ｽｹｰﾘﾝｸﾞ_10" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_20" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_20__ｽｹｰﾘﾝｸﾞ_20" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_1__ｽｹｰﾘﾝｸﾞ_1" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_21" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_15__ｽｹｰﾘﾝｸﾞ_15" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_14__ｽｹｰﾘﾝｸﾞ_14" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_3" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_19__ｽｹｰﾘﾝｸﾞ_19" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_18__ｽｹｰﾘﾝｸﾞ_18" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_4" type="fixed">
+    <origin xyz="0.0107071 -0.0323643 0.00418072" rpy="0 -0 0" />
+    <axis xyz="-0 -0 -1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_6__ｽｹｰﾘﾝｸﾞ_6" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_7__ｽｹｰﾘﾝｸﾞ_7" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_5" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_18__ｽｹｰﾘﾝｸﾞ_18" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_17__ｽｹｰﾘﾝｸﾞ_17" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_6" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_25__ｽｹｰﾘﾝｸﾞ_25" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_24__ｽｹｰﾘﾝｸﾞ_24" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_7" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_2__ｽｹｰﾘﾝｸﾞ_2" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_25__ｽｹｰﾘﾝｸﾞ_25" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_8" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_21__ｽｹｰﾘﾝｸﾞ_21" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_20__ｽｹｰﾘﾝｸﾞ_20" />
+  </joint>
+  <joint name="right_group_1_fastened_joint_9" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="right_ｽｹｰﾘﾝｸﾞ_17__ｽｹｰﾘﾝｸﾞ_17" />
+    <child link="right_ｽｹｰﾘﾝｸﾞ_15__ｽｹｰﾘﾝｸﾞ_15" />
+  </joint>
+  <joint name="right_left_gripper" type="fixed">
+    <origin xyz="3.107659963e-12 -0.003953620003 0.0108" rpy="1.5708 4.633220552e-16 2.954929494e-16" />
+    <axis xyz="0 0 1" />
+    <parent link="right_left_jaw__none" />
+    <child link="right_left_gripper" />
+  </joint>
+  <joint name="right_left_gripper_jaw1" type="fixed">
+    <origin xyz="0.0649192 -0.01736141697 0.003546323772" rpy="0 -1.270549421e-21 -8.027852468e-23" />
+    <axis xyz="0 0 1" />
+    <parent link="right_left_gripper" />
+    <child link="right_left_gripper_jaw1" />
+  </joint>
+  <joint name="right_left_gripper_jaw2" type="fixed">
+    <origin xyz="0.0400692 -0.007373805321 0.003996257086" rpy="0 -1.987351052e-17 9.127421072e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="right_left_gripper" />
+    <child link="right_left_gripper_jaw2" />
+  </joint>
+  <joint name="right_left_gripper_tip" type="fixed">
+    <origin xyz="0.0760001 -0.01736141697 0.003546443772" rpy="0 -1.270549421e-21 -8.027852468e-23" />
+    <axis xyz="0 0 1" />
+    <parent link="right_left_gripper" />
+    <child link="right_left_gripper_tip" />
+  </joint>
+  <joint name="right_revolute_1" type="continuous">
+    <origin xyz="-0.005 -0.07 2.66714e-17" rpy="-0.87037469282041346 2.2204460492503131e-16 0" />
+    <axis xyz="-1 -0 -0" />
+    <parent link="right_rail_holder__cut_extrude2" />
+    <child link="right_pinion_gear__bore_1_" />
+    <mimic joint="right_slider_1" multiplier="-100" offset="0" />
+  </joint>
+  <joint name="right_base_link" type="fixed">
+    <origin xyz="-0.0135653 -3.46945e-18 -0.019" rpy="3.20379e-48 1.89243e-15 -3.14159" />
+    <axis xyz="0 0 1" />
+    <parent link="right_main_mount__cut_extrude10" />
+    <child link="right_base_link" />
+  </joint>
+  <joint name="right_right_gripper" type="fixed">
+    <origin xyz="1.172006936e-12 0.0111069 0.0111539" rpy="1.5708 4.742289124e-15 -3.829664653e-16" />
+    <axis xyz="0 0 1" />
+    <parent link="right_right_jaw__none" />
+    <child link="right_right_gripper" />
+  </joint>
+  <joint name="right_right_gripper_jaw1" type="fixed">
+    <origin xyz="0.0649192 0.01700751325 0.003606517528" rpy="-8.470329473e-22 -8.470329473e-22 7.010250678e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="right_right_gripper" />
+    <child link="right_right_gripper_jaw1" />
+  </joint>
+  <joint name="right_right_gripper_jaw2" type="fixed">
+    <origin xyz="0.0387761 0.006543915867 0.004319625963" rpy="-8.470329473e-22 4.464710665e-17 -1.111517486e-21" />
+    <axis xyz="0 0 1" />
+    <parent link="right_right_gripper" />
+    <child link="right_right_gripper_jaw2" />
+  </joint>
+  <joint name="right_right_gripper_tip" type="fixed">
+    <origin xyz="0.0760001 0.01700751325 0.003607407528" rpy="-8.470329473e-22 -8.470329473e-22 7.010250678e-22" />
+    <axis xyz="0 0 1" />
+    <parent link="right_right_gripper" />
+    <child link="right_right_gripper_tip" />
+  </joint>
+  <joint name="right_slider_1" type="prismatic">
+    <origin xyz="-0.087500000000000008 0.0040699999999999981 0.004769999999999967" rpy="2.29474e-28 6.63046e-16 -3.22328e-17" />
+    <axis xyz="-1 0 0" />
+    <parent link="right_rail_sse2bz_mx10_115__chamfer2" />
+    <child link="right_block_sse2bz_mx10_115__lpattern2_1" />
+    <limit effort="1" velocity="1" lower="0" upper="0.05" />
+  </joint>
+  <joint name="right_slider_2" type="prismatic">
+    <origin xyz="-0.052500000000000005 0.0040700000000000016 0.0047699999999999835" rpy="3.31523e-16 -3.31523e-16 -3.22328e-17" />
+    <axis xyz="-1 0 0" />
+    <parent link="right_rail_sse2bz_mx10_115__chamfer2" />
+    <child link="right_block_sse2bz_mx10_115__lpattern2" />
+    <limit effort="1" velocity="1" lower="-0.05" upper="0" />
+    <mimic joint="right_slider_1" multiplier="-1" offset="0" />
+  </joint>
+  <joint name="right_vrcontroller" type="fixed">
+    <origin xyz="-0.050565247511817277 -0.0089499649967399453 0.10250002905812408" rpy="0.78539811050546149 -5.2891987456504808e-08 -2.3561934705770335" />
+    <axis xyz="0 0 1" />
+    <parent link="right_base_link" />
+    <child link="right_vrcontroller" />
+  </joint>
+  <link name="right_controller_holder" />
+  <joint name="right_controller_holder_frame" type="fixed">
+    <origin xyz="0.017500000000000002 -0.002 0.0089999999999999976" rpy="0 0 1.5707963267948966" />
+    <parent link="right_holder_quest_r__holder_quest_45deg_v3_r" />
+    <child link="right_controller_holder" />
+  </joint>
+  <joint name="quest_origin_to_right" type="floating">
+    <parent link="quest_origin" />
+    <child link="right_hand_root" />
+  </joint>
+</robot>

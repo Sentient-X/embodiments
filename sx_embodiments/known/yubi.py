@@ -33,13 +33,13 @@ from .sources import capture_source
 
 YUBI_HANDS_URDF: Final = packaged_asset(
     relpath="yubi_description/urdf/yubi_hands.urdf",
-    sha256="dc12644756e03db1efc70cfcbd14a2adca53b5645ce79344d67c5b11250a62bb",
-    size_bytes=22504,
+    sha256="517008a332283ec201cb5ca4615f7cf0c2769bbcbc9f56e972376ea879395dd1",
+    size_bytes=23215,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
         repository="https://github.com/Sentient-X/embodiments",
-        revision="yubi-description7-6ff03008-8afd1ffe",
+        revision="sha256:517008a332283ec201cb5ca4615f7cf0c2769bbcbc9f56e972376ea879395dd1",
         path="assets/yubi_description/urdf/yubi_hands.urdf",
         license_id="LicenseRef-Sentient-Proprietary",
         generator="tools/compose_yubi_urdf.py",
@@ -229,7 +229,7 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("yubi"),
     label="YUBI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
-    lineage=Lineage(family="yubi", revision="description7-sx1"),
+    lineage=Lineage(family="yubi", revision="description7-sx2-controller-holder"),
     attachments=(
         body_component("left_jaw", YUBI_JAW, RootMount("left_hand_root")),
         body_component("right_jaw", YUBI_JAW, RootMount("right_hand_root")),
