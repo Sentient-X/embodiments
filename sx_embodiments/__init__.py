@@ -11,7 +11,7 @@ arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodim
 from .assemble import admit_part, assemble, composable_parts, part_from_dict, part_to_dict
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
-from .embodiment import Embodiment
+from .embodiment import Embodiment, EmbodimentMigration, convert_v13_to_v14
 from .errors import (
     AssemblyError,
     AssetDigestMismatchError,
@@ -30,20 +30,32 @@ from .errors import (
 from .identity import EmbodimentId, EmbodimentName
 from .known import development_embodiments, embodiments
 from .layout import (
+    ActuationBinding,
     ActuatorBinding,
     ActuatorBus,
+    ActuatorFeedback,
     ActuatorModel,
     Bounds,
     ChannelKind,
     CoordinateBounds,
     CoordinateUnit,
+    DirectDrive,
+    EncoderReadout,
+    IntegratedDrive,
+    ObservationBinding,
+    Passive,
     Unbounded,
+    UndocumentedDrive,
+    Unobserved,
+    VendorReadout,
 )
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 
 __all__ = [
+    "ActuationBinding",
     "ActuatorBinding",
     "ActuatorBus",
+    "ActuatorFeedback",
     "ActuatorModel",
     "AssemblyError",
     "AssetDigestMismatchError",
@@ -57,25 +69,35 @@ __all__ = [
     "CompositionError",
     "CoordinateBounds",
     "CoordinateUnit",
+    "DirectDrive",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
+    "EmbodimentMigration",
     "EmbodimentName",
     "EmbodimentSchemaError",
+    "EncoderReadout",
     "FactSource",
     "GripperKinematicsError",
+    "IntegratedDrive",
     "InvalidCameraMountError",
     "LayoutError",
     "MissingUrdfError",
     "MountKind",
+    "ObservationBinding",
     "OperatorMount",
     "OperatorSite",
     "PartValidationError",
+    "Passive",
     "Unbounded",
+    "UndocumentedDrive",
     "UnknownEmbodimentError",
+    "Unobserved",
+    "VendorReadout",
     "admit_part",
     "assemble",
     "composable_parts",
+    "convert_v13_to_v14",
     "development_embodiments",
     "embodiments",
     "part_from_dict",

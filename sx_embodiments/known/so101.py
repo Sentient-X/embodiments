@@ -13,7 +13,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import Component, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import ActuatorBinding, ActuatorBus, ActuatorModel, CoordinateUnit
+from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
 from ._authoring import bounded_layout
 
@@ -71,6 +71,7 @@ SO101_ARM: Final = ArmSpec(
         lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385),
         upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121),
         actuators=tuple(_sts3215(bus_id) for bus_id in (1, 2, 3, 4, 5)),
+        observations=(ActuatorFeedback(),) * 5,
     ),
     home=(0.0, 0.0, 0.0, 0.0, 0.0),
 )
@@ -83,6 +84,7 @@ SO101_JAW: Final = GripperSpec(
         lower=(-0.174533,),
         upper=(2.0944,),
         actuators=(_sts3215(6),),
+        observations=(ActuatorFeedback(),),
     ),
     # aperture-in-meters not yet measured; episodes carry the joint value
 )

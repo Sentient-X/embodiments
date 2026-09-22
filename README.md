@@ -24,10 +24,12 @@ registry, from `Embodiment.from_dict`/`from_json` for a stored document, or from
 64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
 friendly registry name or that content ID.
 
-Schema v13 stores one topologically ordered component graph plus nominal rates,
-content-addressed assets, and per-axis actuation facts: a joint axis may bind a
-qualified `ActuatorModel` on an `ActuatorBus` with its chain address and drive map,
-so driver support is a derived property of the document. State order, camera bindings, capabilities, arm/gripper convenience
+Schema v14 stores one topologically ordered component graph plus nominal rates,
+content-addressed assets, and independent per-axis observation and actuation facts. A
+joint axis may be observed through actuator feedback, a vendor interface, or an encoder
+and may be driven directly, through an integrated controller, passively, or remain
+explicitly undocumented. A qualified direct drive binds an `ActuatorModel` on an
+`ActuatorBus` with its chain address and drive map. State order, camera bindings, capabilities, arm/gripper convenience
 views, and the ID are derived from those facts. This keeps one source for morphology while
 remaining ergonomic for drivers, simulation, training, and task admission.
 

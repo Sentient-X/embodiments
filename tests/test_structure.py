@@ -5,7 +5,14 @@ from sx_contracts import Capability, ComponentId
 
 import sx_embodiments
 from sx_embodiments import embodiments
-from sx_embodiments.compose import ComponentKind, ComponentRole, MountedOn, RootMount
+from sx_embodiments.compose import (
+    ComponentKind,
+    ComponentRole,
+    MountedOn,
+    RootMount,
+    leader_component,
+    state_space,
+)
 
 # The whole read-only public surface. An embodiment is obtained from the registry, never
 # assembled: the arguments ``Embodiment(...)`` requires — components, attachments, parts,
@@ -19,7 +26,17 @@ PUBLIC_SURFACE = frozenset(
         # Widened 2026-08 for the sx-drivers bus-driver derivation (its first consumer).
         "ActuatorBinding",
         "ActuatorBus",
+        "ActuatorFeedback",
         "ActuatorModel",
+        "ActuationBinding",
+        "DirectDrive",
+        "EncoderReadout",
+        "IntegratedDrive",
+        "ObservationBinding",
+        "Passive",
+        "UndocumentedDrive",
+        "Unobserved",
+        "VendorReadout",
         # The one authoring door (customer-embodiments plan, Move 2): a validating
         # entrypoint over an untrusted wire definition, not an open constructor —
         # construction material stays unexported and the id stays derived. Its first
@@ -28,6 +45,7 @@ PUBLIC_SURFACE = frozenset(
         "admit_part",
         "assemble",
         "composable_parts",
+        "convert_v13_to_v14",
         "part_from_dict",
         "part_to_dict",
         "AssetDigestMismatchError",
@@ -45,6 +63,7 @@ PUBLIC_SURFACE = frozenset(
         "Embodiment",
         "EmbodimentError",
         "EmbodimentId",
+        "EmbodimentMigration",
         "EmbodimentName",
         "EmbodimentSchemaError",
         "FactSource",
@@ -84,6 +103,19 @@ def test_public_surface_offers_no_way_to_assemble_an_embodiment() -> None:
     # Three of the six required arguments have no public spelling at all, so the constructor
     # is unreachable from outside without deliberately importing a private module.
     assert not exported & {"Component", "EmbodimentKind", "Lineage"}
+
+
+def test_physical_coordinates_do_not_disappear_when_assigned_leader_role() -> None:
+    arm = embodiments["so101"].single_arm
+    leader = leader_component("input_arm", arm, RootMount("base_link"))
+
+    assert state_space("input", (leader,)).names == (
+        "input_arm/shoulder_pan",
+        "input_arm/shoulder_lift",
+        "input_arm/elbow_flex",
+        "input_arm/wrist_flex",
+        "input_arm/wrist_roll",
+    )
 
 
 def test_franka_component_graph_is_topological_and_capability_bearing() -> None:

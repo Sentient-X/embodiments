@@ -353,8 +353,6 @@ def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -
         roots[component.instance] = (
             component.instance if not isinstance(mount, MountedOn) else roots[mount.parent]
         )
-        if component.role is not ComponentRole.BODY:
-            continue
         part = component.part
         if not isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
             continue
@@ -386,15 +384,14 @@ def validate_operator_mounts(
 
 
 def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
-    """Derive the ordered native body-state space, or fail closed."""
-    body = tuple(component for component in components if component.role is ComponentRole.BODY)
-    if any(isinstance(component.part, DeviceSpec) for component in body):
-        raise LayoutError(
-            name,
-            "channel layout is not declared (a body part has no captured description)",
-        )
+    """Derive ordered physical coordinates independent of session role."""
+    physical = tuple(
+        component
+        for component in components
+        if isinstance(component.part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec)
+    )
     coordinates: list[StateCoordinate] = []
-    for attachment in body:
+    for attachment in physical:
         part = attachment.part
         if isinstance(part, ArmSpec):
             kind = ChannelKind.ARM_JOINT
@@ -404,7 +401,7 @@ def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
             kind = ChannelKind.GRIPPER
         elif isinstance(part, MobileBaseSpec):
             kind = ChannelKind.BASE
-        else:  # pragma: no cover - excluded by layout_declared()
+        else:  # pragma: no cover - narrowed above
             raise LayoutError(name, f"unlayoutable part {part!r}")
         coordinates.extend(
             StateCoordinate(

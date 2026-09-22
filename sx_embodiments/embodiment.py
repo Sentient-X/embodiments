@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
@@ -51,15 +52,25 @@ from .errors import (
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import (
+    ActuationBinding,
     ActuatorBinding,
     ActuatorBus,
+    ActuatorFeedback,
     ActuatorModel,
     Bounds,
     CoordinateUnit,
+    DirectDrive,
+    EncoderReadout,
+    IntegratedDrive,
     JointAxis,
     JointLayout,
+    ObservationBinding,
+    Passive,
     StateSpace,
     Unbounded,
+    UndocumentedDrive,
+    Unobserved,
+    VendorReadout,
 )
 from .parts import (
     ArmSpec,
@@ -82,7 +93,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +102,7 @@ class Embodiment:
 
     The component graph is the sole morphology. State order, roles, camera bindings,
     capabilities, and single-arm projections are derived from it. Friendly names are
-    catalog aliases; ``id`` is the digest of the complete schema-13 document.
+    catalog aliases; ``id`` is the digest of the complete schema-14 document.
 
     **Construction is registry-internal.** Outside this package an embodiment is obtained,
     never assembled: ``embodiments[name]`` for a registered revision, ``from_dict``/
@@ -360,6 +371,106 @@ class Embodiment:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EmbodimentMigration:
+    """One verified content-identity edge emitted by an embodiment converter."""
+
+    source_id: EmbodimentId
+    embodiment: Embodiment
+
+    @property
+    def target_id(self) -> EmbodimentId:
+        return self.embodiment.id
+
+
+def convert_v13_to_v14(document: Mapping[str, object]) -> EmbodimentMigration:
+    """Convert one exact schema-13 embodiment without inventing missing access facts.
+
+    A prior actuator proves a direct drive only. Schema 13 never stated how a coordinate
+    was observed, so every converted axis records that absence independently. Missing
+    actuator facts remain undocumented; the converter never guesses feedback, integrated
+    control, or passivity.
+    """
+
+    source = decode.exactly(
+        document,
+        {
+            "id",
+            "schema_version",
+            "name",
+            "label",
+            "kind",
+            "lineage",
+            "components",
+            "rates",
+            "base_mount",
+            "operator_mounts",
+            "assets",
+        },
+        where="schema-13 embodiment",
+        error=EmbodimentSchemaError,
+    )
+    if decode.integer(source, "schema_version") != 13:
+        raise EmbodimentSchemaError("converter requires embodiment schema_version 13")
+    source_id = EmbodimentId(decode.text(source, "id"))
+    source_content = {key: value for key, value in source.items() if key != "id"}
+    try:
+        actual_source_id = content_id(EmbodimentId, cast("JsonObject", source_content))
+    except ValueError as exc:
+        raise EmbodimentSchemaError("schema-13 embodiment is not canonical JSON") from exc
+    if actual_source_id != source_id:
+        raise EmbodimentSchemaError("schema-13 embodiment id does not match its canonical content")
+
+    converted = copy.deepcopy(dict(document))
+    converted["schema_version"] = SCHEMA_VERSION
+    converted_components = cast(list[dict[str, object]], converted["components"])
+    for component_index, component in enumerate(decode.documents(source, "components")):
+        attachment = decode.mapping(component, "attachment")
+        part = decode.mapping(attachment, "part")
+        if "layout" not in part:
+            continue
+        axes = decode.documents(part, "layout")
+        converted_part = cast(
+            dict[str, object],
+            cast(dict[str, object], converted_components[component_index]["attachment"])["part"],
+        )
+        converted_axes = cast(list[dict[str, object]], converted_part["layout"])
+        for axis_index, axis in enumerate(axes):
+            legacy_axis = decode.exactly(axis, {"name", "unit", "bounds", "actuator"})
+            actuator = legacy_axis["actuator"]
+            if actuator is not None:
+                try:
+                    _parse_actuator(
+                        decode.document(
+                            actuator,
+                            where=f"{axis.where}.actuator",
+                            error=EmbodimentSchemaError,
+                        )
+                    )
+                except LayoutError as error:
+                    raise EmbodimentSchemaError(
+                        f"{axis.where}.actuator is invalid: {error}"
+                    ) from error
+            raw_axis = converted_axes[axis_index]
+            raw_axis.pop("actuator")
+            raw_axis["observation"] = {
+                "kind": "unobserved",
+                "reason": "schema 13 did not declare an observation path",
+            }
+            if actuator is None:
+                raw_axis["actuation"] = {
+                    "kind": "undocumented",
+                    "reason": "schema 13 omitted a per-axis actuator binding",
+                }
+            else:
+                raw_axis["actuation"] = {"kind": "direct", "actuator": actuator}
+    content = {key: value for key, value in converted.items() if key != "id"}
+    converted["id"] = str(content_id(EmbodimentId, cast("JsonObject", content)))
+    # Parse now so the converter itself fails on malformed legacy content and emits
+    # one complete old -> new identity edge for persistence owners.
+    return EmbodimentMigration(source_id, Embodiment.from_dict(converted))
+
+
 def _component_to_dict(component: Component) -> dict[str, object]:
     attachment = component.attachment
     if isinstance(attachment, BodyAttachment):
@@ -463,20 +574,47 @@ def _layout_to_dict(layout: JointLayout) -> list[dict[str, object]]:
             }
         else:
             bounds = {"kind": "unbounded"}
-        actuator: dict[str, object] | None = None
-        if axis.actuator is not None:
-            actuator = {
-                "model": axis.actuator.model.value,
-                "bus": axis.actuator.bus.value,
-                "bus_id": axis.actuator.bus_id,
-                "sign": axis.actuator.sign,
-                "zero_offset": axis.actuator.zero_offset,
-                "reduction": axis.actuator.reduction,
-            }
         rows.append(
-            {"name": axis.name, "unit": axis.unit.value, "bounds": bounds, "actuator": actuator}
+            {
+                "name": axis.name,
+                "unit": axis.unit.value,
+                "bounds": bounds,
+                "observation": _observation_to_dict(axis.observation),
+                "actuation": _actuation_to_dict(axis.actuation),
+            }
         )
     return rows
+
+
+def _actuator_to_dict(binding: ActuatorBinding) -> dict[str, object]:
+    return {
+        "model": binding.model.value,
+        "bus": binding.bus.value,
+        "bus_id": binding.bus_id,
+        "sign": binding.sign,
+        "zero_offset": binding.zero_offset,
+        "reduction": binding.reduction,
+    }
+
+
+def _observation_to_dict(value: ObservationBinding) -> dict[str, object]:
+    if isinstance(value, ActuatorFeedback):
+        return {"kind": "actuator_feedback"}
+    if isinstance(value, VendorReadout):
+        return {"kind": "vendor_readout", "interface": value.interface}
+    if isinstance(value, EncoderReadout):
+        return {"kind": "encoder", "sensor": value.sensor}
+    return {"kind": "unobserved", "reason": value.reason}
+
+
+def _actuation_to_dict(value: ActuationBinding) -> dict[str, object]:
+    if isinstance(value, DirectDrive):
+        return {"kind": "direct", "actuator": _actuator_to_dict(value.actuator)}
+    if isinstance(value, IntegratedDrive):
+        return {"kind": "integrated", "controller": value.controller, "group": value.group}
+    if isinstance(value, Passive):
+        return {"kind": "passive", "reason": value.reason}
+    return {"kind": "undocumented", "reason": value.reason}
 
 
 def _parse_components(document: decode.Document) -> tuple[Component, ...]:
@@ -632,7 +770,7 @@ def _parse_part(document: decode.Document) -> Part:
 def _parse_layout(document: decode.Document) -> JointLayout:
     axes: list[JointAxis] = []
     for axis in decode.documents(document, "layout"):
-        entry = decode.exactly(axis, {"name", "unit", "bounds", "actuator"})
+        entry = decode.exactly(axis, {"name", "unit", "bounds", "observation", "actuation"})
         try:
             unit = CoordinateUnit(decode.text(entry, "unit"))
         except ValueError as exc:
@@ -647,15 +785,21 @@ def _parse_layout(document: decode.Document) -> JointLayout:
             bounds = Unbounded()
         else:
             raise EmbodimentSchemaError(f"{bounds_entry.where}.kind is unknown: {bounds_kind!r}")
-        axes.append(JointAxis(decode.text(entry, "name"), unit, bounds, _parse_actuator(entry)))
+        axes.append(
+            JointAxis(
+                decode.text(entry, "name"),
+                unit,
+                bounds,
+                observation=_parse_observation(decode.mapping(entry, "observation")),
+                actuation=_parse_actuation(decode.mapping(entry, "actuation")),
+            )
+        )
     return JointLayout(tuple(axes))
 
 
-def _parse_actuator(entry: decode.Document) -> ActuatorBinding | None:
-    if entry["actuator"] is None:
-        return None
+def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
     binding = decode.exactly(
-        decode.mapping(entry, "actuator"),
+        entry,
         {"model", "bus", "bus_id", "sign", "zero_offset", "reduction"},
     )
     try:
@@ -680,6 +824,40 @@ def _parse_actuator(entry: decode.Document) -> ActuatorBinding | None:
         zero_offset=decode.number(binding, "zero_offset"),
         reduction=decode.number(binding, "reduction"),
     )
+
+
+def _parse_observation(entry: decode.Document) -> ObservationBinding:
+    kind = decode.text(entry, "kind")
+    if kind == "actuator_feedback":
+        decode.exactly(entry, {"kind"})
+        return ActuatorFeedback()
+    if kind == "vendor_readout":
+        value = decode.exactly(entry, {"kind", "interface"})
+        return VendorReadout(decode.text(value, "interface"))
+    if kind == "encoder":
+        value = decode.exactly(entry, {"kind", "sensor"})
+        return EncoderReadout(decode.text(value, "sensor"))
+    if kind == "unobserved":
+        value = decode.exactly(entry, {"kind", "reason"})
+        return Unobserved(decode.text(value, "reason"))
+    raise EmbodimentSchemaError(f"{entry.where}.kind is unknown: {kind!r}")
+
+
+def _parse_actuation(entry: decode.Document) -> ActuationBinding:
+    kind = decode.text(entry, "kind")
+    if kind == "direct":
+        value = decode.exactly(entry, {"kind", "actuator"})
+        return DirectDrive(_parse_actuator(decode.mapping(value, "actuator")))
+    if kind == "integrated":
+        value = decode.exactly(entry, {"kind", "controller", "group"})
+        return IntegratedDrive(decode.text(value, "controller"), decode.text(value, "group"))
+    if kind == "passive":
+        value = decode.exactly(entry, {"kind", "reason"})
+        return Passive(decode.text(value, "reason"))
+    if kind == "undocumented":
+        value = decode.exactly(entry, {"kind", "reason"})
+        return UndocumentedDrive(decode.text(value, "reason"))
+    raise EmbodimentSchemaError(f"{entry.where}.kind is unknown: {kind!r}")
 
 
 def _physical_to_dict(value: PhysicalSpec | None) -> dict[str, float | None] | None:
