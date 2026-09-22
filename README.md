@@ -15,14 +15,53 @@ robot.capabilities  # derived component capabilities
 robot.urdf          # authoritative content-addressed description
 ```
 
-`Embodiment` is one complete immutable hardware revision. There is no public manifest,
-reference, digest, structure, or kinematics wrapper to assemble — and no public way to
-assemble the revision itself. Code that needs hardware facts receives the object: from the
-registry, from `Embodiment.from_dict`/`from_json` for a stored document, or from
-`with_assets` for external-corpus ingest. Registering new hardware is a change to
-`sx_embodiments.known`, so every fact keeps one construction site. Storage and service boundaries that need only identity carry `robot.id`, a
-64-character SHA-256 of the complete canonical object. `embodiments[...]` resolves either a
-friendly registry name or that content ID.
+`Embodiment` is one complete immutable hardware revision. Registry lookup, validated
+assembly, and composition return the same object. Storage boundaries carry `robot.id`;
+code that needs physical facts receives the complete body.
+
+Compose any number of existing bodies by placing named instances. A pair is an ordinary
+composition; parts keep their identity, local coordinates, optics and drive facts.
+
+```python
+from sx_embodiments import PlacedEmbodiment, compose_embodiments, embodiments
+
+robot = compose_embodiments(
+    "workcell",
+    {
+        "left": PlacedEmbodiment(embodiments["so101"], xyz=(-0.3, 0.0, 0.0)),
+        "right": PlacedEmbodiment(embodiments["so101"], xyz=(0.3, 0.0, 0.0)),
+    },
+    label="Workcell",
+)
+```
+
+Component instances and URDF frames are namespaced. `robot.joint_names` resolves the
+unique description joints in native state order. Composition writes its generated URDF
+to the asset cache under its digest. Sharing it with another host requires distributing
+the generated URDF and its dependency assets; a local JSON round-trip does not prove
+Catalog publication or remote asset availability. The assembly grammar also accepts camera
+and force/torque parts; camera optics remain required facts on each sensor part.
+
+Observation and controller semantics are owned by `sx-actions`, which depends on this
+package and derives spaces from the complete object:
+
+```python
+from sx_actions import embodiment_spaces, joint_position, observation_space
+
+observation = observation_space(robot)
+observation.state_shape       # (12,)
+observation.image_shapes      # each named camera's native raster
+observation.cameras           # optics, modality, frame and rate
+commands = joint_position(robot, control_hz=30)
+commands.channels             # exact component, coordinate, unit and bounds
+
+inventory = embodiment_spaces(control_hz=30)
+# Every known definition, including development records, with kind,
+# collection_method (UMI/Ego/Teleop when declared), spaces and blockers.
+```
+
+A declared space does not establish an installed driver or simulator. Runtime support is
+checked by the execution owner against the exact body and requested interface.
 
 Schema v14 stores one topologically ordered component graph plus nominal rates,
 content-addressed assets, and independent per-axis observation and actuation facts. A
@@ -89,3 +128,10 @@ This repository intentionally has no standalone Python behavior workflow. Such a
 resolve the private workspace dependency from this public repository, and a substitute contract
 copy would create a second source of truth. Repository-local review protects this source history;
 the exact `sx` pin-advance workflow is the executable integration gate.
+
+Display previews are separate from hardware identity. `preview_asset(body)` returns a
+content-pinned, transparent WebP for that exact body, or `None` if no preview was published.
+Consumers serve its verified bytes through their own asset endpoint and use the digest for
+caching; they do not infer source-tree paths. Worlds generates these small publications with
+`worlds/sim-envs/scripts/render_embodiment_previews.py` using the arm-practice initial pose.
+The image retains the source assets' publication audience.

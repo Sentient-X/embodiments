@@ -29,3 +29,12 @@ Apache-2.0 like the rest of the repository.
 
 The `assets/` tree ships in wheels as `sx_embodiments/_assets/` and is retained in sdists.
 Consumers resolve the installed or editable tree via `sx_embodiments.assets.asset_root()`.
+
+### Description dependency closure
+
+[`assets/dependency-assets.json`](assets/dependency-assets.json) records the source repository,
+exact revision, source path, license, byte size and SHA-256 for restored UR, Franka, Unitree G1,
+RBY1 and Interbotix ALOHA mesh dependencies. These files retain their upstream bytes. The three
+ALOHA gripper mesh references now point to `official/aloha/meshes/`, sourced from Interbotix;
+they are not MuJoCo Menagerie assets. Collada-to-OBJ conversion happens only in the simulator's
+local cache; the packaged Collada files remain unchanged.

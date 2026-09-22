@@ -276,14 +276,14 @@
     <visual>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -302,14 +302,14 @@
     <visual>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -351,14 +351,14 @@
     <visual>
       <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -389,14 +389,14 @@
     <visual>
       <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -697,14 +697,14 @@
     <visual>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.0685 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_8_gripper_prop.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -723,14 +723,14 @@
     <visual>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="0 0 1.5707963267948966" xyz="-0.063 0 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_9_gripper_bar.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -772,14 +772,14 @@
     <visual>
       <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 -3.141592653589793 1.5707963267948966" xyz="-0.0404 -0.0575 0" />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>
@@ -810,14 +810,14 @@
     <visual>
       <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="interbotix_black" />
     </visual>
     <collision>
       <origin rpy="-1.5707963267948966 3.141592653589793 -1.5707963267948966" xyz="-0.0404 0.0575 0 " />
       <geometry>
-        <mesh filename="package://sx-embodiments/menagerie/aloha/assets/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://sx-embodiments/official/aloha/meshes/vx300s_10_gripper_finger.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
     <inertial>

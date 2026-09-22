@@ -43,3 +43,7 @@ def test_every_directory_on_disk_is_claimed_by_a_declaration() -> None:
     classified = set(asset_audiences())
     on_disk = {entry.name for entry in asset_root().iterdir() if entry.is_dir()}
     assert on_disk - classified == set(), "unclassified asset directories"
+
+
+def test_compound_licenses_keep_entitled_sources_private():
+    assert audience("Apache-2.0 AND LicenseRef-Sentient-Proprietary") is AssetAudience.ENTITLED

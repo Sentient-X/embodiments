@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from enum import StrEnum
@@ -137,7 +138,7 @@ def audience(license_id: str) -> AssetAudience:
     """Classify one declared licence into the audience allowed to receive its bytes."""
     if not license_id.strip():
         raise AssetIntegrityError("asset licence id must not be empty to classify audience")
-    return AssetAudience.ENTITLED if license_id.startswith("LicenseRef-") else AssetAudience.PUBLIC
+    return AssetAudience.ENTITLED if "LicenseRef-" in license_id else AssetAudience.PUBLIC
 
 
 _PACKAGE_URI_PREFIX = "package://sx-embodiments/"
@@ -156,6 +157,8 @@ def resolve_asset(ref: AssetRef) -> Path:
     validate_logical_path(PurePosixPath(relpath))
     root = _local_root()
     resolved = root / relpath if root is not None else None
+    if (resolved is None or not resolved.is_file()) and relpath.startswith("generated/"):
+        resolved = _cache_root() / relpath
     if resolved is None or not resolved.is_file():
         resolved = _fetched(relpath, ref.sha256, ref.byte_size)
     actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
@@ -251,3 +254,70 @@ def packaged_asset(
         provenance=provenance,
         media_type=media_type,
     )
+
+
+def generated_description(urdf: bytes, sources: tuple[ProvenancedAsset, ...]) -> ProvenancedAsset:
+    """Retain a composed URDF under its byte identity, with all source licences."""
+    digest = Sha256Digest(hashlib.sha256(urdf).hexdigest())
+    relpath = f"generated/{digest}/body.urdf"
+    target = _cache_root() / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
+        temporary.write(urdf)
+        temporary_path = Path(temporary.name)
+    temporary_path.replace(target)
+    return ProvenancedAsset(
+        asset=AssetRef(
+            location=_PACKAGE_URI_PREFIX + relpath,
+            content=ContentBlob(digest, len(urdf)),
+            format=AssetFormat.URDF,
+            role=AssetRole.DESCRIPTION,
+            media_type="application/xml",
+            logical_path=PurePosixPath(relpath),
+        ),
+        provenance=AssetProvenance(
+            repository="https://github.com/Sentient-X/embodiments",
+            revision=str(digest),
+            path=relpath,
+            license_id=" AND ".join(sorted({asset.provenance.license_id for asset in sources})),
+            generator="sx_embodiments.compose_embodiments/v1",
+        ),
+    )
+
+
+def description_asset_uri(description: str, reference: str) -> str:
+    """Resolve a description dependency without dropping its source package context.
+
+    Relative paths belong to the description directory. Foreign ROS packages may
+    be beside that description or at the asset root; two matches are ambiguous.
+    Uninstalled foreign packages retain their URI for the runtime to reject.
+    """
+    if not description.startswith(_PACKAGE_URI_PREFIX):
+        raise AssetsUnavailableError("description dependencies need a packaged description")
+    source = PurePosixPath(description.removeprefix(_PACKAGE_URI_PREFIX)).parent
+    if reference.startswith(_PACKAGE_URI_PREFIX):
+        return reference
+    if reference.startswith("package://"):
+        package_path = PurePosixPath(reference.removeprefix("package://"))
+        if package_path.is_absolute() or ".." in package_path.parts or len(package_path.parts) < 2:
+            raise AssetsUnavailableError("invalid package dependency path")
+        root = asset_root().resolve()
+        candidates = {(source / package_path), package_path}
+        present = [path for path in candidates if (root / path).is_file()]
+        if len(present) > 1:
+            raise AssetsUnavailableError(f"ambiguous package dependency: {reference}")
+        return _PACKAGE_URI_PREFIX + str(present[0]) if present else reference
+    if "://" in reference:
+        return reference
+    relative = PurePosixPath(reference)
+    if relative.is_absolute():
+        raise AssetsUnavailableError("description dependencies must not use absolute paths")
+    pieces: list[str] = []
+    for piece in (source / relative).parts:
+        if piece == "..":
+            if not pieces:
+                raise AssetsUnavailableError("description dependency leaves its asset root")
+            pieces.pop()
+        elif piece not in (".", ""):
+            pieces.append(piece)
+    return _PACKAGE_URI_PREFIX + "/".join(pieces)

@@ -376,8 +376,8 @@ def validate_operator_mounts(
     kind: EmbodimentKind,
     mounts: tuple[OperatorMount, ...],
 ) -> None:
-    if mounts and kind is not EmbodimentKind.CAPTURE_RIG:
-        raise CompositionError(name, "only capture rigs may declare operator mounts")
+    # A composed robot may include worn or held input devices. Its overall
+    # category does not erase those devices' physical attachment facts.
     sites = tuple(mount.site for mount in mounts)
     if len(set(sites)) != len(sites):
         raise CompositionError(name, "operator body sites must be unique")

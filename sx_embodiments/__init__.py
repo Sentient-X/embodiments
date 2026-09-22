@@ -1,16 +1,13 @@
 """One content-addressed embodiment object and a friendly-name registry.
 
-The public surface is read-only on purpose. ``embodiments[...]`` hands out complete
-:class:`~sx_embodiments.embodiment.Embodiment` objects; everything else exported here is
-vocabulary for *reading* one — state layout, base mounts, typed errors, asset resolution.
-The materials an embodiment is assembled from (components, attachments, parts, joint
-layouts, lineage, kinds) are not exported, so no caller outside this package can reach the
-arguments ``Embodiment(...)`` requires. Registration is a change to ``sx_embodiments.known``.
+Registry lookup, checked assembly and composition return the same complete Embodiment.
+Parts stay owned by their authoring source; composition namespaces instances and frames.
 """
 
 from .assemble import admit_part, assemble, composable_parts, part_from_dict, part_to_dict
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
+from .composition import PlacedEmbodiment, compose_embodiments
 from .embodiment import Embodiment, EmbodimentMigration, convert_v13_to_v14
 from .errors import (
     AssemblyError,
@@ -27,8 +24,8 @@ from .errors import (
     PartValidationError,
     UnknownEmbodimentError,
 )
-from .identity import EmbodimentId, EmbodimentName
-from .known import development_embodiments, embodiments
+from .identity import EmbodimentId, EmbodimentKind, EmbodimentName
+from .known import development_embodiments, embodiments, preview_asset
 from .layout import (
     ActuationBinding,
     ActuatorBinding,
@@ -52,6 +49,7 @@ from .layout import (
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 
 __all__ = [
+    "preview_asset",
     "ActuationBinding",
     "ActuatorBinding",
     "ActuatorBus",
@@ -73,6 +71,7 @@ __all__ = [
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
+    "EmbodimentKind",
     "EmbodimentMigration",
     "EmbodimentName",
     "EmbodimentSchemaError",
@@ -89,6 +88,7 @@ __all__ = [
     "OperatorSite",
     "PartValidationError",
     "Passive",
+    "PlacedEmbodiment",
     "Unbounded",
     "UndocumentedDrive",
     "UnknownEmbodimentError",
@@ -97,6 +97,7 @@ __all__ = [
     "admit_part",
     "assemble",
     "composable_parts",
+    "compose_embodiments",
     "convert_v13_to_v14",
     "development_embodiments",
     "embodiments",
