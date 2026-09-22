@@ -1,0 +1,1019 @@
+[
+  {
+    "path": "official/aloha/meshes/vx300s_10_gripper_finger.stl",
+    "repository": "https://github.com/Interbotix/interbotix_ros_manipulators",
+    "revision": "0bb2b0e6d0e619bff02cf74dbd5af5681dcf80c9",
+    "source": "interbotix_ros_xsarms/interbotix_xsarm_descriptions/meshes/vx300s_meshes/vx300s_10_gripper_finger.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "a4baacd9a64df1be60ea5e98f50f3c660e1b7a1fe9684aace6004c5058c09483",
+    "byte_size": 42884
+  },
+  {
+    "path": "official/aloha/meshes/vx300s_8_gripper_prop.stl",
+    "repository": "https://github.com/Interbotix/interbotix_ros_manipulators",
+    "revision": "0bb2b0e6d0e619bff02cf74dbd5af5681dcf80c9",
+    "source": "interbotix_ros_xsarms/interbotix_xsarm_descriptions/meshes/vx300s_meshes/vx300s_8_gripper_prop.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "d1275a93fe2157c83dbc095617fb7e672888bdd48ec070a35ef4ab9ebd9755b0",
+    "byte_size": 31684
+  },
+  {
+    "path": "official/aloha/meshes/vx300s_9_gripper_bar.stl",
+    "repository": "https://github.com/Interbotix/interbotix_ros_manipulators",
+    "revision": "0bb2b0e6d0e619bff02cf74dbd5af5681dcf80c9",
+    "source": "interbotix_ros_xsarms/interbotix_xsarm_descriptions/meshes/vx300s_meshes/vx300s_9_gripper_bar.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "a4de62c9a2ed2c78433010e4c05530a1254b1774a7651967f406120c9bf8973e",
+    "byte_size": 379484
+  },
+  {
+    "path": "official/rby1/meshes/EE_FINGER.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/EE_FINGER.dae",
+    "license": "Apache-2.0",
+    "sha256": "90fd1ac816450eeaa6137581fbaf66a7c701f08470988b7978bc2010485ab45e",
+    "byte_size": 73668
+  },
+  {
+    "path": "official/rby1/meshes/EE_GR_TF.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/EE_GR_TF.dae",
+    "license": "Apache-2.0",
+    "sha256": "e0f74498585913bae8c67f01cf80ba5a2391b521427d30da35e04979c30ca1c3",
+    "byte_size": 4558390
+  },
+  {
+    "path": "official/rby1/meshes/LINK_1.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_1.dae",
+    "license": "Apache-2.0",
+    "sha256": "e91b50a5cf1668e7589da0d89753f75b26591dc889daebb7e2ac31ac7ef1a639",
+    "byte_size": 255681
+  },
+  {
+    "path": "official/rby1/meshes/LINK_10.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_10.dae",
+    "license": "Apache-2.0",
+    "sha256": "3c4146313c1a888cad2f66d6a3c41c1637bafd0645a9a6baeda80196df287cd1",
+    "byte_size": 345019
+  },
+  {
+    "path": "official/rby1/meshes/LINK_11_WY.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_11_WY.dae",
+    "license": "Apache-2.0",
+    "sha256": "d6315f2cf60887d5a0aabf3ea1ae6ada2a16bd003a7ce609ef54064f2581f2b5",
+    "byte_size": 6281093
+  },
+  {
+    "path": "official/rby1/meshes/LINK_12_WP.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_12_WP.dae",
+    "license": "Apache-2.0",
+    "sha256": "c69c3376cdb256d15287a063dacb190479dae8acd94a5fbd05943cf3caff399a",
+    "byte_size": 6250117
+  },
+  {
+    "path": "official/rby1/meshes/LINK_13_WR.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_13_WR.dae",
+    "license": "Apache-2.0",
+    "sha256": "eb1b4b764f1189f7628df1d11b72b01f0632c99bfa80d52ab7e2d405ad8fdfe0",
+    "byte_size": 713471
+  },
+  {
+    "path": "official/rby1/meshes/LINK_14.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_14.dae",
+    "license": "Apache-2.0",
+    "sha256": "5e6d8b37f09eb86eb8e4089d6e71e159465abfa45ceab85736d103082f170e05",
+    "byte_size": 303081
+  },
+  {
+    "path": "official/rby1/meshes/LINK_15.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_15.dae",
+    "license": "Apache-2.0",
+    "sha256": "70af1b14b9dd98ba546c89d03c45921e982f792f493e1ee824b4e0c998ceb88b",
+    "byte_size": 127435
+  },
+  {
+    "path": "official/rby1/meshes/LINK_16.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_16.dae",
+    "license": "Apache-2.0",
+    "sha256": "7dac47d6df6c50885ce69b44c21feda32562267c21cafa39270cd700b906497a",
+    "byte_size": 475121
+  },
+  {
+    "path": "official/rby1/meshes/LINK_17.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_17.dae",
+    "license": "Apache-2.0",
+    "sha256": "760c06dd1571f0d77b03e6ed596cd5b020d31052e02335580c7ff3a9c72559c1",
+    "byte_size": 345176
+  },
+  {
+    "path": "official/rby1/meshes/LINK_18_WY.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_18_WY.dae",
+    "license": "Apache-2.0",
+    "sha256": "dfde901e37086385b90c6b8c03c96023f749a6e29269452a36803ac5a0550944",
+    "byte_size": 6677986
+  },
+  {
+    "path": "official/rby1/meshes/LINK_19_WP.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_19_WP.dae",
+    "license": "Apache-2.0",
+    "sha256": "48c99efc301e01f022bc8061078489c3e32f9ab548901ee2971d14c760eb06a6",
+    "byte_size": 6219112
+  },
+  {
+    "path": "official/rby1/meshes/LINK_2.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_2.dae",
+    "license": "Apache-2.0",
+    "sha256": "239fbd125a61a0b7224512ed6a6470108c4b61f8e2cbc940daae2f3ec24101ce",
+    "byte_size": 659725
+  },
+  {
+    "path": "official/rby1/meshes/LINK_20_WR.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_20_WR.dae",
+    "license": "Apache-2.0",
+    "sha256": "22755a4a9f6610fdffeddc7910039b119ddb001cc716c8307ffbfbbde462afed",
+    "byte_size": 1602632
+  },
+  {
+    "path": "official/rby1/meshes/LINK_3.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_3.dae",
+    "license": "Apache-2.0",
+    "sha256": "ce228624baaeb3810646f6c22cabab7fd7308d6de24d364b391f596a6d235cb7",
+    "byte_size": 921919
+  },
+  {
+    "path": "official/rby1/meshes/LINK_4.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_4.dae",
+    "license": "Apache-2.0",
+    "sha256": "5055dca859b5049636eb4f3de4f26f1903baa1454bafb4ded63398ae37df07c0",
+    "byte_size": 305220
+  },
+  {
+    "path": "official/rby1/meshes/LINK_5.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_5.dae",
+    "license": "Apache-2.0",
+    "sha256": "c2d67e29b22cf349c035a3432d99d6df9ced811d259e729ae016485d4be9a399",
+    "byte_size": 246718
+  },
+  {
+    "path": "official/rby1/meshes/LINK_6.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_6.dae",
+    "license": "Apache-2.0",
+    "sha256": "a8f433bed46bff4a43d0a4f0b55e2c66ebc1240c3152935991d756f22d2e33e3",
+    "byte_size": 11779174
+  },
+  {
+    "path": "official/rby1/meshes/LINK_7.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_7.dae",
+    "license": "Apache-2.0",
+    "sha256": "9264f0641abc7347e1f2093540d7303d2127374d3ebca663203a3ce4ef787477",
+    "byte_size": 303087
+  },
+  {
+    "path": "official/rby1/meshes/LINK_8.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_8.dae",
+    "license": "Apache-2.0",
+    "sha256": "b06291fe704300a6103950ea4d4a6a5352a5fd64f75d70678b5ee0c6fa323963",
+    "byte_size": 127233
+  },
+  {
+    "path": "official/rby1/meshes/LINK_9.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/LINK_9.dae",
+    "license": "Apache-2.0",
+    "sha256": "dbc1228a5b60b4cdda928b8ac27ef3cd2a442d90e57ef3f53f7bf215a20c95c4",
+    "byte_size": 476142
+  },
+  {
+    "path": "official/rby1/meshes/MECANUM_WHEEL.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/MECANUM_WHEEL.dae",
+    "license": "Apache-2.0",
+    "sha256": "00bc3cbddf0507609e90212910188106ce2160c8dc4b327af34531c0c795d273",
+    "byte_size": 4584699
+  },
+  {
+    "path": "official/rby1/meshes/MECANUM_WHEEL_M.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/MECANUM_WHEEL_M.dae",
+    "license": "Apache-2.0",
+    "sha256": "c7252bb9e261a1c1ddfd1e74ff5c22c48cbcec46ca773e9e379597fde859efb0",
+    "byte_size": 4601710
+  },
+  {
+    "path": "official/rby1/meshes/NECK_0.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/NECK_0.dae",
+    "license": "Apache-2.0",
+    "sha256": "cadeb20fdbf1416908278c7a4d09981371092a620518efab4b70d6601275b726",
+    "byte_size": 111639
+  },
+  {
+    "path": "official/rby1/meshes/NECK_1.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/NECK_1.dae",
+    "license": "Apache-2.0",
+    "sha256": "fa49f6f3b5fce49c74cb31e4570328adcc716ae7d3574a8c2a3ddfed1e1dce4e",
+    "byte_size": 241119
+  },
+  {
+    "path": "official/rby1/meshes/NECK_2.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/NECK_2.dae",
+    "license": "Apache-2.0",
+    "sha256": "04414e0ea71b12b030a585d7b8d5aa1188a4b05d9fd7f9e8bbdbcdee4ad53f28",
+    "byte_size": 202070
+  },
+  {
+    "path": "official/rby1/meshes/base.dae",
+    "repository": "https://github.com/RainbowRobotics/rby1-sdk",
+    "revision": "38df3267e617d22644f6686e8a7e3c4eac3ce2ee",
+    "source": "models/rby1m/urdf/meshes/base.dae",
+    "license": "Apache-2.0",
+    "sha256": "c173ac3a28da9b0250fc4bb335ede59022f5efeef342ca8b158dbf4fc715bb5d",
+    "byte_size": 1634896
+  },
+  {
+    "path": "official/unitree_g1/meshes/head_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/head_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "005fb67fbd3eff94aa8bf4a6e83238174e9f91b6721f7111594322f223724411",
+    "byte_size": 932784
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_ankle_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_ankle_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "d49e3abc6f5b12e532062cd575b87b5ef40cd2a3fc18f54a1ca5bba4f773d51d",
+    "byte_size": 71184
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_ankle_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_ankle_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "c4092af943141d4d9f74232f3cfa345afc6565f46a077793b8ae0e68b39dc33f",
+    "byte_size": 653384
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_elbow_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_elbow_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "fa752198accd104d5c4c3a01382e45165b944fbbc5acce085059223324e5bed3",
+    "byte_size": 88784
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_hip_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_hip_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "4725168105ee768ee31638ef22b53f6be2d7641bfd7cfefe803488d884776fa4",
+    "byte_size": 181684
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_hip_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_hip_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "91f25922ee8a7c3152790051bebad17b4d9cd243569c38fe340285ff93a97acf",
+    "byte_size": 192184
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_hip_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_hip_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "a16d88aa6ddac8083aa7ad55ed317bea44b1fa003d314fba88965b7ed0f3b55b",
+    "byte_size": 296284
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_knee_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_knee_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "8d92b9e3d3a636761150bb8025e32514c4602b91c7028d523ee42b3e632de477",
+    "byte_size": 854884
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_rubber_hand.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_rubber_hand.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "cff2221a690fa69303f61fce68f2d155c1517b52efb6ca9262dd56e0bc6e70fe",
+    "byte_size": 2287484
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_shoulder_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_shoulder_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "f0d1cfd02fcf0d42f95e678eeca33da3afbcc366ffba5c052847773ec4f31d52",
+    "byte_size": 176784
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_shoulder_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_shoulder_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "fb9df21687773522598dc384f1a2945c7519f11cbc8bd372a49170316d6eee88",
+    "byte_size": 400284
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_shoulder_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_shoulder_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "1aa97e9748e924336567992181f78c7cd0652fd52a4afcca3df6b2ef6f9e712e",
+    "byte_size": 249184
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_wrist_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_wrist_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "b251d8e05047f695d0f536cd78c11973cfa4e78d08cfe82759336cc3471de3a9",
+    "byte_size": 85984
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_wrist_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_wrist_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "edc387c9a0ba8c2237e9b296d32531426fabeb6f53e58df45c76106bca74148c",
+    "byte_size": 356184
+  },
+  {
+    "path": "official/unitree_g1/meshes/left_wrist_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/left_wrist_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "83f8fb3a726bf9613d65dd14f0f447cb918c3c95b3938042a0c9c09749267d3b",
+    "byte_size": 318684
+  },
+  {
+    "path": "official/unitree_g1/meshes/logo_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/logo_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "8571a0a19bc4916fa55f91449f51d5fdefd751000054865a842449429d5f155b",
+    "byte_size": 243384
+  },
+  {
+    "path": "official/unitree_g1/meshes/pelvis.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/pelvis.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "5ba6bbc888e630550140d3c26763f10206da8c8bd30ed886b8ede41c61f57a31",
+    "byte_size": 1060884
+  },
+  {
+    "path": "official/unitree_g1/meshes/pelvis_contour_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/pelvis_contour_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "5cc5c2c7a312329e3feeb2b03d3fc09fc29705bd01864f6767e51be959662420",
+    "byte_size": 1805184
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_ankle_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_ankle_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "15be426539ec1be70246d4d82a168806db64a41301af8b35c197a33348c787a9",
+    "byte_size": 71184
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_ankle_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_ankle_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "4b66222ea56653e627711b56d0a8949b4920da5df091da0ceb343f54e884e3a5",
+    "byte_size": 653784
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_elbow_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_elbow_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "1be925d7aa268bb8fddf5362b9173066890c7d32092c05638608126e59d1e2ab",
+    "byte_size": 88784
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_hip_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_hip_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "e4f3c99d7f4a7d34eadbef9461fc66e3486cb5442db1ec50c86317d459f1a9c6",
+    "byte_size": 181284
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_hip_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_hip_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "4c254ef66a356f492947f360dd931965477b631e3fcc841f91ccc46d945d54f6",
+    "byte_size": 192684
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_hip_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_hip_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "e479c2936ca2057e9eb2f7dff6c189b7419d7b8484dea0b298cbb36a2a6aa668",
+    "byte_size": 296284
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_knee_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_knee_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "63c4008449c9bbe701a6e2b557b7a252e90cf3a5abcf54cee46862b9a69f8ec8",
+    "byte_size": 852284
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_rubber_hand.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_rubber_hand.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "99533b778bca6246144fa511bb9d4e555e075c641f2a0251e04372869cd99d67",
+    "byte_size": 2192684
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_shoulder_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_shoulder_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "24cdb387e0128dfe602770a81c56cdce3a0181d34d039a11d1aaf8819b7b8c02",
+    "byte_size": 176784
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_shoulder_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_shoulder_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "962b97c48f9ce9e8399f45dd9522e0865d19aa9fd299406b2d475a8fc4a53e81",
+    "byte_size": 401884
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_shoulder_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_shoulder_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "a0b76489271da0c72461a344c9ffb0f0c6e64f019ea5014c1624886c442a2fe5",
+    "byte_size": 249984
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_wrist_pitch_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_wrist_pitch_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "d22f8f3b3127f15a63e5be1ee273cd5075786c3142f1c3d9f76cbf43d2a26477",
+    "byte_size": 79584
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_wrist_roll_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_wrist_roll_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "a7ee9212ff5b94d6cb7f52bb1bbf3f352194d5b598acff74f4c77d340c5b344f",
+    "byte_size": 356084
+  },
+  {
+    "path": "official/unitree_g1/meshes/right_wrist_yaw_link.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/right_wrist_yaw_link.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "bc9dece2d12509707e0057ba2e48df8f3d56db0c79410212963a25e8a50f61a6",
+    "byte_size": 341484
+  },
+  {
+    "path": "official/unitree_g1/meshes/torso_link_rev_1_0.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/torso_link_rev_1_0.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "11ddb46f2098efbbd8816b1d65893632d8e78be936376c7cdcd6771899ccc723",
+    "byte_size": 2570584
+  },
+  {
+    "path": "official/unitree_g1/meshes/waist_roll_link_rev_1_0.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/waist_roll_link_rev_1_0.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "b67c347a05abc3e8ddae600d98a082bee273bb39f8e651647708b0a7140a8a97",
+    "byte_size": 85884
+  },
+  {
+    "path": "official/unitree_g1/meshes/waist_yaw_link_rev_1_0.STL",
+    "repository": "https://github.com/unitreerobotics/unitree_ros",
+    "revision": "d96d8f63ae17a7108d4f7229c00ef875ba7129c9",
+    "source": "robots/g1_description/meshes/waist_yaw_link_rev_1_0.STL",
+    "license": "BSD-3-Clause",
+    "sha256": "ec6db442b11f25eed898b5add07940c85d804f300de24dcbd264ccd8be7d554c",
+    "byte_size": 619984
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/base.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/base.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "8a214f3f650e703fa081bd4bd8b1caeb0667598bec22d8b0e572efb97d06e957",
+    "byte_size": 22984
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/forearm.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/forearm.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "7005ed835336ec03ce6a299a356c774bfe2ba989051e37b2a66406173dcb3c96",
+    "byte_size": 67284
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/shoulder.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/shoulder.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "3f7c5f7ee742cf2d57130829be9f20b25625b3513d676ac5e20ca46ae84fd528",
+    "byte_size": 85284
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/upperarm.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/upperarm.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "663a935951c802b1c16ad7478e7ce754b2d48efb828bbe5d3915fb6bb51cd7db",
+    "byte_size": 93784
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/wrist1.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/wrist1.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "1408c3a0a29385fefe30ed44fceca56d2254f51ea93c75c404976816992324cc",
+    "byte_size": 66984
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/wrist2.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/wrist2.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "4b9e74eab991af3dc9d38c3dfaad2c5bc69591fadc855f7966627ba4d0956579",
+    "byte_size": 89184
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/collision/wrist3.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/collision/wrist3.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "7038904dd03dfea56212191ac61d26746b379dbddfd517b905e13c01e1c12e6a",
+    "byte_size": 6984
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/base.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/base.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "28226d95af8c1579a49fe69b62a00d9133a2a05258dad550bb9b583c80dc938f",
+    "byte_size": 370618
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/forearm.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/forearm.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "24d909834c380cceb0490181dae40bcdfcfa4a7fb0c6807d6e58794cdfadcf6e",
+    "byte_size": 1375880
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/shoulder.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/shoulder.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "1c38a6afedfb8f064117da87b60c2dcb9ccd107f957e4c5e0a198f4c2bb63d36",
+    "byte_size": 2344671
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/upperarm.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/upperarm.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "f9d2380d14127440f4a50ed79ab4e7562f86289cd6131016c3d49a3e7483e6ed",
+    "byte_size": 3168984
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/wrist1.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/wrist1.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "643717d042920313dd9daa81511bd9afa66a877625967e6dd8d359ec851b4237",
+    "byte_size": 1241549
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/wrist2.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/wrist2.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "b820e8c8a4488563c7a21fe73bf2fa4038ec9f882dcf9db12e2d1df928253793",
+    "byte_size": 1428002
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur10e/visual/wrist3.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur10e/visual/wrist3.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "52ace7588f131dc43b49ba88d1c83c1f871e6d00659ea84b1f437e2a7f1ab7fe",
+    "byte_size": 71927
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/base.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/base.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "9a145e0d46f2130afdf2a2e8825a00a929870c4c3d6d8e4d1adc5f04db3aac1b",
+    "byte_size": 21084
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/forearm.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/forearm.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "2e7423cab807c34160ec4f770daee5e747d70e777eb01b7beeace2b8c5751816",
+    "byte_size": 53284
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/shoulder.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/shoulder.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "ceb92532177daa77682f5fbd628e01c2137d168f949a7a706ce1dabe9f002387",
+    "byte_size": 70084
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/upperarm.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/upperarm.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "ee893044caf00075cb55b4cf666d1f1311c7979786212a501009f33bee945209",
+    "byte_size": 99684
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/wrist1.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/wrist1.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "f8c9f9337b6fd98c75f052e96de10e14a107ddb6874ba6b904e546f8a4e4f43a",
+    "byte_size": 59584
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/wrist2.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/wrist2.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "2964a63f60ce3e3cf3ad55bcf190d7876d50e373cb64b70a57cea5885eaf3c86",
+    "byte_size": 67584
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/collision/wrist3.stl",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/collision/wrist3.stl",
+    "license": "BSD-3-Clause",
+    "sha256": "83b3666b4ae2badd54af0d2c25a921682ecbc29e849eec646c3ed55fb74c78a3",
+    "byte_size": 7184
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/base.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/base.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "c30e4d7228ef633dca2a02c26df2316741f6642cb6333e8289dba6e6d0b22819",
+    "byte_size": 358056
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/forearm.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/forearm.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "04694bf57dac46e9b8bc7c30f2eec75a1bc762e1f1a879ea30c944f24cacbad8",
+    "byte_size": 1140937
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/shoulder.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/shoulder.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "c581bfa55b86061d9b99d315ed53817b6b693e6a500643bbf9bbb783322d585d",
+    "byte_size": 1797083
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/upperarm.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/upperarm.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "c040a05bb224f14cfab6aa6704d70cbb773ada940eca9a3e34e6ce486c4c4c29",
+    "byte_size": 3082486
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/wrist1.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/wrist1.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "a07a3d96d2540f9be12e4a07bcb8577d9f1e36005920c396a407804343a3b588",
+    "byte_size": 1334663
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/wrist2.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/wrist2.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "982fa42933c6f81629882ad7975e9ba5dac5d474a6b56694e233708376cf840e",
+    "byte_size": 1554839
+  },
+  {
+    "path": "official/universal_robots/ur_description/meshes/ur5e/visual/wrist3.dae",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027",
+    "source": "meshes/ur5e/visual/wrist3.dae",
+    "license": "BSD-3-Clause",
+    "sha256": "7a7664ac4adcd53b0870fe6a2b8b975693d846dd4d07a5f44194c7d16f4890ba",
+    "byte_size": 66077
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/hand.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/hand.stl",
+    "license": "Apache-2.0",
+    "sha256": "94493e94f30fe940f2c8ca2f155c3bbe67bbff406d3edf5e261670d2f0f6e2ed",
+    "byte_size": 10084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link0.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link0.stl",
+    "license": "Apache-2.0",
+    "sha256": "dfc6d94330de8ddb005b311bfdba9f3b8e1aa7c256b71592ee7ff32cb9a9a5aa",
+    "byte_size": 10084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link1.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link1.stl",
+    "license": "Apache-2.0",
+    "sha256": "e41a39a94108fcf56aacff603fc91ec80541f4c1af17b51a0de5617f5566e6d2",
+    "byte_size": 15084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link2.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link2.stl",
+    "license": "Apache-2.0",
+    "sha256": "370f7605a0fae3529db169ded50f52f171024aa792d4d773bc84197301f6a039",
+    "byte_size": 15084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link3.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link3.stl",
+    "license": "Apache-2.0",
+    "sha256": "0a8d638b9349c6c0eefc4e888636ac4838c4b27170f18a51699321118af709c1",
+    "byte_size": 15084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link4.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link4.stl",
+    "license": "Apache-2.0",
+    "sha256": "0180ebb5772ec9840cb049750cffb29a9ddc90311752a16ea34757782ef9e48d",
+    "byte_size": 15084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link5.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link5.stl",
+    "license": "Apache-2.0",
+    "sha256": "dd17e688c7870e722283525879643d53a74c0024d328b0e14b034b54c8b6c31a",
+    "byte_size": 15084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link6.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link6.stl",
+    "license": "Apache-2.0",
+    "sha256": "20b768e99a0e0440b5754dcca108016434e57937cc356acd9c352ccd3cb27f77",
+    "byte_size": 10084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/collision/link7.stl",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/collision/link7.stl",
+    "license": "Apache-2.0",
+    "sha256": "92ac6afcf7574c034d3170d8a68e95ac9048ab9d0dd5bbd8311b86e551b9ab1c",
+    "byte_size": 10084
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/finger.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/finger.dae",
+    "license": "Apache-2.0",
+    "sha256": "caefea762f2d18ca9412cf6c2e64e5007ad03571181d790a8e0c828b1b2035cf",
+    "byte_size": 51239
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/hand.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/hand.dae",
+    "license": "Apache-2.0",
+    "sha256": "fe5d445d509e44a9bd107ff78f0b03c49752c98e5e0a8ebafddf2b6cf5a8b380",
+    "byte_size": 549239
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link0.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link0.dae",
+    "license": "Apache-2.0",
+    "sha256": "050fe608136d11913287eaea6906538ddc9112cdbf7337a3181d9ed03f55f619",
+    "byte_size": 1591592
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link1.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link1.dae",
+    "license": "Apache-2.0",
+    "sha256": "b061af1bcfb57f32719a1ffda44290619549a41b33a37a49bfebe781b20039a4",
+    "byte_size": 978473
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link2.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link2.dae",
+    "license": "Apache-2.0",
+    "sha256": "01ec435e7aee5812eb401489a83bf1717834eb5f21f8f6233e553b2da9be00bb",
+    "byte_size": 998544
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link3.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link3.dae",
+    "license": "Apache-2.0",
+    "sha256": "ce28221fe968ee86787d594222b24d00aa0f47bb64f53eaacbaf6172e81c29b4",
+    "byte_size": 1099883
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link4.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link4.dae",
+    "license": "Apache-2.0",
+    "sha256": "d3a4029d1396471ad78ea5fd06e440167cb46c3ed7ab57befb2bcdbf1360efbf",
+    "byte_size": 1145723
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link5.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link5.dae",
+    "license": "Apache-2.0",
+    "sha256": "07bab2ced87c546bfbc15ce8249038db0e0e582de1607b4243ebd3669dac1f21",
+    "byte_size": 1438343
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link6.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link6.dae",
+    "license": "Apache-2.0",
+    "sha256": "4475cb620e2e7293eb0f317b5f968f6520f703a4e5d4f7b95f75249e4302fd21",
+    "byte_size": 1728753
+  },
+  {
+    "path": "official/franka_panda/franka_description/meshes/visual/link7.dae",
+    "repository": "https://github.com/frankarobotics/franka_ros",
+    "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+    "source": "franka_description/meshes/visual/link7.dae",
+    "license": "Apache-2.0",
+    "sha256": "463227bda9eb9901637107068f59e861fcb81ac89880706d41c26d18c4b46abe",
+    "byte_size": 936416
+  }
+]

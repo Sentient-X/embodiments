@@ -63,6 +63,9 @@ PUBLIC_SURFACE = frozenset(
         "Embodiment",
         "EmbodimentError",
         "EmbodimentId",
+        "EmbodimentKind",
+        "PlacedEmbodiment",
+        "compose_embodiments",
         "EmbodimentMigration",
         "EmbodimentName",
         "EmbodimentSchemaError",
@@ -78,12 +81,13 @@ PUBLIC_SURFACE = frozenset(
         "Unbounded",
         "UnknownEmbodimentError",
         "embodiments",
+        "preview_asset",
         "resolve_asset",
     }
 )
 
 
-def test_public_surface_offers_no_way_to_assemble_an_embodiment() -> None:
+def test_public_surface_exposes_validated_composition_without_raw_construction() -> None:
     exported = frozenset(sx_embodiments.__all__)
     assert exported == PUBLIC_SURFACE
     leaked = {
@@ -102,7 +106,7 @@ def test_public_surface_offers_no_way_to_assemble_an_embodiment() -> None:
     assert required == {"name", "label", "kind", "lineage", "components", "assets"}
     # Three of the six required arguments have no public spelling at all, so the constructor
     # is unreachable from outside without deliberately importing a private module.
-    assert not exported & {"Component", "EmbodimentKind", "Lineage"}
+    assert not exported & {"Component", "Lineage"}
 
 
 def test_physical_coordinates_do_not_disappear_when_assigned_leader_role() -> None:

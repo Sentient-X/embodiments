@@ -21,8 +21,8 @@ ALOHA_MJCF: Final = packaged_asset(
 )
 ALOHA_URDF: Final = packaged_asset(
     relpath="official/aloha/aloha.urdf",
-    sha256="16dc0e1a2c84dac010ae629120afce5621e7201c87966ba2a91ff0e069de09a1",
-    size_bytes=35575,
+    sha256="e463b4f311e97e84a610cd072f74490d359638b64b1f6467b887f8a99a2f1c6c",
+    size_bytes=35559,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

@@ -73,10 +73,10 @@ def test_an_unbound_part_refuses_because_assembled_bodies_are_drivable() -> None
         assemble(definition, urdf=embodiments["so101"].urdf_bytes)
 
 
-def test_only_robots_are_assembled() -> None:
+def test_session_roles_are_not_an_assembly_category() -> None:
     definition = _so101_definition()
     definition["kind"] = "teleop_station"
-    with pytest.raises(AssemblyError, match="assembles robots"):
+    with pytest.raises(AssemblyError, match="leader/follower roles"):
         assemble(definition, urdf=embodiments["so101"].urdf_bytes)
 
 

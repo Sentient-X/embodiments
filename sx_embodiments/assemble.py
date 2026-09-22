@@ -17,7 +17,7 @@ from math import isfinite
 
 from sx_contracts import decode
 
-from .compose import Component, body_component
+from .compose import Component, body_component, sensor_component
 from .embodiment import (
     Embodiment,
     _parse_assets,  # pyright: ignore[reportPrivateUsage]
@@ -33,9 +33,11 @@ from .errors import AssemblyError, EmbodimentSchemaError
 from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
 from .layout import Bounds, UndocumentedDrive
-from .parts import ArmSpec, GripperSpec, JointGroupSpec, MobileBaseSpec
+from .parts import ArmSpec, CameraSpec, ForceTorqueSpec, GripperSpec, JointGroupSpec, MobileBaseSpec
 
-ComposablePart = ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec
+ComposablePart = (
+    ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
+)
 
 _MOVABLE_JOINTS = {"revolute", "prismatic", "continuous"}
 _LIMIT_TOLERANCE = 1e-6
@@ -68,13 +70,13 @@ def composable_parts() -> Mapping[PartId, ComposablePart]:
 
 
 def part_from_dict(document: Mapping[str, object]) -> ComposablePart:
-    """Parse one stored part document through the shared codec, body parts only."""
+    """Parse one stored part document through the shared codec, body and calibrated sensor parts."""
 
     part = _parse_part(decode.document(document, where="part", error=EmbodimentSchemaError))
     if not isinstance(part, ComposablePart):
         raise AssemblyError(
             str(part.part_id),
-            "only body parts are admissible: arm, joint_group, gripper, mobile_base",
+            "admissible parts are arm, joint_group, gripper, mobile_base, camera, force_torque",
         )
     return part
 
@@ -104,7 +106,12 @@ def admit_part(
 
     part = part_from_dict(document)
     subject = str(part.part_id)
-    for axis in part.layout.axes:
+    axes = (
+        part.layout.axes
+        if isinstance(part, (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec))
+        else ()
+    )
+    for axis in axes:
         if isinstance(axis.actuation, UndocumentedDrive):
             raise AssemblyError(
                 subject,
@@ -118,10 +125,10 @@ def admit_part(
     joints = _movable_joints(root)
     _require_joint_agreement(
         subject,
-        tuple((axis.name, axis.bounds) for axis in part.layout.axes),
+        tuple((axis.name, axis.bounds) for axis in axes),
         joints,
     )
-    declared_joints = {axis.name for axis in part.layout.axes}
+    declared_joints = {axis.name for axis in axes}
     if isinstance(part, GripperSpec):
         declared_joints |= {mimic.joint_name for mimic in part.mimic_joints}
     undeclared = sorted(set(joints) - declared_joints)
@@ -217,9 +224,9 @@ def assemble(
     """Mint one embodiment from an untrusted wire definition, or refuse naming the gap.
 
     ``urdf`` is the composed description's exact bytes; the definition's assets must
-    reference it (sha-verified) as the one DESCRIPTION URDF. Every actuated axis of the
-    assembled body must carry a qualified actuator binding — an assembled body is
-    drivable by construction or it is not minted. ``parts`` is the resolvable catalog:
+    reference it (sha-verified) as the one DESCRIPTION URDF. Every native axis must
+    declare direct, integrated or passive actuation.
+    A declaration does not prove runtime driver availability. ``parts`` is the resolvable catalog:
     the production parts by default; the door passes the tenant's admitted parts
     merged over them.
     """
@@ -235,8 +242,10 @@ def assemble(
         kind = EmbodimentKind(decode.text(entry, "kind"))
     except ValueError as exc:
         raise AssemblyError(name, "kind is unknown") from exc
-    if kind is not EmbodimentKind.ROBOT:
-        raise AssemblyError(name, "the door assembles robots; stations stay first-party")
+    if kind is EmbodimentKind.TELEOP_STATION:
+        raise AssemblyError(
+            name, "session leader/follower roles must be bound separately from assembly"
+        )
     if parts is None:
         parts = composable_parts()
     components: list[Component] = []
@@ -250,13 +259,14 @@ def assemble(
                 name,
                 f"part {str(part_id)!r} is not in the composable catalog; known parts: {known}",
             )
-        components.append(
-            body_component(
-                decode.text(attachment, "instance"),
-                part,
-                _parse_component_mount(decode.mapping(attachment, "mount")),
-            )
+        instance = decode.text(attachment, "instance")
+        mount = _parse_component_mount(decode.mapping(attachment, "mount"))
+        component = (
+            sensor_component(instance, part, mount)
+            if isinstance(part, (CameraSpec, ForceTorqueSpec))
+            else body_component(instance, part, mount)
         )
+        components.append(component)
     try:
         embodiment = Embodiment(
             name=EmbodimentName(name),

@@ -104,13 +104,8 @@ class Embodiment:
     capabilities, and single-arm projections are derived from it. Friendly names are
     catalog aliases; ``id`` is the digest of the complete schema-14 document.
 
-    **Construction is registry-internal.** Outside this package an embodiment is obtained,
-    never assembled: ``embodiments[name]`` for a registered revision, ``from_dict``/
-    ``from_json`` for a stored document, ``with_assets`` for external-corpus ingest. The
-    arguments this constructor requires — components, lineage, kind, packaged assets — are
-    not on the public surface (see :mod:`sx_embodiments`), so a new revision is a change to
-    :mod:`sx_embodiments.known`, not a literal at a call site. Hardware facts have one
-    owner; a second construction site is a second source of truth.
+    Constructed through the registry, validated assembly, composition, or the checked
+    document codec. Derived state, camera and capability views share these same facts.
     """
 
     name: EmbodimentName
@@ -213,6 +208,13 @@ class Embodiment:
     @property
     def urdf_bytes(self) -> bytes:
         return self.urdf_path.read_bytes()
+
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        """Unique URDF joint names, in exactly the native state order."""
+        from .description import joint_names
+
+        return joint_names(self.components, self.state, self.urdf_bytes)
 
     @property
     def single_arm(self) -> ArmSpec:

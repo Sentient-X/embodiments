@@ -44,7 +44,7 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
         ),
     ),
     name=EmbodimentName("piperx-station"),
-    label="PiperX single-arm teleop station",
+    label="PiperX leader-follower station",
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="piper", variant="piperx"),
     attachments=(

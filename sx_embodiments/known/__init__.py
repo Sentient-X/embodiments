@@ -8,11 +8,12 @@ from typing import Final
 
 from sx_contracts.assets import AssetIntegrityError
 
-from ..assets import AssetAudience, audience
+from ..assets import AssetAudience, PackagedAsset, audience
 from ..compose import EmbodimentDefinition
 from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
 from ..errors import UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
+from ._previews import PREVIEWS
 from .aloha import ALOHA_SPEC
 from .b601 import B601_DM_SPEC, B601_DM_STATION_SPEC, BIMANUAL_B601_DM_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
@@ -192,4 +193,24 @@ def asset_audiences() -> Mapping[str, AssetAudience]:
                     f"{directory}: declared both {established} and {declared}; "
                     "an asset directory has one audience or it cannot be published"
                 )
+    for preview in PREVIEWS.values():
+        directory = PurePosixPath(preview.relpath).parts[0]
+        declared = audience(preview.provenance.license_id)
+        established = audiences.setdefault(directory, declared)
+        if established is not declared:
+            raise AssetIntegrityError(f"{directory}: preview audience disagrees with its sources")
     return audiences
+
+
+def definitions() -> tuple[EmbodimentDefinition, ...]:
+    """All known hardware, including incomplete revisions; never a hand-picked subset."""
+    return (*_ALL_SPECS, *(entry.spec for entry in DEVELOPMENT_EMBODIMENTS.values()))
+
+
+def preview_asset(embodiment: Embodiment) -> PackagedAsset | None:
+    """Pinned display asset for this exact body; absent for unrendered compositions.
+
+    Display assets are derived publications, separate from hardware identity.
+    Consumers receive verified bytes through PackagedAsset.path, not URDF internals.
+    """
+    return PREVIEWS.get(embodiment.id)
