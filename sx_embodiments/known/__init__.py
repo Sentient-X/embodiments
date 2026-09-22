@@ -25,6 +25,7 @@ from .piper import PIPER_SPEC
 from .rby1 import RBY1_SPEC
 from .sentient_rwh import SENTIENT_RWH_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
+from .stararm102 import STARARM102_SPEC
 from .stations import PIPERX_STATION_SPEC
 from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
@@ -42,6 +43,7 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
     SO101_SPEC,
+    STARARM102_SPEC,
     BIMANUAL_SO101_SPEC,
     QUEST_EGO_SPEC,
     B601_DM_SPEC,
