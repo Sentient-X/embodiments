@@ -140,7 +140,7 @@ from ..compose import (
     leader_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import CoordinateUnit
+from ..layout import CoordinateUnit, IntegratedDrive, UndocumentedDrive, Unobserved, VendorReadout
 from ..parts import (
     ArmSpec,
     DeviceSpec,
@@ -210,6 +210,8 @@ B601_ARM: Final = ArmSpec(
         units=(CoordinateUnit.RADIAN,) * 6,
         lower=(-2.8, -3.14, -3.14, -1.87, -1.57, -3.14),
         upper=(2.8, 0.0, 0.0, 1.57, 1.57, 3.14),
+        observations=(VendorReadout("rebot_b601_dm_can"),) * 6,
+        actuations=(IntegratedDrive("rebot_b601_dm_controller", "arm"),) * 6,
     ),
     home=(0.0,) * 6,  # the driver's calibrated zero pose, inside every URDF limit
     # physical: no manufacturer datasheet captured, so payload/reach/mass stay unstated
@@ -222,6 +224,10 @@ B601_GRIPPER: Final = GripperSpec(
         units=(CoordinateUnit.METER,),
         lower=(0.0,),
         upper=(0.0715,),
+        observations=(
+            Unobserved("Damiao motor angle has no measured conversion to finger travel"),
+        ),
+        actuations=(UndocumentedDrive("motor-to-finger transmission has not been measured"),),
     ),
     travel_m=(0.0, 0.143),  # parallel jaw: aperture = 2 x finger stroke (0.0715 m each)
     mimic_joints=(MimicJoint("gripper_joint2", of="gripper_joint1", multiplier=1.0),),

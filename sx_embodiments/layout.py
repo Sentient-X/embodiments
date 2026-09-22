@@ -100,21 +100,149 @@ class ActuatorBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class JointAxis:
-    """One joint coordinate; name, unit, bounds, and actuation cannot drift apart.
+class ActuatorFeedback:
+    """The coordinate is read from the same qualified actuator that drives it."""
 
-    ``actuator`` is a truthful optional fact: an axis of an integrated vendor arm is
-    driven behind the vendor's own controller and carries no per-axis bus binding.
+
+@dataclass(frozen=True, slots=True)
+class VendorReadout:
+    """A vendor interface reports this physical coordinate."""
+
+    interface: str
+
+    def __post_init__(self) -> None:
+        if not self.interface.strip():
+            raise LayoutError("observation", "vendor readout interface must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class EncoderReadout:
+    """A named encoder reports this physical coordinate."""
+
+    sensor: str
+
+    def __post_init__(self) -> None:
+        if not self.sensor.strip():
+            raise LayoutError("observation", "encoder sensor must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class Unobserved:
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise LayoutError("observation", "unobserved reason must not be empty")
+
+
+ObservationBinding = ActuatorFeedback | VendorReadout | EncoderReadout | Unobserved
+
+
+@dataclass(frozen=True, slots=True)
+class DirectDrive:
+    """A qualified product directly drives this axis."""
+
+    actuator: ActuatorBinding
+
+
+@dataclass(frozen=True, slots=True)
+class IntegratedDrive:
+    """A vendor controller drives the named group without a per-axis bus binding."""
+
+    controller: str
+    group: str
+
+    def __post_init__(self) -> None:
+        if not self.controller.strip() or not self.group.strip():
+            raise LayoutError(
+                "actuation", "integrated drive controller and group must not be empty"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class Passive:
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise LayoutError("actuation", "passive reason must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class UndocumentedDrive:
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise LayoutError("actuation", "undocumented drive reason must not be empty")
+
+
+ActuationBinding = DirectDrive | IntegratedDrive | Passive | UndocumentedDrive
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class JointAxis:
+    """One physical coordinate, independent of how a session uses it.
+
+    The optional positional ``actuator`` argument is retained only as an authoring
+    convenience and normalizes to an explicit direct drive. Observation is an
+    independent fact: a motor binding does not prove that its state is readable.
     """
 
     name: str
     unit: CoordinateUnit
     bounds: CoordinateBounds
-    actuator: ActuatorBinding | None = None
+    observation: ObservationBinding
+    actuation: ActuationBinding
+
+    def __init__(
+        self,
+        name: str,
+        unit: CoordinateUnit,
+        bounds: CoordinateBounds,
+        actuator: ActuatorBinding | None = None,
+        *,
+        observation: ObservationBinding | None = None,
+        actuation: ActuationBinding | None = None,
+    ) -> None:
+        if actuator is not None and actuation is not None:
+            raise LayoutError("joint", "declare actuator or actuation, not both")
+        resolved_actuation: ActuationBinding = (
+            DirectDrive(actuator)
+            if actuator is not None
+            else actuation
+            if actuation is not None
+            else UndocumentedDrive("drive facts are not documented")
+        )
+        resolved_observation: ObservationBinding = (
+            observation
+            if observation is not None
+            else Unobserved("observation facts are not documented")
+        )
+        if isinstance(resolved_observation, ActuatorFeedback) and not isinstance(
+            resolved_actuation, DirectDrive
+        ):
+            raise LayoutError(
+                "joint", "actuator feedback requires a direct qualified actuator drive"
+            )
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "unit", unit)
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(self, "observation", resolved_observation)
+        object.__setattr__(self, "actuation", resolved_actuation)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise LayoutError("joint", "axis name must not be empty")
+
+    @property
+    def actuator(self) -> ActuatorBinding | None:
+        """Qualified direct actuator, or none for every other explicit drive relation."""
+
+        if isinstance(self.actuation, DirectDrive):
+            return self.actuation.actuator
+        return None
 
 
 @dataclass(frozen=True, slots=True)

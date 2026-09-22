@@ -26,7 +26,7 @@ from ..compose import (
 )
 from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import CoordinateUnit
+from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..parts import GripperSpec, MimicJoint
 from ._authoring import bounded_layout
 from .sources import capture_source
@@ -163,6 +163,8 @@ YUBI_JAW: Final = GripperSpec(
         units=(CoordinateUnit.RADIAN,),
         lower=(0.0,),
         upper=(0.785398,),
+        observations=(EncoderReadout("as5601_usb_serial"),),
+        actuations=(Passive("handheld jaw has no commanded actuation path"),),
     ),
     travel_m=(0.0, 0.100083349),
     mimic_joints=(

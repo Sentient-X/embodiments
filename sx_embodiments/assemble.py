@@ -32,7 +32,7 @@ from .embodiment import (
 from .errors import AssemblyError, EmbodimentSchemaError
 from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
-from .layout import Bounds
+from .layout import Bounds, UndocumentedDrive
 from .parts import ArmSpec, GripperSpec, JointGroupSpec, MobileBaseSpec
 
 ComposablePart = ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec
@@ -90,8 +90,8 @@ def admit_part(
 ) -> ComposablePart:
     """Admit one customer part, or refuse naming exactly what the author must fix.
 
-    The part document is parsed by the shared codec; every actuated axis must carry a
-    qualified actuator binding (drivable by construction — the motor restriction);
+    The part document is parsed by the shared codec; every axis must explicitly state
+    its drive relation, which may be direct, integrated, or passive but not undocumented;
     and the part's own description fragment must agree with the declared facts: every
     declared joint movable with matching limits, no *undeclared* movable joint (a
     hidden degree of freedom is absent from the composed body's state vector), every
@@ -105,11 +105,11 @@ def admit_part(
     part = part_from_dict(document)
     subject = str(part.part_id)
     for axis in part.layout.axes:
-        if axis.actuator is None:
+        if isinstance(axis.actuation, UndocumentedDrive):
             raise AssemblyError(
                 subject,
-                f"axis {axis.name!r} carries no actuator binding; an admitted part is"
-                " drivable by construction",
+                f"axis {axis.name!r} has undocumented drive facts; declare direct,"
+                " integrated, or passive actuation",
             )
     try:
         root = ET.fromstring(urdf)
@@ -272,7 +272,7 @@ def assemble(
         raise
     except ValueError as exc:
         raise EmbodimentSchemaError(f"invalid definition: {exc}") from exc
-    _require_complete_actuation(embodiment)
+    _require_declared_actuation(embodiment)
     _validate_urdf(
         embodiment.name,
         tuple(asset.asset for asset in embodiment.assets),
@@ -284,13 +284,13 @@ def assemble(
     return embodiment
 
 
-def _require_complete_actuation(embodiment: Embodiment) -> None:
+def _require_declared_actuation(embodiment: Embodiment) -> None:
     for coordinate in embodiment.state.coordinates:
-        if coordinate.axis.actuator is None:
+        if isinstance(coordinate.axis.actuation, UndocumentedDrive):
             raise AssemblyError(
                 str(embodiment.name),
-                f"axis {coordinate.instance}/{coordinate.joint_name} carries no actuator"
-                " binding; an assembled body is drivable by construction",
+                f"axis {coordinate.instance}/{coordinate.joint_name} has undocumented drive"
+                " facts; declare direct, integrated, or passive actuation",
             )
 
 

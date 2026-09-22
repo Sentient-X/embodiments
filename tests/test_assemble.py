@@ -69,7 +69,7 @@ def test_an_unbound_part_refuses_because_assembled_bodies_are_drivable() -> None
     attachments = definition["attachments"]
     assert isinstance(attachments, list)
     attachments[0]["part_id"] = "panda-arm"
-    with pytest.raises(AssemblyError, match="carries no actuator binding"):
+    with pytest.raises(AssemblyError, match="undocumented drive facts"):
         assemble(definition, urdf=embodiments["so101"].urdf_bytes)
 
 
@@ -161,8 +161,15 @@ def test_admission_refuses_an_unbound_axis() -> None:
     from sx_embodiments import admit_part
 
     document = _hand_document()
-    document["layout"][0]["actuator"] = None
-    with pytest.raises(AssemblyError, match="carries no actuator binding"):
+    document["layout"][0]["actuation"] = {
+        "kind": "undocumented",
+        "reason": "vendor facts missing",
+    }
+    document["layout"][0]["observation"] = {
+        "kind": "unobserved",
+        "reason": "vendor facts missing",
+    }
+    with pytest.raises(AssemblyError, match="undocumented drive facts"):
         admit_part(document, urdf=_HAND_URDF, mesh_paths=frozenset({"acme/finger.stl"}))
 
 
