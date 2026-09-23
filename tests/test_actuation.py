@@ -24,7 +24,14 @@ from sx_embodiments import (
     embodiments,
 )
 from sx_embodiments.identity import EmbodimentId
-from sx_embodiments.layout import Bounds, CoordinateUnit, JointAxis, JointLayout
+from sx_embodiments.layout import (
+    UNDOCUMENTED_DRIVE_REASON,
+    UNDOCUMENTED_OBSERVATION_REASON,
+    Bounds,
+    CoordinateUnit,
+    JointAxis,
+    JointLayout,
+)
 
 
 def _sts(bus_id: int) -> ActuatorBinding:
@@ -283,3 +290,41 @@ def test_schema_13_converter_wraps_semantically_invalid_actuator_as_schema_error
         convert_v13_to_v14(legacy)
 
     assert isinstance(caught.value.__cause__, LayoutError)
+
+
+def _schema_13(current: dict[str, object], *, keep_actuators: bool) -> dict[str, object]:
+    legacy = copy.deepcopy(current)
+    legacy["schema_version"] = 13
+    components = legacy["components"]
+    assert isinstance(components, list)
+    for component in components:
+        for axis in component["attachment"]["part"].get("layout", []):
+            actuation = axis.pop("actuation")
+            axis.pop("observation")
+            axis["actuator"] = actuation.get("actuator") if keep_actuators else None
+    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
+    return legacy
+
+
+def test_schema_13_unactuated_body_converts_to_the_body_authored_today() -> None:
+    """A schema-13 axis with no actuator is the absence today's layout records by default.
+
+    Recorded history and catalog rows minted at schema 13 stay readable only if the
+    converter says that absence in the same words: otherwise the converted body is a
+    different identity from the registry's, and v14 validation refuses its actions.
+    """
+    body = embodiments["piper"]
+    assert all(
+        isinstance(item.axis.actuation, UndocumentedDrive)
+        and item.axis.actuation.reason == UNDOCUMENTED_DRIVE_REASON
+        and isinstance(item.axis.observation, Unobserved)
+        and item.axis.observation.reason == UNDOCUMENTED_OBSERVATION_REASON
+        for item in body.state.coordinates
+    ), "the fixture must be a body with no documented drive or observation facts"
+    legacy = _schema_13(body.to_dict(), keep_actuators=False)
+
+    migration = convert_v13_to_v14(legacy)
+
+    assert str(migration.source_id) == legacy["id"]
+    assert migration.embodiment.id == body.id
+    assert migration.embodiment.to_dict() == body.to_dict()
