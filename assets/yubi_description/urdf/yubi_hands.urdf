@@ -246,12 +246,6 @@
     <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
     <mimic joint="left_left_finger" multiplier="1" offset="0" />
   </joint>
-  <link name="left_controller_holder" />
-  <joint name="left_controller_holder_frame" type="fixed">
-    <origin xyz="-0.038000038116582681 0.0074997656908985322 0.013999894092481618" rpy="-4.0314486803392608e-08 8.9708139361377448e-07 4.607911508865901e-07" />
-    <parent link="left_base_link" />
-    <child link="left_controller_holder" />
-  </joint>
   <link name="quest_left_controller" />
   <joint name="left_controller_tracking_frame" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 -1.5707963267948966" />
@@ -501,12 +495,6 @@
     <axis xyz="0 0 1" />
     <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
     <mimic joint="right_left_finger" multiplier="1" offset="0" />
-  </joint>
-  <link name="right_controller_holder" />
-  <joint name="right_controller_holder_frame" type="fixed">
-    <origin xyz="-0.037999977854557943 -0.0075000000003000063 0.01399997281189156" rpy="4.5777735220020544e-16 -7.4800567295696396e-08 8.0718499414803019e-17" />
-    <parent link="right_base_link" />
-    <child link="right_controller_holder" />
   </joint>
   <link name="quest_right_controller" />
   <joint name="right_controller_tracking_frame" type="fixed">
