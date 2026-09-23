@@ -244,4 +244,10 @@
     <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
     <mimic joint="left_finger" multiplier="1" offset="0" />
   </joint>
+  <link name="controller_holder" />
+  <joint name="controller_holder_frame" type="fixed">
+    <origin xyz="-0.038000038116582681 0.0074997656908985322 0.013999894092481618" rpy="-4.0314486803392608e-08 8.9708139361377448e-07 4.607911508865901e-07" />
+    <parent link="base_link" />
+    <child link="controller_holder" />
+  </joint>
 </robot>

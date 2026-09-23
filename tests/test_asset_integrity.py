@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import runpy
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -66,6 +67,25 @@ PINNED: tuple[PackagedAsset, ...] = (
     FFW_BG2_URDF,
     SENTIENT_RWH_URDF,
 )
+
+
+def test_yubi_holder_frames_are_fixed_leaves_and_composition_is_current() -> None:
+    root = Path(__file__).resolve().parents[1]
+    render = runpy.run_path(str(root / "tools/compose_yubi_urdf.py"))["render"]
+    assert render() == YUBI_HANDS_URDF.path().read_bytes()
+    combined = ET.parse(YUBI_HANDS_URDF.path()).getroot()
+    for side in ("left", "right"):
+        source = ET.parse(
+            root / f"assets/yubi_description/source/yubi_{side}_gripper.urdf"
+        ).getroot()
+        original = source.find("joint[@name='controller_holder_frame']")
+        joint = combined.find(f"joint[@name='{side}_controller_holder_frame']")
+        assert original is not None and joint is not None
+        assert joint.attrib["type"] == "fixed"
+        assert joint.find("origin").attrib == original.find("origin").attrib
+        assert joint.find("parent").attrib["link"] == f"{side}_base_link"
+        assert joint.find("child").attrib["link"] == f"{side}_controller_holder"
+        assert not combined.findall(f"joint/parent[@link='{side}_controller_holder']")
 
 
 @pytest.mark.parametrize("asset", (*PINNED, *YUBI_MESHES), ids=lambda a: a.relpath)
