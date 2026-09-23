@@ -46,6 +46,27 @@ def test_so101_spec_matches_urdf() -> None:
     assert (lower, upper) == (SO101_JAW.joint_lower[0], SO101_JAW.joint_upper[0])
 
 
+def test_stararm102_spec_matches_pinned_manufacturer_kinematics() -> None:
+    body = embodiments["stararm102-ld"]
+    joints = _movable_joints(body.urdf_path)
+    assert tuple(c.joint_name for c in body.state.coordinates) == (
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "joint7_left",
+    )
+    for coordinate in body.state.coordinates:
+        lo, hi, _ = joints[coordinate.joint_name]
+        assert coordinate.lower == lo
+        assert coordinate.upper == hi
+    mimic = joints["joint7_right"][2].find("mimic")
+    assert mimic is not None and mimic.get("joint") == "joint7_left"
+    assert mimic.get("multiplier") == "-1"
+
+
 def test_b601_spec_matches_urdf_and_records_the_driver_divergence() -> None:
     """The B601-DM channels ARE the vendored URDF's movable joints (the Piper precedent).
 
