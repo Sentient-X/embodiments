@@ -23,6 +23,7 @@ from .humanoid import SENTIENT_HUMANOID_SPEC
 from .insta360 import INSTA360_UMI_SPEC
 from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
+from .piper_umi import PIPER_UMI_SPEC
 from .rby1 import RBY1_SPEC
 from .sentient_rwh import SENTIENT_RWH_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
@@ -70,6 +71,10 @@ class DevelopmentEmbodiment:
 
 
 DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] = {
+    PIPER_UMI_SPEC.name: DevelopmentEmbodiment(
+        spec=PIPER_UMI_SPEC,
+        reason=DevelopmentReason.MISSING_CAMERA_CALIBRATION,
+    ),
     INSTA360_UMI_SPEC.name: DevelopmentEmbodiment(
         spec=INSTA360_UMI_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,

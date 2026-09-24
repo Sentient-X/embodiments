@@ -10,6 +10,13 @@ from .errors import LayoutError
 from .identity import PartId
 
 
+#: What an axis records when nothing documents how it is driven or observed. The
+#: schema-13 converter records the same absence with the same words, so a body
+#: authored today and the same body carried from schema 13 are one identity.
+UNDOCUMENTED_DRIVE_REASON = "drive facts are not documented"
+UNDOCUMENTED_OBSERVATION_REASON = "observation facts are not documented"
+
+
 class ChannelKind(StrEnum):
     ARM_JOINT = "arm_joint"
     BODY_JOINT = "body_joint"
@@ -212,12 +219,10 @@ class JointAxis:
             if actuator is not None
             else actuation
             if actuation is not None
-            else UndocumentedDrive("drive facts are not documented")
+            else UndocumentedDrive(UNDOCUMENTED_DRIVE_REASON)
         )
         resolved_observation: ObservationBinding = (
-            observation
-            if observation is not None
-            else Unobserved("observation facts are not documented")
+            observation if observation is not None else Unobserved(UNDOCUMENTED_OBSERVATION_REASON)
         )
         if isinstance(resolved_observation, ActuatorFeedback) and not isinstance(
             resolved_actuation, DirectDrive

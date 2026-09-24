@@ -52,6 +52,8 @@ from .errors import (
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import (
+    UNDOCUMENTED_DRIVE_REASON,
+    UNDOCUMENTED_OBSERVATION_REASON,
     ActuationBinding,
     ActuatorBinding,
     ActuatorBus,
@@ -391,7 +393,8 @@ def convert_v13_to_v14(document: Mapping[str, object]) -> EmbodimentMigration:
     A prior actuator proves a direct drive only. Schema 13 never stated how a coordinate
     was observed, so every converted axis records that absence independently. Missing
     actuator facts remain undocumented; the converter never guesses feedback, integrated
-    control, or passivity.
+    control, or passivity. Both absences are recorded in the words an axis authored
+    today carries for the same absence, so conversion re-mints nothing it did not change.
     """
 
     source = decode.exactly(
@@ -457,12 +460,12 @@ def convert_v13_to_v14(document: Mapping[str, object]) -> EmbodimentMigration:
             raw_axis.pop("actuator")
             raw_axis["observation"] = {
                 "kind": "unobserved",
-                "reason": "schema 13 did not declare an observation path",
+                "reason": UNDOCUMENTED_OBSERVATION_REASON,
             }
             if actuator is None:
                 raw_axis["actuation"] = {
                     "kind": "undocumented",
-                    "reason": "schema 13 omitted a per-axis actuator binding",
+                    "reason": UNDOCUMENTED_DRIVE_REASON,
                 }
             else:
                 raw_axis["actuation"] = {"kind": "direct", "actuator": actuator}
