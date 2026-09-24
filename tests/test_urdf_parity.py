@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from math import radians
 from pathlib import Path
 
-from sx_embodiments import embodiments, resolve_asset
+from sx_embodiments import development_embodiments, embodiments, resolve_asset
 from sx_embodiments.known.b601 import B601_ARM, B601_DM_URDF, B601_GRIPPER
 from sx_embodiments.known.das import DAS_JAW_V4
 from sx_embodiments.known.humanoid import (
@@ -44,6 +44,27 @@ def test_so101_spec_matches_urdf() -> None:
         assert (lower, upper) == (SO101_ARM.joint_lower[i], SO101_ARM.joint_upper[i])
     lower, upper, _ = joints[SO101_JAW.joint_names[0]]
     assert (lower, upper) == (SO101_JAW.joint_lower[0], SO101_JAW.joint_upper[0])
+
+
+def test_stararm102_development_spec_matches_generic_upstream_urdf() -> None:
+    body = development_embodiments["stararm102-ld"]
+    joints = _movable_joints(body.urdf_path)
+    assert tuple(c.joint_name for c in body.state.coordinates) == (
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "joint7_left",
+    )
+    for coordinate in body.state.coordinates:
+        lo, hi, _ = joints[coordinate.joint_name]
+        assert coordinate.lower == lo
+        assert coordinate.upper == hi
+    mimic = joints["joint7_right"][2].find("mimic")
+    assert mimic is not None and mimic.get("joint") == "joint7_left"
+    assert mimic.get("multiplier") == "-1"
 
 
 def test_b601_spec_matches_urdf_and_records_the_driver_divergence() -> None:

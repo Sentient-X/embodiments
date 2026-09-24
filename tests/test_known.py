@@ -105,3 +105,12 @@ def test_yubi_embodiment_has_only_yubi_description_assets_and_parts() -> None:
     assert all(
         str(asset.asset.logical_path).startswith("yubi_description/") for asset in yubi.assets
     )
+
+
+def test_stararm102_requires_authoritative_ld_geometry_before_promotion() -> None:
+    entry = DEVELOPMENT_EMBODIMENTS["stararm102-ld"]
+    assert entry.reason is DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION
+    assert "stararm102-ld" not in set(embodiments)
+    body = development_embodiments["stararm102-ld"]
+    assert body.state.width == 7
+    assert Embodiment.from_json(body.to_json()) == body
