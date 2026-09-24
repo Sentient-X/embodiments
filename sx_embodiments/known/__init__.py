@@ -45,7 +45,6 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
     SO101_SPEC,
-    STARARM102_SPEC,
     BIMANUAL_SO101_SPEC,
     QUEST_EGO_SPEC,
     B601_DM_SPEC,
@@ -71,6 +70,10 @@ class DevelopmentEmbodiment:
 
 
 DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] = {
+    STARARM102_SPEC.name: DevelopmentEmbodiment(
+        spec=STARARM102_SPEC,
+        reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
+    ),
     PIPER_UMI_SPEC.name: DevelopmentEmbodiment(
         spec=PIPER_UMI_SPEC,
         reason=DevelopmentReason.MISSING_CAMERA_CALIBRATION,

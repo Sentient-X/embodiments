@@ -19,6 +19,7 @@ from sx_embodiments import (
     Passive,
     UndocumentedDrive,
     Unobserved,
+    VendorReadout,
     convert_v13_to_v14,
     development_embodiments,
     embodiments,
@@ -328,3 +329,17 @@ def test_schema_13_unactuated_body_converts_to_the_body_authored_today() -> None
     assert str(migration.source_id) == legacy["id"]
     assert migration.embodiment.id == body.id
     assert migration.embodiment.to_dict() == body.to_dict()
+
+
+def test_stararm102_readout_does_not_claim_qualified_actuation() -> None:
+    body = development_embodiments["stararm102-ld"]
+    restored = Embodiment.from_json(body.to_json())
+    for candidate in (body, restored):
+        for address, coordinate in enumerate(candidate.state.coordinates):
+            axis = coordinate.axis
+            assert axis.observation == VendorReadout(
+                f"fashionstar.uart.servo_monitor[{address}].angle_monitor"
+            )
+            assert isinstance(axis.actuation, UndocumentedDrive)
+            assert "LD SDK unlocks" in axis.actuation.reason
+            assert axis.actuator is None
