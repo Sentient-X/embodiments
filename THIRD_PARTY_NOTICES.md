@@ -5,6 +5,7 @@ Apache-2.0 like the rest of the repository.
 
 | Tree | Origin | License |
 |------|--------|---------|
+| `assets/piper_umi_description/` | Operator-supplied left/right URDFs and meshes; namespaced by `tools/compose_piper_umi_urdf.py`. Declared repository references identify the packaged bundle in this repository, not the upstream CAD source. Original left/right CAD URLs remain unspecified. | `LicenseRef-Sentient-Proprietary`, as instructed by the supplying operator; not a public redistribution grant |
 | `assets/das_gripper_with_vr/` | First-party (Sentient-X DAS/UMI handheld capture gripper, V4, with VR tracking anchors). Moved from the data-pipeline repo (`urdf/DAS_Gripper_with_VR/`). | Apache-2.0 |
 | `assets/menagerie/agilex_piper/` | [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie), Agilex Piper model, upstream commit pinned in `assets/menagerie/menagerie.commit`. | MIT (RosenYin, 2024) — `LICENSE` in-dir |
 | `assets/menagerie/aloha/` | MuJoCo Menagerie, ALOHA 2 model, same upstream pin. | BSD-3-Clause — `LICENSE` in-dir |
