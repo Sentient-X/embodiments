@@ -47,9 +47,9 @@ from .layout import (
     VendorReadout,
 )
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
+from .recorded import RecordedEmbodiment, historical_identities, read_recorded
 
 __all__ = [
-    "preview_asset",
     "ActuationBinding",
     "ActuatorBinding",
     "ActuatorBus",
@@ -89,6 +89,7 @@ __all__ = [
     "PartValidationError",
     "Passive",
     "PlacedEmbodiment",
+    "RecordedEmbodiment",
     "Unbounded",
     "UndocumentedDrive",
     "UnknownEmbodimentError",
@@ -101,7 +102,10 @@ __all__ = [
     "convert_v13_to_v14",
     "development_embodiments",
     "embodiments",
+    "historical_identities",
     "part_from_dict",
     "part_to_dict",
+    "preview_asset",
+    "read_recorded",
     "resolve_asset",
 ]
