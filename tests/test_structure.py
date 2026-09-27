@@ -46,6 +46,12 @@ PUBLIC_SURFACE = frozenset(
         "assemble",
         "composable_parts",
         "convert_v13_to_v14",
+        # A recording's embodiment and the identity it was recorded under, with the
+        # canonical identities earlier schemas published. Widened 2026-09 for the pod
+        # delivery validator and the Catalog recording reader (its first consumers).
+        "RecordedEmbodiment",
+        "historical_identities",
+        "read_recorded",
         "part_from_dict",
         "part_to_dict",
         "AssetDigestMismatchError",

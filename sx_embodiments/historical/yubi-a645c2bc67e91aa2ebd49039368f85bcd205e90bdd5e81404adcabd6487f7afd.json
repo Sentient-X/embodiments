@@ -1,0 +1,462 @@
+{
+  "assets": [
+    {
+      "asset": {
+        "content": {
+          "sha256": "dc12644756e03db1efc70cfcbd14a2adca53b5645ce79344d67c5b11250a62bb",
+          "size_bytes": 22504
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/yubi_description/urdf/yubi_hands.urdf",
+        "logical_path": "yubi_description/urdf/yubi_hands.urdf",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": "tools/compose_yubi_urdf.py",
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "assets/yubi_description/urdf/yubi_hands.urdf",
+        "repository": "https://github.com/Sentient-X/embodiments",
+        "revision": "yubi-description7-6ff03008-8afd1ffe"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "685276b224b90ed2e7b1b7697c0c9887874ab13a64ba4225116f32252536a000",
+          "size_bytes": 1951384
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_base_link.stl",
+        "logical_path": "yubi_description/meshes/shared/link_base_link.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_base_link.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:685276b224b90ed2e7b1b7697c0c9887874ab13a64ba4225116f32252536a000"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "92669d334be292c4a98aad0dfa63bb3e3442ac180ddfc7f2c6d4670c582f0610",
+          "size_bytes": 49084
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_connector.stl",
+        "logical_path": "yubi_description/meshes/shared/link_connector.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_connector_left.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:92669d334be292c4a98aad0dfa63bb3e3442ac180ddfc7f2c6d4670c582f0610"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "bd87c87be45e11b21abcd43afc8d67efb2ff6b6dff968c727cf62d041ec8230f",
+          "size_bytes": 533484
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_left_finger.stl",
+        "logical_path": "yubi_description/meshes/shared/link_left_finger.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_left_finger.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:bd87c87be45e11b21abcd43afc8d67efb2ff6b6dff968c727cf62d041ec8230f"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "8ab1f912630be3a0efc1ccd07bf1513e8964259a4109b263745898ec26f39791",
+          "size_bytes": 251484
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_left_nail.stl",
+        "logical_path": "yubi_description/meshes/shared/link_left_nail.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_left_nail.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:8ab1f912630be3a0efc1ccd07bf1513e8964259a4109b263745898ec26f39791"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "be704bf532c29c86e9a5486fa9c53c093a0531ac36f3df4ec9535e9b79ef3936",
+          "size_bytes": 560384
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_right_finger.stl",
+        "logical_path": "yubi_description/meshes/shared/link_right_finger.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_right_finger.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:be704bf532c29c86e9a5486fa9c53c093a0531ac36f3df4ec9535e9b79ef3936"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "2f8aff9c5da05b284281ae7e117ad905d44f033cbba872f84542eb9037cd295a",
+          "size_bytes": 251084
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/shared/link_right_nail.stl",
+        "logical_path": "yubi_description/meshes/shared/link_right_nail.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_right_nail.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:2f8aff9c5da05b284281ae7e117ad905d44f033cbba872f84542eb9037cd295a"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "ff2feb49ce9348a289d1b336f9dfc523a88db6e569ea47a7ca78177a453a1206",
+          "size_bytes": 6162384
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/left/link_controller.stl",
+        "logical_path": "yubi_description/meshes/left/link_controller.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_controller_left.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:ff2feb49ce9348a289d1b336f9dfc523a88db6e569ea47a7ca78177a453a1206"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "1e2e00243d65bd9a624a341f0d4323a2a45d0d4c425fd4c3075dcaf290eb1b31",
+          "size_bytes": 1717384
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/left/link_housing.stl",
+        "logical_path": "yubi_description/meshes/left/link_housing.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_housing_left.stl",
+        "repository": "https://cad.onshape.com/documents/b807fc587efa728d9cf496a6/w/7176242b14d954b35e9a0f8d/e/c659d653cfd1965addfdf1a0",
+        "revision": "sha256:1e2e00243d65bd9a624a341f0d4323a2a45d0d4c425fd4c3075dcaf290eb1b31"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "f05d4c84aa0aca2ad647b9c3fb8772753bb646a54e4c1054bc8210dc019a47e1",
+          "size_bytes": 6162884
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/right/link_controller.stl",
+        "logical_path": "yubi_description/meshes/right/link_controller.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_controller_right.stl",
+        "repository": "https://cad.onshape.com/documents/a49048be0a418509ea642b3d/w/0a6170e4e5b19ae4d8d75a37/e/9cb1639fa99dd40bf32608f7",
+        "revision": "sha256:f05d4c84aa0aca2ad647b9c3fb8772753bb646a54e4c1054bc8210dc019a47e1"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "fec06aa0637d138d20e325714cfc1cc531927706d376bc8b9f1847a7a4196b4e",
+          "size_bytes": 1251234
+        },
+        "format": "mesh",
+        "location": "package://sx-embodiments/yubi_description/meshes/right/link_housing.stl",
+        "logical_path": "yubi_description/meshes/right/link_housing.stl",
+        "media_type": "model/stl",
+        "role": "geometry"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "LicenseRef-Sentient-Proprietary",
+        "path": "meshes/link_housing.stl",
+        "repository": "https://cad.onshape.com/documents/a49048be0a418509ea642b3d/w/0a6170e4e5b19ae4d8d75a37/e/9cb1639fa99dd40bf32608f7",
+        "revision": "sha256:fec06aa0637d138d20e325714cfc1cc531927706d376bc8b9f1847a7a4196b4e"
+      }
+    }
+  ],
+  "base_mount": null,
+  "components": [
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "gap_curve": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 0.078539816,
+              "y": 0.010457629
+            },
+            {
+              "x": 0.157079633,
+              "y": 0.021072297
+            },
+            {
+              "x": 0.235619449,
+              "y": 0.031672278
+            },
+            {
+              "x": 0.314159265,
+              "y": 0.042192221
+            },
+            {
+              "x": 0.392699082,
+              "y": 0.052567267
+            },
+            {
+              "x": 0.471238898,
+              "y": 0.06273345
+            },
+            {
+              "x": 0.549778714,
+              "y": 0.072628091
+            },
+            {
+              "x": 0.628318531,
+              "y": 0.082190189
+            },
+            {
+              "x": 0.706858347,
+              "y": 0.091360788
+            },
+            {
+              "x": 0.785398,
+              "y": 0.100083349
+            }
+          ],
+          "grasp": "parallel",
+          "grasp_centre_m": null,
+          "kind": "gripper",
+          "layout": [
+            {
+              "actuator": null,
+              "bounds": {
+                "kind": "bounded",
+                "lower": 0.0,
+                "upper": 0.785398
+              },
+              "name": "left_finger",
+              "unit": "rad"
+            }
+          ],
+          "mimic_joints": [
+            {
+              "multiplier": -1.0,
+              "name": "right_finger",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": 1.0,
+              "name": "right_nail",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": -1.0,
+              "name": "left_nail",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": -1.0,
+              "name": "right_connector",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": 1.0,
+              "name": "left_connector",
+              "of": "left_finger"
+            }
+          ],
+          "part_id": "yubi-jaw-v2",
+          "physical": null,
+          "travel_m": [
+            0.0,
+            0.100083349
+          ]
+        }
+      },
+      "instance": "left_jaw",
+      "mount": {
+        "frame": "left_hand_root",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "gap_curve": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 0.078539816,
+              "y": 0.010457629
+            },
+            {
+              "x": 0.157079633,
+              "y": 0.021072297
+            },
+            {
+              "x": 0.235619449,
+              "y": 0.031672278
+            },
+            {
+              "x": 0.314159265,
+              "y": 0.042192221
+            },
+            {
+              "x": 0.392699082,
+              "y": 0.052567267
+            },
+            {
+              "x": 0.471238898,
+              "y": 0.06273345
+            },
+            {
+              "x": 0.549778714,
+              "y": 0.072628091
+            },
+            {
+              "x": 0.628318531,
+              "y": 0.082190189
+            },
+            {
+              "x": 0.706858347,
+              "y": 0.091360788
+            },
+            {
+              "x": 0.785398,
+              "y": 0.100083349
+            }
+          ],
+          "grasp": "parallel",
+          "grasp_centre_m": null,
+          "kind": "gripper",
+          "layout": [
+            {
+              "actuator": null,
+              "bounds": {
+                "kind": "bounded",
+                "lower": 0.0,
+                "upper": 0.785398
+              },
+              "name": "left_finger",
+              "unit": "rad"
+            }
+          ],
+          "mimic_joints": [
+            {
+              "multiplier": -1.0,
+              "name": "right_finger",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": 1.0,
+              "name": "right_nail",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": -1.0,
+              "name": "left_nail",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": -1.0,
+              "name": "right_connector",
+              "of": "left_finger"
+            },
+            {
+              "multiplier": 1.0,
+              "name": "left_connector",
+              "of": "left_finger"
+            }
+          ],
+          "part_id": "yubi-jaw-v2",
+          "physical": null,
+          "travel_m": [
+            0.0,
+            0.100083349
+          ]
+        }
+      },
+      "instance": "right_jaw",
+      "mount": {
+        "frame": "right_hand_root",
+        "kind": "root"
+      }
+    }
+  ],
+  "id": "a645c2bc67e91aa2ebd49039368f85bcd205e90bdd5e81404adcabd6487f7afd",
+  "kind": "capture_rig",
+  "label": "YUBI bimanual handheld capture rig",
+  "lineage": {
+    "family": "yubi",
+    "revision": "description7-sx1",
+    "variant": ""
+  },
+  "name": "yubi",
+  "operator_mounts": [
+    {
+      "attachment_frame": "quest_left_controller",
+      "root_frame": "left_hand_root",
+      "site": "left_hand"
+    },
+    {
+      "attachment_frame": "quest_right_controller",
+      "root_frame": "right_hand_root",
+      "site": "right_hand"
+    }
+  ],
+  "rates": null,
+  "schema_version": 13
+}

@@ -142,6 +142,31 @@ def audience(license_id: str) -> AssetAudience:
 
 
 _PACKAGE_URI_PREFIX = "package://sx-embodiments/"
+_SUPERSEDED_DIR = "_by_digest"
+
+
+def superseded_relpath(relpath: str, sha256: str) -> str:
+    """Where a package keeps an earlier published revision of one of its files.
+
+    ``<package>/_by_digest/<sha256>/<filename>``: inside the owning package, so it keeps
+    that package's audience, and under its original name, so its format still reads.
+    Recordings name their embodiment by content, and a document an earlier schema
+    published must keep resolving after the canonical file at the same path changes.
+    """
+    path = PurePosixPath(relpath)
+    return f"{path.parts[0]}/{_SUPERSEDED_DIR}/{sha256}/{path.name}"
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _fetched_superseded(relpath: str, ref: AssetRef) -> Path:
+    """The mirror's kept revision; absent it, the refusal is the digest mismatch."""
+    try:
+        return _fetched(superseded_relpath(relpath, ref.sha256), ref.sha256, ref.byte_size)
+    except AssetsUnavailableError:
+        raise AssetDigestMismatchError(relpath, ref.sha256, "a different revision") from None
 
 
 def resolve_asset(ref: AssetRef) -> Path:
@@ -159,9 +184,20 @@ def resolve_asset(ref: AssetRef) -> Path:
     resolved = root / relpath if root is not None else None
     if (resolved is None or not resolved.is_file()) and relpath.startswith("generated/"):
         resolved = _cache_root() / relpath
+    if resolved is not None and resolved.is_file() and _digest(resolved) != ref.sha256:
+        # The package has since changed this file; a revision an earlier published
+        # document names is kept by its digest, locally or on the mirror.
+        kept = root / superseded_relpath(relpath, ref.sha256) if root is not None else None
+        if kept is not None and kept.is_file():
+            resolved = kept
+        elif os.environ.get(_MIRROR_ENV):
+            resolved = _fetched_superseded(relpath, ref)
     if resolved is None or not resolved.is_file():
-        resolved = _fetched(relpath, ref.sha256, ref.byte_size)
-    actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        try:
+            resolved = _fetched(relpath, ref.sha256, ref.byte_size)
+        except AssetDigestMismatchError:
+            resolved = _fetched_superseded(relpath, ref)
+    actual = _digest(resolved)
     if actual != ref.sha256:
         raise AssetDigestMismatchError(relpath, ref.sha256, actual)
     actual_size = resolved.stat().st_size
