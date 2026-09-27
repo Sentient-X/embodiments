@@ -101,6 +101,13 @@ are recorded in `THIRD_PARTY_NOTICES.md`. Wheels and sdists include the tree und
 `sx_embodiments/_assets`. `sx_embodiments.assets.asset_root()` resolves the environment override,
 installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailableError`.
 
+Recordings are immutable and name their embodiment by content, so a document this registry
+published under an earlier schema (`sx_embodiments/historical/`, read by `read_recorded`) must
+keep resolving. When a canonical file changes, keep its published revision at
+`<package>/_by_digest/<sha256>/<filename>` (`assets.superseded_relpath`); `resolve_asset` serves
+it, locally or from the mirror, when the file at the declared path no longer matches.
+`tests/test_recorded.py` fails when a historical document's asset stops resolving.
+
 The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
 Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.
 Declaration order is the native physical coordinate order and is pinned against each URDF.

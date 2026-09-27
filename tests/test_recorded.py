@@ -13,6 +13,7 @@ from sx_embodiments import (
     development_embodiments,
     historical_identities,
     read_recorded,
+    resolve_asset,
 )
 
 # The canonical YUBI package published under schema 13 from bf11315 (2026-08-20) until
@@ -67,3 +68,13 @@ def test_a_re_identified_foreign_schema_13_package_is_not_historical() -> None:
     document["id"] = str(content_id(EmbodimentId, content))
     recorded = read_recorded(document)
     assert recorded.recorded_id not in historical_identities(EmbodimentName("yubi"))
+
+
+def test_every_asset_a_historical_document_names_still_resolves() -> None:
+    """A later change to a canonical file must keep the published revision by digest
+    (``assets.superseded_relpath``); this is where forgetting to fails."""
+    for entry in (resources.files("sx_embodiments") / "historical").iterdir():
+        if entry.name.endswith(".json"):
+            recorded = read_recorded(json.loads(entry.read_text()))
+            for asset in recorded.embodiment.assets:
+                resolve_asset(asset.asset)
