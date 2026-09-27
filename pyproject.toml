@@ -26,8 +26,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["sx_embodiments"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"assets" = "sx_embodiments/_assets"
+[tool.hatch.build.targets.wheel.hooks.custom]
+# `hatch_build.py`: standard wheels carry `assets/` as `sx_embodiments/_assets`; editable ones do not.
 
 [tool.ruff]
 src = [".", "tests"]
