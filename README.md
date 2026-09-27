@@ -97,8 +97,9 @@ boundaries hash bytes before producing an `AssetRef`.
 ## Assets
 
 Canonical robot and capture-hardware descriptions live under `assets/`; provenance and licensing
-are recorded in `THIRD_PARTY_NOTICES.md`. Wheels and sdists include the tree under
-`sx_embodiments/_assets`. `sx_embodiments.assets.asset_root()` resolves the environment override,
+are recorded in `THIRD_PARTY_NOTICES.md`. Standard wheels and sdists include the tree under
+`sx_embodiments/_assets`; an editable install reads it from `assets/` in the checkout
+(`hatch_build.py`). `sx_embodiments.assets.asset_root()` resolves the environment override,
 installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailableError`.
 
 Recordings are immutable and name their embodiment by content, so a document this registry
