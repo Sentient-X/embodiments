@@ -18,8 +18,10 @@ from sx_contracts.content import ContentBlob
 from sx_embodiments import (
     AssetDigestMismatchError,
     AssetsUnavailableError,
+    development_embodiments,
     embodiments,
     materialize,
+    materialized,
 )
 from sx_embodiments import assets as assets_module
 from sx_embodiments.assets import (
@@ -382,3 +384,24 @@ def test_a_probe_reads_one_byte_and_keeps_the_bearer_off_the_redirect(
     # The range follows the redirect to the signed object; the bearer does not.
     assert request.headers == {"Range": "bytes=0-0"}
     assert request.unredirected_hdrs == {"Authorization": f"Bearer {_TOKEN}"}
+
+
+def test_materialized_names_a_file_inside_the_closure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
+    das = development_embodiments["das-umi-v4"]
+    urdf = materialized(das)
+    root = materialize(das)
+    assert urdf == root / das.urdf.asset.uri.removeprefix("package://sx-embodiments/")
+    # The description names its meshes through its own ROS package name; they sit
+    # under the package's vendored directory, and the closure holds them there.
+    vendored = 0
+    for mesh in ET.parse(urdf).getroot().iter("mesh"):
+        filename = mesh.attrib["filename"]
+        name = description_asset_uri(das.urdf.asset.uri, filename)
+        if filename.startswith("package://DAS_Gripper_urdf/"):
+            vendored += 1
+            assert name.startswith("package://sx-embodiments/das_gripper_with_vr/meshes/"), name
+        assert (root / name.removeprefix("package://sx-embodiments/")).is_file(), name
+    assert vendored

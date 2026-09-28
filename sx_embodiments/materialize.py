@@ -22,7 +22,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
-from sx_contracts.assets import AssetFormat, validate_logical_path
+from sx_contracts.assets import AssetFormat, AssetRef, validate_logical_path
 from sx_contracts.content import ContentBlob
 from sx_contracts.identity import content_digest
 
@@ -266,3 +266,24 @@ def materialize(embodiment: Embodiment) -> Path:
     finally:
         if partial.exists():
             shutil.rmtree(partial, ignore_errors=True)
+
+
+def materialized(embodiment: Embodiment, ref: AssetRef | None = None) -> Path:
+    """Where ``ref`` sits in ``embodiment``'s materialized closure, beside every file it names.
+
+    ``ref`` defaults to the authoritative description. A consumer that follows a
+    description's own references (a URDF loader, MuJoCo, a mesh preview) reads it here
+    rather than from :func:`resolve_asset`, whose single verified file has no siblings on
+    a host without the tree.
+    """
+    target = embodiment.urdf.asset if ref is None else ref
+    if not target.uri.startswith(PACKAGE_URI_PREFIX):
+        raise AssetsUnavailableError(
+            f"asset uri is not a packaged sx-embodiments asset: {target.uri}"
+        )
+    relpath = target.uri.removeprefix(PACKAGE_URI_PREFIX)
+    root = materialize(embodiment)
+    path = root / relpath
+    if not path.is_file():
+        raise AssetsUnavailableError(f"{embodiment.name}: {relpath} is not in its closure")
+    return path

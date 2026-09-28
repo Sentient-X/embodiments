@@ -113,11 +113,19 @@ declared assets and every file its descriptions name) under the tree's own relpa
 `package://sx-embodiments/<relpath>` names and relative mesh references read unchanged:
 
 ```python
-from sx_embodiments import embodiments, materialize
+from sx_embodiments import embodiments, materialize, materialized
 
 root = materialize(embodiments["so101"])
 urdf = root / "so101/so101.urdf"
+urdf = materialized(embodiments["so101"])   # the same file, named by the body's description
 ```
+
+Every consumer that follows a description's references (MuJoCo, a URDF loader, a mesh
+preview) reads it from the closure, never from `asset_root()`, whose tree a host may not
+carry. A description that names meshes through its upstream ROS package
+(`package://DAS_Gripper_urdf/meshes/...`) resolves them in the one ancestor directory of the
+description that holds them, and every registered body's closure is checked to consist of
+manifest rows (`tests/test_asset_integrity.py`).
 
 Each file is hardlinked from a digest-keyed cache (`~/.cache/sx-embodiments/sha256/`, or
 `SX_EMBODIMENTS_ASSET_CACHE`), filled once from the local tree or from the asset store and

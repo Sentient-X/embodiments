@@ -55,6 +55,7 @@ PUBLIC_SURFACE = frozenset(
         # A directory holding exactly one embodiment's asset closure, filled from the
         # digest-keyed cache (embodiment-assets plan, E1). Its consumers move to it in E3.
         "materialize",
+        "materialized",
         "part_from_dict",
         "part_to_dict",
         "AssetDigestMismatchError",

@@ -525,10 +525,13 @@ def description_asset_uri(description: str, reference: str) -> str:
     """Resolve a description dependency without dropping its source package context.
 
     Relative paths belong to the description directory. Foreign ROS packages may
-    be beside that description or at the asset root; two matches are ambiguous.
-    Uninstalled foreign packages retain their URI for the runtime to reject. Presence is
-    read from the asset manifest, never probed on disk, so it answers the same with or
-    without a local tree.
+    be beside that description or at the asset root; two matches are ambiguous. When
+    neither holds the file, the package is the one the description itself sits in,
+    vendored under another directory name (``package://DAS_Gripper_urdf/meshes/...``
+    from ``das_gripper_with_vr/urdf/``): the one ancestor of the description that holds
+    the member is its root, and two such ancestors are ambiguous. Uninstalled foreign
+    packages retain their URI for the runtime to reject. Presence is read from the asset
+    manifest, never probed on disk, so it answers the same with or without a local tree.
     """
     if not description.startswith(PACKAGE_URI_PREFIX):
         raise AssetsUnavailableError("description dependencies need a packaged description")
@@ -542,6 +545,13 @@ def description_asset_uri(description: str, reference: str) -> str:
         manifest = asset_manifest()
         candidates = {(source / package_path), package_path}
         present = [path for path in candidates if str(path) in manifest]
+        if not present:
+            member = PurePosixPath(*package_path.parts[1:])
+            present = [
+                parent / member
+                for parent in source.parents
+                if parent != PurePosixPath(".") and str(parent / member) in manifest
+            ]
         if len(present) > 1:
             raise AssetsUnavailableError(f"ambiguous package dependency: {reference}")
         return PACKAGE_URI_PREFIX + str(present[0]) if present else reference

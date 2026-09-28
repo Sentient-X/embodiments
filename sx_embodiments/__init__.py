@@ -46,7 +46,7 @@ from .layout import (
     Unobserved,
     VendorReadout,
 )
-from .materialize import materialize
+from .materialize import materialize, materialized
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource
 from .recorded import RecordedEmbodiment, historical_identities, read_recorded
 
@@ -105,6 +105,7 @@ __all__ = [
     "embodiments",
     "historical_identities",
     "materialize",
+    "materialized",
     "part_from_dict",
     "part_to_dict",
     "preview_asset",

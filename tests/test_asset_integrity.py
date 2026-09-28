@@ -11,8 +11,16 @@ from pathlib import Path
 import pytest
 from sx_contracts.assets import AssetFormat, AssetIntegrityError
 
-from sx_embodiments import AssetDigestMismatchError, AssetsUnavailableError, resolve_asset
-from sx_embodiments.assets import PackagedAsset, asset_root
+from sx_embodiments import (
+    AssetDigestMismatchError,
+    AssetsUnavailableError,
+    Embodiment,
+    development_embodiments,
+    embodiments,
+    resolve_asset,
+)
+from sx_embodiments.assets import PackagedAsset, asset_manifest, asset_root, description_asset_uri
+from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, DevelopmentReason
 from sx_embodiments.known.aloha import ALOHA_MJCF, ALOHA_URDF
 from sx_embodiments.known.b601 import B601_DM_STATION_URDF, B601_DM_URDF, BIMANUAL_B601_DM_URDF
 from sx_embodiments.known.das import DAS_GRIPPER_URDF, DAS_UMI_V4_URDF, QUEST_EGO_URDF
@@ -33,6 +41,7 @@ from sx_embodiments.known.universal_robots import (
 )
 from sx_embodiments.known.yor import YOR_MJCF, YOR_URDF
 from sx_embodiments.known.yubi import YUBI_HANDS_URDF, YUBI_MESHES
+from sx_embodiments.materialize import closure
 
 PINNED: tuple[PackagedAsset, ...] = (
     SO101_URDF,
@@ -121,31 +130,36 @@ def test_packaged_asset_path_verifies_local_digest_and_size(
         wrong_size.path()
 
 
-def test_urdf_mesh_references_exist() -> None:
-    """Every mesh the pinned URDFs reference resolves inside the assets tree."""
-    root = asset_root()
-    for asset, mesh_base in (
-        (SO101_URDF, root / "so101"),
-        (BIMANUAL_SO101_URDF, root / "so101"),
-        (DAS_GRIPPER_URDF, root / "das_gripper_with_vr"),
-        (YUBI_HANDS_URDF, root / "yubi_description"),
-        (SENTIENT_HUMANOID_URDF, root / "humanoid_pkg"),
-        (B601_DM_URDF, root / "b601_dm"),
-        (BIMANUAL_B601_DM_URDF, root / "b601_dm"),
-        (B601_DM_STATION_URDF, root / "b601_dm"),
-        (FFW_BG2_URDF, root / "ai_worker/ffw_bg2_rev4"),
-        (SENTIENT_RWH_URDF, root / "sentient_rwh"),
-    ):
-        tree = ET.parse(asset.path())
-        for mesh in tree.getroot().iter("mesh"):
-            filename = mesh.get("filename")
-            assert filename is not None
-            if filename.startswith("package://"):
-                tail = filename.removeprefix("package://").split("/", 1)[-1]
-            else:
-                tail = filename
-            candidates = [mesh_base / tail, asset.path().parent / tail]
-            assert any(c.is_file() for c in candidates), f"{asset.relpath}: missing {filename}"
+def _described_bodies() -> tuple[Embodiment, ...]:
+    """Every registered body with a description: production, then development."""
+    development = tuple(
+        development_embodiments[name]
+        for name, entry in DEVELOPMENT_EMBODIMENTS.items()
+        if entry.reason is not DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION
+    )
+    return (*embodiments.values(), *development)
+
+
+@pytest.mark.parametrize("body", _described_bodies(), ids=lambda body: str(body.name))
+def test_every_file_a_description_names_is_a_manifest_row(body: Embodiment) -> None:
+    """Each mesh, texture and include a registered description names is a declared file.
+
+    ``closure`` resolves every reference through ``description_asset_uri`` and refuses one
+    the manifest does not name, so a body that closes is one ``materialize`` can build on
+    a host without the tree, from the store alone.
+    """
+    files = closure(body)
+    manifest = asset_manifest()
+    described = {asset.asset.uri.removeprefix("package://sx-embodiments/") for asset in body.assets}
+    for relpath, content in files.items():
+        if relpath in described:
+            continue
+        row = manifest.get(relpath)
+        assert row is not None and row.content == content, relpath
+    urdf = body.urdf.asset.uri.removeprefix("package://sx-embodiments/")
+    for mesh in ET.fromstring(body.urdf_bytes).iter("mesh"):
+        name = description_asset_uri(body.urdf.asset.uri, mesh.attrib["filename"])
+        assert name.removeprefix("package://sx-embodiments/") in files, (urdf, name)
 
 
 @pytest.mark.parametrize(
