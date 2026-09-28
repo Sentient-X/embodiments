@@ -102,12 +102,39 @@ are recorded in `THIRD_PARTY_NOTICES.md`. Standard wheels and sdists include the
 (`hatch_build.py`). `sx_embodiments.assets.asset_root()` resolves the environment override,
 installed tree, or editable-checkout tree and otherwise raises `AssetsUnavailableError`.
 
+`sx_embodiments/asset-manifest.json` names every file of the tree with its sha256, size and
+`license_id`. It is generated from the tree and the declarations (`python
+tools/render_asset_manifest.py`), and `tests/test_asset_manifest.py` fails when it disagrees
+with either. A declared asset keeps its own licence; an undeclared mesh takes the licences
+declared in its nearest ancestor directory, so its audience is its directory's.
+
+`materialize(embodiment)` returns a directory holding exactly that body's closure (its
+declared assets and every file its descriptions name) under the tree's own relpaths, so
+`package://sx-embodiments/<relpath>` names and relative mesh references read unchanged:
+
+```python
+from sx_embodiments import embodiments, materialize
+
+root = materialize(embodiments["so101"])
+urdf = root / "so101/so101.urdf"
+```
+
+Each file is hardlinked from a digest-keyed cache (`~/.cache/sx-embodiments/sha256/`, or
+`SX_EMBODIMENTS_ASSET_CACHE`), filled once from the local tree or from the asset store and
+verified against the declared sha256 and size before it is cached. The store is
+`SX_EMBODIMENTS_ASSET_STORE` (`https://` or `file://`, objects at `sha256/<xx>/<digest>`),
+read with the bearer `SX_EMBODIMENTS_ASSET_STORE_TOKEN` in an unredirected header; the token
+never appears in a URL, a message or a traceback, and 401, 403 and 404 all raise
+`AssetsUnavailableError`. Tampered bytes raise `AssetDigestMismatchError` and never enter the
+cache.
+
 Recordings are immutable and name their embodiment by content, so a document this registry
 published under an earlier schema (`sx_embodiments/historical/`, read by `read_recorded`) must
 keep resolving. When a canonical file changes, keep its published revision at
 `<package>/_by_digest/<sha256>/<filename>` (`assets.superseded_relpath`); `resolve_asset` serves
-it, locally or from the mirror, when the file at the declared path no longer matches.
-`tests/test_recorded.py` fails when a historical document's asset stops resolving.
+it locally, or fetches the revision from the store by its digest, when the file at the
+declared path no longer matches. `tests/test_recorded.py` fails when a historical document's
+asset stops resolving.
 
 The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
 Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.

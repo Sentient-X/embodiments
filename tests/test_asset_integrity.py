@@ -89,7 +89,7 @@ def test_ref_projects_declared_identity_without_asset_bytes(
     empty = tmp_path / "no-assets"
     empty.mkdir()
     monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(empty))
-    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_MIRROR", raising=False)
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
 
     ref = SO101_URDF.ref()
 
@@ -106,7 +106,7 @@ def test_packaged_asset_path_verifies_local_digest_and_size(
     candidate = local / SO101_URDF.relpath
     candidate.parent.mkdir(parents=True)
     monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(local))
-    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_MIRROR", raising=False)
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
 
     candidate.write_bytes(original + b"tampered")
     with pytest.raises(AssetDigestMismatchError):
