@@ -1,6 +1,7 @@
 """Materialize a closure from an empty cache through the digest-keyed store, fail-closed."""
 
 import os
+import time
 import traceback
 import urllib.error
 import urllib.request
@@ -142,14 +143,18 @@ def test_a_miss_without_a_store_is_fail_closed(
         materialize(embodiments["so101"])
 
 
-def test_the_retired_mirror_variable_is_a_typed_refusal(
+def test_the_retired_mirror_variable_is_refused_even_when_the_tree_holds_the_bytes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _no_local_tree(monkeypatch, tmp_path)
-    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
+    """Set at all, the stale setting fails on first use, not on the first miss."""
+    del tmp_path
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSETS", raising=False)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", "https://store.example/assets")
     monkeypatch.setenv("SX_EMBODIMENTS_ASSET_MIRROR", "https://mirror.example/assets")
     with pytest.raises(AssetsUnavailableError, match="retired"):
         resolve_asset(embodiments["so101"].urdf.asset)
+    with pytest.raises(AssetsUnavailableError, match="retired"):
+        materialize(embodiments["so101"])
 
 
 def test_a_plain_http_store_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -206,3 +211,120 @@ def test_a_transport_failure_is_unavailable_and_never_shows_the_credential(
     with pytest.raises(AssetsUnavailableError) as refused:
         resolve_asset(embodiments["so101"].urdf.asset)
     assert _TOKEN not in "".join(traceback.format_exception(refused.value))
+
+
+@pytest.mark.parametrize(
+    "token", [f"{_TOKEN}\n", f"{_TOKEN}\r\nX-Injected: 1", f"{_TOKEN}\u00e9", f"{_TOKEN}\u2603"]
+)
+def test_a_malformed_credential_is_a_typed_refusal_that_never_names_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, token: str
+) -> None:
+    """A token read from a file or mount must not escape through the transport's error."""
+    _https_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE_TOKEN", token)
+    sent: list[urllib.request.Request] = []
+
+    def record(request: urllib.request.Request, timeout: float) -> object:
+        del timeout
+        sent.append(request)
+        raise urllib.error.HTTPError(request.full_url, 404, "missing", Message(), None)
+
+    monkeypatch.setattr(assets_module.urllib.request, "urlopen", record)
+    with pytest.raises(AssetsUnavailableError) as refused:
+        resolve_asset(embodiments["so101"].urdf.asset)
+    rendered = "".join(traceback.format_exception(refused.value))
+    assert _TOKEN not in rendered
+    if token.strip() == _TOKEN:
+        # Surrounding whitespace is dropped, and the clean bearer is what is sent.
+        (request,) = sent
+        assert request.unredirected_hdrs == {"Authorization": f"Bearer {_TOKEN}"}
+    else:
+        assert not sent, "a malformed credential reached the transport"
+        assert "SX_EMBODIMENTS_ASSET_STORE_TOKEN" in str(refused.value)
+
+
+@pytest.mark.parametrize("token", ["tok\n", "t\u00f6k"])
+def test_a_malformed_credential_never_escapes_the_real_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, token: str
+) -> None:
+    """Through the unpatched urllib stack: no ValueError or UnicodeError carries the bearer."""
+    _no_local_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", "https://127.0.0.1:9/assets")
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE_TOKEN", token)
+    with pytest.raises(AssetsUnavailableError) as refused:
+        resolve_asset(embodiments["so101"].urdf.asset)
+    rendered = "".join(traceback.format_exception(refused.value))
+    assert token.strip() not in rendered.replace("sha256", "")
+
+
+def test_a_transport_value_error_never_carries_the_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _https_store(monkeypatch, tmp_path)
+
+    def invalid_header(request: urllib.request.Request, timeout: float) -> object:
+        del timeout
+        raise ValueError(f"Invalid header value {request.unredirected_hdrs!r}")
+
+    monkeypatch.setattr(assets_module.urllib.request, "urlopen", invalid_header)
+    with pytest.raises(AssetsUnavailableError) as refused:
+        resolve_asset(embodiments["so101"].urdf.asset)
+    assert _TOKEN not in "".join(traceback.format_exception(refused.value))
+
+
+def test_a_complete_closure_is_kept_and_a_damaged_one_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    so101 = embodiments["so101"]
+    files = closure(so101)
+    store = _store(tmp_path, files)
+    _no_local_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store)
+    root = materialize(so101)
+    marker = root.stat().st_ino
+    assert materialize(so101) == root and root.stat().st_ino == marker
+
+    (root / "extra.txt").write_text("not part of the closure")
+    rebuilt = materialize(so101)
+    assert rebuilt == root and not (root / "extra.txt").exists()
+    assert not [entry for entry in root.parent.iterdir() if entry.name.startswith(".")]
+
+
+def test_a_copied_closure_is_complete_where_hardlinks_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    so101 = embodiments["so101"]
+    files = closure(so101)
+    store = _store(tmp_path, files)
+    _no_local_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store)
+
+    def refuse(source: object, target: object) -> None:
+        del source, target
+        raise PermissionError("links refused")
+
+    monkeypatch.setattr(assets_module.os, "link", refuse)
+    root = materialize(so101)
+    assert {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} == set(files)
+    marker = root.stat().st_ino
+    assert materialize(so101) == root and root.stat().st_ino == marker
+
+
+def test_abandoned_build_directories_are_swept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    so101 = embodiments["so101"]
+    files = closure(so101)
+    store = _store(tmp_path, files)
+    cache = _no_local_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store)
+    closures = cache / "closures"
+    stale = closures / ".deadbeef.abandoned"
+    fresh = closures / ".deadbeef.in-flight"
+    for directory in (stale, fresh):
+        (directory / "so101").mkdir(parents=True)
+    old = time.time() - 2 * 3600
+    os.utime(stale, (old, old))
+    materialize(so101)
+    assert not stale.exists()
+    assert fresh.exists()

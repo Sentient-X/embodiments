@@ -1,5 +1,8 @@
 """Pinned upstream origins shared by the packaged embodiment descriptions."""
 
+from collections.abc import Mapping
+from typing import Final
+
 from sx_contracts.assets import AssetProvenance
 
 from ..parts import FactSource
@@ -35,3 +38,17 @@ def ai_worker(path: str, generator: str | None = None) -> AssetProvenance:
         license_id="Apache-2.0",
         generator=generator,
     )
+
+
+VENDORED_LICENCES: Final[Mapping[str, str]] = {
+    # The upstream i2rt YAM model, vendored with menagerie at MENAGERIE_REVISION; no
+    # registered embodiment references it yet. Its own LICENSE file is MIT.
+    "menagerie/i2rt_yam": "MIT",
+    # This repository's own record of MENAGERIE_REVISION, under the package's licence.
+    "menagerie/menagerie.commit": "Apache-2.0",
+}
+"""Licences of tree files that no embodiment declaration reaches, by file or directory.
+
+The manifest reads a file's licence from its declaration; a vendored file nothing
+references has none, and inheriting one from an unrelated sibling would be a guess.
+"""

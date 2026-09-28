@@ -17,6 +17,8 @@ description reads unchanged.
 import os
 import shutil
 import tempfile
+import time
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
@@ -33,10 +35,13 @@ from .assets import (
     intact,
     link_view,
     local_asset_root,
+    refuse_retired_configuration,
 )
 from .embodiment import Embodiment
 from .errors import AssetsUnavailableError
 
+# A build or discard directory older than this was left by an interrupted process.
+_ABANDONED_AFTER_S = 3600.0
 _URDF_REFERENCES = (("mesh", "filename"), ("texture", "filename"))
 _MJCF_MESH_TAGS = frozenset({"mesh", "skin"})
 _MJCF_TEXTURE_TAGS = frozenset({"texture", "hfield"})
@@ -111,6 +116,7 @@ def closure(embodiment: Embodiment) -> dict[str, ContentBlob]:
     A declared asset keeps its declared identity (a recorded body may name an earlier
     revision than the tree's); every file a description names takes the manifest's.
     """
+    refuse_retired_configuration()
     manifest = asset_manifest()
     local = local_asset_root()
     files: dict[str, ContentBlob] = {}
@@ -170,18 +176,49 @@ def _readable(relpath: str, content: ContentBlob, local: Path | None) -> Path:
 
 
 def _complete(directory: Path, files: dict[str, ContentBlob]) -> bool:
-    """``directory`` holds exactly ``files``, each a link of an intact blob."""
-    present = {
-        path.relative_to(directory).as_posix() for path in directory.rglob("*") if not path.is_dir()
-    }
+    """``directory`` holds exactly ``files``, each a link of its blob or an intact copy."""
+    try:
+        present = {
+            path.relative_to(directory).as_posix()
+            for path in directory.rglob("*")
+            if not path.is_dir()
+        }
+    except OSError:
+        return False
     if present != files.keys():
         return False
     for relpath, content in files.items():
         blob = cache_root() / "sha256" / content.sha256[:2] / content.sha256
         target = directory / relpath
-        if not (blob.is_file() and target.is_file() and os.path.samefile(blob, target)):
+        try:
+            linked = blob.is_file() and os.path.samefile(blob, target)
+        except OSError:
+            return False
+        if not (linked or intact(target, content)):
             return False
     return True
+
+
+def _discard(directory: Path) -> None:
+    """Remove a directory no reader can be holding: renamed aside first, then deleted."""
+    aside = directory.with_name(f".discard.{directory.name}.{uuid.uuid4().hex}")
+    try:
+        directory.rename(aside)
+    except FileNotFoundError:
+        return
+    shutil.rmtree(aside, ignore_errors=True)
+
+
+def _sweep(closures: Path) -> None:
+    """Delete build and discard directories an interrupted materialize left behind."""
+    horizon = time.time() - _ABANDONED_AFTER_S
+    for entry in closures.glob(".*"):
+        try:
+            abandoned = entry.is_dir() and entry.stat().st_mtime < horizon
+        except OSError:
+            continue
+        if abandoned:
+            shutil.rmtree(entry, ignore_errors=True)
 
 
 def materialize(embodiment: Embodiment) -> Path:
@@ -189,7 +226,9 @@ def materialize(embodiment: Embodiment) -> Path:
 
     The directory is named by the closure's content digest, built beside its final name
     and renamed into place, so a reader only ever sees a complete closure. Every blob is
-    verified as it is linked; a closure left incomplete or altered is rebuilt.
+    verified as it is linked. A complete closure is never deleted; one left incomplete
+    or altered is renamed aside before it is removed, so a concurrent reader holding a
+    complete one is never disturbed.
     """
     files = closure(embodiment)
     local = local_asset_root()
@@ -205,16 +244,25 @@ def materialize(embodiment: Embodiment) -> Path:
     if target.is_dir() and _complete(target, files):
         return target
     closures.mkdir(parents=True, exist_ok=True)
+    _sweep(closures)
     partial = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=closures))
-    for relpath, blob in blobs.items():
-        link_view(blob, partial / relpath)
-    if target.exists():
-        shutil.rmtree(target)
     try:
-        partial.rename(target)
-    except OSError:
-        # A concurrent materialize published the same closure first.
-        shutil.rmtree(partial)
-        if not _complete(target, files):
-            raise
-    return target
+        for relpath, blob in blobs.items():
+            link_view(blob, partial / relpath)
+        for _ in range(3):
+            if target.is_dir() and _complete(target, files):
+                return target
+            if target.exists():
+                _discard(target)
+            try:
+                partial.rename(target)
+                return target
+            except OSError:
+                # Another process published or replaced it first; check it again.
+                continue
+        if _complete(target, files):
+            return target
+        raise AssetsUnavailableError(f"{embodiment.name}: could not publish closure {key}")
+    finally:
+        if partial.exists():
+            shutil.rmtree(partial, ignore_errors=True)
