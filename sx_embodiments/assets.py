@@ -1,14 +1,20 @@
 """Package-local payload machinery over the shared asset vocabulary."""
 
 import hashlib
+import http.client
+import json
 import os
 import tempfile
+import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
+from sx_contracts import decode
 from sx_contracts.assets import (
     AssetFormat,
     AssetIntegrityError,
@@ -19,6 +25,7 @@ from sx_contracts.assets import (
     validate_logical_path,
 )
 from sx_contracts.content import ContentBlob, Sha256Digest
+from sx_contracts.identity import file_digest
 
 from .errors import (
     AssetDigestMismatchError,
@@ -26,13 +33,23 @@ from .errors import (
 )
 
 _ASSETS_ENV = "SX_EMBODIMENTS_ASSETS"
-_MIRROR_ENV = "SX_EMBODIMENTS_ASSET_MIRROR"
+_STORE_ENV = "SX_EMBODIMENTS_ASSET_STORE"
+# The bearer credential for the store. It is read at the moment of a fetch, placed only in
+# an unredirected ``Authorization`` header, and never enters a URL, a message or a log.
+_STORE_TOKEN_ENV = "SX_EMBODIMENTS_ASSET_STORE_TOKEN"
+_RETIRED_MIRROR_ENV = "SX_EMBODIMENTS_ASSET_MIRROR"
 _CACHE_ENV = "SX_EMBODIMENTS_ASSET_CACHE"
-_MIRROR_SCHEMES = frozenset({"https", "file"})
+_STORE_SCHEMES = frozenset({"https", "file"})
+_REFUSED_STATUSES = frozenset({401, 403, 404})
 _FETCH_TIMEOUT_S = 60.0
+MANIFEST_PATH = Path(__file__).resolve().parent / "asset-manifest.json"
+_MANIFEST_KEYS = {"path", "sha256", "size", "license_id"}
+# The tree's own provenance index for restored upstream files; an input to the manifest,
+# not an asset any description references.
+MANIFEST_TREE_INDEX = "dependency-assets.json"
 
 
-def _local_root() -> Path | None:
+def local_asset_root() -> Path | None:
     """The local ``assets/`` tree when one exists; ``None`` is a lawful cache miss."""
     override = os.environ.get(_ASSETS_ENV)
     if override:
@@ -51,7 +68,7 @@ def _local_root() -> Path | None:
 
 def asset_root() -> Path:
     """Locate the canonical ``assets/`` tree, or fail closed."""
-    root = _local_root()
+    root = local_asset_root()
     if root is None:
         raise AssetsUnavailableError(
             f"description assets not found: set {_ASSETS_ENV} or reinstall sx-embodiments"
@@ -59,65 +76,14 @@ def asset_root() -> Path:
     return root
 
 
-def _cache_root() -> Path:
+def cache_root() -> Path:
+    """This host's asset cache: ``sha256/`` blobs and the views hardlinked from them."""
     override = os.environ.get(_CACHE_ENV)
     if override:
         return Path(override)
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "sx-embodiments" / "assets"
-
-
-def _fetched(relpath: str, sha256: str, size_bytes: int) -> Path:
-    """The digest-verified mirror fetch/cache in front of the local fail-closed miss.
-
-    The mirror is explicit pre-execution configuration (``SX_EMBODIMENTS_ASSET_MIRROR``,
-    the governed read-only rendering of the asset tree), never a guessed source: absent
-    it, a local miss stays :class:`AssetsUnavailableError`. Bytes are verified against
-    the declared content identity before they are cached or served — a corrupt or
-    tampered mirror object is a typed refusal, and nothing unverified enters the cache.
-    """
-
-    mirror = os.environ.get(_MIRROR_ENV)
-    if not mirror:
-        raise AssetsUnavailableError(
-            f"packaged asset missing on disk: {relpath} "
-            f"(set {_ASSETS_ENV} to a local tree or {_MIRROR_ENV} to the governed mirror)"
-        )
-    scheme = urlparse(mirror).scheme
-    if scheme not in _MIRROR_SCHEMES:
-        raise AssetsUnavailableError(
-            f"{_MIRROR_ENV} must use one of {sorted(_MIRROR_SCHEMES)}, got {scheme!r}"
-        )
-    cached = _cache_root() / relpath
-    if cached.is_file():
-        try:
-            data = cached.read_bytes()
-        except OSError:
-            data = b""
-        if hashlib.sha256(data).hexdigest() == sha256 and len(data) == size_bytes:
-            return cached
-        # An unreadable or corrupt cache entry is a cache miss; concurrent fetchers
-        # may race to clear it, so a vanished entry is not an error.
-        cached.unlink(missing_ok=True)
-    url = mirror.rstrip("/") + "/" + relpath
-    try:
-        with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_S) as response:
-            data = response.read()
-    except OSError as error:
-        raise AssetsUnavailableError(f"asset mirror fetch failed for {relpath}: {error}") from error
-    actual = hashlib.sha256(data).hexdigest()
-    if actual != sha256:
-        raise AssetDigestMismatchError(relpath, sha256, actual)
-    if len(data) != size_bytes:
-        raise AssetIntegrityError(f"{relpath}: expected {size_bytes} bytes, got {len(data)}")
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    # Per-process partial name + atomic replace: concurrent fetchers never interleave
-    # writes into one temp file, and a reader only ever sees a complete published file.
-    partial = cached.with_name(f"{cached.name}.partial.{os.getpid()}")
-    partial.write_bytes(data)
-    os.replace(partial, cached)
-    return cached
+    return base / "sx-embodiments"
 
 
 class AssetAudience(StrEnum):
@@ -141,7 +107,202 @@ def audience(license_id: str) -> AssetAudience:
     return AssetAudience.ENTITLED if "LicenseRef-" in license_id else AssetAudience.PUBLIC
 
 
-_PACKAGE_URI_PREFIX = "package://sx-embodiments/"
+@dataclass(frozen=True, slots=True)
+class ManifestEntry:
+    """One file of the asset tree: where it sits, its exact bytes, and who may have them."""
+
+    relpath: str
+    content: ContentBlob
+    license_id: str
+
+    def __post_init__(self) -> None:
+        validate_logical_path(PurePosixPath(self.relpath))
+        audience(self.license_id)
+
+    @property
+    def audience(self) -> AssetAudience:
+        return audience(self.license_id)
+
+
+def parse_manifest(text: str) -> tuple[ManifestEntry, ...]:
+    """Parse the manifest's one rendering, refusing any row that is not exactly a file fact."""
+    try:
+        rows: object = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise AssetIntegrityError(f"asset manifest is not JSON: {error}") from error
+    entries = tuple(
+        ManifestEntry(
+            decode.text(row, "path"),
+            ContentBlob(Sha256Digest(decode.text(row, "sha256")), decode.integer(row, "size")),
+            decode.text(row, "license_id"),
+        )
+        for row in (
+            decode.exactly(item, _MANIFEST_KEYS, error=AssetIntegrityError)
+            for item in decode.documents({"manifest": rows}, "manifest", error=AssetIntegrityError)
+        )
+    )
+    relpaths = [entry.relpath for entry in entries]
+    if relpaths != sorted(set(relpaths)):
+        raise AssetIntegrityError("asset manifest rows must be unique and sorted by path")
+    return entries
+
+
+def render_manifest_json(entries: tuple[ManifestEntry, ...]) -> str:
+    """The manifest's one rendering: a sorted array, one file per line."""
+    rows = [
+        json.dumps(
+            {
+                "path": entry.relpath,
+                "sha256": str(entry.content.sha256),
+                "size": entry.content.size_bytes,
+                "license_id": entry.license_id,
+            },
+            ensure_ascii=False,
+        )
+        for entry in sorted(entries, key=lambda entry: entry.relpath)
+    ]
+    return "[\n" + ",\n".join(rows) + "\n]\n"
+
+
+@cache
+def asset_manifest() -> Mapping[str, ManifestEntry]:
+    """Every file of the asset tree by relpath, read from the committed manifest."""
+    try:
+        text = MANIFEST_PATH.read_text(encoding="utf-8")
+    except OSError as error:
+        raise AssetsUnavailableError(f"asset manifest unreadable: {MANIFEST_PATH.name}") from error
+    return {entry.relpath: entry for entry in parse_manifest(text)}
+
+
+def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
+    """The store read for one digest, carrying the bearer credential when one is configured.
+
+    The credential goes in an *unredirected* header: when the store answers with a
+    redirect to a signed object URL, the bearer stays with the store and never reaches the
+    host the redirect names.
+    """
+    store = os.environ.get(_STORE_ENV)
+    if not store:
+        if os.environ.get(_RETIRED_MIRROR_ENV):
+            raise AssetsUnavailableError(
+                f"{_RETIRED_MIRROR_ENV} is retired: the store is digest-keyed; set {_STORE_ENV}"
+            )
+        raise AssetsUnavailableError(
+            f"asset sha256 {sha256} is not on this host "
+            f"(set {_ASSETS_ENV} to a local tree or {_STORE_ENV} to the asset store)"
+        )
+    scheme = urlparse(store).scheme
+    if scheme not in _STORE_SCHEMES:
+        raise AssetsUnavailableError(
+            f"{_STORE_ENV} must use one of {sorted(_STORE_SCHEMES)}, got {scheme!r}"
+        )
+    request = urllib.request.Request(f"{store.rstrip('/')}/sha256/{sha256[:2]}/{sha256}")
+    token = os.environ.get(_STORE_TOKEN_ENV)
+    if token:
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
+
+
+def _store_fetch(sha256: Sha256Digest) -> bytes:
+    """Read one object from the store; every refusal is :class:`AssetsUnavailableError`.
+
+    The raised message names the digest and the status only. Neither the request (which
+    holds the credential) nor the transport exception is chained, so no traceback carries
+    either.
+    """
+    request = _store_request(sha256)
+    status: int | None = None
+    try:
+        with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_S) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        status = error.code
+    except (OSError, http.client.HTTPException) as error:
+        reason = type(error).__name__
+        raise AssetsUnavailableError(
+            f"asset store read failed for sha256 {sha256}: {reason}"
+        ) from None
+    if status in _REFUSED_STATUSES:
+        raise AssetsUnavailableError(f"asset store refused sha256 {sha256}: HTTP {status}")
+    raise AssetsUnavailableError(f"asset store failed for sha256 {sha256}: HTTP {status}")
+
+
+def _verified(label: str, content: ContentBlob, data: bytes) -> bytes:
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != content.sha256:
+        raise AssetDigestMismatchError(label, content.sha256, actual)
+    if len(data) != content.size_bytes:
+        raise AssetIntegrityError(f"{label}: expected {content.size_bytes} bytes, got {len(data)}")
+    return data
+
+
+def intact(path: Path, content: ContentBlob) -> bool:
+    """Whether ``path`` holds exactly ``content``; an unreadable file does not."""
+    try:
+        return path.stat().st_size == content.size_bytes and file_digest(path) == content.sha256
+    except OSError:
+        return False
+
+
+def _publish(target: Path, data: bytes) -> None:
+    """Write complete bytes under ``target`` atomically, read-only, so no view can edit them."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
+        temporary.write(data)
+        partial = Path(temporary.name)
+    partial.chmod(0o444)
+    os.replace(partial, target)
+
+
+def cached_blob(content: ContentBlob, *, relpath: str, local: Path | None = None) -> Path:
+    """The verified blob for ``content`` in the digest-keyed cache, filling a miss once.
+
+    A miss is filled from ``local`` when those bytes verify, and otherwise from the store.
+    Every source is checked against the declared sha256 and size before anything is
+    written, and a corrupt entry is a miss: nothing unverified is ever cached or served.
+    """
+    digest = content.sha256
+    blob = cache_root() / "sha256" / digest[:2] / digest
+    if intact(blob, content):
+        return blob
+    blob.unlink(missing_ok=True)
+    data: bytes | None = None
+    if local is not None and local.is_file():
+        candidate = local.read_bytes()
+        if hashlib.sha256(candidate).hexdigest() == digest and len(candidate) == content.size_bytes:
+            data = candidate
+    if data is None:
+        data = _verified(relpath, content, _store_fetch(digest))
+    _publish(blob, data)
+    return blob
+
+
+def link_view(blob: Path, target: Path) -> None:
+    """Place ``blob`` at ``target`` as a hardlink (a copy only where links are refused)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(blob, target)
+    except FileExistsError:
+        target.unlink()
+        os.link(blob, target)
+    except OSError:
+        _publish(target, blob.read_bytes())
+
+
+def _fetched(relpath: str, content: ContentBlob) -> Path:
+    """One verified file from the store, under its own name so its format still reads.
+
+    ``files/<sha256>/<filename>``: keyed by content like the blob it links, so every
+    revision of a path keeps its own view.
+    """
+    blob = cached_blob(content, relpath=relpath)
+    view = cache_root() / "files" / content.sha256 / PurePosixPath(relpath).name
+    if not (view.is_file() and os.path.samefile(view, blob)):
+        link_view(blob, view)
+    return view
+
+
+PACKAGE_URI_PREFIX = "package://sx-embodiments/"
 _SUPERSEDED_DIR = "_by_digest"
 
 
@@ -157,53 +318,46 @@ def superseded_relpath(relpath: str, sha256: str) -> str:
     return f"{path.parts[0]}/{_SUPERSEDED_DIR}/{sha256}/{path.name}"
 
 
-def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _fetched_superseded(relpath: str, ref: AssetRef) -> Path:
-    """The mirror's kept revision; absent it, the refusal is the digest mismatch."""
-    try:
-        return _fetched(superseded_relpath(relpath, ref.sha256), ref.sha256, ref.byte_size)
-    except AssetsUnavailableError:
-        raise AssetDigestMismatchError(relpath, ref.sha256, "a different revision") from None
-
-
 def resolve_asset(ref: AssetRef) -> Path:
     """Resolve a ``package://sx-embodiments/...`` reference to its verified on-disk file.
 
     The inverse of :meth:`PackagedAsset.ref` for consumers that hold only the portable
-    asset fact from an embodiment. Fail-closed on every step: a foreign
-    URI scheme, a missing file, or bytes whose digest disagrees with the reference.
+    asset fact from an embodiment. The local tree serves the file when its bytes match,
+    then a kept revision beside it, then the store by digest; a foreign URI scheme, a
+    missing file, or bytes whose digest disagrees with the reference all fail closed.
     """
-    if not ref.uri.startswith(_PACKAGE_URI_PREFIX):
+    if not ref.uri.startswith(PACKAGE_URI_PREFIX):
         raise AssetsUnavailableError(f"asset uri is not a packaged sx-embodiments asset: {ref.uri}")
-    relpath = ref.uri.removeprefix(_PACKAGE_URI_PREFIX)
+    relpath = ref.uri.removeprefix(PACKAGE_URI_PREFIX)
     validate_logical_path(PurePosixPath(relpath))
-    root = _local_root()
-    resolved = root / relpath if root is not None else None
-    if (resolved is None or not resolved.is_file()) and relpath.startswith("generated/"):
-        resolved = _cache_root() / relpath
-    if resolved is not None and resolved.is_file() and _digest(resolved) != ref.sha256:
-        # The package has since changed this file; a revision an earlier published
-        # document names is kept by its digest, locally or on the mirror.
-        kept = root / superseded_relpath(relpath, ref.sha256) if root is not None else None
-        if kept is not None and kept.is_file():
-            resolved = kept
-        elif os.environ.get(_MIRROR_ENV):
-            resolved = _fetched_superseded(relpath, ref)
-    if resolved is None or not resolved.is_file():
-        try:
-            resolved = _fetched(relpath, ref.sha256, ref.byte_size)
-        except AssetDigestMismatchError:
-            resolved = _fetched_superseded(relpath, ref)
-    actual = _digest(resolved)
-    if actual != ref.sha256:
-        raise AssetDigestMismatchError(relpath, ref.sha256, actual)
-    actual_size = resolved.stat().st_size
-    if actual_size != ref.byte_size:
-        raise AssetIntegrityError(f"{relpath}: expected {ref.byte_size} bytes, got {actual_size}")
-    return resolved
+    root = local_asset_root()
+    candidates: list[Path] = []
+    if root is not None:
+        candidates += [root / relpath, root / superseded_relpath(relpath, ref.sha256)]
+    if relpath.startswith("generated/"):
+        candidates.append(cache_root() / relpath)
+    present = [candidate for candidate in candidates if candidate.is_file()]
+    for candidate in present:
+        if intact(candidate, ref.content):
+            return candidate
+    if present and not os.environ.get(_STORE_ENV):
+        # The package has since changed this file and keeps no revision of it here; the
+        # refusal says which bytes were found, not merely that the right ones were not.
+        found = present[0]
+        actual = file_digest(found)
+        if actual != ref.sha256:
+            raise AssetDigestMismatchError(relpath, ref.sha256, actual)
+        raise AssetIntegrityError(
+            f"{relpath}: expected {ref.byte_size} bytes, got {found.stat().st_size}"
+        )
+    try:
+        return _fetched(relpath, ref.content)
+    except AssetsUnavailableError as error:
+        if present:
+            raise
+        raise AssetsUnavailableError(
+            f"packaged asset missing on disk: {relpath}; {error}"
+        ) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +383,7 @@ class PackagedAsset:
         return str(self.content.sha256)
 
     def path(self) -> Path:
-        """Resolve and verify the declared bytes from the local tree or mirror cache."""
+        """Resolve and verify the declared bytes from the local tree or the asset store."""
 
         return resolve_asset(self.ref())
 
@@ -296,7 +450,7 @@ def generated_description(urdf: bytes, sources: tuple[ProvenancedAsset, ...]) ->
     """Retain a composed URDF under its byte identity, with all source licences."""
     digest = Sha256Digest(hashlib.sha256(urdf).hexdigest())
     relpath = f"generated/{digest}/body.urdf"
-    target = _cache_root() / relpath
+    target = cache_root() / relpath
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
         temporary.write(urdf)
@@ -304,7 +458,7 @@ def generated_description(urdf: bytes, sources: tuple[ProvenancedAsset, ...]) ->
     temporary_path.replace(target)
     return ProvenancedAsset(
         asset=AssetRef(
-            location=_PACKAGE_URI_PREFIX + relpath,
+            location=PACKAGE_URI_PREFIX + relpath,
             content=ContentBlob(digest, len(urdf)),
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
@@ -326,23 +480,25 @@ def description_asset_uri(description: str, reference: str) -> str:
 
     Relative paths belong to the description directory. Foreign ROS packages may
     be beside that description or at the asset root; two matches are ambiguous.
-    Uninstalled foreign packages retain their URI for the runtime to reject.
+    Uninstalled foreign packages retain their URI for the runtime to reject. Presence is
+    read from the asset manifest, never probed on disk, so it answers the same with or
+    without a local tree.
     """
-    if not description.startswith(_PACKAGE_URI_PREFIX):
+    if not description.startswith(PACKAGE_URI_PREFIX):
         raise AssetsUnavailableError("description dependencies need a packaged description")
-    source = PurePosixPath(description.removeprefix(_PACKAGE_URI_PREFIX)).parent
-    if reference.startswith(_PACKAGE_URI_PREFIX):
+    source = PurePosixPath(description.removeprefix(PACKAGE_URI_PREFIX)).parent
+    if reference.startswith(PACKAGE_URI_PREFIX):
         return reference
     if reference.startswith("package://"):
         package_path = PurePosixPath(reference.removeprefix("package://"))
         if package_path.is_absolute() or ".." in package_path.parts or len(package_path.parts) < 2:
             raise AssetsUnavailableError("invalid package dependency path")
-        root = asset_root().resolve()
+        manifest = asset_manifest()
         candidates = {(source / package_path), package_path}
-        present = [path for path in candidates if (root / path).is_file()]
+        present = [path for path in candidates if str(path) in manifest]
         if len(present) > 1:
             raise AssetsUnavailableError(f"ambiguous package dependency: {reference}")
-        return _PACKAGE_URI_PREFIX + str(present[0]) if present else reference
+        return PACKAGE_URI_PREFIX + str(present[0]) if present else reference
     if "://" in reference:
         return reference
     relative = PurePosixPath(reference)
@@ -356,4 +512,4 @@ def description_asset_uri(description: str, reference: str) -> str:
             pieces.pop()
         elif piece not in (".", ""):
             pieces.append(piece)
-    return _PACKAGE_URI_PREFIX + "/".join(pieces)
+    return PACKAGE_URI_PREFIX + "/".join(pieces)

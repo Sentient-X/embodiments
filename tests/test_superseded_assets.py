@@ -24,7 +24,7 @@ def _local_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, files: dict[str
     local.mkdir(exist_ok=True)
     monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(local))
     monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
-    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_MIRROR", raising=False)
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
     return local
 
 
@@ -68,17 +68,17 @@ def test_a_wrong_kept_revision_is_refused(
         resolve_asset(ref)
 
 
-def test_the_mirror_serves_a_kept_revision_when_its_canonical_file_changed(
+def test_the_store_serves_an_earlier_revision_by_its_digest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, published: bytes
 ) -> None:
+    """The store is keyed by digest, so a revision the tree no longer holds still resolves."""
     ref = embodiments["so101"].urdf.asset
-    _local_tree(monkeypatch, tmp_path, {})
-    mirror = tmp_path / "mirror"
-    for relpath, data in {
-        _URDF_RELPATH: published + b"<!-- revised -->",
-        superseded_relpath(_URDF_RELPATH, ref.sha256): published,
-    }.items():
-        (mirror / relpath).parent.mkdir(parents=True, exist_ok=True)
-        (mirror / relpath).write_bytes(data)
-    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_MIRROR", mirror.as_uri())
-    assert resolve_asset(ref).read_bytes() == published
+    _local_tree(monkeypatch, tmp_path, {_URDF_RELPATH: published + b"<!-- revised -->"})
+    store = tmp_path / "store"
+    target = store / "sha256" / ref.sha256[:2] / ref.sha256
+    target.parent.mkdir(parents=True)
+    target.write_bytes(published)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store.as_uri())
+    resolved = resolve_asset(ref)
+    assert resolved.read_bytes() == published
+    assert resolved.name == "so101.urdf"
