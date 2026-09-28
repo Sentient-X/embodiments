@@ -108,7 +108,7 @@ tools/render_asset_manifest.py`), and `tests/test_asset_manifest.py` fails when 
 with either. A declared asset keeps its own licence; an undeclared mesh takes the licences
 declared in its nearest ancestor directory, so its audience is its directory's.
 
-`materialize(embodiment)` returns a directory holding exactly that body's closure (its
+`materialize(embodiment)` returns a directory holding that body's verified closure (its
 declared assets and every file its descriptions name) under the tree's own relpaths, so
 `package://sx-embodiments/<relpath>` names and relative mesh references read unchanged:
 
@@ -127,7 +127,10 @@ carry. A description that names meshes through its upstream ROS package
 description that holds them, and every registered body's closure is checked to consist of
 manifest rows (`tests/test_asset_integrity.py`).
 
-Each file is hardlinked from a digest-keyed cache (`~/.cache/sx-embodiments/sha256/`, or
+On a host that carries the tree and whose tree holds every closure file with its declared
+bytes, `materialize` returns the tree itself and writes nothing, so a container with a
+read-only root reads its image's tree as before. Otherwise each file is hardlinked from a
+digest-keyed cache (`~/.cache/sx-embodiments/sha256/`, or
 `SX_EMBODIMENTS_ASSET_CACHE`), filled once from the local tree or from the asset store and
 verified against the declared sha256 and size before it is cached. The store is
 `SX_EMBODIMENTS_ASSET_STORE` (`https://` or `file://`, objects at `sha256/<xx>/<digest>`),

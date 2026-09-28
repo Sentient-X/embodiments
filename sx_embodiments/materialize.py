@@ -1,4 +1,4 @@
-"""``materialize(embodiment)``: a directory holding exactly that embodiment's asset closure.
+"""``materialize(embodiment)``: a directory holding that embodiment's verified asset closure.
 
 ```python
 root = materialize(embodiments["so101"])
@@ -7,9 +7,10 @@ model = mujoco.MjModel.from_xml_path(str(root / "so101/so101.urdf"))
 
 The closure is every declared asset plus every file its descriptions name (URDF meshes
 and textures; MJCF meshes, textures, height fields, skins and includes), resolved to
-relpaths the manifest knows. Each file is taken from the digest-keyed cache, filled once
-from the local tree or the store and verified before it is cached, and hardlinked into
-``closures/<closure digest>/<relpath>``. Relpaths are the tree's own, so every
+relpaths the manifest knows. A local tree that holds every closure file intact is used in
+place; otherwise each file is taken from the digest-keyed cache, filled once from the
+local tree or the store and verified before it is cached, and hardlinked into
+``closures/<closure digest>/<relpath>``, which holds exactly the closure. Relpaths are the tree's own, so every
 ``package://sx-embodiments/<relpath>`` name and every relative reference inside a
 description reads unchanged.
 """
@@ -222,16 +223,25 @@ def _sweep(closures: Path) -> None:
 
 
 def materialize(embodiment: Embodiment) -> Path:
-    """A directory holding exactly ``embodiment``'s closure, hardlinked from the cache.
+    """A directory holding ``embodiment``'s closure, every file verified.
 
-    The directory is named by the closure's content digest, built beside its final name
-    and renamed into place, so a reader only ever sees a complete closure. Every blob is
-    verified as it is linked. A complete closure is never deleted; one left incomplete
-    or altered is renamed aside before it is removed, so a concurrent reader holding a
-    complete one is never disturbed.
+    On a host that carries the tree, and whose tree holds every closure file with its
+    declared bytes, the tree itself is that directory: nothing is copied or written,
+    so a container whose root is read-only reads its image's tree as it always has.
+    Otherwise it is a directory holding exactly the closure, hardlinked from the cache,
+    named by the closure's content digest, built beside its final name and renamed into
+    place, so a reader only ever sees a complete closure. Every blob is verified as it
+    is linked. A complete closure is never deleted; one left incomplete or altered is
+    renamed aside before it is removed, so a concurrent reader holding a complete one
+    is never disturbed.
     """
     files = closure(embodiment)
     local = local_asset_root()
+    if local is not None and all(
+        not relpath.startswith("generated/") and intact(local / relpath, content)
+        for relpath, content in files.items()
+    ):
+        return local
     key = content_digest(
         [
             [relpath, str(content.sha256), content.size_bytes]

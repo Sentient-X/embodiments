@@ -405,3 +405,28 @@ def test_materialized_names_a_file_inside_the_closure(
             assert name.startswith("package://sx-embodiments/das_gripper_with_vr/meshes/"), name
         assert (root / name.removeprefix("package://sx-embodiments/")).is_file(), name
     assert vendored
+
+
+def test_an_intact_local_tree_is_the_closure_and_a_tampered_one_is_not(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    so101 = embodiments["so101"]
+    files = closure(so101)
+    tree = tmp_path / "tree"
+    for relpath in files:
+        target = tree / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((asset_root() / relpath).read_bytes())
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSETS", str(tree))
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
+
+    # Read in place: nothing is written, so a read-only root still materializes.
+    assert materialize(so101) == tree
+    assert not (tmp_path / "cache").exists()
+
+    mesh = next(relpath for relpath in files if relpath.lower().endswith(".stl"))
+    data = (tree / mesh).read_bytes()
+    (tree / mesh).write_bytes(bytes([data[0] ^ 0xFF]) + data[1:])
+    with pytest.raises(AssetsUnavailableError):
+        materialize(so101)
