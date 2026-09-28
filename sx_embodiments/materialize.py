@@ -10,7 +10,8 @@ and textures; MJCF meshes, textures, height fields, skins and includes), resolve
 relpaths the manifest knows. A local tree that holds every closure file intact is used in
 place; otherwise each file is taken from the digest-keyed cache, filled once from the
 local tree or the store and verified before it is cached, and hardlinked into
-``closures/<closure digest>/<relpath>``, which holds exactly the closure. Relpaths are the tree's own, so every
+``closures/<closure digest>/<relpath>``, which holds exactly the closure. Relpaths are
+the tree's own, so every
 ``package://sx-embodiments/<relpath>`` name and every relative reference inside a
 description reads unchanged.
 """
@@ -111,13 +112,27 @@ def _mjcf_references(relpath: str, data: bytes) -> list[str]:
     return references
 
 
+# Closures resolved in this process, keyed by the body's content identity and the
+# tree and cache its descriptions were read from.
+_CLOSURES: dict[tuple[str, str, str], dict[str, ContentBlob]] = {}
+
+
 def closure(embodiment: Embodiment) -> dict[str, ContentBlob]:
     """Every file ``embodiment`` needs, by relpath, with the bytes it must have.
 
     A declared asset keeps its declared identity (a recorded body may name an earlier
     revision than the tree's); every file a description names takes the manifest's.
+    Resolved once per process for each body, tree and cache.
     """
     refuse_retired_configuration()
+    memo = (str(embodiment.id), str(local_asset_root()), str(cache_root()))
+    known = _CLOSURES.get(memo)
+    if known is None:
+        known = _CLOSURES[memo] = _resolve_closure(embodiment)
+    return dict(known)
+
+
+def _resolve_closure(embodiment: Embodiment) -> dict[str, ContentBlob]:
     manifest = asset_manifest()
     local = local_asset_root()
     files: dict[str, ContentBlob] = {}
@@ -192,7 +207,11 @@ def _complete(directory: Path, files: dict[str, ContentBlob]) -> bool:
         blob = cache_root() / "sha256" / content.sha256[:2] / content.sha256
         target = directory / relpath
         try:
-            linked = blob.is_file() and os.path.samefile(blob, target)
+            linked = (
+                blob.is_file()
+                and os.path.samefile(blob, target)
+                and target.stat().st_size == content.size_bytes
+            )
         except OSError:
             return False
         if not (linked or intact(target, content)):
@@ -222,6 +241,20 @@ def _sweep(closures: Path) -> None:
             shutil.rmtree(entry, ignore_errors=True)
 
 
+# Closures this process has verified, keyed by closure digest, the local tree and the
+# cache they were verified against, so the tree in place is hashed once per process.
+_VERIFIED: dict[tuple[str, str, str], Path] = {}
+
+
+def _closure_key(files: dict[str, ContentBlob]) -> str:
+    return content_digest(
+        [
+            [relpath, str(content.sha256), content.size_bytes]
+            for relpath, content in sorted(files.items())
+        ]
+    )
+
+
 def materialize(embodiment: Embodiment) -> Path:
     """A directory holding ``embodiment``'s closure, every file verified.
 
@@ -233,21 +266,48 @@ def materialize(embodiment: Embodiment) -> Path:
     place, so a reader only ever sees a complete closure. Every blob is verified as it
     is linked. A complete closure is never deleted; one left incomplete or altered is
     renamed aside before it is removed, so a concurrent reader holding a complete one
-    is never disturbed.
+    is never disturbed. A closure is verified once per process.
+
+    A cache that cannot be written (a read-only root, no space) is
+    :class:`AssetsUnavailableError` naming the cache, never a bare ``OSError``.
     """
+    return _materialized_closure(embodiment)[0]
+
+
+def _materialized_closure(embodiment: Embodiment) -> tuple[Path, dict[str, ContentBlob]]:
     files = closure(embodiment)
     local = local_asset_root()
+    key = _closure_key(files)
+    memo = (key, str(local), str(cache_root()))
+    known = _VERIFIED.get(memo)
+    # The tree in place is trusted once verified; a cache closure is re-checked by
+    # links and sizes, which is cheap, since the cache is this host's to damage.
+    if known is not None and (known == local or _complete(known, files)):
+        return known, files
     if local is not None and all(
         not relpath.startswith("generated/") and intact(local / relpath, content)
         for relpath, content in files.items()
     ):
-        return local
-    key = content_digest(
-        [
-            [relpath, str(content.sha256), content.size_bytes]
-            for relpath, content in sorted(files.items())
-        ]
-    )
+        _VERIFIED[memo] = local
+        return local, files
+    try:
+        root = _build(embodiment, files, key, local)
+    except OSError as error:
+        raise AssetsUnavailableError(
+            f"{embodiment.name}: the asset cache {cache_root()} cannot hold its closure "
+            f"({type(error).__name__}); the local tree lacks files it needs, so set "
+            f"{_CACHE_ENV_NAME} to a writable directory"
+        ) from None
+    _VERIFIED[memo] = root
+    return root, files
+
+
+_CACHE_ENV_NAME = "SX_EMBODIMENTS_ASSET_CACHE"
+
+
+def _build(
+    embodiment: Embodiment, files: dict[str, ContentBlob], key: str, local: Path | None
+) -> Path:
     closures = cache_root() / "closures"
     target = closures / key
     blobs = {relpath: _source(relpath, content, local) for relpath, content in files.items()}
@@ -284,7 +344,9 @@ def materialized(embodiment: Embodiment, ref: AssetRef | None = None) -> Path:
     ``ref`` defaults to the authoritative description. A consumer that follows a
     description's own references (a URDF loader, MuJoCo, a mesh preview) reads it here
     rather than from :func:`resolve_asset`, whose single verified file has no siblings on
-    a host without the tree.
+    a host without the tree. ``ref`` must name a file of this body's closure with the
+    closure's exact bytes; any other reference, or a path that leaves the tree, is
+    refused, even where the tree in place happens to hold a file at that path.
     """
     target = embodiment.urdf.asset if ref is None else ref
     if not target.uri.startswith(PACKAGE_URI_PREFIX):
@@ -292,8 +354,13 @@ def materialized(embodiment: Embodiment, ref: AssetRef | None = None) -> Path:
             f"asset uri is not a packaged sx-embodiments asset: {target.uri}"
         )
     relpath = target.uri.removeprefix(PACKAGE_URI_PREFIX)
-    root = materialize(embodiment)
-    path = root / relpath
-    if not path.is_file():
+    validate_logical_path(PurePosixPath(relpath))
+    root, files = _materialized_closure(embodiment)
+    content = files.get(relpath)
+    if content is None:
         raise AssetsUnavailableError(f"{embodiment.name}: {relpath} is not in its closure")
-    return path
+    if content != target.content:
+        raise AssetsUnavailableError(
+            f"{embodiment.name}: {relpath} is {content} in its closure, not {target.content}"
+        )
+    return root / relpath

@@ -310,7 +310,13 @@ def cached_blob(content: ContentBlob, *, relpath: str, local: Path | None = None
     blob = cache_root() / "sha256" / digest[:2] / digest
     if intact(blob, content):
         return blob
-    blob.unlink(missing_ok=True)
+    try:
+        blob.unlink(missing_ok=True)
+    except OSError as error:
+        raise AssetsUnavailableError(
+            f"{relpath}: the asset cache {cache_root()} cannot be written "
+            f"({type(error).__name__}); set {_CACHE_ENV} to a writable directory"
+        ) from None
     data: bytes | None = None
     if local is not None and local.is_file():
         candidate = local.read_bytes()
@@ -318,7 +324,13 @@ def cached_blob(content: ContentBlob, *, relpath: str, local: Path | None = None
             data = candidate
     if data is None:
         data = _verified(relpath, content, _store_fetch(digest))
-    _publish(blob, data)
+    try:
+        _publish(blob, data)
+    except OSError as error:
+        raise AssetsUnavailableError(
+            f"{relpath}: the asset cache {cache_root()} cannot be written "
+            f"({type(error).__name__}); set {_CACHE_ENV} to a writable directory"
+        ) from None
     return blob
 
 

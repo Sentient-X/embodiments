@@ -3,17 +3,20 @@
 import importlib.util
 import io
 import os
+import sys
 import time
 import traceback
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-from sx_contracts.content import ContentBlob
+from sx_contracts.assets import AssetIntegrityError
+from sx_contracts.content import ContentBlob, Sha256Digest
 
 from sx_embodiments import (
     AssetDigestMismatchError,
@@ -31,7 +34,7 @@ from sx_embodiments.assets import (
     probe_store,
     resolve_asset,
 )
-from sx_embodiments.materialize import closure
+from sx_embodiments.materialize import _VERIFIED, closure  # pyright: ignore[reportPrivateUsage]
 
 _TOKEN = "sx-test-bearer-7f3a9c"
 
@@ -428,5 +431,51 @@ def test_an_intact_local_tree_is_the_closure_and_a_tampered_one_is_not(
     mesh = next(relpath for relpath in files if relpath.lower().endswith(".stl"))
     data = (tree / mesh).read_bytes()
     (tree / mesh).write_bytes(bytes([data[0] ^ 0xFF]) + data[1:])
+    # A tree verified in place is trusted for the rest of the process.
+    assert materialize(so101) == tree
+    _VERIFIED.clear()
     with pytest.raises(AssetsUnavailableError):
         materialize(so101)
+
+
+def test_materialized_refuses_a_reference_outside_the_bodys_closure() -> None:
+    so101 = embodiments["so101"]
+    # Another body's description sits in the same tree, but not in this closure.
+    with pytest.raises(AssetsUnavailableError, match="not in its closure"):
+        materialized(so101, embodiments["piper"].urdf.asset)
+    zeroed = replace(
+        so101.urdf.asset,
+        content=ContentBlob(Sha256Digest("0" * 64), so101.urdf.asset.byte_size),
+    )
+    with pytest.raises(AssetsUnavailableError, match="in its closure, not"):
+        materialized(so101, zeroed)
+    escaping = replace(so101.urdf.asset, location="package://sx-embodiments/../../etc/passwd")
+    with pytest.raises(AssetIntegrityError):
+        materialized(so101, escaping)
+
+
+def test_a_cache_that_cannot_be_written_is_a_typed_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    so101 = embodiments["so101"]
+    store = _store(tmp_path, closure(so101))
+    _no_local_tree(monkeypatch, tmp_path)
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_bytes(b"")
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(blocker / "cache"))
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store)
+    with pytest.raises(AssetsUnavailableError, match="cannot be written"):
+        materialize(so101)
+
+
+def test_a_tree_in_place_is_hashed_once_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    rby1 = embodiments["rby1"]
+    _VERIFIED.clear()
+    first = materialize(rby1)
+
+    def rehashed(*_: object) -> bool:
+        pytest.fail("a verified closure was hashed again")
+
+    monkeypatch.setattr(sys.modules["sx_embodiments.materialize"], "intact", rehashed)
+    assert materialize(rby1) == first
+    assert materialized(rby1).is_file()
