@@ -6,9 +6,13 @@ without the tree resolve a description's meshes and fetch them from the store by
 
 A declared asset (a :class:`PackagedAsset`, a preview, a row of the tree's
 ``dependency-assets.json``) carries its own licence. The thousands of meshes a description
-names carry none, so an undeclared file takes the licences declared in its nearest
-ancestor directory that declares any, joined with ``AND``. That keeps the audience rule
-whole: a file under an entitled directory can only inherit an entitled licence.
+names carry none, so an undeclared file takes the licence declared in its nearest
+ancestor directory that declares any, and only when every declaration beneath that
+directory names the same licence: a directory whose subtrees disagree cannot license a file
+in a subtree none of them covers, so that file is a disagreement until it is declared. A
+vendored file no embodiment references is declared in ``known.sources.VENDORED_LICENCES``.
+The audience rule stays whole: a file under an entitled directory can only inherit an
+entitled licence.
 
     python tools/render_asset_manifest.py           # rewrite the manifest from the tree
     python tools/render_asset_manifest.py --check   # fail when it disagrees with either
@@ -32,6 +36,7 @@ from .assets import (
 from .embodiment import packaged_assets
 from .known import asset_audiences, definitions
 from .known._previews import PREVIEWS
+from .known.sources import VENDORED_LICENCES
 
 
 class ManifestDisagreementError(AssetIntegrityError):
@@ -86,10 +91,21 @@ def _directory_licences(licences: Mapping[str, set[str]]) -> dict[PurePosixPath,
 
 
 def _inherited(relpath: str, by_directory: Mapping[PurePosixPath, set[str]]) -> str | None:
-    """The licences declared in the nearest ancestor directory that declares any."""
-    for parent in PurePosixPath(relpath).parents:
+    """The one licence declared beneath the nearest declaring ancestor, or ``None``.
+
+    A vendored declaration (``VENDORED_LICENCES``, a file or a directory) wins over
+    inheritance. An ancestor whose declarations name several licences is refused rather
+    than joined: the union of unrelated siblings is nobody's licence.
+    """
+    path = PurePosixPath(relpath)
+    for candidate in (path, *path.parents):
+        vendored = VENDORED_LICENCES.get(str(candidate))
+        if vendored is not None:
+            return vendored
+    for parent in path.parents:
         if parent in by_directory:
-            return _joined(by_directory[parent])
+            values = by_directory[parent]
+            return next(iter(values)) if len(values) == 1 else None
     return None
 
 
@@ -120,7 +136,10 @@ def render_manifest(root: Path) -> tuple[ManifestEntry, ...]:
             _joined(licences[relpath]) if relpath in licences else _inherited(relpath, by_directory)
         )
         if license_id is None:
-            disagreements.append(f"{relpath}: no declaration licenses this file")
+            disagreements.append(
+                f"{relpath}: no declaration licenses this file, and its nearest declaring "
+                "ancestor holds no single licence"
+            )
             continue
         directory = PurePosixPath(relpath).parts[0]
         if audience(license_id) is not audiences.get(directory):

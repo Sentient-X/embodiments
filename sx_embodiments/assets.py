@@ -174,6 +174,38 @@ def asset_manifest() -> Mapping[str, ManifestEntry]:
     return {entry.relpath: entry for entry in parse_manifest(text)}
 
 
+def refuse_retired_configuration() -> None:
+    """Refuse the relpath-keyed mirror's variable whenever it is set, not only on a miss.
+
+    A host still configured for the mirror would otherwise work from its local tree and
+    fail only on the first miss, far from the stale setting that caused it.
+    """
+    if os.environ.get(_RETIRED_MIRROR_ENV) is not None:
+        raise AssetsUnavailableError(
+            f"{_RETIRED_MIRROR_ENV} is retired: the store is digest-keyed; unset it and set "
+            f"{_STORE_ENV}"
+        )
+
+
+def _store_token() -> str | None:
+    """The configured bearer, parsed once: surrounding whitespace dropped, visible ASCII only.
+
+    A credential read from a file or a secret mount often ends in a newline, and
+    ``http.client`` rejects such a header value with an exception whose text is the whole
+    header. Parsing here means no malformed credential reaches the transport, and the
+    refusal names the variable, never the value.
+    """
+    raw = os.environ.get(_STORE_TOKEN_ENV)
+    if raw is None:
+        return None
+    token = raw.strip()
+    if not token or not all("!" <= character <= "~" for character in token):
+        raise AssetsUnavailableError(
+            f"{_STORE_TOKEN_ENV} must be a non-empty token of visible ASCII characters"
+        )
+    return token
+
+
 def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
     """The store read for one digest, carrying the bearer credential when one is configured.
 
@@ -181,12 +213,9 @@ def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
     redirect to a signed object URL, the bearer stays with the store and never reaches the
     host the redirect names.
     """
+    refuse_retired_configuration()
     store = os.environ.get(_STORE_ENV)
     if not store:
-        if os.environ.get(_RETIRED_MIRROR_ENV):
-            raise AssetsUnavailableError(
-                f"{_RETIRED_MIRROR_ENV} is retired: the store is digest-keyed; set {_STORE_ENV}"
-            )
         raise AssetsUnavailableError(
             f"asset sha256 {sha256} is not on this host "
             f"(set {_ASSETS_ENV} to a local tree or {_STORE_ENV} to the asset store)"
@@ -197,8 +226,8 @@ def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
             f"{_STORE_ENV} must use one of {sorted(_STORE_SCHEMES)}, got {scheme!r}"
         )
     request = urllib.request.Request(f"{store.rstrip('/')}/sha256/{sha256[:2]}/{sha256}")
-    token = os.environ.get(_STORE_TOKEN_ENV)
-    if token:
+    token = _store_token()
+    if token is not None:
         request.add_unredirected_header("Authorization", f"Bearer {token}")
     return request
 
@@ -206,9 +235,9 @@ def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
 def _store_fetch(sha256: Sha256Digest) -> bytes:
     """Read one object from the store; every refusal is :class:`AssetsUnavailableError`.
 
-    The raised message names the digest and the status only. Neither the request (which
-    holds the credential) nor the transport exception is chained, so no traceback carries
-    either.
+    The raised message names the digest and the status or exception type only. Neither
+    the request (which holds the credential) nor the transport exception is chained, so
+    no message or traceback carries either.
     """
     request = _store_request(sha256)
     status: int | None = None
@@ -217,7 +246,10 @@ def _store_fetch(sha256: Sha256Digest) -> bytes:
             return response.read()
     except urllib.error.HTTPError as error:
         status = error.code
-    except (OSError, http.client.HTTPException) as error:
+        error.close()
+    except (OSError, http.client.HTTPException, ValueError) as error:
+        # ValueError covers UnicodeError and http.client's invalid-header refusal, whose
+        # text would otherwise carry the header value.
         reason = type(error).__name__
         raise AssetsUnavailableError(
             f"asset store read failed for sha256 {sha256}: {reason}"
@@ -328,6 +360,7 @@ def resolve_asset(ref: AssetRef) -> Path:
     """
     if not ref.uri.startswith(PACKAGE_URI_PREFIX):
         raise AssetsUnavailableError(f"asset uri is not a packaged sx-embodiments asset: {ref.uri}")
+    refuse_retired_configuration()
     relpath = ref.uri.removeprefix(PACKAGE_URI_PREFIX)
     validate_logical_path(PurePosixPath(relpath))
     root = local_asset_root()
