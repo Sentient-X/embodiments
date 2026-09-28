@@ -1,5 +1,7 @@
 """Materialize a closure from an empty cache through the digest-keyed store, fail-closed."""
 
+import importlib.util
+import io
 import os
 import time
 import traceback
@@ -8,6 +10,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.message import Message
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from sx_contracts.content import ContentBlob
@@ -19,7 +22,13 @@ from sx_embodiments import (
     materialize,
 )
 from sx_embodiments import assets as assets_module
-from sx_embodiments.assets import asset_manifest, asset_root, description_asset_uri, resolve_asset
+from sx_embodiments.assets import (
+    asset_manifest,
+    asset_root,
+    description_asset_uri,
+    probe_store,
+    resolve_asset,
+)
 from sx_embodiments.materialize import closure
 
 _TOKEN = "sx-test-bearer-7f3a9c"
@@ -328,3 +337,48 @@ def test_abandoned_build_directories_are_swept(
     materialize(so101)
     assert not stale.exists()
     assert fresh.exists()
+
+
+def _store_check() -> ModuleType:
+    tool = Path(__file__).parents[1] / "tools/check_asset_store.py"
+    spec = importlib.util.spec_from_file_location("check_asset_store", tool)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_store_check_names_exactly_the_digests_the_store_lacks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    files = closure(embodiments["so101"])
+    kept = dict(sorted(files.items())[1:])
+    (lost_relpath, lost), *_ = sorted(files.items())
+    store = _store(tmp_path, kept)
+    _no_local_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_STORE", store)
+
+    refusals = _store_check().unserved(files.values())
+
+    assert len(refusals) == 1 and lost.sha256 in refusals[0], lost_relpath
+    assert _store_check().unserved(kept.values()) == []
+
+
+def test_a_probe_reads_one_byte_and_keeps_the_bearer_off_the_redirect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _https_store(monkeypatch, tmp_path)
+
+    def serve(request: urllib.request.Request, timeout: float) -> object:
+        del timeout
+        seen.append(request)
+        return io.BytesIO(b"x")
+
+    monkeypatch.setattr(assets_module.urllib.request, "urlopen", serve)
+    content = embodiments["so101"].urdf.asset.content
+    probe_store(content)
+
+    (request,) = seen
+    # The range follows the redirect to the signed object; the bearer does not.
+    assert request.headers == {"Range": "bytes=0-0"}
+    assert request.unredirected_hdrs == {"Authorization": f"Bearer {_TOKEN}"}

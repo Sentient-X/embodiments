@@ -232,14 +232,17 @@ def _store_request(sha256: Sha256Digest) -> urllib.request.Request:
     return request
 
 
-def _store_fetch(sha256: Sha256Digest) -> bytes:
+def _store_fetch(sha256: Sha256Digest, *, first_byte: bool = False) -> bytes:
     """Read one object from the store; every refusal is :class:`AssetsUnavailableError`.
 
     The raised message names the digest and the status or exception type only. Neither
     the request (which holds the credential) nor the transport exception is chained, so
-    no message or traceback carries either.
+    no message or traceback carries either. ``first_byte`` asks for one byte in an
+    ordinary (redirected) header, so the signed object read honours it too.
     """
     request = _store_request(sha256)
+    if first_byte:
+        request.add_header("Range", "bytes=0-0")
     status: int | None = None
     try:
         with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_S) as response:
@@ -257,6 +260,16 @@ def _store_fetch(sha256: Sha256Digest) -> bytes:
     if status in _REFUSED_STATUSES:
         raise AssetsUnavailableError(f"asset store refused sha256 {sha256}: HTTP {status}")
     raise AssetsUnavailableError(f"asset store failed for sha256 {sha256}: HTTP {status}")
+
+
+def probe_store(content: ContentBlob) -> None:
+    """Prove the store serves ``content`` without downloading it, or raise the fetch's refusal.
+
+    One request per digest reading its first byte (an empty object has none to read, so it
+    is read whole): what a check over every manifest digest costs, and the same bearer,
+    redirect and :class:`AssetsUnavailableError` a real fetch meets.
+    """
+    _store_fetch(content.sha256, first_byte=content.size_bytes > 0)
 
 
 def _verified(label: str, content: ContentBlob, data: bytes) -> bytes:

@@ -128,6 +128,20 @@ never appears in a URL, a message or a traceback, and 401, 403 and 404 all raise
 `AssetsUnavailableError`. Tampered bytes raise `AssetDigestMismatchError` and never enter the
 cache.
 
+The hosted store is the SentientX catalog door:
+
+```bash
+export SX_EMBODIMENTS_ASSET_STORE=https://catalog.sentientx.io/api/embodiment-assets
+export SX_EMBODIMENTS_ASSET_STORE_TOKEN=sxk_...   # a SentientX API key
+```
+
+It redirects each digest to a short-lived signed read of the object, after checking the key
+holds a `(catalog, asset_reader)` grant whose scope reaches the file's audience: `public`
+reaches files under public licences, `entitled` also reaches `LicenseRef-*` files. A digest
+the manifest does not name is never served. `python tools/check_asset_store.py` reads one
+byte of every manifest digest through the configured store and names each one it refuses
+or lacks.
+
 Recordings are immutable and name their embodiment by content, so a document this registry
 published under an earlier schema (`sx_embodiments/historical/`, read by `read_recorded`) must
 keep resolving. When a canonical file changes, keep its published revision at
