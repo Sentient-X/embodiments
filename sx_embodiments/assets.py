@@ -382,6 +382,9 @@ def resolve_asset(ref: AssetRef) -> Path:
     asset fact from an embodiment. The local tree serves the file when its bytes match,
     then a kept revision beside it, then the store by digest; a foreign URI scheme, a
     missing file, or bytes whose digest disagrees with the reference all fail closed.
+    A path that leaves the tree is :class:`AssetIntegrityError` (a malformed
+    reference), as it is for ``materialized``; a file that cannot be had is
+    :class:`AssetsUnavailableError`.
     """
     if not ref.uri.startswith(PACKAGE_URI_PREFIX):
         raise AssetsUnavailableError(f"asset uri is not a packaged sx-embodiments asset: {ref.uri}")

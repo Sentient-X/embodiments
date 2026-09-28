@@ -15,16 +15,18 @@ from typing import cast
 from sx_contracts import CapabilityProfile, CapabilitySet, ComponentCapabilities, decode
 from sx_contracts.assets import (
     AssetFormat,
+    AssetIntegrityError,
     AssetProvenance,
     AssetRef,
     AssetRole,
     ProvenancedAsset,
+    validate_logical_path,
 )
 from sx_contracts.content import ContentBlob, Sha256Digest
 from sx_contracts.identity import JsonObject, content_id
 from sx_contracts.identity import canonical_json as canonical_document
 
-from .assets import PackagedAsset, resolve_asset
+from .assets import PACKAGE_URI_PREFIX, PackagedAsset, resolve_asset
 from .compose import (
     BaseMount,
     BodyAttachment,
@@ -134,6 +136,16 @@ class Embodiment:
             raise EmbodimentSchemaError("embodiment family must not be empty")
         if not self.assets:
             raise EmbodimentSchemaError("embodiment must reference at least one asset")
+        for asset in self.assets:
+            uri = asset.asset.uri
+            if uri.startswith(PACKAGE_URI_PREFIX):
+                # A packaged asset's URI names a file of the tree: it may not leave it.
+                try:
+                    validate_logical_path(PurePosixPath(uri.removeprefix(PACKAGE_URI_PREFIX)))
+                except AssetIntegrityError as error:
+                    raise EmbodimentSchemaError(
+                        f"invalid packaged asset uri {uri!r}: {error}"
+                    ) from None
         identities = {
             (
                 asset.asset.location,

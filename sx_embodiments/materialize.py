@@ -144,6 +144,8 @@ def _resolve_closure(embodiment: Embodiment) -> dict[str, ContentBlob]:
                 f"asset uri is not a packaged sx-embodiments asset: {ref.uri}"
             )
         relpath = ref.uri.removeprefix(PACKAGE_URI_PREFIX)
+        # Parsing refuses such a URI already; a closure never writes outside its root.
+        validate_logical_path(PurePosixPath(relpath))
         files[relpath] = ref.content
         pending.append((relpath, ref.format))
     missing: list[str] = []
@@ -347,6 +349,11 @@ def materialized(embodiment: Embodiment, ref: AssetRef | None = None) -> Path:
     a host without the tree. ``ref`` must name a file of this body's closure with the
     closure's exact bytes; any other reference, or a path that leaves the tree, is
     refused, even where the tree in place happens to hold a file at that path.
+
+    Two errors, for two different faults: a malformed reference (a path with ``..``,
+    absolute, or backslashed) is :class:`AssetIntegrityError`, a caller's bug; bytes
+    that are missing, refused or unwritable here are :class:`AssetsUnavailableError`.
+    A caller that degrades on unavailability catches only the second.
     """
     target = embodiment.urdf.asset if ref is None else ref
     if not target.uri.startswith(PACKAGE_URI_PREFIX):

@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 import os
 import sys
 import time
@@ -13,6 +14,7 @@ from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 from sx_contracts.assets import AssetIntegrityError
@@ -21,6 +23,8 @@ from sx_contracts.content import ContentBlob, Sha256Digest
 from sx_embodiments import (
     AssetDigestMismatchError,
     AssetsUnavailableError,
+    Embodiment,
+    EmbodimentSchemaError,
     development_embodiments,
     embodiments,
     materialize,
@@ -479,3 +483,24 @@ def test_a_tree_in_place_is_hashed_once_per_process(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys.modules["sx_embodiments.materialize"], "intact", rehashed)
     assert materialize(rby1) == first
     assert materialized(rby1).is_file()
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "package://sx-embodiments/../../../ESCAPED.obj",
+        "package://sx-embodiments/so101/../../ESCAPED.obj",
+        "package://sx-embodiments//etc/passwd",
+    ],
+)
+def test_a_packaged_uri_that_leaves_the_tree_never_parses(
+    location: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A recorded document naming such a file is refused before anything is written."""
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
+    document = embodiments["so101"].to_dict()
+    assets = cast("list[dict[str, dict[str, object]]]", document["assets"])
+    assets[0]["asset"]["location"] = location
+    with pytest.raises(EmbodimentSchemaError, match="invalid packaged asset uri"):
+        Embodiment.from_json(json.dumps(document))
+    assert not any(tmp_path.rglob("ESCAPED.obj"))
