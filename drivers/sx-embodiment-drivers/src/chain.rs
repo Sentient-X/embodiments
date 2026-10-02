@@ -15,11 +15,29 @@ pub enum Evidence {
 
 /// What one command established.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Receipt {
+pub struct Receipt<F> {
     pub evidence: Evidence,
     /// The joint coordinates the actuators reported in their answers, in native state order;
     /// empty when the bus answers nothing.
     pub observed: Vec<f64>,
+    /// Each actuator's own answer, in its bus's terms, in native state order; empty when the
+    /// bus answers nothing.
+    pub feedback: Vec<F>,
+}
+
+/// The joint range a chain commands on one axis: the declared bounds intersected with what
+/// the driver's configuration lets the actuator reach.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CommandRange {
+    pub lower: f64,
+    pub upper: f64,
+}
+
+impl CommandRange {
+    #[must_use]
+    pub fn admits(&self, joint: f64) -> bool {
+        joint.is_finite() && (self.lower..=self.upper).contains(&joint)
+    }
 }
 
 /// What a stop's answers proved, actuator by actuator, by bus address.
@@ -105,18 +123,24 @@ pub fn check_targets(axes: &[BoundAxis], joints: &[f64]) -> Result<(), TargetErr
 /// A chain of bound actuators on one bus, in the embodiment's native state order.
 pub trait ActuatorChain {
     type Error: std::error::Error + Send + Sync + 'static;
+    /// One actuator's answer as the bus reports it.
+    type Feedback: Clone + std::fmt::Debug + PartialEq;
 
     /// The bound axes, in native state order: index `i` of every vector is `axes()[i]`.
     fn axes(&self) -> &[BoundAxis];
+
+    /// The joint range each axis is commanded within, in native state order; always inside
+    /// the axis's declared bounds.
+    fn commandable(&self) -> &[CommandRange];
 
     /// Drive every axis toward `joints`, in joint coordinates, enabling the chain first if a
     /// stop left it disabled.
     ///
     /// # Errors
     ///
-    /// Refuses a vector outside the axes' bounds before any frame is sent; reports the link's
-    /// failure or an actuator whose answer contradicts the command.
-    fn command(&mut self, joints: &[f64]) -> Result<Receipt, Self::Error>;
+    /// Refuses a vector outside the commandable ranges before any frame is sent; reports the
+    /// link's failure or an actuator whose answer contradicts the command.
+    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error>;
 
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
     /// prove. The chain stays disabled until the next command.

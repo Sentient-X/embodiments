@@ -20,15 +20,31 @@
 //!   checked there; here every frame is already a received CAN frame.
 //! - The transport keeps an unparsed remainder across every read; `recv_set_param_data` in
 //!   `DM_CAN.py` reads without prepending it.
+//! - `recv` and `recv_set_param_data` read until the link has nothing pending; `DM_CAN.py`
+//!   reads `serial_.read_all()` once per call.
 //! - A method naming an unregistered motor returns [`DmCanError::MotorNotFound`] where the
-//!   vendor prints and returns.
-//! - [`Motor`] counts its feedback frames (`feedback_count`) so a caller can tell a fresh answer
-//!   from a cached one; the vendor keeps only the latest values.
+//!   vendor prints and returns. That includes `enable`, `disable`, `set_zero_position` and
+//!   `refresh_motor_status`, which `DM_CAN.py` sends whether or not the motor is registered.
+//! - A feedback frame is taken only on the motor's `MasterID` with the motor's id in its first
+//!   byte's low nibble; `DM_CAN.py` takes any registered id and, on id 0, looks the motor up by
+//!   that nibble. A frame failing the check is dropped, so the motor reads as silent.
+//! - [`Motor`] also keeps the feedback's MOS and rotor temperatures (bytes 6 and 7), which
+//!   `DM_CAN.py` does not decode, and counts its feedback frames (`feedback_count`) so a caller
+//!   can tell a fresh answer from a cached one.
+//! - Each [`Motor`] carries its own limit row, and [`MotorControl::change_limit_param`] changes
+//!   one motor's, as Damiao's `SocketCAN` routine does (`Motor.limit_param` and
+//!   `changeMotorLimit` in `SocketCan控制例程/Python例程/damiao_socketcan.py`,
+//!   <https://gitee.com/kit-miao/motor-control-routine> at
+//!   `fa8f511cab00ac424a10fb94d4ad2c11e270f5b2`); `DM_CAN.py`'s `change_limit_param` mutates
+//!   the row every motor of that model shares.
 //! - Translated only where a consumer drives it: MIT control, enable, disable, set zero,
-//!   refresh, register read and write, control-mode switch. The position, velocity,
-//!   force-position and CSP modes, `enable_old`, `control_delay`, `change_motor_param`,
-//!   `save_motor_param` (a flash write) and `change_limit_param` (which mutates the shared
-//!   table) are left out; `Pd`, `Vd` and `isEnable`, which `DM_CAN.py` never reads, too.
+//!   refresh, register read and write, control-mode switch, limit change. The position,
+//!   velocity, force-position and CSP modes, `enable_old`, `control_delay`,
+//!   `change_motor_param` and `save_motor_param` (a flash write) are left out; `Pd`, `Vd` and
+//!   `isEnable`, which `DM_CAN.py` never reads, too.
+//! - Kept from `DM_CAN.py` as it is: `recv` decodes a register reply arriving on a `MasterID`
+//!   as feedback, as the vendor's `__process_packet` does; replies are consumed by
+//!   `recv_set_param_data` first in every sequence this crate runs.
 
 // The vendor's names (`kp_uint`/`kd_uint`, `recv_q`/`recv_dq`) are kept.
 #![allow(clippy::similar_names)]
@@ -168,9 +184,14 @@ pub struct Motor {
     pub state_dq: f32,
     pub state_tau: f32,
     pub state_err: u8,
+    /// MOS and rotor temperatures, degrees Celsius (not in `DM_CAN.py`).
+    pub state_t_mos: u8,
+    pub state_t_rotor: u8,
     pub slave_id: u16,
     pub master_id: u16,
     pub motor_type: DmMotorType,
+    /// `[Q_MAX, DQ_MAX, TAU_MAX]` this motor's frames are scaled by.
+    pub limit_param: [f64; 3],
     pub now_control_mode: ControlType,
     pub temp_param_dict: BTreeMap<u8, ParamValue>,
     /// Feedback frames decoded so far (not in `DM_CAN.py`; see the module header).
@@ -186,9 +207,12 @@ impl Motor {
             state_dq: 0.0,
             state_tau: 0.0,
             state_err: 0,
+            state_t_mos: 0,
+            state_t_rotor: 0,
             slave_id,
             master_id,
             motor_type,
+            limit_param: motor_type.limit_param(),
             now_control_mode: ControlType::MIT,
             temp_param_dict: BTreeMap::new(),
             feedback_count: 0,
@@ -220,7 +244,7 @@ impl Motor {
         self.state_tau
     }
 
-    /// The feedback's first-byte high nibble: 0 disabled, 1 enabled, 8..=0xE a fault.
+    /// The feedback's first-byte high nibble; [`crate::chain::MotorState`] names its values.
     #[must_use]
     pub const fn get_error(&self) -> u8 {
         self.state_err
@@ -239,6 +263,8 @@ pub enum DmCanError {
     MotorNotFound(u16),
     #[error("cannot convert float NaN to integer")]
     NotANumber,
+    #[error("Value must be an integer within the range of uint32")]
+    ParamOutOfRange,
     #[error("the CAN link failed")]
     Io(#[from] io::Error),
 }
@@ -286,7 +312,7 @@ impl<P: CanPort> MotorControl<P> {
         let index = self.index(slave_id)?;
         let kp_uint = float_to_uint(kp, 0.0, 500.0, 12)?;
         let kd_uint = float_to_uint(kd, 0.0, 5.0, 12)?;
-        let [q_max, dq_max, tau_max] = self.motors[index].motor_type.limit_param();
+        let [q_max, dq_max, tau_max] = self.motors[index].limit_param;
         let q_uint = float_to_uint(q, -q_max, q_max, 16)?;
         let dq_uint = float_to_uint(dq, -dq_max, dq_max, 12)?;
         let tau_uint = float_to_uint(tau, -tau_max, tau_max, 12)?;
@@ -362,23 +388,26 @@ impl<P: CanPort> MotorControl<P> {
     }
 
     fn process_packet(&mut self, data: [u8; 8], can_id: u32) {
-        let index = if can_id != 0x00 {
-            self.motors_map.get(&can_id)
-        } else {
-            self.motors_map.get(&u32::from(data[0] & 0x0f))
-        };
-        let Some(&index) = index else {
+        let Some(&index) = self.motors_map.get(&can_id) else {
             return;
         };
+        let motor = &self.motors[index];
+        if u32::from(motor.master_id) != can_id
+            || u16::from(data[0] & 0x0f) != motor.slave_id & 0x0f
+        {
+            return;
+        }
         let err_int = (data[0] >> 4) & 0x0f;
         let q_uint = (u16::from(data[1]) << 8) | u16::from(data[2]);
         let dq_uint = (u16::from(data[3]) << 4) | (u16::from(data[4]) >> 4);
         let tau_uint = ((u16::from(data[4]) & 0xf) << 8) | u16::from(data[5]);
         let motor = &mut self.motors[index];
-        let [q_max, dq_max, tau_max] = motor.motor_type.limit_param();
+        let [q_max, dq_max, tau_max] = motor.limit_param;
         let recv_q = uint_to_float(q_uint, -q_max, q_max, 16);
         let recv_dq = uint_to_float(dq_uint, -dq_max, dq_max, 12);
         let recv_tau = uint_to_float(tau_uint, -tau_max, tau_max, 12);
+        motor.state_t_mos = data[6];
+        motor.state_t_rotor = data[7];
         motor.recv_data(recv_q, recv_dq, recv_tau, err_int);
     }
 
@@ -438,17 +467,28 @@ impl<P: CanPort> MotorControl<P> {
         self.send_data(PARAM_ID, data_buf)
     }
 
+    /// `__write_motor_param`: the value's wire type follows the register, by [`is_in_ranges`].
     fn write_motor_param(
         &mut self,
         slave_id: u16,
         rid: DmVariable,
-        data: ParamValue,
+        data: f64,
     ) -> Result<(), DmCanError> {
         let [can_id_l, can_id_h] = slave_id.to_le_bytes();
         let mut data_buf = [can_id_l, can_id_h, 0x55, rid as u8, 0x00, 0x00, 0x00, 0x00];
-        data_buf[4..8].copy_from_slice(&match data {
-            ParamValue::Float(value) => float_to_uint8s(value),
-            ParamValue::Uint32(value) => data_to_uint8s(value),
+        data_buf[4..8].copy_from_slice(&if is_in_ranges(rid as u8) {
+            // `int(data)` truncates toward zero; `data_to_uint8s` refuses what uint32 cannot hold.
+            let truncated = data.trunc();
+            if !(0.0..=f64::from(u32::MAX)).contains(&truncated) {
+                return Err(DmCanError::ParamOutOfRange);
+            }
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let value = truncated as u32;
+            data_to_uint8s(value)
+        } else {
+            #[allow(clippy::cast_possible_truncation)]
+            let value = data as f32;
+            float_to_uint8s(value)
         });
         self.send_data(PARAM_ID, data_buf)
     }
@@ -466,11 +506,7 @@ impl<P: CanPort> MotorControl<P> {
     ) -> Result<bool, DmCanError> {
         let index = self.index(slave_id)?;
         let rid = DmVariable::CTRL_MODE;
-        self.write_motor_param(
-            slave_id,
-            rid,
-            ParamValue::Uint32(u32::from(control_mode as u8)),
-        )?;
+        self.write_motor_param(slave_id, rid, f64::from(control_mode as u8))?;
         for _ in 0..SWITCH_MODE_RETRIES {
             self.port.sleep(PARAM_RETRY_INTERVAL);
             self.recv_set_param_data()?;
@@ -479,6 +515,24 @@ impl<P: CanPort> MotorControl<P> {
             }
         }
         Ok(false)
+    }
+
+    /// `changeMotorLimit` of Damiao's `SocketCAN` routine: rescale one motor's frames to the
+    /// `PMAX`, `VMAX` and `TMAX` its registers hold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor.
+    pub fn change_limit_param(
+        &mut self,
+        slave_id: u16,
+        p_max: f64,
+        v_max: f64,
+        t_max: f64,
+    ) -> Result<(), DmCanError> {
+        let index = self.index(slave_id)?;
+        self.motors[index].limit_param = [p_max, v_max, t_max];
+        Ok(())
     }
 
     /// `refresh_motor_status`: ask the motor for a feedback frame, then read.

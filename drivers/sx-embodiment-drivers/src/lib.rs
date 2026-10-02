@@ -22,5 +22,6 @@ pub use binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, validate_chain,
 };
 pub use chain::{
-    ActuatorChain, Evidence, ProvenStop, Receipt, StopReport, TargetError, check_targets,
+    ActuatorChain, CommandRange, Evidence, ProvenStop, Receipt, StopReport, TargetError,
+    check_targets,
 };

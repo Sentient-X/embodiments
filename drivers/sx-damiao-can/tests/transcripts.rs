@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sx_damiao_can::b601::b601;
-use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError};
+use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, MotorFeedback, MotorLimits, MotorState};
 use sx_damiao_can::dm_can::{
     DmCanError, DmMotorType, DmVariable, Motor, MotorControl, ParamValue, float_to_uint,
     uint_to_float,
@@ -157,7 +158,31 @@ fn feedback_decodes_as_the_vendors() {
             row["err"].as_u64().unwrap(),
             "{row}"
         );
+        // DM_CAN.py does not decode the temperatures: bytes 6 and 7, as motorbridge reads them.
+        assert_eq!((motor.state_t_mos, motor.state_t_rotor), (data[6], data[7]));
     }
+}
+
+#[test]
+fn feedback_on_another_id_or_naming_another_motor_is_dropped() {
+    let mut port = Capture::default();
+    let answer = [0x11, 0x80, 0x00, 0x80, 0x08, 0x00, 30, 31];
+    // On the motor's command id rather than its feedback id.
+    port.inbox.push_back(CanFrame {
+        id: 0x01,
+        data: answer,
+    });
+    // On its feedback id but naming motor 2 in the low nibble.
+    let mut foreign = answer;
+    foreign[0] = 0x12;
+    port.inbox.push_back(CanFrame {
+        id: 0x11,
+        data: foreign,
+    });
+    let mut control = MotorControl::new(port);
+    control.add_motor(Motor::new(DmMotorType::DM4310, 0x01, 0x11));
+    control.recv().expect("recv");
+    assert_eq!(control.motor(0x01).unwrap().feedback_count, 0);
 }
 
 /// The recorded bus: each write must be the next recorded one, and makes its answers readable;
@@ -280,6 +305,45 @@ fn report(step: &Value) -> StopReport {
     }
 }
 
+fn limits(step: &Value) -> Vec<MotorLimits> {
+    step["limits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let row = row.as_array().unwrap();
+            #[allow(clippy::cast_possible_truncation)]
+            let narrow = |value: &Value| f64_of(value) as f32;
+            MotorLimits {
+                bus_id: u16::try_from(row[0].as_u64().unwrap()).unwrap(),
+                p_max: narrow(&row[1]),
+                v_max: narrow(&row[2]),
+                t_max: narrow(&row[3]),
+            }
+        })
+        .collect()
+}
+
+fn feedback(step: &Value) -> Vec<MotorFeedback> {
+    #[allow(clippy::cast_possible_truncation)]
+    let narrow = |value: &Value| f64_of(value) as f32;
+    let byte = |value: &Value| u8::try_from(value.as_u64().unwrap()).unwrap();
+    step["feedback"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|answer| MotorFeedback {
+            bus_id: u16::try_from(answer["bus_id"].as_u64().unwrap()).unwrap(),
+            state: MotorState::from_err(byte(&answer["state"])),
+            position: narrow(&answer["position"]),
+            velocity: narrow(&answer["velocity"]),
+            torque: narrow(&answer["torque"]),
+            mos_celsius: byte(&answer["mos_celsius"]),
+            rotor_celsius: byte(&answer["rotor_celsius"]),
+        })
+        .collect()
+}
+
 /// Run the chain through a recorded session and hold every step to the recorded outcome.
 fn replay(name: &str) {
     let session = session(name);
@@ -287,6 +351,7 @@ fn replay(name: &str) {
     let steps = session["steps"].as_array().unwrap();
     let mut chain = DamiaoChain::open(stream.port(), b601()).expect("open");
     assert_eq!(steps[0]["step"], "open");
+    assert_eq!(chain.limits(), limits(&steps[0]).as_slice());
     for step in &steps[1..] {
         match step["step"].as_str().unwrap() {
             "command" => match chain.command(&joints(step)) {
@@ -299,6 +364,7 @@ fn replay(name: &str) {
                         .map(f64_of)
                         .collect();
                     assert_eq!(receipt.observed, observed);
+                    assert_eq!(receipt.feedback, feedback(step));
                 }
                 Err(DamiaoChainError::StopPending) => {
                     assert_eq!(step["error"]["stop_pending"], true);
@@ -318,12 +384,17 @@ fn a_whole_b601_session_is_the_vendors_bus_traffic() {
 }
 
 #[test]
+fn a_dm4340_reporting_damiaos_other_velocity_range_is_scaled_by_it() {
+    replay("vmax_8");
+}
+
+#[test]
 fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
     replay("stop_fault");
 }
 
 #[test]
-fn a_motor_whose_vmax_register_differs_from_its_row_is_refused_at_open() {
+fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     let session = session("limit_mismatch");
     let stream = ReplayStream::new(session["events"].as_array().unwrap());
     match DamiaoChain::open(stream.port(), b601()) {
@@ -331,7 +402,6 @@ fn a_motor_whose_vmax_register_differs_from_its_row_is_refused_at_open() {
             bus_id,
             register,
             motor,
-            table,
         }) => {
             let error = &session["steps"][0]["error"];
             assert_eq!(u64::from(bus_id), error["limit_mismatch"].as_u64().unwrap());
@@ -339,16 +409,15 @@ fn a_motor_whose_vmax_register_differs_from_its_row_is_refused_at_open() {
             #[allow(clippy::cast_possible_truncation)]
             let reported = f64_of(&error["motor"]) as f32;
             assert_eq!(motor, Some(ParamValue::Float(reported)));
-            assert_eq!(f64::from(table), f64_of(&error["table"]));
         }
         Err(error) => panic!("{error}"),
-        Ok(_) => panic!("opened a motor with a mismatched VMAX register"),
+        Ok(_) => panic!("opened a motor with a VMAX no table carries"),
     }
     assert_eq!(stream.remaining(), 0);
 }
 
 #[test]
-fn a_target_outside_the_bounds_or_the_motor_range_sends_nothing() {
+fn a_target_outside_the_commandable_range_sends_nothing() {
     let session = session("session");
     let events = session["events"].as_array().unwrap();
     let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
@@ -361,14 +430,57 @@ fn a_target_outside_the_bounds_or_the_motor_range_sends_nothing() {
         Err(DamiaoChainError::Target(_))
     ));
     targets[1] = 0.0;
+    targets[0] = 2.7; // inside the URDF's 2.8 rad, past the deployed soft box's 150 deg
+    assert!(matches!(
+        chain.command(&targets),
+        Err(DamiaoChainError::Uncommandable { .. })
+    ));
+    targets[0] = 0.0;
     targets[6] = 0.05; // inside the finger's stroke, past the gripper motor's open angle
     assert!(matches!(
         chain.command(&targets),
-        Err(DamiaoChainError::MotorOutOfRange { .. })
+        Err(DamiaoChainError::Uncommandable { .. })
     ));
     assert!(matches!(
         chain.command(&[0.0; 6]),
         Err(DamiaoChainError::Target(_))
     ));
     assert_eq!(stream.remaining(), 0);
+}
+
+#[test]
+// 3.14 is the URDF's own limit, not an approximation of pi.
+#[allow(clippy::approx_constant)]
+fn the_commandable_ranges_are_the_urdf_inside_the_soft_box_and_the_reachable_gripper() {
+    let ranges: Vec<(f64, f64)> = b601()
+        .iter()
+        .map(|motor| {
+            let range = motor.commandable();
+            (range.lower, range.upper)
+        })
+        .collect();
+    let degrees = f64::to_radians;
+    assert_eq!(
+        ranges,
+        vec![
+            (degrees(-150.0), degrees(150.0)),
+            (-3.14, 0.0),
+            (-3.14, 0.0),
+            (degrees(-80.0), 1.57),
+            (-1.57, 1.57),
+            (degrees(-90.0), degrees(90.0)),
+            (0.0, 0.045),
+        ]
+    );
+}
+
+#[test]
+fn the_transcripts_are_the_bytes_the_provenance_names() {
+    let provenance: Value =
+        serde_json::from_str(include_str!("fixtures/dm_can/provenance.json")).expect("provenance");
+    let digest = Sha256::digest(include_bytes!("fixtures/dm_can/transcripts.json"));
+    assert_eq!(
+        hex(&digest),
+        provenance["transcripts.json"]["sha256"].as_str().unwrap()
+    );
 }

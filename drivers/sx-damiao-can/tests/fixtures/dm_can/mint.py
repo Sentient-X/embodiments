@@ -40,6 +40,8 @@ It needs numpy, which DM_CAN.py imports.
 from __future__ import annotations
 
 import ast
+import copy
+import hashlib
 import json
 import math
 import os
@@ -119,6 +121,9 @@ class FakeMotor:
 class FakeSerial:
     """A USB2CAN bridge: records each transmit packet and queues the motors' answers."""
 
+    T_MOS = 30
+    T_ROTOR = 31
+
     def __init__(self, motors: list[FakeMotor]) -> None:
         self.is_open = False
         self.motors = {motor.slave: motor for motor in motors}
@@ -173,7 +178,17 @@ class FakeSerial:
 
     def feedback(self, motor: FakeMotor) -> bytes:
         state = motor.fault if motor.fault is not None else int(motor.enabled)
-        data = bytes([(state << 4) | (motor.slave & 0x0F), *motor.q, 0x7F, 0xF7, 0xFF, 30, 31])
+        data = bytes(
+            [
+                (state << 4) | (motor.slave & 0x0F),
+                *motor.q,
+                0x7F,
+                0xF7,
+                0xFF,
+                self.T_MOS,
+                self.T_ROTOR,
+            ]
+        )
         return self.packet(motor.master, data)
 
     @staticmethod
@@ -189,18 +204,46 @@ DM_TYPE = {
     "damiao_dm4310": DM_CAN.DM_Motor_Type.DM4310,
     "damiao_dm4340": DM_CAN.DM_Motor_Type.DM4340,
 }
-# Seeed: master = id + 0x10; kp/kd from rebotarm_hardware.yaml (kd 8 declared as 5, the MIT max)
-# and rebotarm_dm.yaml for the gripper; the gripper motor's range from position_limits.
+# src/b601.rs: master = id + 0x10; kp/kd from reBotArm_control_py's rebotarm_dm.yaml (the 4340P's
+# kd 8 declared as 5, the MIT maximum); motor ranges are the URDF limits intersected with
+# LeRobot's DM_PROFILE.joint_limits soft box (degrees), and the gripper motor's position_limits.
 CONTROLLER = {
-    1: (120.0, 5.0),
-    2: (120.0, 5.0),
-    3: (120.0, 5.0),
-    4: (18.0, 2.0),
-    5: (18.0, 2.0),
-    6: (18.0, 2.0),
-    7: (8.0, 1.0),
+    1: (120.0, 5.0, (-150.0, 150.0)),
+    2: (120.0, 5.0, (-200.0, 1.0)),
+    3: (120.0, 5.0, (-200.0, 1.0)),
+    4: (18.0, 2.0, (-80.0, 90.0)),
+    5: (18.0, 2.0, (-90.0, 90.0)),
+    6: (18.0, 2.0, (-90.0, 90.0)),
+    7: (8.0, 1.0, None),
 }
 GRIPPER_MOTOR_RANGE = (-5.0, 0.0)
+# The DM4340 velocity ranges Damiao publishes: DM_CAN.py's row, then C++例程 damiao.h's.
+ACCEPTED_VMAX = {int(DM_CAN.DM_Motor_Type.DM4340): (10.0, 8.0)}
+# The fake motors' answers to the enable/disable/MIT frames carry state nibble 1 when enabled
+# and 0 when disabled, the codes in motorbridge/motorbridge@e8b3ac66
+# motor_vendors/damiao/src/protocol.rs:29-41 (status_name).
+VENDOR_LIMIT_PARAM = copy.deepcopy(DM_CAN.MotorControl.Limit_Param)
+
+
+def restore_vendor_limits() -> None:
+    """DM_CAN.py's change_limit_param mutates the class's shared table; undo it per session."""
+    for row, original in zip(DM_CAN.MotorControl.Limit_Param, VENDOR_LIMIT_PARAM, strict=True):
+        row[:] = original
+
+
+def motor_range(axis: dict[str, Any]) -> tuple[float, float]:
+    _kp, _kd, soft = CONTROLLER[axis["bus_id"]]
+    if soft is None:
+        return GRIPPER_MOTOR_RANGE
+    return (max(axis["lower"], math.radians(soft[0])), min(axis["upper"], math.radians(soft[1])))
+
+
+def commandable(axis: dict[str, Any]) -> tuple[float, float]:
+    lower, upper = motor_range(axis)
+    ends = [
+        value / (axis["sign"] * axis["reduction"]) + axis["zero_offset"] for value in (lower, upper)
+    ]
+    return (max(axis["lower"], min(ends)), min(axis["upper"], max(ends)))
 
 
 class ChainRefusalError(Exception):
@@ -212,6 +255,7 @@ class ChainRefusalError(Exception):
 class Chain:
     def __init__(self, axes: list[dict[str, Any]], serial: FakeSerial) -> None:
         self.axes = axes
+        self.serial = serial
         self.control = DM_CAN.MotorControl(serial)
         self.motors = []
         for axis in axes:
@@ -244,40 +288,61 @@ class Chain:
                     {"unexpected_state": motor.SlaveID, "state": motor.getError()}
                 )
 
-    def open(self) -> None:
+    def feedback(self) -> list[dict[str, Any]]:
+        # DM_CAN.py does not decode the temperatures; they are bytes 6 and 7 of the fake
+        # motors' frames.
+        return [
+            {
+                "bus_id": motor.SlaveID,
+                "state": int(motor.getError()),
+                "position": float(motor.getPosition()),
+                "velocity": float(motor.getVelocity()),
+                "torque": float(motor.getTorque()),
+                "mos_celsius": FakeSerial.T_MOS,
+                "rotor_celsius": FakeSerial.T_ROTOR,
+            }
+            for motor in self.motors
+        ]
+
+    def open(self) -> list[list[float]]:
+        limits: list[list[float]] = []
         for motor in self.motors:
             if not self.control.switchControlMode(motor, DM_CAN.Control_Type.MIT):
                 raise ChainRefusalError({"mode_not_confirmed": motor.SlaveID})
-            row = DM_CAN.MotorControl.Limit_Param[motor.MotorType]
-            for register, table in zip(("PMAX", "VMAX", "TMAX"), row, strict=True):
+            row = VENDOR_LIMIT_PARAM[motor.MotorType]
+            found = []
+            for index, register in enumerate(("PMAX", "VMAX", "TMAX")):
+                accepted = (
+                    ACCEPTED_VMAX.get(int(motor.MotorType), (row[1],))
+                    if register == "VMAX"
+                    else (row[index],)
+                )
                 value = self.control.read_motor_param(motor, DM_CAN.DM_variable[register])
-                if value is None or float(np.float32(value)) != float(np.float32(table)):
+                if value is None or float(np.float32(value)) not in [
+                    float(np.float32(table)) for table in accepted
+                ]:
                     raise ChainRefusalError(
-                        {
-                            "limit_mismatch": motor.SlaveID,
-                            "register": register,
-                            "motor": value,
-                            "table": float(np.float32(table)),
-                        }
+                        {"limit_mismatch": motor.SlaveID, "register": register, "motor": value}
                     )
+                found.append(float(np.float32(value)))
+            if found != [float(np.float32(table)) for table in row]:
+                self.control.change_limit_param(motor.MotorType, *found)
+            limits.append([motor.SlaveID, *found])
         before = self.counts()
         for motor in self.motors:
             self.control.disable(motor)
         self.await_answers(before)
         self.expect_all(before, 0)
+        return limits
 
-    def command(self, joints: list[float]) -> list[float]:
+    def command(self, joints: list[float]) -> dict[str, Any]:
         if self.stop_pending:
             raise ChainRefusalError({"stop_pending": True})
         targets = []
         for axis, joint in zip(self.axes, joints, strict=True):
-            assert axis["lower"] <= joint <= axis["upper"]
-            target = axis["sign"] * (joint - axis["zero_offset"]) * axis["reduction"]
-            lower, upper = (
-                GRIPPER_MOTOR_RANGE if axis["bus_id"] == 7 else (axis["lower"], axis["upper"])
-            )
-            assert lower <= target <= upper
-            targets.append(target)
+            lower, upper = commandable(axis)
+            assert lower <= joint <= upper, (axis["joint"], joint)
+            targets.append(axis["sign"] * (joint - axis["zero_offset"]) * axis["reduction"])
         if not self.enabled:
             before = self.counts()
             for motor in self.motors:
@@ -287,14 +352,15 @@ class Chain:
             self.enabled = True
         before = self.counts()
         for motor, target in zip(self.motors, targets, strict=True):
-            kp, kd = CONTROLLER[motor.SlaveID]
+            kp, kd, _soft = CONTROLLER[motor.SlaveID]
             self.control.controlMIT(motor, kp, kd, target, 0.0, 0.0)
         self.await_answers(before)
         self.expect_all(before, 1)
-        return [
+        observed = [
             float(motor.getPosition()) / (axis["sign"] * axis["reduction"]) + axis["zero_offset"]
             for motor, axis in zip(self.motors, self.axes, strict=True)
         ]
+        return {"observed": observed, "feedback": self.feedback()}
 
     def stop(self) -> dict[str, Any]:
         self.enabled = False
@@ -331,28 +397,45 @@ def fake_motors(axes: list[dict[str, Any]]) -> list[FakeMotor]:
 ACTIONS = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.5, -1.0, -1.5, 0.25, -0.25, 1.0, 0.03],
-    [-2.8, -3.14, 0.0, 1.57, 1.57, -3.14, 0.045],
+    # The commandable edges: soft box on joint1, joint4's lower, joint6; URDF elsewhere; the
+    # gripper at the motor's open angle.
+    [math.radians(-150.0), -3.14, 0.0, 1.57, 1.57, math.radians(-90.0), 0.045],
 ]
+SEQUENCING = (
+    "chain sequencing over vendor primitives: the order of calls is src/chain.rs's, mirrored "
+    "here; every frame, wait and decode inside a call is DM_CAN.py's own"
+)
+
+
+def step(entry: dict[str, Any]) -> dict[str, Any]:
+    """A step result with how many events the session had recorded when it ended."""
+    return {**entry, "event_count": len(EVENTS)}
 
 
 def run_session(axes: list[dict[str, Any]], script: str) -> dict[str, Any]:
     EVENTS.clear()
     FEEDBACK_COUNTS.clear()
+    restore_vendor_limits()
     motors = fake_motors(axes)
+    if script == "vmax_8":
+        for motor in motors[:3]:
+            motor.registers[int(DM_CAN.DM_variable.VMAX)] = 8.0
+    if script == "limit_mismatch":
+        motors[1].registers[int(DM_CAN.DM_variable.VMAX)] = 9.0
     serial = FakeSerial(motors)
     chain = Chain(axes, serial)
     steps: list[dict[str, Any]] = []
     try:
-        chain.open()
-        steps.append(step({"step": "open", "result": "ok"}))
-        if script == "session":
-            for action in ACTIONS:
-                observed = chain.command(action)
-                steps.append(step({"step": "command", "joints": action, "observed": observed}))
+        limits = chain.open()
+        steps.append(step({"step": "open", "limits": limits}))
+        if script in ("session", "vmax_8"):
+            for action in ACTIONS if script == "session" else ACTIONS[1:2]:
+                steps.append(step({"step": "command", "joints": action, **chain.command(action)}))
             steps.append(step({"step": "stop", "report": chain.stop()}))
         elif script == "stop_fault":
-            observed = chain.command(ACTIONS[1])
-            steps.append(step({"step": "command", "joints": ACTIONS[1], "observed": observed}))
+            steps.append(
+                step({"step": "command", "joints": ACTIONS[1], **chain.command(ACTIONS[1])})
+            )
             serial.motors[3].fault = 0xA
             serial.motors[5].silent = True
             steps.append(step({"step": "stop", "report": chain.stop()}))
@@ -362,31 +445,12 @@ def run_session(axes: list[dict[str, Any]], script: str) -> dict[str, Any]:
                 steps.append(
                     step({"step": "command", "joints": ACTIONS[0], "error": failure.error})
                 )
+        elif script == "limit_mismatch":
+            raise SystemExit("an open with a VMAX no Damiao table carries must fail")
     except ChainRefusalError as failure:
         steps.append(step({"step": "open", "error": failure.error}))
-    return {"name": script, "events": list(EVENTS), "steps": steps}
-
-
-def step(entry: dict[str, Any]) -> dict[str, Any]:
-    """A step result with how many events the session had recorded when it ended."""
-    return {**entry, "event_count": len(EVENTS)}
-
-
-def run_limit_mismatch(axes: list[dict[str, Any]]) -> dict[str, Any]:
-    EVENTS.clear()
-    FEEDBACK_COUNTS.clear()
-    motors = fake_motors(axes)
-    motors[1].registers[int(DM_CAN.DM_variable.VMAX)] = 8.0
-    chain = Chain(axes, FakeSerial(motors))
-    try:
-        chain.open()
-        raise SystemExit("an open with a mismatched VMAX register must fail")
-    except ChainRefusalError as failure:
-        return {
-            "name": "limit_mismatch",
-            "events": list(EVENTS),
-            "steps": [step({"step": "open", "error": failure.error})],
-        }
+    restore_vendor_limits()
+    return {"name": script, "sequencing": SEQUENCING, "events": list(EVENTS), "steps": steps}
 
 
 # --- vectors ---------------------------------------------------------------------------------
@@ -619,6 +683,10 @@ def cross_checks(vendor: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def main() -> None:
     bindings = json.loads(BINDINGS.read_text())
     axes = bindings["axes"]
@@ -630,12 +698,47 @@ def main() -> None:
         "vectors": vendor,
         "sessions": [
             run_session(axes, "session"),
+            run_session(axes, "vmax_8"),
             run_session(axes, "stop_fault"),
-            run_limit_mismatch(axes),
+            run_session(axes, "limit_mismatch"),
         ],
         "cross_checks": cross_checks(vendor),
     }
     OUT.write_text(json.dumps(document, indent=1, ensure_ascii=False) + "\n")
+    lerobot = checkout("LEROBOT", LEROBOT_COMMIT)
+    provenance = {
+        "sources": {
+            "DM_CAN.py": {
+                "repository": "https://gitee.com/kit-miao/motor-sdk",
+                "revision": MOTOR_SDK_COMMIT,
+                "path": "Python例程/u2can/DM_CAN.py",
+                "sha256": sha256(SDK / "Python例程" / "u2can" / "DM_CAN.py"),
+            },
+            "damiao.py": {
+                "repository": "https://github.com/huggingface/lerobot",
+                "revision": LEROBOT_COMMIT,
+                "path": "src/lerobot/motors/damiao/damiao.py",
+                "sha256": sha256(lerobot / "src/lerobot/motors/damiao/damiao.py"),
+            },
+            "tables.py": {
+                "repository": "https://github.com/huggingface/lerobot",
+                "revision": LEROBOT_COMMIT,
+                "path": "src/lerobot/motors/damiao/tables.py",
+                "sha256": sha256(lerobot / "src/lerobot/motors/damiao/tables.py"),
+            },
+            "sentient_can_harness.cpp": {
+                "repository": "Sentient-X/sentient_can",
+                "revision": SENTIENT_CAN_COMMIT,
+                "path": "drivers/sx-damiao-can/tests/fixtures/dm_can/sentient_can_harness.cpp",
+                "sha256": sha256(HERE / "sentient_can_harness.cpp"),
+            },
+            "mint.py": {"sha256": sha256(Path(__file__))},
+        },
+        "transcripts.json": {"sha256": sha256(OUT)},
+    }
+    (HERE / "provenance.json").write_text(
+        json.dumps(provenance, indent=1, ensure_ascii=False) + "\n"
+    )
 
 
 if __name__ == "__main__":
