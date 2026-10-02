@@ -54,14 +54,20 @@
    "path": "src/lerobot/robots/so_follower/so_follower.py",
    "sha256": "d09a2e63ad916f3a9e69740b1033e8c1f2dd5b025d61e5b0baacf1767ca6b8d1"
   },
+  "src/lerobot/robots/so_follower/config_so_follower.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/robots/so_follower/config_so_follower.py",
+   "sha256": "f68219e486a94107c83b607b96af5c856f0c95dac7481b08dcc8c0c1dc629bd5"
+  },
   "so101_bindings.json": {
    "sha256": "73e766fb02a7ae607228d02608198eaf58e92fa5701e671936adf68cfa111518"
   },
   "mint.py": {
-   "sha256": "6f3482d3de5794b8257adfe94a532922f6cb1ea6b59ec8d8b7b6e598a7123535"
+   "sha256": "140537000910c9aa5107587eea22bda6c0fac54b60792723299f269af2b13ebd"
   }
  },
  "sts3215_so101.json": {
-  "sha256": "4a82ba8fddc5bfe2b98c2f1066358698d37849ddfc97654fcc73f84540ddfffe"
+  "sha256": "48690dc51ea8b33a64404471768617dc2ef3785176ef1821a46055ff302d2793"
  }
 }

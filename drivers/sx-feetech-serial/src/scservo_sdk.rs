@@ -33,16 +33,29 @@
 //!   at worst fail the reply's checks, and a stop's torque-off must go out regardless.
 //! - `rxPacket` also drops a header whose LENGTH is below 2, which cannot carry the error byte
 //!   every status packet has; the vendor then indexes past the packet.
+//! - `rxPacket` checks the deadline once on every pass that does not finish the packet: also
+//!   after dropping a byte past an invalid header, after skipping to a header, and after
+//!   learning the packet's length, where the vendor reads again without checking. `txRxPacket`
+//!   checks it after every packet from another id, where the vendor reads the next one. A line
+//!   that keeps delivering foreign or corrupt bytes therefore still times out within the
+//!   port's timeout, which the chain's stop budget relies on; the vendor loops while bytes
+//!   arrive.
+//! - `txPacket` also refuses (`COMM_TX_ERROR`) a LENGTH that claims more bytes than the packet
+//!   buffer holds; the vendor indexes past it.
+//! - `writeTxRx`, `syncWriteTxOnly` and `GroupSyncWrite::add_param` take their data as a slice
+//!   and count its length themselves, where the vendor passes `length` or `param_length`
+//!   beside the list and trusts it.
 //! - `read1ByteTxRx` and `read2ByteTxRx` report a reply with fewer data bytes than asked as
 //!   `COMM_RX_CORRUPT`; the vendor raises `IndexError`.
 //! - [`GroupSyncWrite::tx_packet`] takes the handler it sends through as an argument, where
 //!   the vendor's `GroupSyncWrite` keeps a reference to it.
 //! - Translated only where a consumer drives it: `txPacket`, `rxPacket`, `txRxPacket`,
 //!   `readTxRx`, `read1ByteTxRx`, `read2ByteTxRx`, `writeTxRx`, `write1ByteTxRx`,
-//!   `syncWriteTxOnly`, the byte helpers and `scs_toscs`, `GroupSyncWrite`'s parameter
-//!   handling, and `sms_sts`'s register table, `LockEprom` and `unLockEprom`. Ping, action,
-//!   reg-write, sync-read, offset calibration, reset, the four-byte reads and writes,
-//!   `scs_tohost`, and `sms_sts`'s position, speed and wheel-mode helpers are left out.
+//!   `write2ByteTxRx`, `syncWriteTxOnly`, the byte helpers, `scs_toscs` and `scs_tohost`,
+//!   `GroupSyncWrite`'s parameter handling, and `sms_sts`'s register table, `LockEprom` and
+//!   `unLockEprom`. Ping, action, reg-write, sync-read, offset calibration, reset, the
+//!   four-byte reads and writes, and `sms_sts`'s position, speed and wheel-mode helpers are
+//!   left out.
 
 use sx_embodiment_drivers::serial::SerialPort;
 
@@ -142,6 +155,16 @@ impl<P> ProtocolPacketHandler<P> {
     #[must_use]
     pub const fn scs_getend(&self) -> u8 {
         self.scs_end
+    }
+
+    /// A sign-magnitude register value as a signed number: bit `b` is the sign.
+    #[must_use]
+    pub fn scs_tohost(a: u16, b: u32) -> i32 {
+        if a & (1 << b) != 0 {
+            -i32::from(a & !(1 << b))
+        } else {
+            i32::from(a)
+        }
     }
 
     /// A signed number as a sign-magnitude register value: the magnitude, with bit `b` set
@@ -255,6 +278,10 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
                         // unavailable ID or unavailable Length or unavailable Error
                         // remove the first byte in the packet
                         rxpacket.remove(0);
+                        if self.port_handler.is_packet_timeout() {
+                            result = timed_out(rxpacket.len());
+                            break;
+                        }
                         continue;
                     }
 
@@ -262,6 +289,10 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
                     let exact = usize::from(rxpacket[PKT_LENGTH]) + PKT_LENGTH + 1;
                     if wait_length != exact {
                         wait_length = exact;
+                        if rx_length < wait_length && self.port_handler.is_packet_timeout() {
+                            result = timed_out(rx_length);
+                            break;
+                        }
                         continue;
                     }
 
@@ -285,6 +316,10 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
                 }
                 // remove unnecessary packets
                 rxpacket.drain(0..idx);
+                if self.port_handler.is_packet_timeout() {
+                    result = timed_out(rxpacket.len());
+                    break;
+                }
             } else if self.port_handler.is_packet_timeout() {
                 // check timeout
                 result = timed_out(rx_length);
@@ -327,6 +362,10 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
             let (rxpacket, result) = self.rx_packet();
             if result != CommResult::Success || txpacket[PKT_ID] == rxpacket[PKT_ID] {
                 break (rxpacket, result);
+            }
+            // A packet from another servo: give up once the wait has run out.
+            if self.port_handler.is_packet_timeout() {
+                break (rxpacket, CommResult::RxTimeout);
             }
         };
 
@@ -404,6 +443,11 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
 
     pub fn write1_byte_tx_rx(&mut self, scs_id: u8, address: u8, data: u8) -> (CommResult, u8) {
         self.write_tx_rx(scs_id, address, &[data])
+    }
+
+    pub fn write2_byte_tx_rx(&mut self, scs_id: u8, address: u8, data: u16) -> (CommResult, u8) {
+        let data_write = [self.scs_lobyte(data), self.scs_hibyte(data)];
+        self.write_tx_rx(scs_id, address, &data_write)
     }
 
     /// One broadcast SYNC WRITE of `param` (id, then `data_length` bytes, per servo).
@@ -588,6 +632,8 @@ mod tests {
     fn sign_magnitude_is_the_vendors() {
         assert_eq!(ProtocolPacketHandler::<()>::scs_toscs(-5, 15), 0x8005);
         assert_eq!(ProtocolPacketHandler::<()>::scs_toscs(5, 15), 5);
+        assert_eq!(ProtocolPacketHandler::<()>::scs_tohost(0x0805, 11), -5);
+        assert_eq!(ProtocolPacketHandler::<()>::scs_tohost(0x0405, 11), 0x0405);
     }
 
     #[test]

@@ -18,6 +18,9 @@ use sx_feetech_serial::scservo_sdk::CommResult;
 use sx_feetech_serial::so101::so101;
 use sx_feetech_serial::{FeetechChain, FeetechChainError, FeetechServo, MotorCalibration};
 
+/// Exchanges per servo in `read_calibration`: minimum, maximum, homing offset.
+const CALIBRATION_READS: usize = 3;
+
 const GOLDEN: &str = include_str!("fixtures/scservo/sts3215_so101.json");
 
 #[derive(Deserialize)]
@@ -28,6 +31,15 @@ struct Golden {
     identify: Vec<Exchange>,
     safe_stop: Vec<Exchange>,
     torque_enable: Vec<Exchange>,
+    homing_offsets: Vec<HomingOffset>,
+    read_calibration: Vec<Exchange>,
+    configure: Vec<Exchange>,
+}
+
+#[derive(Deserialize)]
+struct HomingOffset {
+    id: u16,
+    homing_offset: i16,
 }
 
 #[derive(Deserialize)]
@@ -132,8 +144,9 @@ impl SerialPort for FakePort {
 
     fn set_packet_timeout(&mut self, _packet_length: usize) {}
 
+    /// The wait runs out as soon as nothing more is pending.
     fn is_packet_timeout(&mut self) -> bool {
-        true
+        self.pending.is_empty()
     }
 }
 
@@ -144,8 +157,13 @@ fn servos(golden: &Golden, calibration: &str) -> Vec<FeetechServo> {
     }
     let calibration: [MotorCalibration; 6] = rows
         .iter()
-        .map(|row| MotorCalibration {
+        .zip(&golden.homing_offsets)
+        .map(|(row, homing)| MotorCalibration {
             drive_mode: row.drive_mode != 0,
+            homing_offset: {
+                assert_eq!(homing.id, row.id);
+                homing.homing_offset
+            },
             range_min: row.range_min,
             range_max: row.range_max,
         })
@@ -161,6 +179,15 @@ fn open(exchanges: &[Exchange], calibration: &str) -> FeetechChain<FakePort> {
         servos(&golden(), calibration),
     )
     .expect("open")
+}
+
+/// Everything open says to the bus: identify, the calibration check, and configure.
+fn opening(golden: &Golden) -> Vec<Exchange> {
+    with(&[
+        &golden.identify,
+        &golden.read_calibration,
+        &golden.configure,
+    ])
 }
 
 fn with(parts: &[&[Exchange]]) -> Vec<Exchange> {
@@ -201,6 +228,10 @@ fn the_transcript_is_the_bytes_the_provenance_names() {
         provenance["sts3215_so101.json"]["sha256"].as_str().unwrap()
     );
     assert_eq!(
+        hex(&Sha256::digest(include_bytes!("fixtures/scservo/mint.py"))),
+        provenance["sources"]["mint.py"]["sha256"].as_str().unwrap()
+    );
+    assert_eq!(
         hex(&Sha256::digest(include_bytes!(
             "fixtures/so101_bindings.json"
         ))),
@@ -216,7 +247,7 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
     assert!(golden.goal_positions.len() >= 8);
     for case in &golden.goal_positions {
         let mut chain = open(
-            &with(&[&golden.identify, &golden.torque_enable]),
+            &with(&[&opening(&golden), &golden.torque_enable]),
             &case.calibration,
         );
         let ticks: Vec<u16> = chain
@@ -249,7 +280,7 @@ fn a_stop_disables_torque_proves_it_and_the_next_command_re_enables() {
     let golden = golden();
     let mut chain = open(
         &with(&[
-            &golden.identify,
+            &opening(&golden),
             &golden.torque_enable,
             &golden.safe_stop,
             &golden.torque_enable,
@@ -277,7 +308,7 @@ fn a_servo_still_holding_torque_leaves_the_stop_unproven() {
     let mut stop = golden.safe_stop.clone();
     let last = stop.last_mut().expect("read-back");
     answer(last, 0, &[1]);
-    let mut chain = open(&with(&[&golden.identify, &stop]), "so101");
+    let mut chain = open(&with(&[&opening(&golden), &stop]), "so101");
     let report = chain.stop();
     assert_eq!(report.unproven, vec![6]);
     assert!(matches!(
@@ -348,7 +379,7 @@ fn an_unqualified_silent_or_misdeclared_servo_is_refused_at_open() {
 #[test]
 fn out_of_range_or_wrong_width_targets_are_refused_before_the_bus() {
     let golden = golden();
-    let mut chain = open(&golden.identify, "so101");
+    let mut chain = open(&opening(&golden), "so101");
     let written = chain.port().written.len();
     assert!(matches!(
         chain.command(&[0.0; 5]),
@@ -377,7 +408,7 @@ fn a_stalled_servo_mid_chain_still_lets_every_later_servo_torque_off() {
     // Servo 2 is stalled: its torque-off acknowledgement carries the overload flag.
     let torque_off = stop_exchanges(&golden, 2)[0];
     answer(&mut stop[torque_off], 0x20, &[]);
-    let mut chain = open(&with(&[&golden.identify, &stop]), "so101");
+    let mut chain = open(&with(&[&opening(&golden), &stop]), "so101");
     let report = chain.stop();
     assert!(
         chain.port().expected.is_empty(),
@@ -397,7 +428,7 @@ fn a_stalled_servo_mid_chain_still_lets_every_later_servo_torque_off() {
 #[test]
 fn a_link_that_cannot_flush_its_input_still_sends_every_torque_off() {
     let golden = golden();
-    let port = FakePort::expecting(&with(&[&golden.identify, &golden.safe_stop]));
+    let port = FakePort::expecting(&with(&[&opening(&golden), &golden.safe_stop]));
     let clear_fails = Arc::clone(&port.clear_fails);
     let mut chain = FeetechChain::open(port, servos(&golden, "so101")).expect("open");
     clear_fails.store(true, Ordering::SeqCst);
@@ -415,7 +446,7 @@ fn a_silent_servo_is_reported_after_every_other_servo_is_stopped() {
     for index in stop_exchanges(&golden, 2) {
         stop[index].response = String::new();
     }
-    let mut chain = open(&with(&[&golden.identify, &stop]), "so101");
+    let mut chain = open(&with(&[&opening(&golden), &stop]), "so101");
     let report = chain.stop();
     assert_eq!(report.unproven, vec![2]);
     assert!(
@@ -440,6 +471,222 @@ fn a_reply_from_another_servo_is_skipped_as_the_vendor_skips_it() {
         stray.response
     };
     identify[0].response = format!("{stray}{}", identify[0].response);
-    FeetechChain::open(FakePort::expecting(&identify), servos(&golden, "so101"))
+    let exchanges = with(&[&identify, &golden.read_calibration, &golden.configure]);
+    FeetechChain::open(FakePort::expecting(&exchanges), servos(&golden, "so101"))
         .expect("the stray packet is skipped");
+}
+
+#[test]
+fn open_checks_the_calibration_and_configures_every_servo_as_the_vendor_sequence_does() {
+    let golden = golden();
+    let chain = open(&opening(&golden), "so101");
+    assert!(
+        chain.port().expected.is_empty(),
+        "every read and write of open was made"
+    );
+    // Servo 6's Phase answered with bit 4 set, so open wrote it back cleared.
+    let phase_writes = golden
+        .configure
+        .iter()
+        .filter(|exchange| bytes(&exchange.request)[4..6] == [0x03, 18])
+        .count();
+    assert_eq!(phase_writes, 1);
+}
+
+#[test]
+fn a_servo_whose_registers_disagree_with_its_calibration_is_refused_at_open() {
+    let golden = golden();
+    for (field, value) in [(0, [0xEF, 0x02]), (1, [0x17, 0x0D]), (2, [0x1F, 0x00])] {
+        let mut reads = golden.read_calibration.clone();
+        // Servo 2: a minimum of 751, a maximum of 3351, or a homing offset of +31.
+        answer(&mut reads[CALIBRATION_READS + field], 0, &value);
+        let exchanges = with(&[&golden.identify, &reads]);
+        let error = FeetechChain::open(FakePort::expecting(&exchanges), servos(&golden, "so101"))
+            .err()
+            .expect("refused");
+        assert!(
+            matches!(error, FeetechChainError::Uncalibrated { bus_id: 2, .. }),
+            "{error}"
+        );
+    }
+    let mut supplied = servos(&golden, "so101");
+    supplied[0].calibration.homing_offset = 31;
+    let exchanges = with(&[&golden.identify, &golden.read_calibration]);
+    assert!(matches!(
+        FeetechChain::open(FakePort::expecting(&exchanges), supplied),
+        Err(FeetechChainError::Uncalibrated {
+            bus_id: 1,
+            homing_offset: -31,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_configure_write_the_servo_flags_refuses_open() {
+    let golden = golden();
+    let mut configure = golden.configure.clone();
+    let last = configure.last_mut().expect("overload torque");
+    answer(last, 0x08, &[]);
+    let exchanges = with(&[&golden.identify, &golden.read_calibration, &configure]);
+    assert!(matches!(
+        FeetechChain::open(FakePort::expecting(&exchanges), servos(&golden, "so101")),
+        Err(FeetechChainError::ServoError {
+            bus_id: 6,
+            error: 0x08
+        })
+    ));
+}
+
+#[test]
+fn faults_a_proven_stop_reported_refuse_motion_until_cleared() {
+    let golden = golden();
+    let mut stop = golden.safe_stop.clone();
+    let torque_off = stop_exchanges(&golden, 2)[0];
+    answer(&mut stop[torque_off], 0x20, &[]);
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &stop,
+            &golden.safe_stop,
+            &golden.torque_enable,
+        ]),
+        "so101",
+    );
+    assert!(chain.stop().is_proven());
+    let radians = &golden.goal_positions[0].radians;
+    assert!(matches!(
+        chain.command(radians),
+        Err(FeetechChainError::FaultedAtStop { ref faults }) if faults == &[(2, 0x20)]
+    ));
+    // A later clean stop does not release the latch; only clear_faults does.
+    assert_eq!(chain.stop(), StopReport::default());
+    assert_eq!(chain.faults(), &[(2, 0x20)]);
+    assert!(chain.command(radians).is_err());
+    chain.clear_faults();
+    chain
+        .command(radians)
+        .expect("motion after the faults were cleared");
+}
+
+#[test]
+fn the_commandable_range_is_the_bounds_at_float32_and_admission_agrees() {
+    let golden = golden();
+    let chain = open(&opening(&golden), "so101");
+    for (range, axis) in chain.commandable().iter().zip(chain.axes()) {
+        #[allow(clippy::cast_possible_truncation)]
+        let (lower, upper) = (axis.lower as f32, axis.upper as f32);
+        assert!(range.lower.to_bits() == f64::from(lower).to_bits());
+        assert!(range.upper.to_bits() == f64::from(upper).to_bits());
+    }
+    for case in &golden.goal_positions {
+        for ((servo, range), joint) in chain
+            .servos()
+            .iter()
+            .zip(chain.commandable())
+            .zip(&case.radians)
+        {
+            assert!(range.admits(*joint), "{joint}");
+            assert!(servo.goal_position(*joint).is_ok());
+        }
+    }
+    let beyond = chain.commandable()[0].lower - 1e-9;
+    assert!(!chain.commandable()[0].admits(beyond));
+    assert!(chain.servos()[0].goal_position(beyond).is_err());
+}
+
+/// A line that never stops delivering bytes that are not a packet; its wait runs out after
+/// a fixed number of checks.
+struct Babbling {
+    checks: usize,
+}
+
+impl SerialPort for Babbling {
+    fn clear_port(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        Ok(packet.len())
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        Ok(vec![0x00; length.max(1)])
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(10)
+    }
+
+    fn set_packet_timeout(&mut self, _packet_length: usize) {}
+
+    fn is_packet_timeout(&mut self) -> bool {
+        self.checks += 1;
+        self.checks > 100
+    }
+}
+
+/// A line that answers every request with a valid status packet from another servo.
+struct Foreign {
+    checks: usize,
+    pending: VecDeque<u8>,
+}
+
+impl SerialPort for Foreign {
+    fn clear_port(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        Ok(packet.len())
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        if self.pending.is_empty() {
+            // Servo 9 reports its model, over and over.
+            self.pending
+                .extend([0xFF, 0xFF, 0x09, 0x04, 0x00, 0x09, 0x03, 0xE6]);
+        }
+        let available = length.min(self.pending.len());
+        Ok(self.pending.drain(..available).collect())
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(10)
+    }
+
+    fn set_packet_timeout(&mut self, _packet_length: usize) {}
+
+    fn is_packet_timeout(&mut self) -> bool {
+        self.checks += 1;
+        self.checks > 100
+    }
+}
+
+#[test]
+fn a_line_that_keeps_delivering_foreign_bytes_still_times_out() {
+    let golden = golden();
+    let babbling = FeetechChain::open(Babbling { checks: 0 }, servos(&golden, "so101"));
+    assert!(
+        matches!(
+            babbling,
+            Err(FeetechChainError::Comm {
+                bus_id: 1,
+                result: CommResult::RxCorrupt | CommResult::RxTimeout
+            })
+        ),
+        "{:?}",
+        babbling.err()
+    );
+    let foreign = Foreign {
+        checks: 0,
+        pending: VecDeque::new(),
+    };
+    assert!(matches!(
+        FeetechChain::open(foreign, servos(&golden, "so101")),
+        Err(FeetechChainError::Comm {
+            bus_id: 1,
+            result: CommResult::RxCorrupt | CommResult::RxTimeout
+        })
+    ));
 }

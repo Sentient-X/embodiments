@@ -16,6 +16,7 @@ fn the_so101_chain_is_the_registrys_bindings_in_native_state_order() {
     let axes = rendered["axes"].as_array().unwrap();
     let calibration = MotorCalibration {
         drive_mode: false,
+        homing_offset: 0,
         range_min: 0,
         range_max: 4095,
     };
