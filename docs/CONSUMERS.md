@@ -13,7 +13,7 @@ lands only with a production consumer.
 | real2sim | registered object rebound by `robot.with_assets(...)` | the bundle's own closure check fails closed before rebinding |
 | sx-episodes | full object in each episode; `EmbodimentId` in summaries | object/URDF/calibration/action agreement and tensor coordinate order |
 | auto-perfect | full object for drivers, safety, telemetry, and simulation | runtime limits and constraints derive directly from the object |
-| Station | the `drivers/` crates by path, driving a body's bound axes in native state order | each composition held equal to the rendered registry bindings; vendor-transcript parity |
+| Station (from its switch to `drivers/sx-damiao-can`, which lands right after the crate and the `sx` pin advance to it; nothing consumes the crates before then) | the `drivers/` crates by path, driving a body's bound axes in native state order | each composition held equal to the rendered registry bindings; vendor-transcript parity |
 | SXD | generated full-object projection because standalone workers cannot import workspace packages | byte-for-byte projection parity check |
 
 Rerun episode entity paths belong to `sx-episodes`; nominal camera names/mounts/rates belong to

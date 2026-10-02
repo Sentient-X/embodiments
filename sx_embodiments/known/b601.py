@@ -91,18 +91,23 @@ at the addresses ``reBotArm_control_py`` (``Seeed-Projects/reBotArm_control_py``
 gripper are ``4310`` motors at 0x04..0x07. The 4340P is the DM-J4340P-2EC; Damiao's own driver
 (``DM_CAN.py``) carries one DM4340 limit row for it, and Seeed's ``motorbridge`` gives 4340 and
 4340P identical limits, so ``ActuatorModel.DAMIAO_DM4340`` names the motor the protocol drives.
-The drive maps are the vendor controller's (``reBotArmController_ROS2`` at the commit above,
+The drive maps are the vendor controller's (``reBotArmController_ROS2`` at
+``a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd``,
 ``src/rebotarmcontroller/rebotarmcontroller/ros_publishers.py``):
 
 * ``joint1``..``joint6`` publish the motor angles unchanged, so each binding is identity
   (``sign=1``, ``zero_offset=0``, ``reduction=1``), consistent with the table above: the
   driver's soft box and the description share sign and zero.
-* ``gripper_joint1`` is ``_gripper_motor_to_joint_position``: the motor's fraction of its open
+* ``gripper_joint1`` is declared from Seeed's publisher mapping, ``ros_publishers.py:7-17``
+  (``_gripper_motor_to_joint_position``, a saturating display mapping), and is unmeasured;
+  the station's bench row 3b measures it. The mapping takes the motor's fraction of its open
   angle (``position_limits.open = -5.0`` rad, ``close = 0.0`` in
   ``src/rebotarm_bringup/config/rebotarm_hardware.yaml``) times half of
-  ``_GRIPPER_MAX_WIDTH = 0.09`` m. That is ``sign=-1``, ``reduction = 5.0 / 0.045`` rad/m. The
-  vendor's motor range reaches 0.045 m of finger travel; the description's stroke runs to
-  0.0715 m, so a driver bounded by the motor's open angle never commands the last 0.0265 m.
+  ``_GRIPPER_MAX_WIDTH = 0.09`` m: ``sign=-1``, ``reduction = 5.0 / 0.045`` rad/m. The motor's
+  open angle reaches 0.045 m of finger travel, so the commandable range is 0..0.045 m, declared
+  by the driver composition (``drivers/sx-damiao-can``, ``ActuatorChain.commandable``) from
+  that source. The axis bounds stay the description's 0..0.0715 m stroke, which
+  ``tests/test_urdf_parity.py`` pins and ``travel_m`` derives from.
   The deployed LeRobot driver's -270 deg gripper box (-4.71 rad) is a second, tighter number
   for that open angle; the transmission takes the vendor's.
 

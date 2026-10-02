@@ -110,13 +110,16 @@ axes equal to the bindings `tools/render_driver_bindings.py` renders from the re
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
-| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`) | the `sx` station's `B601WithGripper` actuator |
+| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`) | intended: the `sx` station's B601 actuator, switched to this crate in the lane that lands right after this crate and the `sx` pin advance to it; nothing consumes it before then |
 
 The `feetech_serial` bus is driven by the station's own `feetech` adapter in `sx`.
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
+
+Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's
+`just check-rust` runs them on the pinned commit, and that is the only enforcement.
 
 ## Assets
 
