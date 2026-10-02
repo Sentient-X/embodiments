@@ -83,16 +83,33 @@ separate them symmetrically, from touching at ``0`` to the ``0.143`` m aperture 
 ``joint7``/``joint8`` axes resolve to the *same* parent direction, so its mirror is
 ``-1.0``.
 
-Deliberate divergence, written down per the abstractions rule, and NOT closed by that
-patch: the deployed driver's ``gripper`` channel is a Damiao 4310 **motor angle**
-(-270..0 deg, ``send_force_pos``/``send_mit`` in radians), and the upstream description
-publishes no motor-to-finger transmission, so the two are different quantities with no
-verified conversion. A consumer mapping a LeRobot B601 recording onto this channel must
-supply that conversion; it is capture-side data, not a registry fact. ``gap_curve``
-therefore stays ``None`` (the finger travel is linear in the joint by construction; it is
-the *motor* relation that is unknown). No ``<transmission>`` or ``mechanicalReduction`` was
-added to the description: the ratio is unknown, and fabricating one would corrupt a file
-sim and IK trust.
+Every axis is a qualified direct drive, read back from the motor that drives it
+(``ActuatorFeedback``): seven Damiao DM-J motors on one CAN bus, ``ActuatorBus.DAMIAO_CAN``,
+at the addresses ``reBotArm_control_py`` (``Seeed-Projects/reBotArm_control_py`` at
+``6415d43130d1e143c70dc106096a857ac5556f81``, ``config/rebotarm_dm.yaml``) assigns:
+``joint1``..``joint3`` are ``4340P`` motors at 0x01..0x03, ``joint4``..``joint6`` and the
+gripper are ``4310`` motors at 0x04..0x07. The 4340P is the DM-J4340P-2EC; Damiao's own driver
+(``DM_CAN.py``) carries one DM4340 limit row for it, and Seeed's ``motorbridge`` gives 4340 and
+4340P identical limits, so ``ActuatorModel.DAMIAO_DM4340`` names the motor the protocol drives.
+The drive maps are the vendor controller's (``reBotArmController_ROS2`` at the commit above,
+``src/rebotarmcontroller/rebotarmcontroller/ros_publishers.py``):
+
+* ``joint1``..``joint6`` publish the motor angles unchanged, so each binding is identity
+  (``sign=1``, ``zero_offset=0``, ``reduction=1``), consistent with the table above: the
+  driver's soft box and the description share sign and zero.
+* ``gripper_joint1`` is ``_gripper_motor_to_joint_position``: the motor's fraction of its open
+  angle (``position_limits.open = -5.0`` rad, ``close = 0.0`` in
+  ``src/rebotarm_bringup/config/rebotarm_hardware.yaml``) times half of
+  ``_GRIPPER_MAX_WIDTH = 0.09`` m. That is ``sign=-1``, ``reduction = 5.0 / 0.045`` rad/m. The
+  vendor's motor range reaches 0.045 m of finger travel; the description's stroke runs to
+  0.0715 m, so a driver bounded by the motor's open angle never commands the last 0.0265 m.
+  The deployed LeRobot driver's -270 deg gripper box (-4.71 rad) is a second, tighter number
+  for that open angle; the transmission takes the vendor's.
+
+``drivers/sx-damiao-can`` in this repository drives these bindings, translated from Damiao's
+``DM_CAN.py``, and holds its B601 chain equal to them. The qualification ``ActuatorModel``
+growth carries — bench drivability and safe-stop semantics of the two Damiao models — is the
+station's bench row 3b, which the founder owns.
 
 The bimanual flat convention ``[left joint1..joint6 | left gripper 6 | right joint1..joint6
 | right gripper 13]`` is exactly the declared attachment order, and matches
@@ -140,7 +157,7 @@ from ..compose import (
     leader_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import CoordinateUnit, IntegratedDrive, UndocumentedDrive, Unobserved, VendorReadout
+from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..parts import (
     ArmSpec,
     DeviceSpec,
@@ -202,6 +219,21 @@ B601_DM_STATION_URDF: Final = packaged_asset(
     media_type="application/xml",
 )
 
+#: The gripper motor's open angle and one finger's travel there (see the module docstring).
+B601_GRIPPER_MOTOR_OPEN_RAD: Final = 5.0
+B601_GRIPPER_FINGER_OPEN_M: Final = 0.09 / 2
+
+
+def _damiao(
+    model: ActuatorModel, bus_id: int, *, sign: int = 1, reduction: float = 1.0
+) -> ActuatorBinding:
+    """One motor on the B601's Damiao CAN bus; each bimanual side is its own bus."""
+
+    return ActuatorBinding(
+        model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id, sign=sign, reduction=reduction
+    )
+
+
 B601_ARM: Final = ArmSpec(
     part_id=PartId("rebot-b601dm-arm"),
     # Names and limits are the vendored URDF's revolute joints, in kinematic order.
@@ -210,8 +242,11 @@ B601_ARM: Final = ArmSpec(
         units=(CoordinateUnit.RADIAN,) * 6,
         lower=(-2.8, -3.14, -3.14, -1.87, -1.57, -3.14),
         upper=(2.8, 0.0, 0.0, 1.57, 1.57, 3.14),
-        observations=(VendorReadout("rebot_b601_dm_can"),) * 6,
-        actuations=(IntegratedDrive("rebot_b601_dm_controller", "arm"),) * 6,
+        actuators=(
+            *(_damiao(ActuatorModel.DAMIAO_DM4340, bus_id) for bus_id in (1, 2, 3)),
+            *(_damiao(ActuatorModel.DAMIAO_DM4310, bus_id) for bus_id in (4, 5, 6)),
+        ),
+        observations=(ActuatorFeedback(),) * 6,
     ),
     home=(0.0,) * 6,  # the driver's calibrated zero pose, inside every URDF limit
     # physical: no manufacturer datasheet captured, so payload/reach/mass stay unstated
@@ -224,10 +259,15 @@ B601_GRIPPER: Final = GripperSpec(
         units=(CoordinateUnit.METER,),
         lower=(0.0,),
         upper=(0.0715,),
-        observations=(
-            Unobserved("Damiao motor angle has no measured conversion to finger travel"),
+        actuators=(
+            _damiao(
+                ActuatorModel.DAMIAO_DM4310,
+                7,
+                sign=-1,
+                reduction=B601_GRIPPER_MOTOR_OPEN_RAD / B601_GRIPPER_FINGER_OPEN_M,
+            ),
         ),
-        actuations=(UndocumentedDrive("motor-to-finger transmission has not been measured"),),
+        observations=(ActuatorFeedback(),),
     ),
     travel_m=(0.0, 0.143),  # parallel jaw: aperture = 2 x finger stroke (0.0715 m each)
     mimic_joints=(MimicJoint("gripper_joint2", of="gripper_joint1", multiplier=1.0),),
@@ -301,8 +341,8 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
         notes=(
             "Camera products are declared by the capture wiring configuration. Intrinsics, "
             "mounts, resolution, and frame rate must come from the actual station and recording.",
-            "Gripper motor angle and finger travel are different quantities. Their conversion "
-            "has not been verified; encoder part numbers are not documented.",
+            "Gripper finger travel is the motor angle through the vendor controller's linear "
+            "transmission; encoder part numbers are not documented.",
         ),
     ),
     name=EmbodimentName("b601-dm-station"),

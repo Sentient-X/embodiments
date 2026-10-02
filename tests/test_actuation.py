@@ -14,7 +14,6 @@ from sx_embodiments import (
     Embodiment,
     EmbodimentSchemaError,
     EncoderReadout,
-    IntegratedDrive,
     LayoutError,
     Passive,
     UndocumentedDrive,
@@ -58,6 +57,29 @@ def test_so101_axes_carry_qualified_feetech_bindings() -> None:
         assert binding.sign == 1
         assert binding.zero_offset == 0.0
         assert binding.reduction == 1.0
+
+
+def test_b601_axes_carry_the_vendor_damiao_bindings() -> None:
+    robot = embodiments["b601-dm"]
+    bindings = tuple(coordinate.axis.actuator for coordinate in robot.state.coordinates)
+    expected = (
+        *((ActuatorModel.DAMIAO_DM4340, bus_id) for bus_id in (1, 2, 3)),
+        *((ActuatorModel.DAMIAO_DM4310, bus_id) for bus_id in (4, 5, 6, 7)),
+    )
+    assert (
+        tuple((binding.model, binding.bus_id) for binding in bindings if binding is not None)
+        == expected
+    )
+    for binding in bindings[:6]:
+        assert binding is not None
+        assert binding.bus is ActuatorBus.DAMIAO_CAN
+        assert (binding.sign, binding.zero_offset, binding.reduction) == (1, 0.0, 1.0)
+    jaw = bindings[6]
+    assert jaw is not None
+    assert jaw.bus is ActuatorBus.DAMIAO_CAN
+    # Seeed's controller: finger = motor / -5.0 rad * 0.045 m, so motor = -joint * 5.0 / 0.045.
+    assert (jaw.sign, jaw.zero_offset) == (-1, 0.0)
+    assert jaw.reduction == pytest.approx(5.0 / 0.045)
 
 
 def test_bimanual_sides_reuse_per_chain_addresses() -> None:
@@ -182,14 +204,7 @@ def test_known_hardware_access_facts_are_explicit_without_promotion() -> None:
     assert all(isinstance(c.axis.observation, ActuatorFeedback) for c in so101.state.coordinates)
 
     b601 = embodiments["b601-dm"]
-    assert all(
-        isinstance(c.axis.actuation, IntegratedDrive)
-        for c in b601.state.coordinates
-        if c.instance == "arm"
-    )
-    jaw = next(c.axis for c in b601.state.coordinates if c.instance == "gripper")
-    assert isinstance(jaw.observation, Unobserved)
-    assert isinstance(jaw.actuation, UndocumentedDrive)
+    assert all(isinstance(c.axis.observation, ActuatorFeedback) for c in b601.state.coordinates)
 
     yubi = development_embodiments["yubi"]
     assert all(isinstance(c.axis.observation, EncoderReadout) for c in yubi.state.coordinates)

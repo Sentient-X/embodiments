@@ -69,12 +69,15 @@ class ActuatorModel(StrEnum):
     """
 
     FEETECH_STS3215 = "feetech_sts3215"
+    DAMIAO_DM4310 = "damiao_dm4310"
+    DAMIAO_DM4340 = "damiao_dm4340"
 
 
 class ActuatorBus(StrEnum):
     """The closed transport vocabulary qualified actuators are driven over."""
 
     FEETECH_SERIAL = "feetech_serial"
+    DAMIAO_CAN = "damiao_can"
 
 
 @dataclass(frozen=True, slots=True)
