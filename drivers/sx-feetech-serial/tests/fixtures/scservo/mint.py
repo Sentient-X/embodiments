@@ -502,8 +502,8 @@ def main() -> None:
         }
     sources["so101_bindings.json"] = {"sha256": sha256(BINDINGS)}
     sources["mint.py"] = {"sha256": sha256(Path(__file__))}
-    provenance = {"sources": sources, "sts3215_so101.json": {"sha256": sha256(OUT)}}
-    (HERE / "provenance.json").write_text(json.dumps(provenance, indent=1) + "\n", encoding="utf-8")
+    record = {"sources": sources, "sts3215_so101.json": {"sha256": sha256(OUT)}}
+    (HERE / "sources.json").write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

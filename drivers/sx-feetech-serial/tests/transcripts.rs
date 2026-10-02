@@ -220,22 +220,26 @@ fn stop_exchanges(golden: &Golden, id: u8) -> Vec<usize> {
 }
 
 #[test]
-fn the_transcript_is_the_bytes_the_provenance_names() {
-    let provenance: Value =
-        serde_json::from_str(include_str!("fixtures/scservo/provenance.json")).expect("provenance");
+fn the_transcript_is_the_bytes_its_sources_record_names() {
+    let sources_record: Value =
+        serde_json::from_str(include_str!("fixtures/scservo/sources.json")).expect("sources");
     assert_eq!(
         hex(&Sha256::digest(GOLDEN.as_bytes())),
-        provenance["sts3215_so101.json"]["sha256"].as_str().unwrap()
+        sources_record["sts3215_so101.json"]["sha256"]
+            .as_str()
+            .unwrap()
     );
     assert_eq!(
         hex(&Sha256::digest(include_bytes!("fixtures/scservo/mint.py"))),
-        provenance["sources"]["mint.py"]["sha256"].as_str().unwrap()
+        sources_record["sources"]["mint.py"]["sha256"]
+            .as_str()
+            .unwrap()
     );
     assert_eq!(
         hex(&Sha256::digest(include_bytes!(
             "fixtures/so101_bindings.json"
         ))),
-        provenance["sources"]["so101_bindings.json"]["sha256"]
+        sources_record["sources"]["so101_bindings.json"]["sha256"]
             .as_str()
             .unwrap()
     );

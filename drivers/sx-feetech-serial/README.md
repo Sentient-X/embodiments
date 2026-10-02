@@ -41,7 +41,7 @@ exists there.
 
 `tests/fixtures/scservo/mint.py` runs `scservo_sdk` against a recording port, with `LeRobot`'s
 `_unnormalize` executed from its pinned file, and writes `sts3215_so101.json`;
-`provenance.json` holds the sha256 of every source it ran and of the transcript. The tests
+`sources.json` holds the sha256 of every source it ran and of the transcript. The tests
 replay each exchange byte for byte.
 
 ```bash
