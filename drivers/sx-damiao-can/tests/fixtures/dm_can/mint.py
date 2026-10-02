@@ -4,9 +4,12 @@ The reference, run here unmodified:
 
 - Damiao's motor SDK, https://gitee.com/kit-miao/motor-sdk at
   fb0e9fc5455ecb02ed13cc1f43de58078be61b07, ``Python例程/u2can/DM_CAN.py`` (the ``SDK/电机SDK``
-  submodule of https://gitee.com/kit-miao/damiao). ``MotorControl`` talks to a fake serial
-  device that records every byte it writes and answers as the motors would; ``DM_CAN.sleep`` is
-  replaced by a recorder, so each wait the vendor's sequencing takes is in the transcript.
+  submodule of https://gitee.com/kit-miao/damiao), Damiao's modified copy of cmjang's
+  DM_Control_Python (https://github.com/cmjang/DM_Control_Python at
+  7da93877ba844d9587149d6f3a6385453aa8379f; MIT, Copyright (c) 2024 cmjang).
+  ``MotorControl`` talks to a fake serial device that records every byte it writes and
+  answers as the motors would; ``DM_CAN.sleep`` is replaced by a recorder, so each wait the
+  vendor's sequencing takes is in the transcript.
 
 ``transcripts.json`` holds:
 

@@ -1,7 +1,9 @@
 # sx-damiao-can
 
 Damiao DM-J motors over CAN, translated from Damiao's own `DM_CAN.py`
-(<https://gitee.com/kit-miao/motor-sdk> at `fb0e9fc5`, `Python例程/u2can/DM_CAN.py`), and the
+(<https://gitee.com/kit-miao/motor-sdk> at `fb0e9fc5`, `Python例程/u2can/DM_CAN.py`; Damiao's
+copy of cmjang's `DM_Control_Python`, MIT, Copyright (c) 2024 cmjang — see
+`LICENSE-THIRD-PARTY`), and the
 Seeed reBot B601-DM's chain of seven of them. Every departure from `DM_CAN.py` is listed in the
 header of the module that makes it.
 

@@ -4,7 +4,8 @@ description = "Damiao DM-J motors over CAN, ported from Damiao's own DM_CAN.py, 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# dm_can.rs and usb2can.rs translate cmjang's MIT-licensed DM_CAN.py (LICENSE-THIRD-PARTY).
+license = "Apache-2.0 AND MIT"
 publish.workspace = true
 
 [dependencies]

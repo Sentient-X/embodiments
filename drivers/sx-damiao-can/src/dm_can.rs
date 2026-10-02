@@ -2,7 +2,12 @@
 //!
 //! Reference: <https://gitee.com/kit-miao/motor-sdk> at
 //! `fb0e9fc5455ecb02ed13cc1f43de58078be61b07`, file `Python例程/u2can/DM_CAN.py` (the motor SDK
-//! submodule of Damiao's official repository <https://gitee.com/kit-miao/damiao>, `SDK/电机SDK`).
+//! submodule of Damiao's official repository <https://gitee.com/kit-miao/damiao>, `SDK/电机SDK`),
+//! Damiao's modified copy of cmjang's `DM_Control_Python`
+//! (<https://github.com/cmjang/DM_Control_Python> at `7da93877ba844d9587149d6f3a6385453aa8379f`).
+//!
+//! Vendor-derived: Copyright (c) 2024 cmjang, MIT License. The full permission notice is in
+//! `LICENSE-THIRD-PARTY` beside this crate's `Cargo.toml`; Sentient-X's changes are Apache-2.0.
 //!
 //! Same structure, names and arithmetic: [`Motor`] is its `Motor`, [`MotorControl`] its
 //! `MotorControl`, and the free functions its module helpers. Every command keeps the vendor's

@@ -1,9 +1,11 @@
 //! A chain of bound Damiao motors as one `ActuatorChain`, driven through [`crate::dm_can`].
 //!
 //! Every bus operation is a `DM_CAN.py` call; the order they are called in is this chain's.
-//! Open runs the vendor test's bring-up for each motor (`DM_Motor_Test.py`:
-//! `switchControlMode`, then `read_motor_param` of `PMAX`, `VMAX` and `TMAX`), then `disable`s
-//! it. Command `enable`s each motor when the chain is disabled, then sends one `controlMIT` per
+//! Open follows the vendor demo's bring-up for each motor (`DM_Motor_Test.py:14-26`, same
+//! commit: `switchControlMode`, then `read_motor_param` of `PMAX`, `VMAX` and `TMAX`, which the
+//! demo prints), then `disable`s it. Two deviations from the demo: it switches to `POS_VEL`
+//! where the chain switches to `MIT`, and it refuses nothing where the chain refuses a register
+//! value (below). Command `enable`s each motor when the chain is disabled, then sends one `controlMIT` per
 //! motor holding its target with zero velocity and feed-forward torque. Stop `disable`s every
 //! motor.
 //!
@@ -17,7 +19,10 @@
 //!   rescales every position, velocity and torque on the wire. Damiao's own tables disagree on
 //!   the DM4340's velocity range — 10 rad/s in `DM_CAN.py`, 8 rad/s in its C++ SDK
 //!   (`C++例程/u2can/include/damiao.h`, same commit) — so either is accepted for that model, and
-//!   [`DamiaoChain::limits`] records which the motor reported.
+//!   [`DamiaoChain::limits`] records which the motor reported. The vendor's own answer to a
+//!   motor on another table is `DM_CAN.py`'s `change_limit_param`, which rewrites the row every
+//!   motor of that model shares; this crate rescales the one motor instead
+//!   ([`crate::dm_can::MotorControl::change_limit_param`]).
 //! - After the vendor's own read it waits briefly for each motor's answer, and judges it by the
 //!   feedback's first-byte high nibble ([`MotorState`]). `DM_CAN.py` stores the nibble unread.
 //! - A stop is proven motor by motor: a fresh answer reporting disabled. A silent motor is asked

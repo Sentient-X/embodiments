@@ -1,7 +1,11 @@
 //! Damiao's USB2CAN serial bridge as a `CanPort`, translated from `DM_CAN.py`.
 //!
+//! Vendor-derived: Copyright (c) 2024 cmjang, MIT License. The full permission notice is in
+//! `LICENSE-THIRD-PARTY` beside this crate's `Cargo.toml`; Sentient-X's changes are Apache-2.0.
+//!
 //! Reference: <https://gitee.com/kit-miao/motor-sdk> at
-//! `fb0e9fc5455ecb02ed13cc1f43de58078be61b07`, file `Python例程/u2can/DM_CAN.py`:
+//! `fb0e9fc5455ecb02ed13cc1f43de58078be61b07`, file `Python例程/u2can/DM_CAN.py` (Damiao's copy of
+//! cmjang's `DM_Control_Python` at `7da93877ba844d9587149d6f3a6385453aa8379f`):
 //! `MotorControl.send_data_frame` and `__send_data` (the 30-byte transmit packet with the CAN id
 //! at bytes 13..15 and the payload at 21..29), `recv` and `__extract_packets` (16-byte receive
 //! packets framed `0xAA .. 0x55`, command at byte 1, CAN id little-endian at 3..7, payload at
