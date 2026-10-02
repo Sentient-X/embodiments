@@ -98,7 +98,7 @@ class CameraOptics:
 
     The intrinsic matrix is row-major and calibrated for exactly ``width`` x ``height``.
     ``distortion_model`` and coefficients use the same wire vocabulary as
-    ``sx.episode.CameraCalibration``. The source and authority make the default auditable;
+    ``sx.episode.CameraCalibration``. The recorded source says where the default came from;
     serial-specific episode calibration overrides it without changing embodiment identity.
     """
 

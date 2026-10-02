@@ -60,12 +60,12 @@ CoordinateBounds = Unbounded | Bounds
 
 
 class ActuatorModel(StrEnum):
-    """The closed, qualified actuator-product vocabulary (byte-equal to purchasable products).
+    """The closed list of tested actuator products (byte-equal to purchasable products).
 
-    Growing it is a first-party decision that carries a qualification obligation: bench
-    drivability and safe-stop/torque-off semantics on the station. This enum is the
-    product's "clear motor restrictions": a body whose every actuated axis binds to a
-    qualified model is drivable by construction; anything else fails closed at authoring.
+    Adding one is a first-party decision that comes with testing: it must drive on the
+    bench and safe-stop and torque-off on the station. This enum is the product's "clear
+    motor restrictions": a body whose every actuated axis uses a tested model can be
+    driven by construction; anything else is refused at authoring.
     """
 
     FEETECH_STS3215 = "feetech_sts3215"
@@ -74,7 +74,7 @@ class ActuatorModel(StrEnum):
 
 
 class ActuatorBus(StrEnum):
-    """The closed transport vocabulary qualified actuators are driven over."""
+    """The closed list of buses tested actuators are driven over."""
 
     FEETECH_SERIAL = "feetech_serial"
     DAMIAO_CAN = "damiao_can"
@@ -82,11 +82,11 @@ class ActuatorBus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ActuatorBinding:
-    """How one joint axis is physically driven: a qualified product on a shared bus.
+    """How one joint axis is physically driven: a tested product on a shared bus.
 
     ``bus_id`` is the actuator's address on its daisy chain; the same address may recur
     across chains (each bimanual side is its own serial adapter), never within one
-    layout. ``sign``, ``zero_offset``, and ``reduction`` map the governed joint
+    layout. ``sign``, ``zero_offset``, and ``reduction`` map the body's joint
     coordinate onto the actuator's own axis where the drive is not identity:
     ``actuator = sign * (joint - zero_offset) * reduction``.
     """
@@ -111,7 +111,7 @@ class ActuatorBinding:
 
 @dataclass(frozen=True, slots=True)
 class ActuatorFeedback:
-    """The coordinate is read from the same qualified actuator that drives it."""
+    """The coordinate is read from the same tested actuator that drives it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +150,7 @@ ObservationBinding = ActuatorFeedback | VendorReadout | EncoderReadout | Unobser
 
 @dataclass(frozen=True, slots=True)
 class DirectDrive:
-    """A qualified product directly drives this axis."""
+    """A tested product directly drives this axis."""
 
     actuator: ActuatorBinding
 

@@ -91,7 +91,7 @@ class OperatorSite(StrEnum):
 class OperatorMount:
     """Ergonomic attachment of one movable URDF subtree to a human-body site.
 
-    ``root_frame`` is the subtree the viewer may place. ``attachment_frame`` is the exact
+    ``root_frame`` is the subtree the viewer may place. ``attachment_frame`` is the
     device frame that coincides with the body site (the gripper handle, not its camera or
     base origin). Keeping both frames makes the body placement a kinematic solve rather
     than a family-name-specific coordinate nudge.
