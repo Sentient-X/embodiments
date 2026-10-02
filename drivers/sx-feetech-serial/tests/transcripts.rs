@@ -574,14 +574,14 @@ fn faults_a_proven_stop_reported_refuse_motion_until_cleared() {
 }
 
 #[test]
-fn the_commandable_range_is_the_bounds_at_float32_and_admission_agrees() {
+fn the_commandable_range_is_the_bounds_and_their_float32_roundings_and_admission_agrees() {
     let golden = golden();
     let chain = open(&opening(&golden), "so101");
     for (range, axis) in chain.commandable().iter().zip(chain.axes()) {
         #[allow(clippy::cast_possible_truncation)]
         let (lower, upper) = (axis.lower as f32, axis.upper as f32);
-        assert!(range.lower.to_bits() == f64::from(lower).to_bits());
-        assert!(range.upper.to_bits() == f64::from(upper).to_bits());
+        assert!(range.lower.to_bits() == axis.lower.min(f64::from(lower)).to_bits());
+        assert!(range.upper.to_bits() == axis.upper.max(f64::from(upper)).to_bits());
     }
     for case in &golden.goal_positions {
         for ((servo, range), joint) in chain
@@ -594,15 +594,45 @@ fn the_commandable_range_is_the_bounds_at_float32_and_admission_agrees() {
             assert!(servo.goal_position(*joint).is_ok());
         }
     }
-    let beyond = chain.commandable()[0].lower - 1e-9;
-    assert!(!chain.commandable()[0].admits(beyond));
-    assert!(chain.servos()[0].goal_position(beyond).is_err());
+    // Outside both a bound and its float32 rounding: refused by admission and conversion.
+    for (servo, range) in chain.servos().iter().zip(chain.commandable()) {
+        for beyond in [range.lower - 1e-6, range.upper + 1e-6] {
+            assert!(!range.admits(beyond), "{beyond}");
+            assert!(servo.goal_position(beyond).is_err(), "{beyond}");
+        }
+    }
+}
+
+#[test]
+fn every_declared_bound_of_every_so101_axis_is_admitted_and_converts() {
+    let golden = golden();
+    for calibration in ["so101", "so101-inverted-gripper"] {
+        let chain = open(&opening(&golden), calibration);
+        for ((servo, range), axis) in chain
+            .servos()
+            .iter()
+            .zip(chain.commandable())
+            .zip(chain.axes())
+        {
+            #[allow(clippy::cast_possible_truncation)]
+            let rounded = [axis.lower as f32, axis.upper as f32].map(f64::from);
+            for bound in [axis.lower, axis.upper, rounded[0], rounded[1]] {
+                assert!(range.admits(bound), "{} {bound}", axis.joint);
+                servo
+                    .goal_position(bound)
+                    .unwrap_or_else(|error| panic!("{} {bound}: {error}", axis.joint));
+            }
+            assert!(range.lower <= axis.lower && axis.upper <= range.upper);
+        }
+    }
 }
 
 /// A line that never stops delivering bytes that are not a packet; its wait runs out after
 /// a fixed number of checks.
 struct Babbling {
+    byte: u8,
     checks: usize,
+    reads: usize,
 }
 
 impl SerialPort for Babbling {
@@ -615,7 +645,12 @@ impl SerialPort for Babbling {
     }
 
     fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        Ok(vec![0x00; length.max(1)])
+        self.reads += 1;
+        assert!(
+            self.reads < 10_000,
+            "the read loop never checked its deadline"
+        );
+        Ok(vec![self.byte; length.max(1)])
     }
 
     fn timeout(&self) -> Duration {
@@ -633,6 +668,7 @@ impl SerialPort for Babbling {
 /// A line that answers every request with a valid status packet from another servo.
 struct Foreign {
     checks: usize,
+    reads: usize,
     pending: VecDeque<u8>,
 }
 
@@ -646,10 +682,15 @@ impl SerialPort for Foreign {
     }
 
     fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        self.reads += 1;
+        assert!(
+            self.reads < 10_000,
+            "the exchange never checked its deadline"
+        );
         if self.pending.is_empty() {
-            // Servo 9 reports its model, over and over.
-            self.pending
-                .extend([0xFF, 0xFF, 0x09, 0x04, 0x00, 0x09, 0x03, 0xE6]);
+            // Servo 9 answers, status only, over and over: a packet whose declared length is
+            // the minimum read, so only the foreign-id deadline check can end the exchange.
+            self.pending.extend([0xFF, 0xFF, 0x09, 0x02, 0x00, 0xF4]);
         }
         let available = length.min(self.pending.len());
         Ok(self.pending.drain(..available).collect())
@@ -670,20 +711,32 @@ impl SerialPort for Foreign {
 #[test]
 fn a_line_that_keeps_delivering_foreign_bytes_still_times_out() {
     let golden = golden();
-    let babbling = FeetechChain::open(Babbling { checks: 0 }, servos(&golden, "so101"));
-    assert!(
-        matches!(
-            babbling,
-            Err(FeetechChainError::Comm {
-                bus_id: 1,
-                result: CommResult::RxCorrupt | CommResult::RxTimeout
-            })
-        ),
-        "{:?}",
-        babbling.err()
-    );
+    // 0x00 never forms a header (each pass skips to the last byte); 0xFF always forms one
+    // with an invalid id (each pass drops a byte). Each reaches a different deadline check.
+    for byte in [0x00, 0xFF] {
+        let babbling = FeetechChain::open(
+            Babbling {
+                byte,
+                checks: 0,
+                reads: 0,
+            },
+            servos(&golden, "so101"),
+        );
+        assert!(
+            matches!(
+                babbling,
+                Err(FeetechChainError::Comm {
+                    bus_id: 1,
+                    result: CommResult::RxCorrupt | CommResult::RxTimeout
+                })
+            ),
+            "{byte:#04x}: {:?}",
+            babbling.err()
+        );
+    }
     let foreign = Foreign {
         checks: 0,
+        reads: 0,
         pending: VecDeque::new(),
     };
     assert!(matches!(

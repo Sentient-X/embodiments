@@ -67,11 +67,18 @@
 //!   did: `sx_drivers.feetech.radians_to_wire` (`packages/sx-drivers/sx_drivers/feetech.py:
 //!   291-313` in `Sentient-X/sx` at `d6d4a3ea6`, the source the station's golden was first
 //!   minted from) took a float32 target and compared it with each bound at float32 under
-//!   `NumPy`'s promotion rules. Each axis's commandable range is therefore its declared bounds
-//!   rounded to float32 (within half a float32 step outside the declared bounds, which moves
-//!   no servo by a tick, so it departs from the trait's "inside the declared bounds"),
-//!   admission is that range exactly, and every later step runs on the target rounded to
-//!   `f32`, in `f64`, as Python does.
+//!   `NumPy`'s promotion rules. Each axis's commandable range is the union of its declared
+//!   bounds and those bounds rounded to float32: `[min(lower, f32(lower)), max(upper,
+//!   f32(upper))]`. Every declared bound is admitted, and so is a bound's float32 rounding
+//!   where that lands outside it, by less than half a float32 step, which moves no servo by a
+//!   tick; that much departs from the trait's "inside the declared bounds". Admission is that
+//!   range, in `f64`, exactly as [`ActuatorChain::commandable`] reports it, and every later step
+//!   runs on the target rounded to `f32`, in `f64`, as Python does; rounding is monotone, so an
+//!   admitted target rounds to within the bounds' float32 roundings. This matches the Python
+//!   follower on every target it could receive (it received float32 values, so a bound's
+//!   rounding at most). It refuses an `f64` target outside both a bound and that bound's
+//!   rounding, which the Python follower never saw: rounded to float32 first, such a target
+//!   could have been admitted there.
 //! - A stop is proven servo by servo by the torque read-back, not by the acknowledgements. The
 //!   error bytes the servos report while stopping, such as overload or overheating, are faults
 //!   of a stop that may still be proven; they are latched, and every command is refused until
@@ -185,12 +192,13 @@ impl FeetechServo {
         u8::try_from(self.axis.binding.bus_id).unwrap_or(u8::MAX)
     }
 
-    /// The joint range this servo is commanded within: its declared bounds rounded to float32.
+    /// The joint range this servo is commanded within: its declared bounds, widened to their
+    /// float32 roundings where those land outside them.
     #[must_use]
     pub fn commandable(&self) -> CommandRange {
         CommandRange {
-            lower: float32(self.axis.lower),
-            upper: float32(self.axis.upper),
+            lower: self.axis.lower.min(float32(self.axis.lower)),
+            upper: self.axis.upper.max(float32(self.axis.upper)),
         }
     }
 
@@ -327,6 +335,7 @@ fn expect(bus_id: u16, (result, error): (CommResult, u8)) -> Result<(), FeetechC
 impl<P: SerialPort> FeetechChain<P> {
     /// Validate every servo, prove each answers as a qualified STS3215 holding the calibration
     /// supplied, disable torque and configure every servo, and leave the chain disabled.
+    /// The arm must be at rest: with torque off, a held pose slumps under gravity.
     ///
     /// # Errors
     ///
@@ -475,7 +484,8 @@ impl<P: SerialPort> FeetechChain<P> {
         Ok(())
     }
 
-    /// The status flags proven stops reported and the chain holds, as (bus id, flags).
+    /// The status flags every stop since the last [`FeetechChain::clear_faults`] reported,
+    /// proven or not, as (bus id, flags).
     #[must_use]
     pub fn faults(&self) -> &[(u16, u8)] {
         &self.faults

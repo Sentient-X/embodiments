@@ -31,10 +31,14 @@ exists there.
   `enable_torque` (`Torque_Enable` 1, `Lock` 1) before the first command after open or a stop,
   one `Goal_Position` SYNC WRITE per command, `disable_torque` (`Torque_Enable` 0, `Lock` 0)
   on every servo at stop, then the read-back.
+- **Open the arm at rest.** Open disables torque on every servo before configuring it, so an
+  arm holding a pose slumps under gravity. `LeRobot` assumes the same: `SOFollower.connect`
+  expects the arm "in a rest position" when torque is disabled (`so_follower.py:91-96`).
 - **Wire values.** The binding's drive map gives the actuator coordinate. That coordinate is
   degrees for the arm and percent of the declared range for the gripper, and the servo's
   calibrated range takes it to ticks as `MotorsBus._unnormalize` does. Targets are admitted
-  within the bounds rounded to float32 and converted at float32, as the station's earlier
+  within the declared bounds, widened to their float32 roundings where those land outside,
+  and converted at float32, as the station's earlier
   Python follower (`sx_drivers.feetech.radians_to_wire`) did.
 
 ## Parity
