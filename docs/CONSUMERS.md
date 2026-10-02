@@ -13,6 +13,7 @@ lands only with a production consumer.
 | real2sim | registered object rebound by `robot.with_assets(...)` | the bundle's own closure check fails closed before rebinding |
 | sx-episodes | full object in each episode; `EmbodimentId` in summaries | object/URDF/calibration/action agreement and tensor coordinate order |
 | auto-perfect | full object for drivers, safety, telemetry, and simulation | runtime limits and constraints derive directly from the object |
+| Station | the `drivers/` crates by path, driving a body's bound axes in native state order | each composition held equal to the rendered registry bindings; vendor-transcript parity |
 | SXD | generated full-object projection because standalone workers cannot import workspace packages | byte-for-byte projection parity check |
 
 Rerun episode entity paths belong to `sx-episodes`; nominal camera names/mounts/rates belong to
@@ -27,5 +28,8 @@ Deliberate boundaries:
 - Per-unit intrinsics/extrinsics and encoder zeros are recording/session calibration.
 - Simulation scene cameras are scene facts, not body facts.
 - Controller semantics and command ordering belong to `sx-actions`.
+- A qualified direct drive's driver is chosen by its bus: `damiao_can` by
+  `drivers/sx-damiao-can` here, `feetech_serial` by the station's own `feetech` adapter.
+  Bench qualification of each `ActuatorModel` — drivability and safe-stop — is the station's.
 - Episode quality, speed bins, and measured control timing are episode facts.
 - Service APIs carry one content ID, not local `{name, digest}` wrapper models.
