@@ -29,7 +29,7 @@ Deliberate boundaries:
 - Simulation scene cameras are scene facts, not body facts.
 - Controller semantics and command ordering belong to `sx-actions`.
 - A qualified direct drive's driver is chosen by its bus: `damiao_can` by
-  `drivers/sx-damiao-can` here, `feetech_serial` by the station's own `feetech` adapter.
+  `drivers/sx-damiao-can` here, `feetech_serial` by `drivers/sx-feetech-serial` here.
   Bench qualification of each `ActuatorModel` — drivability and safe-stop — is the station's.
 - Episode quality, speed bins, and measured control timing are episode facts.
 - Service APIs carry one content ID, not local `{name, digest}` wrapper models.

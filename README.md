@@ -111,8 +111,7 @@ axes equal to the bindings `tools/render_driver_bindings.py` renders from the re
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
 | `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | intended: the `sx` station's B601 actuator, switched to this crate in the lane that lands right after this crate and the `sx` pin advance to it; nothing consumes it before then |
-
-The `feetech_serial` bus is driven by the station's own `feetech` adapter in `sx`.
+| `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | intended: the `sx` station's `FeetechActuator`, a thin wrapper over this crate's chain in the lane that lands right after this crate and the `sx` pin advance to it; nothing consumes it before then |
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check

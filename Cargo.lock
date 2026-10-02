@@ -165,6 +165,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sx-feetech-serial"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "sx-embodiment-drivers",
+ "thiserror",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

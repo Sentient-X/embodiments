@@ -231,7 +231,7 @@ class JointAxis:
             resolved_actuation, DirectDrive
         ):
             raise LayoutError(
-                "joint", "actuator feedback requires a direct qualified actuator drive"
+                "joint", "actuator feedback needs an actuator that drives the joint directly"
             )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "unit", unit)

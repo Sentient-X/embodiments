@@ -1,0 +1,73 @@
+{
+ "sources": {
+  "scservo_sdk/scservo_def.py": {
+   "repository": "https://github.com/ftservo/FTServo_Python",
+   "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+   "path": "scservo_sdk/scservo_def.py",
+   "sha256": "4d424845867b1211bce22dfc3ad8b2c17023066d9d18526248c0271430f02398"
+  },
+  "scservo_sdk/protocol_packet_handler.py": {
+   "repository": "https://github.com/ftservo/FTServo_Python",
+   "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+   "path": "scservo_sdk/protocol_packet_handler.py",
+   "sha256": "60ac1bbb56ff94b2ae26ed26746b03da9c9b812459c34488ea6ca12d8919171c"
+  },
+  "scservo_sdk/group_sync_write.py": {
+   "repository": "https://github.com/ftservo/FTServo_Python",
+   "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+   "path": "scservo_sdk/group_sync_write.py",
+   "sha256": "a4e4b0644e8c8200238a891a1e2793b902b9011b34b7308261bc30bf84739eee"
+  },
+  "scservo_sdk/sms_sts.py": {
+   "repository": "https://github.com/ftservo/FTServo_Python",
+   "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+   "path": "scservo_sdk/sms_sts.py",
+   "sha256": "5d148d69b5c0211a8354e5ca376802a2bdb301e92cde3faba57bd37d169d4558"
+  },
+  "scservo_sdk/port_handler.py": {
+   "repository": "https://github.com/ftservo/FTServo_Python",
+   "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+   "path": "scservo_sdk/port_handler.py",
+   "sha256": "77c491e2e927235557179c446a08f730ab6e473cab79e63191971f299a8b4b6b"
+  },
+  "src/lerobot/motors/motors_bus.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/motors_bus.py",
+   "sha256": "ade55d42046f1f0fa737eb61c360d76ed98211f200e10918dc2e6fcfd640a688"
+  },
+  "src/lerobot/motors/feetech/feetech.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/feetech/feetech.py",
+   "sha256": "0460413cd6a641cede015ac19ac53d2cfe9c343af1bd18ed74e1951229f64ff2"
+  },
+  "src/lerobot/motors/feetech/tables.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/feetech/tables.py",
+   "sha256": "71f7f7beb17169781bd26a33b165ed4c5c3df7b9c477d36860f9d6011eb00428"
+  },
+  "src/lerobot/robots/so_follower/so_follower.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/robots/so_follower/so_follower.py",
+   "sha256": "d09a2e63ad916f3a9e69740b1033e8c1f2dd5b025d61e5b0baacf1767ca6b8d1"
+  },
+  "src/lerobot/robots/so_follower/config_so_follower.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/robots/so_follower/config_so_follower.py",
+   "sha256": "f68219e486a94107c83b607b96af5c856f0c95dac7481b08dcc8c0c1dc629bd5"
+  },
+  "so101_bindings.json": {
+   "sha256": "73e766fb02a7ae607228d02608198eaf58e92fa5701e671936adf68cfa111518"
+  },
+  "mint.py": {
+   "sha256": "3d1bd36d2902b9ac5f45d750cdfb649787f59702a06cb728566e8694b4780e1c"
+  }
+ },
+ "sts3215_so101.json": {
+  "sha256": "48690dc51ea8b33a64404471768617dc2ef3785176ef1821a46055ff302d2793"
+ }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "sx-feetech-serial"
+description = "Feetech STS servos over their serial bus, ported from Feetech's own scservo_sdk, and the SO-101 chain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# scservo_sdk.rs translates ftservo's MIT-licensed scservo_sdk (LICENSE-THIRD-PARTY).
+license = "Apache-2.0 AND MIT"
+publish.workspace = true
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
