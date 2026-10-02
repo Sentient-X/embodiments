@@ -1,0 +1,436 @@
+{
+ "motors": [
+  {
+   "name": "shoulder_pan",
+   "id": 1,
+   "gripper": false,
+   "lower": -1.91986,
+   "upper": 1.91986
+  },
+  {
+   "name": "shoulder_lift",
+   "id": 2,
+   "gripper": false,
+   "lower": -1.74533,
+   "upper": 1.74533
+  },
+  {
+   "name": "elbow_flex",
+   "id": 3,
+   "gripper": false,
+   "lower": -1.69,
+   "upper": 1.69
+  },
+  {
+   "name": "wrist_flex",
+   "id": 4,
+   "gripper": false,
+   "lower": -1.65806,
+   "upper": 1.65806
+  },
+  {
+   "name": "wrist_roll",
+   "id": 5,
+   "gripper": false,
+   "lower": -2.74385,
+   "upper": 2.84121
+  },
+  {
+   "name": "gripper",
+   "id": 6,
+   "gripper": true,
+   "lower": -0.174533,
+   "upper": 2.0944
+  }
+ ],
+ "calibrations": {
+  "so101": [
+   {
+    "id": 1,
+    "drive_mode": 0,
+    "range_min": 750,
+    "range_max": 3350
+   },
+   {
+    "id": 2,
+    "drive_mode": 0,
+    "range_min": 820,
+    "range_max": 3280
+   },
+   {
+    "id": 3,
+    "drive_mode": 0,
+    "range_min": 900,
+    "range_max": 3150
+   },
+   {
+    "id": 4,
+    "drive_mode": 0,
+    "range_min": 860,
+    "range_max": 3230
+   },
+   {
+    "id": 5,
+    "drive_mode": 0,
+    "range_min": 40,
+    "range_max": 4050
+   },
+   {
+    "id": 6,
+    "drive_mode": 0,
+    "range_min": 2030,
+    "range_max": 3470
+   }
+  ],
+  "so101-inverted-gripper": [
+   {
+    "id": 1,
+    "drive_mode": 0,
+    "range_min": 750,
+    "range_max": 3350
+   },
+   {
+    "id": 2,
+    "drive_mode": 0,
+    "range_min": 820,
+    "range_max": 3280
+   },
+   {
+    "id": 3,
+    "drive_mode": 0,
+    "range_min": 900,
+    "range_max": 3150
+   },
+   {
+    "id": 4,
+    "drive_mode": 0,
+    "range_min": 860,
+    "range_max": 3230
+   },
+   {
+    "id": 5,
+    "drive_mode": 0,
+    "range_min": 40,
+    "range_max": 4050
+   },
+   {
+    "id": 6,
+    "drive_mode": 1,
+    "range_min": 2030,
+    "range_max": 3470
+   }
+  ]
+ },
+ "goal_positions": [
+  {
+   "calibration": "so101",
+   "radians": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ticks": [
+    2050,
+    2050,
+    2025,
+    2045,
+    2045,
+    2140
+   ],
+   "packet": "fffffe16832a0201020802020803e90704fd0705fd07065c08b7"
+  },
+  {
+   "calibration": "so101",
+   "radians": [
+    0.5,
+    -0.75,
+    1.25,
+    -1.5,
+    2.5,
+    1.0
+   ],
+   "ticks": [
+    2375,
+    1561,
+    2839,
+    1067,
+    3674,
+    2775
+   ],
+   "packet": "fffffe16832a0201470902190603170b042b04055a0e06d70a1e"
+  },
+  {
+   "calibration": "so101",
+   "radians": [
+    -1.9198600053787231,
+    1.7453299760818481,
+    -1.690000057220459,
+    1.6580599546432495,
+    -2.743849992752075,
+    -0.17453299462795258
+   ],
+   "ticks": [
+    798,
+    3187,
+    923,
+    3125,
+    256,
+    2030
+   ],
+   "packet": "fffffe16832a02011e0302730c039b0304350c05000106ee07b2"
+  },
+  {
+   "calibration": "so101",
+   "radians": [
+    1.899999976158142,
+    -1.7000000476837158,
+    1.600000023841858,
+    -1.600000023841858,
+    2.799999952316284,
+    2.094399929046631
+   ],
+   "ticks": [
+    3288,
+    942,
+    3067,
+    1002,
+    3869,
+    3469
+   ],
+   "packet": "fffffe16832a0201d80c02ae0303fb0b04ea03051d0f068d0dd9"
+  },
+  {
+   "calibration": "so101-inverted-gripper",
+   "radians": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ticks": [
+    2050,
+    2050,
+    2025,
+    2045,
+    2045,
+    3359
+   ],
+   "packet": "fffffe16832a0201020802020803e90704fd0705fd07061f0def"
+  },
+  {
+   "calibration": "so101-inverted-gripper",
+   "radians": [
+    0.5,
+    -0.75,
+    1.25,
+    -1.5,
+    2.5,
+    1.0
+   ],
+   "ticks": [
+    2375,
+    1561,
+    2839,
+    1067,
+    3674,
+    2724
+   ],
+   "packet": "fffffe16832a0201470902190603170b042b04055a0e06a40a51"
+  },
+  {
+   "calibration": "so101-inverted-gripper",
+   "radians": [
+    -1.9198600053787231,
+    1.7453299760818481,
+    -1.690000057220459,
+    1.6580599546432495,
+    -2.743849992752075,
+    -0.17453299462795258
+   ],
+   "ticks": [
+    798,
+    3187,
+    923,
+    3125,
+    256,
+    3469
+   ],
+   "packet": "fffffe16832a02011e0302730c039b0304350c050001068d0d0d"
+  },
+  {
+   "calibration": "so101-inverted-gripper",
+   "radians": [
+    1.899999976158142,
+    -1.7000000476837158,
+    1.600000023841858,
+    -1.600000023841858,
+    2.799999952316284,
+    2.094399929046631
+   ],
+   "ticks": [
+    3288,
+    942,
+    3067,
+    1002,
+    3869,
+    2030
+   ],
+   "packet": "fffffe16832a0201d80c02ae0303fb0b04ea03051d0f06ee077e"
+  }
+ ],
+ "identify": [
+  {
+   "request": "ffff0104020302f3",
+   "response": "ffff0104000903ee"
+  },
+  {
+   "request": "ffff0204020302f2",
+   "response": "ffff0204000903ed"
+  },
+  {
+   "request": "ffff0304020302f1",
+   "response": "ffff0304000903ec"
+  },
+  {
+   "request": "ffff0404020302f0",
+   "response": "ffff0404000903eb"
+  },
+  {
+   "request": "ffff0504020302ef",
+   "response": "ffff0504000903ea"
+  },
+  {
+   "request": "ffff0604020302ee",
+   "response": "ffff0604000903e9"
+  }
+ ],
+ "safe_stop": [
+  {
+   "request": "ffff0104032800cf",
+   "response": "ffff010200fc"
+  },
+  {
+   "request": "ffff0104033700c0",
+   "response": "ffff010200fc"
+  },
+  {
+   "request": "ffff0204032800ce",
+   "response": "ffff020200fb"
+  },
+  {
+   "request": "ffff0204033700bf",
+   "response": "ffff020200fb"
+  },
+  {
+   "request": "ffff0304032800cd",
+   "response": "ffff030200fa"
+  },
+  {
+   "request": "ffff0304033700be",
+   "response": "ffff030200fa"
+  },
+  {
+   "request": "ffff0404032800cc",
+   "response": "ffff040200f9"
+  },
+  {
+   "request": "ffff0404033700bd",
+   "response": "ffff040200f9"
+  },
+  {
+   "request": "ffff0504032800cb",
+   "response": "ffff050200f8"
+  },
+  {
+   "request": "ffff0504033700bc",
+   "response": "ffff050200f8"
+  },
+  {
+   "request": "ffff0604032800ca",
+   "response": "ffff060200f7"
+  },
+  {
+   "request": "ffff0604033700bb",
+   "response": "ffff060200f7"
+  },
+  {
+   "request": "ffff0104022801cf",
+   "response": "ffff01030000fb"
+  },
+  {
+   "request": "ffff0204022801ce",
+   "response": "ffff02030000fa"
+  },
+  {
+   "request": "ffff0304022801cd",
+   "response": "ffff03030000f9"
+  },
+  {
+   "request": "ffff0404022801cc",
+   "response": "ffff04030000f8"
+  },
+  {
+   "request": "ffff0504022801cb",
+   "response": "ffff05030000f7"
+  },
+  {
+   "request": "ffff0604022801ca",
+   "response": "ffff06030000f6"
+  }
+ ],
+ "torque_enable": [
+  {
+   "request": "ffff0104032801ce",
+   "response": "ffff010200fc"
+  },
+  {
+   "request": "ffff0104033701bf",
+   "response": "ffff010200fc"
+  },
+  {
+   "request": "ffff0204032801cd",
+   "response": "ffff020200fb"
+  },
+  {
+   "request": "ffff0204033701be",
+   "response": "ffff020200fb"
+  },
+  {
+   "request": "ffff0304032801cc",
+   "response": "ffff030200fa"
+  },
+  {
+   "request": "ffff0304033701bd",
+   "response": "ffff030200fa"
+  },
+  {
+   "request": "ffff0404032801cb",
+   "response": "ffff040200f9"
+  },
+  {
+   "request": "ffff0404033701bc",
+   "response": "ffff040200f9"
+  },
+  {
+   "request": "ffff0504032801ca",
+   "response": "ffff050200f8"
+  },
+  {
+   "request": "ffff0504033701bb",
+   "response": "ffff050200f8"
+  },
+  {
+   "request": "ffff0604032801c9",
+   "response": "ffff060200f7"
+  },
+  {
+   "request": "ffff0604033701ba",
+   "response": "ffff060200f7"
+  }
+ ]
+}

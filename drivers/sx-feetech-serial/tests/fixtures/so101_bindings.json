@@ -1,0 +1,72 @@
+{
+  "embodiment": "so101",
+  "id": "e5523f6fe586138742b107ea674b7d4c63fdcb27ce1c210a4e58becb3dcfa1c8",
+  "axes": [
+    {
+      "joint": "shoulder_pan",
+      "lower": -1.91986,
+      "upper": 1.91986,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 1,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "shoulder_lift",
+      "lower": -1.74533,
+      "upper": 1.74533,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 2,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "elbow_flex",
+      "lower": -1.69,
+      "upper": 1.69,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 3,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "wrist_flex",
+      "lower": -1.65806,
+      "upper": 1.65806,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 4,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "wrist_roll",
+      "lower": -2.74385,
+      "upper": 2.84121,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 5,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "gripper",
+      "lower": -0.174533,
+      "upper": 2.0944,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 6,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    }
+  ]
+}

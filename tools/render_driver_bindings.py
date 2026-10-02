@@ -4,8 +4,8 @@
     python tools/render_driver_bindings.py           # rewrite every bindings file
     python tools/render_driver_bindings.py --check   # exit 1 when one disagrees
 
-A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601 chain)
-keeps its axes in Rust; this file is the registry's side, rendered from ``robot.state`` in
+A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601 chain,
+``sx-feetech-serial``'s SO-101) keeps its axes in Rust; this file is the registry's side, rendered from ``robot.state`` in
 native state order, and the crate's tests compare against it. ``tests/test_driver_bindings.py``
 runs the same check.
 """
@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
 BINDINGS: dict[Path, str] = {
     ROOT / "drivers/sx-damiao-can/tests/fixtures/b601_bindings.json": "b601-dm",
+    ROOT / "drivers/sx-feetech-serial/tests/fixtures/so101_bindings.json": "so101",
 }
 
 
