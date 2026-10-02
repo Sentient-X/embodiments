@@ -39,7 +39,7 @@ use sx_embodiment_drivers::{
 use thiserror::Error;
 
 use crate::dm_can::{
-    ControlType, DmCanError, DmMotorType, DmVariable, Motor, MotorControl, ParamValue,
+    ControlType, DISABLE_WAIT, DmCanError, DmMotorType, DmVariable, Motor, MotorControl, ParamValue,
 };
 
 /// `ActuatorModel.DAMIAO_DM4310` in the registry.
@@ -55,6 +55,10 @@ const KD_MAX: f64 = 5.0;
 const MAX_MOTOR_ID: u16 = 0x7FE;
 const ANSWER_POLLS: usize = 20;
 const ANSWER_POLL_INTERVAL: Duration = Duration::from_millis(1);
+/// What the link adds to each frame the stop sends, on top of the waits it takes: the USB2CAN
+/// transmit packet (30 bytes) and the motor's answer (16 bytes) at 921600 baud take under
+/// 0.6 ms, and a USB full-speed bridge adds up to a 1 ms frame of latency each way.
+const LINK_ALLOWANCE: Duration = Duration::from_millis(2);
 /// The DM4340 velocity ranges Damiao publishes: `DM_CAN.py`'s row, then `damiao.h`'s.
 const DM4340_VMAX: [f64; 2] = [10.0, 8.0];
 
@@ -300,6 +304,17 @@ impl<P: CanPort> DamiaoChain<P> {
         chain.await_answers(&before)?;
         chain.expect_all(&before, MotorState::Disabled)?;
         Ok(chain)
+    }
+
+    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: every
+    /// motor's `disable` and its 0.01 s wait, an answer poll, a `refresh_motor_status` for
+    /// every motor that stayed silent, a second poll, and the link's allowance for each of those
+    /// frames.
+    #[must_use]
+    pub fn stop_budget(&self) -> Duration {
+        let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
+        let polls = u32::try_from(ANSWER_POLLS - 1).unwrap_or(u32::MAX);
+        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + LINK_ALLOWANCE * motors * 2
     }
 
     /// The limit row each motor reported at open, in native state order.

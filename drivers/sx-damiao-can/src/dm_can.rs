@@ -275,7 +275,7 @@ pub enum DmCanError {
 }
 
 const ENABLE_WAIT: Duration = Duration::from_millis(100);
-const DISABLE_WAIT: Duration = Duration::from_millis(10);
+pub(crate) const DISABLE_WAIT: Duration = Duration::from_millis(10);
 const SET_ZERO_WAIT: Duration = Duration::from_millis(100);
 const PARAM_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const SWITCH_MODE_RETRIES: usize = 10;

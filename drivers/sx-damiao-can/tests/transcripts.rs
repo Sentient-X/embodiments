@@ -484,3 +484,35 @@ fn the_transcripts_are_the_bytes_the_provenance_names() {
         provenance["transcripts.json"]["sha256"].as_str().unwrap()
     );
 }
+
+#[test]
+fn every_recorded_stop_waits_inside_the_chains_stop_budget() {
+    let budget = {
+        let session = session("session");
+        let events = session["events"].as_array().unwrap();
+        let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
+        let stream = ReplayStream::new(&events[..opened]);
+        DamiaoChain::open(stream.port(), b601())
+            .expect("open")
+            .stop_budget()
+    };
+    for session in transcripts()["sessions"].as_array().unwrap() {
+        let events = session["events"].as_array().unwrap();
+        let mut start = 0;
+        for step in session["steps"].as_array().unwrap() {
+            let end = usize::try_from(step["event_count"].as_u64().unwrap()).unwrap();
+            if step["step"] == "stop" {
+                let waited: f64 = events[start..end]
+                    .iter()
+                    .filter_map(|event| event.get("sleep").and_then(Value::as_f64))
+                    .sum();
+                assert!(
+                    Duration::from_secs_f64(waited) < budget,
+                    "{}: the stop waited {waited} s against a {budget:?} budget",
+                    session["name"]
+                );
+            }
+            start = end;
+        }
+    }
+}
