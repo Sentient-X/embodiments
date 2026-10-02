@@ -423,7 +423,7 @@ def resolve_asset(ref: AssetRef) -> Path:
 
 @dataclass(frozen=True, slots=True)
 class PackagedAsset:
-    """A description file shipped under this repo's ``assets/`` tree, content-pinned."""
+    """A description file shipped under this repo's ``assets/`` tree, pinned by its content hash."""
 
     relpath: str  # assets-root-relative, forward slashes ("so101/so101.urdf")
     content: ContentBlob
