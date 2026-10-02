@@ -1,0 +1,34 @@
+{
+ "sources": {
+  "DM_CAN.py": {
+   "repository": "https://gitee.com/kit-miao/motor-sdk",
+   "revision": "fb0e9fc5455ecb02ed13cc1f43de58078be61b07",
+   "path": "Python例程/u2can/DM_CAN.py",
+   "sha256": "6e9f4b6fb639ff2d5ebeb426d61b0af70c9146d47a05c0f57d034b94cc522e1d"
+  },
+  "damiao.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "ff71cae1ae2d09fd035553c35da65888ed6c8304",
+   "path": "src/lerobot/motors/damiao/damiao.py",
+   "sha256": "5dcc363e2624746ba0318b25e86660c536b3b14ae96fbe132a25184ba0272283"
+  },
+  "tables.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "ff71cae1ae2d09fd035553c35da65888ed6c8304",
+   "path": "src/lerobot/motors/damiao/tables.py",
+   "sha256": "3c2be95b29fe25e2bb4c28384271ecd595e6aa1f15197ea4a1aa97568461089b"
+  },
+  "sentient_can_harness.cpp": {
+   "repository": "Sentient-X/sentient_can",
+   "revision": "3837d224327d89ed30b6fdee3577769d8dae5f94",
+   "path": "drivers/sx-damiao-can/tests/fixtures/dm_can/sentient_can_harness.cpp",
+   "sha256": "a8601e1e6646871d32035b46d1cf4bb37e9b140ad7ede36dcc3e8501f696f06c"
+  },
+  "mint.py": {
+   "sha256": "f3ec0cbb6db7b1d21baebe1f0df26a850e226aa3aa9f37629d74bae71aa2b795"
+  }
+ },
+ "transcripts.json": {
+  "sha256": "1e02b590f08164768e93a857518bfc66cfc5ed8d9a0061b01076b326cc1a17bf"
+ }
+}

@@ -29,6 +29,12 @@ Apache-2.0 like the rest of the repository.
 | `assets/official/universal_robots/` | Deterministic xacro expansions of [`UniversalRobots/Universal_Robots_ROS2_Description`](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description), `8c2adebd48d8722ec83dd2a06f49049a16b3c9f4`, for UR5e and UR10e. | BSD-3-Clause |
 | `assets/official/yor/` | Deterministic URDF projection of the pinned YOR MJCF using `tools/mjcf_to_urdf.py`; the converter preserves the official link/joint tree and controlled joint names. | MIT |
 
+### Driver code translated from vendor sources
+
+| Tree | Origin | License |
+|------|--------|---------|
+| `drivers/sx-damiao-can/src/dm_can.rs`, `drivers/sx-damiao-can/src/usb2can.rs` | Rust translations of `DM_CAN.py` from Damiao's motor SDK, [`kit-miao/motor-sdk`](https://gitee.com/kit-miao/motor-sdk) at `fb0e9fc5455ecb02ed13cc1f43de58078be61b07`, path `Python例程/u2can/DM_CAN.py` (sha256 `6e9f4b6fb639ff2d5ebeb426d61b0af70c9146d47a05c0f57d034b94cc522e1d`). That file is Damiao's modified copy of cmjang's [`DM_Control_Python`](https://github.com/cmjang/DM_Control_Python) at `7da93877ba844d9587149d6f3a6385453aa8379f`. `dm_can.rs` translates `Motor`, `MotorControl` (MIT control, enable, disable, set zero, refresh, register read and write, control-mode switch), `Limit_Param`, `DM_variable`, `Control_Type` and the packing helpers; `usb2can.rs` the USB2CAN serial framing (`send_data_frame`, `__send_data`, `__extract_packets`). Each module header lists where the translation departs from the source. | MIT, Copyright (c) 2024 cmjang — `Python例程/u2can/LICENSE` beside the source; the permission notice is reproduced in `drivers/sx-damiao-can/LICENSE-THIRD-PARTY` |
+
 The `assets/` tree ships in wheels as `sx_embodiments/_assets/` and is retained in sdists.
 Consumers resolve the installed or editable tree via `sx_embodiments.assets.asset_root()`.
 

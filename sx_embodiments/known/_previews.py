@@ -211,9 +211,9 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "23bc2833bda1f1b9eb5ad9a90774b8b9ac4ca87a416ee093bfbbfd4d37f99192"
+        "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9"
     ): packaged_asset(
-        relpath="b601_dm/previews/23bc2833bda1f1b9eb5ad9a90774b8b9ac4ca87a416ee093bfbbfd4d37f99192.webp",
+        relpath="b601_dm/previews/f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9.webp",
         sha256="3b842894e5094a3f48aa1e249ebb25aaa63278057768a44d886ccba494e6464a",
         size_bytes=2560,
         format=AssetFormat.OTHER,
@@ -228,9 +228,9 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "2061b21100bd859624b2cee57515da0fa56a6baf8330700e7579bc64f15269eb"
+        "36a277038730304bfb6d940cf3c4ca3b59ce0889836371a5e2bf7cc866ae89db"
     ): packaged_asset(
-        relpath="b601_dm/previews/2061b21100bd859624b2cee57515da0fa56a6baf8330700e7579bc64f15269eb.webp",
+        relpath="b601_dm/previews/36a277038730304bfb6d940cf3c4ca3b59ce0889836371a5e2bf7cc866ae89db.webp",
         sha256="abbfea2ce1c6da7b9e9b10c4f71e160bd91bb78d2eb0733f8c416916fad5265b",
         size_bytes=2382,
         format=AssetFormat.OTHER,
@@ -262,9 +262,9 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "247556411179d16439bb955736542729ecf4e52e78dd8e91b0eea29468a771fb"
+        "680de5b114dcb45d17b4eafaf804dd1398e01722dbefbbc07cd6bb84222f7ff7"
     ): packaged_asset(
-        relpath="b601_dm/previews/247556411179d16439bb955736542729ecf4e52e78dd8e91b0eea29468a771fb.webp",
+        relpath="b601_dm/previews/680de5b114dcb45d17b4eafaf804dd1398e01722dbefbbc07cd6bb84222f7ff7.webp",
         sha256="abbfea2ce1c6da7b9e9b10c4f71e160bd91bb78d2eb0733f8c416916fad5265b",
         size_bytes=2382,
         format=AssetFormat.OTHER,

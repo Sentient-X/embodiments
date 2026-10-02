@@ -1,0 +1,83 @@
+{
+  "embodiment": "b601-dm",
+  "id": "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9",
+  "axes": [
+    {
+      "joint": "joint1",
+      "lower": -2.8,
+      "upper": 2.8,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 1,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "joint2",
+      "lower": -3.14,
+      "upper": 0.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 2,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "joint3",
+      "lower": -3.14,
+      "upper": 0.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 3,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "joint4",
+      "lower": -1.87,
+      "upper": 1.57,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 4,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "joint5",
+      "lower": -1.57,
+      "upper": 1.57,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 5,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "joint6",
+      "lower": -3.14,
+      "upper": 3.14,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 6,
+      "sign": 1,
+      "zero_offset": 0.0,
+      "reduction": 1.0
+    },
+    {
+      "joint": "gripper_joint1",
+      "lower": 0.0,
+      "upper": 0.0715,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 7,
+      "sign": -1,
+      "zero_offset": 0.0,
+      "reduction": 111.11111111111111
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+[package]
+name = "sx-damiao-can"
+description = "Damiao DM-J motors over CAN, ported from Damiao's own DM_CAN.py, and the reBot B601-DM chain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# dm_can.rs and usb2can.rs translate cmjang's MIT-licensed DM_CAN.py (LICENSE-THIRD-PARTY).
+license = "Apache-2.0 AND MIT"
+publish.workspace = true
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
