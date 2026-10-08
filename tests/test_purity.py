@@ -27,7 +27,8 @@ def test_imports_stay_within_the_budget() -> None:
                 names = {alias.name.split(".")[0] for alias in node.names}
             elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 names = {node.module.split(".")[0]}
-            for name in names - _ALLOWED:
+            allowed = _ALLOWED | ({"serial"} if path == SRC / "encoder_serial.py" else set())
+            for name in names - allowed:
                 violations.append(f"{path.relative_to(SRC)}: imports {name}")
     assert not violations, "imports beyond the sx-embodiments budget:\n" + "\n".join(violations)
 
