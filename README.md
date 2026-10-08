@@ -120,6 +120,20 @@ cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's
 `just check-rust` runs them on the pinned commit, and that is the only enforcement.
 
+## Quest capture device I/O
+
+`sx_embodiments.quest_capture.QuestLink` owns the existing OpenQuestCapture USB/adb
+and HTTP protocol: recovery, APK-byte identity, recording control, pulls and raw clock
+replies. `sx_embodiments.quest` owns build-bound hardware/pose facts and historical APK
+conventions. The sx Factory recorder consumes the driver; capture and conversion consume
+these same facts. Factory owns clock-fit acceptance, episode orchestration and recording.
+The driver uses only the standard library; adb remains a host prerequisite.
+
+Loopback HTTP tests verify the request/response boundary and refuse malformed device
+clock fields. They do not qualify a headset, a Pico runtime or remote robot control.
+The superproject records these source bytes in its recorder build fingerprint, so moving
+or changing the driver requires a new accepted capture build before production use.
+
 ## Assets
 
 Canonical robot and capture-hardware descriptions live under `assets/`; provenance and licensing
