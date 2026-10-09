@@ -148,6 +148,10 @@ class ParallelYubiCalibration:
             raise YubiCalibrationError("Parallel YUBI calibration values must be finite")
         if self.mm_per_count <= 0.0 or self.travel_mm <= 0.0:
             raise YubiCalibrationError("Parallel YUBI scale and travel must be positive")
+        if not 0.0 < self.residual_bound_mm <= PARALLEL_YUBI_MAX_RESIDUAL_MM:
+            raise YubiCalibrationError(
+                f"a Parallel YUBI residual bound must be at most {PARALLEL_YUBI_MAX_RESIDUAL_MM} mm"
+            )
         if not 0.0 <= self.residual_mm <= self.residual_bound_mm:
             raise YubiCalibrationError("Parallel YUBI fit residual exceeds its bound")
 
@@ -176,13 +180,12 @@ class ParallelYubiFitRefused:
 def fit_parallel_yubi_calibration(
     unit_id: str,
     samples: Sequence[tuple[float, float]],
-    *,
-    max_residual_mm: float = PARALLEL_YUBI_MAX_RESIDUAL_MM,
 ) -> ParallelYubiCalibration | ParallelYubiFitRefused:
     """Fit one unit's law from measured (encoder count, aperture mm) pairs.
 
     The points must include the closed stop and span the jaw's travel; the straight
-    line through them is accepted only if every point lies within ``max_residual_mm``.
+    line through them is accepted only if every point lies within
+    ``PARALLEL_YUBI_MAX_RESIDUAL_MM``.
     """
 
     if len(samples) < PARALLEL_YUBI_MIN_SAMPLES:
@@ -199,7 +202,7 @@ def fit_parallel_yubi_calibration(
         return ParallelYubiFitRefused(
             ParallelYubiFitRefusalReason.NEGATIVE_APERTURE, "a measured aperture is negative"
         )
-    if min(apertures) > max_residual_mm:
+    if min(apertures) > PARALLEL_YUBI_MAX_RESIDUAL_MM:
         return ParallelYubiFitRefused(
             ParallelYubiFitRefusalReason.NO_CLOSED_STOP,
             "no point was measured with the jaws closed, so the zero is unknown",
@@ -224,10 +227,11 @@ def fit_parallel_yubi_calibration(
         )
     intercept = mean_mm - slope * mean_count
     residual = max(abs(intercept + slope * count - mm) for count, mm in samples)
-    if residual > max_residual_mm:
+    if residual > PARALLEL_YUBI_MAX_RESIDUAL_MM:
         return ParallelYubiFitRefused(
             ParallelYubiFitRefusalReason.RESIDUAL_EXCEEDED,
-            f"a point is {residual:.3f} mm off the fitted line; the bound is {max_residual_mm} mm",
+            f"a point is {residual:.3f} mm off the fitted line; "
+            f"the bound is {PARALLEL_YUBI_MAX_RESIDUAL_MM} mm",
         )
     return ParallelYubiCalibration(
         unit_id=unit_id,
@@ -236,7 +240,7 @@ def fit_parallel_yubi_calibration(
         sign=1 if slope > 0.0 else -1,
         travel_mm=max(apertures),
         residual_mm=residual,
-        residual_bound_mm=max_residual_mm,
+        residual_bound_mm=PARALLEL_YUBI_MAX_RESIDUAL_MM,
     )
 
 
