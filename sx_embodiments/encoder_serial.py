@@ -3,7 +3,7 @@
 import math
 import time
 from collections.abc import Generator, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,8 +89,12 @@ def open_encoder_lines(
                 yield None if text is None else EncoderLine(text, received)
 
         yield lines()
-    finally:
-        try:
+    except BaseException:
+        # A failed close must not replace the error that ended the capture.
+        with suppress(serial.SerialException, OSError):
             port.close()
-        except (serial.SerialException, OSError) as error:
-            raise EncoderReadError(f"encoder serial close failed: {error}") from error
+        raise
+    try:
+        port.close()
+    except (serial.SerialException, OSError) as error:
+        raise EncoderReadError(f"encoder serial close failed: {error}") from error
