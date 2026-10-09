@@ -120,6 +120,37 @@ cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's
 `just check-rust` runs them on the pinned commit, and that is the only enforcement.
 
+## Quest capture device I/O
+
+`sx_embodiments.quest_capture.QuestLink` owns the existing OpenQuestCapture USB/adb
+and HTTP protocol: recovery, APK-byte identity, recording control, pulls and raw clock
+replies. `sx_embodiments.quest` owns build-bound hardware/pose facts and historical APK
+conventions. The sx Factory recorder consumes the driver; capture and conversion consume
+these same facts. Factory owns clock-fit acceptance, episode orchestration and recording.
+The driver uses only the standard library; adb remains a host prerequisite.
+
+Loopback HTTP tests verify the request/response boundary and refuse malformed device
+clock fields. They do not qualify a headset, a Pico runtime or remote robot control.
+The superproject records these source bytes in its recorder build fingerprint, so moving
+or changing the driver requires a new accepted capture build before production use.
+
+## Standard YUBI encoder interpretation
+
+`sx_embodiments.yubi.YubiEncoder` parses the existing standard YUBI AS5601 stream,
+normalizes its signed zero-relative angle and refuses range or firmware-identity changes
+within a connection. Capture preflight and recording use this same parser. The module also
+owns the existing encoder envelope and the canonical four-bar jaw conversion used by the
+recording converter. `encoder_serial.open_encoder_lines` owns UART access and host receipt timestamps;
+install `sx-embodiments[capture]` for its pyserial dependency. Factory retains spooling
+and freshness. The shared
+`encoder_serial.EncoderLineDecoder` admits a frame only at its newline, retains timeout
+fragments, and bounds a line to 4096 bytes. Capture preflight and recording use it for
+both existing encoder profiles; invalid UTF-8 and oversized lines refuse capture.
+
+These are the existing standard-YUBI facts. They neither define Parallel YUBI's geometry
+nor replace measured per-unit calibration. The nominal CAD aperture curve retains its
+existing clamping behavior; this migration adds no physical qualification.
+
 ## Assets
 
 Canonical robot and capture-hardware descriptions live under `assets/`; provenance and licensing
