@@ -281,6 +281,15 @@ QUEST_APK_BUILD_1_4_4 = QuestApkBuildId(
 QUEST_APK_BUILD_1_4_5 = QuestApkBuildId(
     "sha256:ff6e924b7f45955b86c74a50e0a0e2c0726f45070bdb82a95084444caa76e7d9"
 )
+# Released 2026-10-08 as OpenQuestCapture 1.4.6 (version code 13, capture contract
+# 1.4.3, OpenQuestCapture#9): refuses to start with frozen head tracking, reports stop,
+# pause and controller state to the pod, flushes CSVs every second, writes
+# stream_manifest.json, and starts body tracking at launch. body_tracking.csv gains four
+# columns after the joints. Pose producers and conventions are unchanged. Registered so
+# its recordings resolve; the active build moves to it with the pod's APK pin (sx#1307).
+QUEST_APK_BUILD_1_4_6 = QuestApkBuildId(
+    "sha256:71ee51b9367b5152e830348c2f859c0e481f5b59c66f522cfaa544594fd9b222"
+)
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
     MappingProxyType(
         {
@@ -325,6 +334,10 @@ REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFa
                 body_source=QuestRawPoseSource.OVR_NATIVE_RH,
             ),
             QUEST_APK_BUILD_1_4_5: QuestPoseConventionFacts(
+                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
+                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
+            ),
+            QUEST_APK_BUILD_1_4_6: QuestPoseConventionFacts(
                 controller_hmd_source=QuestRawPoseSource.UNITY_LH,
                 body_source=QuestRawPoseSource.OVR_NATIVE_RH,
             ),
@@ -378,6 +391,7 @@ __all__ = [
     "QUEST_APK_BUILD_1_4_3",
     "QUEST_APK_BUILD_1_4_4",
     "QUEST_APK_BUILD_1_4_5",
+    "QUEST_APK_BUILD_1_4_6",
     "REAL_QUEST_POSE_CONVENTION_FACTS",
     "SIMULATED_QUEST_APK_BUILD_ID",
     "SIMULATED_QUEST_CAPTURE_APP",
