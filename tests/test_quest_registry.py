@@ -14,15 +14,18 @@ from sx_embodiments.quest import (
 )
 
 
-def test_1_4_6_resolves_with_unchanged_conventions_but_does_not_capture_until_pinned() -> None:
-    """OpenQuestCapture 1.4.6 keeps 1.4.5's pose producers; new capture stays on the pod's
-    pinned build until both move together (sx#1307)."""
-    assert ACTIVE_REAL_QUEST_APK_BUILD_ID == QUEST_APK_BUILD_1_4_5
+def test_1_4_6_captures_and_1_4_5_recordings_still_resolve() -> None:
+    """OpenQuestCapture 1.4.6 keeps 1.4.5's pose producers and is the build new capture
+    is pinned to, with the pod's APK pin (sx#1307); 1.4.5's recordings still resolve."""
+    assert ACTIVE_REAL_QUEST_APK_BUILD_ID == QUEST_APK_BUILD_1_4_6
     assert (
         REAL_QUEST_POSE_CONVENTION_FACTS[QUEST_APK_BUILD_1_4_6]
         == (REAL_QUEST_POSE_CONVENTION_FACTS[QUEST_APK_BUILD_1_4_5])
     )
     app = QuestCaptureApp(QUEST_APK_BUILD_1_4_6, "1.4.6", "quest/test/os")
     assert resolve_real_quest_pose_convention(app).capture_app == app
+    require_active_real_quest_build(app)
+    old = QuestCaptureApp(QUEST_APK_BUILD_1_4_5, "1.4.5", "quest/test/os")
+    assert resolve_real_quest_pose_convention(old).capture_app == old
     with pytest.raises(InactiveQuestApkBuildError):
-        require_active_real_quest_build(app)
+        require_active_real_quest_build(old)
