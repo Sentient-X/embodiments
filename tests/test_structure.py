@@ -4,7 +4,7 @@ import types
 from sx_contracts import Capability, ComponentId
 
 import sx_embodiments
-from sx_embodiments import embodiments
+from sx_embodiments import Limb, embodiments
 from sx_embodiments.compose import (
     ComponentKind,
     ComponentRole,
@@ -45,17 +45,19 @@ PUBLIC_SURFACE = frozenset(
         "admit_part",
         "assemble",
         "composable_parts",
-        "convert_v13_to_v14",
         # A recording's embodiment and the identity it was recorded under, with the
         # canonical identities earlier schemas published. Widened 2026-09 for the pod
         # delivery validator and the Catalog recording reader (its first consumers).
         "RecordedEmbodiment",
+        "historical_document",
         "historical_identities",
         "read_recorded",
         # A directory holding exactly one embodiment's asset closure, filled from the
         # digest-keyed cache (embodiment-assets plan, E1). Its consumers move to it in E3.
         "materialize",
         "materialized",
+        # One reader for stored documents of every earlier schema, returning the edge.
+        "migrate",
         "part_from_dict",
         "part_to_dict",
         "AssetDigestMismatchError",
@@ -83,6 +85,8 @@ PUBLIC_SURFACE = frozenset(
         "GripperKinematicsError",
         "InvalidCameraMountError",
         "LayoutError",
+        # What a mounted chain serves; read wherever a consumer selects arms or necks.
+        "Limb",
         "MissingUrdfError",
         "MountKind",
         "OperatorMount",
@@ -121,7 +125,7 @@ def test_public_surface_exposes_validated_composition_without_raw_construction()
 
 def test_physical_coordinates_do_not_disappear_when_assigned_leader_role() -> None:
     arm = embodiments["so101"].single_arm
-    leader = leader_component("input_arm", arm, RootMount("base_link"))
+    leader = leader_component("input_arm", arm, RootMount("base_link"), limb=Limb.ARM)
 
     assert state_space("input", (leader,)).names == (
         "input_arm/shoulder_pan",

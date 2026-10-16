@@ -9,7 +9,6 @@ from sx_contracts import ComponentId
 from .errors import LayoutError
 from .identity import PartId
 
-
 #: What an axis records when nothing documents how it is driven or observed. The
 #: schema-13 converter records the same absence with the same words, so a body
 #: authored today and the same body carried from schema 13 are one identity.
@@ -86,16 +85,16 @@ class ActuatorBinding:
 
     ``bus_id`` is the actuator's address on its daisy chain; the same address may recur
     across chains (each bimanual side is its own serial adapter), never within one
-    layout. ``sign``, ``zero_offset``, and ``reduction`` map the body's joint
-    coordinate onto the actuator's own axis where the drive is not identity:
-    ``actuator = sign * (joint - zero_offset) * reduction``.
+    layout. ``sign`` and ``reduction`` map the body's joint coordinate onto the actuator's
+    own axis where the drive is not identity: ``actuator = sign * (joint - zero) *
+    reduction``. The zero is measured per motor, so it is a joint calibration of the unit,
+    never a fact of the design.
     """
 
     model: ActuatorModel
     bus: ActuatorBus
     bus_id: int
     sign: int = 1
-    zero_offset: float = 0.0
     reduction: float = 1.0
 
     def __post_init__(self) -> None:
@@ -103,8 +102,6 @@ class ActuatorBinding:
             raise LayoutError("actuator", "bus_id must be a positive integer")
         if self.sign not in (-1, 1):
             raise LayoutError("actuator", "sign must be +1 or -1")
-        if not math.isfinite(self.zero_offset):
-            raise LayoutError("actuator", "zero_offset must be finite")
         if not math.isfinite(self.reduction) or self.reduction <= 0.0:
             raise LayoutError("actuator", "reduction must be a positive finite ratio")
 

@@ -1,0 +1,225 @@
+{
+  "assets": [
+    {
+      "asset": {
+        "content": {
+          "sha256": "dd7f789c1aa4b9f82174dd49f6c4d62f5338f0956ec8e59c37576ee161903279",
+          "size_bytes": 16065
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/so101/so101.urdf",
+        "logical_path": "so101/so101.urdf",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "MIT",
+        "path": "envs/robot/so101.urdf",
+        "repository": "https://github.com/AbdulazizAlmuzairee/Squint",
+        "revision": "d8ca2fbfb4cef6b6097c71f9ec172c76125a572f"
+      }
+    }
+  ],
+  "base_mount": null,
+  "components": [
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 1,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.91986,
+                "upper": 1.91986
+              },
+              "name": "shoulder_pan",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 2,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.74533,
+                "upper": 1.74533
+              },
+              "name": "shoulder_lift",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 3,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.69,
+                "upper": 1.69
+              },
+              "name": "elbow_flex",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 4,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.65806,
+                "upper": 1.65806
+              },
+              "name": "wrist_flex",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 5,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.74385,
+                "upper": 2.84121
+              },
+              "name": "wrist_roll",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "so101-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "arm",
+      "mount": {
+        "frame": "base_link",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "gap_curve": null,
+          "grasp": "parallel",
+          "grasp_centre_m": null,
+          "kind": "gripper",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "feetech_serial",
+                  "bus_id": 6,
+                  "model": "feetech_sts3215",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.174533,
+                "upper": 2.0944
+              },
+              "name": "gripper",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            }
+          ],
+          "mimic_joints": [],
+          "part_id": "so101-jaw",
+          "physical": null,
+          "travel_m": null
+        }
+      },
+      "instance": "jaw",
+      "mount": {
+        "frame": "gripper_link",
+        "kind": "mounted_on",
+        "parent": "arm"
+      }
+    }
+  ],
+  "id": "e5523f6fe586138742b107ea674b7d4c63fdcb27ce1c210a4e58becb3dcfa1c8",
+  "kind": "robot",
+  "label": "SO-101 (single arm)",
+  "lineage": {
+    "family": "so101",
+    "revision": "",
+    "variant": ""
+  },
+  "name": "so101",
+  "operator_mounts": [],
+  "rates": null,
+  "schema_version": 14
+}

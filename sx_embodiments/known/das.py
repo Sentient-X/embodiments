@@ -174,7 +174,7 @@ QUEST3_REFERENCE_OPTICS: Final = CameraOptics(
 
 QUEST3_HEAD: Final = CameraSpec(
     part_id=PartId("quest3-head"),
-    model=SensorModel.QUEST3_RGB,
+    model=SensorModel("quest3_rgb"),
     modality=CameraModality.RGB,
     fps=30.0,
     optics=QUEST3_REFERENCE_OPTICS,

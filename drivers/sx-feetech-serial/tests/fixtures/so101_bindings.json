@@ -1,6 +1,6 @@
 {
   "embodiment": "so101",
-  "id": "e5523f6fe586138742b107ea674b7d4c63fdcb27ce1c210a4e58becb3dcfa1c8",
+  "id": "89727a3d6c8cb40fd8b34b847b64de1531027a63774ffcc97dac3c869bf4e05c",
   "axes": [
     {
       "joint": "shoulder_pan",
@@ -10,7 +10,6 @@
       "bus": "feetech_serial",
       "bus_id": 1,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -21,7 +20,6 @@
       "bus": "feetech_serial",
       "bus_id": 2,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -32,7 +30,6 @@
       "bus": "feetech_serial",
       "bus_id": 3,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -43,7 +40,6 @@
       "bus": "feetech_serial",
       "bus_id": 4,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -54,7 +50,6 @@
       "bus": "feetech_serial",
       "bus_id": 5,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -65,7 +60,6 @@
       "bus": "feetech_serial",
       "bus_id": 6,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     }
   ]

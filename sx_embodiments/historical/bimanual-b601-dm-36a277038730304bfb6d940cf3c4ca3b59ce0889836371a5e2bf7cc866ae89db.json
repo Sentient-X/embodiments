@@ -1,0 +1,497 @@
+{
+  "assets": [
+    {
+      "asset": {
+        "content": {
+          "sha256": "eb15a091412fa112f11d8bef3d170a40aa3cbb9db335fb145a1b27eb2aa000a0",
+          "size_bytes": 13428
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/b601_dm/reBot_B601_DM_with_gripper.urdf",
+        "logical_path": "b601_dm/reBot_B601_DM_with_gripper.urdf",
+        "media_type": "application/xml",
+        "role": "other"
+      },
+      "provenance": {
+        "generator": "sx-embodiments vendoring: (1) the 20 package://rebotarm_bringup/description/meshes_b601_gripper/<name>.STL mesh refs rewritten to meshes/<name>.STL; (2) <mimic joint=\"gripper_joint1\" multiplier=\"1.0\"/> added to gripper_joint2 (one Damiao motor at CAN 0x07 drives both fingers; the upstream SolidWorks export omitted the coupling)",
+        "license_id": "Apache-2.0",
+        "path": "src/rebotarm_bringup/description/urdf/reBot_B601_DM_with_gripper.urdf",
+        "repository": "https://github.com/Seeed-Projects/reBotArmController_ROS2",
+        "revision": "a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "21d4f8b3849783e8ca42757298ff4239de68ceceba37d6947e23471aa81b0b84",
+          "size_bytes": 21997
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/b601_dm/bimanual_B601_DM.urdf",
+        "logical_path": "b601_dm/bimanual_B601_DM.urdf",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": "sx-embodiments/tools/compose_registered_urdfs.py",
+        "license_id": "Apache-2.0",
+        "path": "src/rebotarm_bringup/description/urdf/reBot_B601_DM_with_gripper.urdf",
+        "repository": "https://github.com/Seeed-Projects/reBotArmController_ROS2",
+        "revision": "a61efe4fa223ca50cd721ef8ebe4a60e90f28bfd"
+      }
+    }
+  ],
+  "base_mount": null,
+  "components": [
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 1,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8,
+                "upper": 2.8
+              },
+              "name": "joint1",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 2,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 0.0
+              },
+              "name": "joint2",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 3,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 0.0
+              },
+              "name": "joint3",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 4,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.87,
+                "upper": 1.57
+              },
+              "name": "joint4",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 5,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.57,
+                "upper": 1.57
+              },
+              "name": "joint5",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 6,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 3.14
+              },
+              "name": "joint6",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "rebot-b601dm-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "left_arm",
+      "mount": {
+        "frame": "left_base_link",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "gap_curve": null,
+          "grasp": "parallel",
+          "grasp_centre_m": null,
+          "kind": "gripper",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 7,
+                  "model": "damiao_dm4310",
+                  "reduction": 111.11111111111111,
+                  "sign": -1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": 0.0,
+                "upper": 0.0715
+              },
+              "name": "gripper_joint1",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "m"
+            }
+          ],
+          "mimic_joints": [
+            {
+              "multiplier": 1.0,
+              "name": "gripper_joint2",
+              "of": "gripper_joint1"
+            }
+          ],
+          "part_id": "rebot-b601dm-gripper",
+          "physical": null,
+          "travel_m": [
+            0.0,
+            0.143
+          ]
+        }
+      },
+      "instance": "left_gripper",
+      "mount": {
+        "frame": "left_link6",
+        "kind": "mounted_on",
+        "parent": "left_arm"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 1,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8,
+                "upper": 2.8
+              },
+              "name": "joint1",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 2,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 0.0
+              },
+              "name": "joint2",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 3,
+                  "model": "damiao_dm4340",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 0.0
+              },
+              "name": "joint3",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 4,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.87,
+                "upper": 1.57
+              },
+              "name": "joint4",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 5,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.57,
+                "upper": 1.57
+              },
+              "name": "joint5",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 6,
+                  "model": "damiao_dm4310",
+                  "reduction": 1.0,
+                  "sign": 1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14,
+                "upper": 3.14
+              },
+              "name": "joint6",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "rebot-b601dm-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "right_arm",
+      "mount": {
+        "frame": "right_base_link",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "gap_curve": null,
+          "grasp": "parallel",
+          "grasp_centre_m": null,
+          "kind": "gripper",
+          "layout": [
+            {
+              "actuation": {
+                "actuator": {
+                  "bus": "damiao_can",
+                  "bus_id": 7,
+                  "model": "damiao_dm4310",
+                  "reduction": 111.11111111111111,
+                  "sign": -1,
+                  "zero_offset": 0.0
+                },
+                "kind": "direct"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": 0.0,
+                "upper": 0.0715
+              },
+              "name": "gripper_joint1",
+              "observation": {
+                "kind": "actuator_feedback"
+              },
+              "unit": "m"
+            }
+          ],
+          "mimic_joints": [
+            {
+              "multiplier": 1.0,
+              "name": "gripper_joint2",
+              "of": "gripper_joint1"
+            }
+          ],
+          "part_id": "rebot-b601dm-gripper",
+          "physical": null,
+          "travel_m": [
+            0.0,
+            0.143
+          ]
+        }
+      },
+      "instance": "right_gripper",
+      "mount": {
+        "frame": "right_link6",
+        "kind": "mounted_on",
+        "parent": "right_arm"
+      }
+    }
+  ],
+  "id": "36a277038730304bfb6d940cf3c4ca3b59ce0889836371a5e2bf7cc866ae89db",
+  "kind": "robot",
+  "label": "Bimanual Seeed Studio reBot B601-DM",
+  "lineage": {
+    "family": "rebot-b601",
+    "revision": "",
+    "variant": "dm-bimanual"
+  },
+  "name": "bimanual-b601-dm",
+  "operator_mounts": [],
+  "rates": null,
+  "schema_version": 14
+}

@@ -1,0 +1,605 @@
+{
+  "assets": [
+    {
+      "asset": {
+        "content": {
+          "sha256": "e79678962ede3c9c6def69ac3e40f1ac67e59d41e5205f6356dd294bb88017a6",
+          "size_bytes": 50397
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/humanoid_pkg/urdf/urdf_robot_acc.urdf",
+        "logical_path": "humanoid_pkg/urdf/urdf_robot_acc.urdf",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "BSD-3-Clause",
+        "path": "urdf/urdf_robot_acc.urdf",
+        "repository": "https://github.com/Sentient-X/humanoid_pkg",
+        "revision": "666bc6b5e00c76b8388a70fcc40a6987e0f1da7a"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "1276bbfd8731401160abe1698c988a6807fdb95f001c2ad9755f18e856b4c6a4",
+          "size_bytes": 19218
+        },
+        "format": "mjcf",
+        "location": "package://sx-embodiments/humanoid_pkg/mjcf/humanoid_28dof.xml",
+        "logical_path": "humanoid_pkg/mjcf/humanoid_28dof.xml",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "BSD-3-Clause",
+        "path": "mjcf/humanoid_28dof.xml",
+        "repository": "https://github.com/Sentient-X/humanoid_pkg",
+        "revision": "666bc6b5e00c76b8388a70fcc40a6987e0f1da7a"
+      }
+    }
+  ],
+  "base_mount": null,
+  "components": [
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "joint_group",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "torso_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.270002435284,
+                "upper": 0.270002435284
+              },
+              "name": "waist_roll_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.767944870878,
+                "upper": 0.767944870878
+              },
+              "name": "waist_pitch_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "sentient-humanoid-torso"
+        }
+      },
+      "instance": "torso",
+      "mount": {
+        "frame": "torso",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14159265359,
+                "upper": 3.14159265359
+              },
+              "name": "right_shoulder_pitch_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14159265359,
+                "upper": 0.356919832033
+              },
+              "name": "right_shoulder_roll_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "right_elbow_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "right_elbow_forearm_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "right_wrist_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "sentient-humanoid-right-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "right_arm",
+      "mount": {
+        "frame": "chest_link",
+        "kind": "mounted_on",
+        "parent": "torso"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.14159265359,
+                "upper": 3.14159265359
+              },
+              "name": "left_shoulder_pitch_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.356919832033,
+                "upper": 3.14159265359
+              },
+              "name": "left_shoulder_roll_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "left_elbow_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "left_elbow_forearm_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "left_wrist_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "sentient-humanoid-left-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "left_arm",
+      "mount": {
+        "frame": "chest_link",
+        "kind": "mounted_on",
+        "parent": "torso"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "joint_group",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.279252680319,
+                "upper": 1.919862177194
+              },
+              "name": "right_hip_roll_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.094395102393,
+                "upper": 2.094395102393
+              },
+              "name": "right_hip_pitch_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "right_hip_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.535889741755,
+                "upper": 1.535889741755
+              },
+              "name": "right_knee_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.698131700798,
+                "upper": 0.698131700798
+              },
+              "name": "right_foot1_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.436332312999,
+                "upper": 0.436332312999
+              },
+              "name": "right_foot2_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "sentient-humanoid-right-leg"
+        }
+      },
+      "instance": "right_leg",
+      "mount": {
+        "frame": "right_leg",
+        "kind": "root"
+      }
+    },
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "kind": "joint_group",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.279252680319,
+                "upper": 1.919862177194
+              },
+              "name": "left_hip_roll_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.094395102393,
+                "upper": 2.094395102393
+              },
+              "name": "left_hip_pitch_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.570796326795,
+                "upper": 1.570796326795
+              },
+              "name": "left_hip_yaw_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.535889741755,
+                "upper": 1.535889741755
+              },
+              "name": "left_knee_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.698131700798,
+                "upper": 0.698131700798
+              },
+              "name": "left_foot1_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.436332312999,
+                "upper": 0.436332312999
+              },
+              "name": "left_foot2_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "sentient-humanoid-left-leg"
+        }
+      },
+      "instance": "left_leg",
+      "mount": {
+        "frame": "left_leg",
+        "kind": "root"
+      }
+    }
+  ],
+  "id": "c74c32cd6f3ede9c3fbf99e9123ecde144067f113c7f804b72895162aac6137f",
+  "kind": "robot",
+  "label": "Sentient humanoid",
+  "lineage": {
+    "family": "sentient-humanoid",
+    "revision": "",
+    "variant": ""
+  },
+  "name": "sentient-humanoid",
+  "operator_mounts": [],
+  "rates": null,
+  "schema_version": 14
+}

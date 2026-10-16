@@ -48,10 +48,17 @@ instead — do not add a regenerate-and-compare test the way ``yubi`` has one.
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import BaseMount, EmbodimentDefinition, MountedOn, MountKind, body_component
+from ..compose import (
+    BaseMount,
+    EmbodimentDefinition,
+    MountedOn,
+    MountKind,
+    RootMount,
+    body_component,
+)
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, JointGroupSpec, MobileBaseSpec
+from ..parts import ChainSpec, Limb, MobileBaseSpec
 from ._authoring import unbounded_layout
 
 SENTIENT_RWH_URDF: Final = packaged_asset(
@@ -82,7 +89,7 @@ SENTIENT_RWH_BASE: Final = MobileBaseSpec(
     ),
 )
 
-SENTIENT_RWH_TORSO: Final = JointGroupSpec(
+SENTIENT_RWH_TORSO: Final = ChainSpec(
     part_id=PartId("sentient-rwh-torso"),
     # The lift/spine column carrying the shoulders from z=0.29 m to z=1.29 m in `base_link`.
     layout=unbounded_layout(
@@ -92,7 +99,7 @@ SENTIENT_RWH_TORSO: Final = JointGroupSpec(
     home=(0.0,) * 5,
 )
 
-SENTIENT_RWH_RIGHT_ARM: Final = ArmSpec(
+SENTIENT_RWH_RIGHT_ARM: Final = ChainSpec(
     part_id=PartId("sentient-rwh-right-arm"),
     # Seven channels, not eight: `RA_7` is `fixed` in the export (see the module docstring).
     layout=unbounded_layout(
@@ -102,7 +109,7 @@ SENTIENT_RWH_RIGHT_ARM: Final = ArmSpec(
     home=(0.0,) * 7,
 )
 
-SENTIENT_RWH_LEFT_ARM: Final = ArmSpec(
+SENTIENT_RWH_LEFT_ARM: Final = ChainSpec(
     part_id=PartId("sentient-rwh-left-arm"),
     layout=unbounded_layout(
         names=("LA_1", "LA_2", "LA_3", "LA_4", "LA_5", "LA_6", "LA_7", "LA_8_wrist"),
@@ -117,10 +124,19 @@ SENTIENT_RWH_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-rwh"),
     attachments=(
-        body_component("base", SENTIENT_RWH_BASE),
-        body_component("torso", SENTIENT_RWH_TORSO, MountedOn("base", "base_link")),
-        body_component("right_arm", SENTIENT_RWH_RIGHT_ARM, MountedOn("torso", "Arm_link5_torso")),
-        body_component("left_arm", SENTIENT_RWH_LEFT_ARM, MountedOn("torso", "Arm_link5_torso")),
+        body_component("base", SENTIENT_RWH_BASE, RootMount("base_link")),
+        body_component(
+            "torso", SENTIENT_RWH_TORSO, MountedOn("base", "base_link"), limb=Limb.TORSO
+        ),
+        body_component(
+            "right_arm",
+            SENTIENT_RWH_RIGHT_ARM,
+            MountedOn("torso", "Arm_link5_torso"),
+            limb=Limb.ARM,
+        ),
+        body_component(
+            "left_arm", SENTIENT_RWH_LEFT_ARM, MountedOn("torso", "Arm_link5_torso"), limb=Limb.ARM
+        ),
     ),
     # Footprint measured as the xy AABB of the chassis AND the four wheels' collision
     # geometry, posed into `base_link`. The wheels are the part that protrudes: the chassis

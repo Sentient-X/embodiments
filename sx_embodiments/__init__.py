@@ -8,7 +8,7 @@ from .assemble import admit_part, assemble, composable_parts, part_from_dict, pa
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
 from .composition import PlacedEmbodiment, compose_embodiments
-from .embodiment import Embodiment, EmbodimentMigration, convert_v13_to_v14
+from .embodiment import Embodiment, EmbodimentMigration, migrate
 from .errors import (
     AssemblyError,
     AssetDigestMismatchError,
@@ -47,8 +47,13 @@ from .layout import (
     VendorReadout,
 )
 from .materialize import materialize, materialized
-from .parts import CameraOptics, CameraOpticsAuthority, FactSource
-from .recorded import RecordedEmbodiment, historical_identities, read_recorded
+from .parts import CameraOptics, CameraOpticsAuthority, FactSource, Limb
+from .recorded import (
+    RecordedEmbodiment,
+    historical_document,
+    historical_identities,
+    read_recorded,
+)
 
 __all__ = [
     "ActuationBinding",
@@ -82,6 +87,7 @@ __all__ = [
     "IntegratedDrive",
     "InvalidCameraMountError",
     "LayoutError",
+    "Limb",
     "MissingUrdfError",
     "MountKind",
     "ObservationBinding",
@@ -100,12 +106,13 @@ __all__ = [
     "assemble",
     "composable_parts",
     "compose_embodiments",
-    "convert_v13_to_v14",
     "development_embodiments",
     "embodiments",
+    "historical_document",
     "historical_identities",
     "materialize",
     "materialized",
+    "migrate",
     "part_from_dict",
     "part_to_dict",
     "preview_asset",

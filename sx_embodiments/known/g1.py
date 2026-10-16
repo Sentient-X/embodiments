@@ -3,10 +3,10 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, JointGroupSpec
+from ..parts import ChainSpec, Limb
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -35,9 +35,9 @@ UNITREE_G1_URDF: Final = packaged_asset(
 )
 
 
-def _g1_leg(side: Literal["left", "right"]) -> JointGroupSpec:
+def _g1_leg(side: Literal["left", "right"]) -> ChainSpec:
     roll = (-0.5236, 2.9671) if side == "left" else (-2.9671, 0.5236)
-    return JointGroupSpec(
+    return ChainSpec(
         part_id=PartId(f"unitree-g1-{side}-leg"),
         layout=bounded_layout(
             names=tuple(
@@ -60,10 +60,10 @@ def _g1_leg(side: Literal["left", "right"]) -> JointGroupSpec:
     )
 
 
-def _g1_arm(side: Literal["left", "right"]) -> ArmSpec:
+def _g1_arm(side: Literal["left", "right"]) -> ChainSpec:
     shoulder_roll = (-1.5882, 2.2515) if side == "left" else (-2.2515, 1.5882)
     home_roll = 0.2 if side == "left" else -0.2
-    return ArmSpec(
+    return ChainSpec(
         part_id=PartId(f"unitree-g1-{side}-arm"),
         layout=bounded_layout(
             names=tuple(
@@ -104,7 +104,7 @@ def _g1_arm(side: Literal["left", "right"]) -> ArmSpec:
 
 UNITREE_G1_LEFT_LEG: Final = _g1_leg("left")
 UNITREE_G1_RIGHT_LEG: Final = _g1_leg("right")
-UNITREE_G1_TORSO: Final = JointGroupSpec(
+UNITREE_G1_TORSO: Final = ChainSpec(
     part_id=PartId("unitree-g1-torso"),
     layout=bounded_layout(
         names=("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"),
@@ -123,10 +123,14 @@ UNITREE_G1_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="unitree-g1", variant="29dof"),
     attachments=(
-        body_component("left_leg", UNITREE_G1_LEFT_LEG),
-        body_component("right_leg", UNITREE_G1_RIGHT_LEG),
-        body_component("torso", UNITREE_G1_TORSO),
-        body_component("left_arm", UNITREE_G1_LEFT_ARM, MountedOn("torso", "torso_link")),
-        body_component("right_arm", UNITREE_G1_RIGHT_ARM, MountedOn("torso", "torso_link")),
+        body_component("left_leg", UNITREE_G1_LEFT_LEG, RootMount("pelvis"), limb=Limb.LEG),
+        body_component("right_leg", UNITREE_G1_RIGHT_LEG, RootMount("pelvis"), limb=Limb.LEG),
+        body_component("torso", UNITREE_G1_TORSO, RootMount("pelvis"), limb=Limb.TORSO),
+        body_component(
+            "left_arm", UNITREE_G1_LEFT_ARM, MountedOn("torso", "torso_link"), limb=Limb.ARM
+        ),
+        body_component(
+            "right_arm", UNITREE_G1_RIGHT_ARM, MountedOn("torso", "torso_link"), limb=Limb.ARM
+        ),
     ),
 )

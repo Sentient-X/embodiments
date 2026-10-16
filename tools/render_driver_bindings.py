@@ -41,7 +41,6 @@ def render(name: str) -> str:
                 "bus": binding.bus.value,
                 "bus_id": binding.bus_id,
                 "sign": binding.sign,
-                "zero_offset": binding.zero_offset,
                 "reduction": binding.reduction,
             }
         )

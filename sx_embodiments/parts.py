@@ -6,8 +6,10 @@ scene registry (``robot0_joint1``, robosuite handles) stay consumer-local — a 
 appears in the description asset belongs to the part; a name minted by an engine belongs to
 the consumer.
 
-There is deliberately no TeleopDevice part type: a leader arm IS an :class:`ArmSpec` — what
-makes it a leader is its role in a composition, not its nature. Hardware whose kinematic
+There is deliberately no TeleopDevice part type: a leader arm IS a :class:`ChainSpec` — what
+makes it a leader is its role in a composition, not its nature. Likewise a chain is not an arm,
+a neck or a leg by nature: the :class:`Limb` it serves is a fact of where it is mounted, so one
+design can be an arm on one body and a neck on another. Hardware whose kinematic
 description has not been captured yet is a :class:`DeviceSpec`; its presence in a body role
 marks the embodiment's channel layout as not yet declared, so layout-derived enforcement
 skips rather than invents.
@@ -18,7 +20,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NewType
 
 from .assets import PackagedAsset
 from .curves import Curve1D
@@ -50,14 +52,24 @@ def _uppers(layout: JointLayout) -> tuple[float, ...]:
     return tuple(axis.bounds.upper for axis in layout.axes if isinstance(axis.bounds, Bounds))
 
 
-class SensorModel(StrEnum):
-    """The closed sensor-product vocabulary (byte-equal to the factory hardware strings)."""
+SensorModel = NewType("SensorModel", str)
+"""A camera product's id in the open camera-model registry (``known.cameras``).
 
-    UVC_MONO = "uvc_mono"
-    REALSENSE_D405 = "realsense_d405"
-    REALSENSE_D435 = "realsense_d435"
-    QUEST3_RGB = "quest3_rgb"
-    INSTA360_X5 = "insta360_x5"
+Open, not closed: a new camera is a registry record, never a schema change. The value is
+byte-equal to the factory hardware strings (``realsense_d405``).
+"""
+
+
+class Limb(StrEnum):
+    """What a mounted chain serves on its body; channel kind and capabilities derive from it."""
+
+    ARM = "arm"
+    TORSO = "torso"
+    HEAD = "head"
+    LEG = "leg"
+    LIFT = "lift"
+    # A converted document that never said what its chain served; never authored today.
+    UNDOCUMENTED = "undocumented"
 
 
 class CameraModality(StrEnum):
@@ -206,13 +218,13 @@ def _validate_configuration(
 
 
 @dataclass(frozen=True, slots=True)
-class ArmSpec:
-    """A serial arm; ``joint_names`` order defines this part's channel order.
+class ChainSpec:
+    """One actuated kinematic chain; layout order is this part's channel order.
 
-    ``ready_joints`` is a work-ready configuration — tool over the workspace, poised to
-    act — distinct from ``home_joints`` (the driver's calibrated zero, which may point
-    the arm straight up). Consumers that stage motion (scene composition, bench bring-up)
-    read ``ready``; drivers home to ``home``.
+    Arms, necks, torsos, legs and lifts are all chains. Joint names are the part's own,
+    resolved against the description inside the component's mount subtree, so one design
+    mounted on two sides is one part. ``ready`` is a work-ready configuration, distinct from
+    ``home`` (the driver's calibrated zero); consumers that stage motion read ``ready``.
     """
 
     part_id: PartId
@@ -223,7 +235,7 @@ class ArmSpec:
     physical: PhysicalSpec | None = None
 
     def __post_init__(self) -> None:
-        _validate_configuration(self.part_id, "an arm", self.layout, self.home, self.ready)
+        _validate_configuration(self.part_id, "a chain", self.layout, self.home, self.ready)
 
     @property
     def dof(self) -> int:
@@ -236,47 +248,6 @@ class ArmSpec:
     @property
     def ready_joints(self) -> tuple[float, ...] | None:
         return self.ready
-
-    @property
-    def joint_names(self) -> tuple[str, ...]:
-        return _names(self.layout)
-
-    @property
-    def joint_units(self) -> tuple[CoordinateUnit, ...]:
-        return _units(self.layout)
-
-    @property
-    def joint_lower(self) -> tuple[float, ...]:
-        return _lowers(self.layout)
-
-    @property
-    def joint_upper(self) -> tuple[float, ...]:
-        return _uppers(self.layout)
-
-
-@dataclass(frozen=True, slots=True)
-class JointGroupSpec:
-    """An articulated body group that is not an arm, gripper, or mobile base.
-
-    Legs, torso/head chains, and linear lifts use this atom. ``joint_names`` contains
-    executed action channels only; passive/mimic joints stay in the description asset.
-    """
-
-    part_id: PartId
-    layout: JointLayout
-    home: tuple[float, ...]
-    assets: tuple[PackagedAsset, ...] = ()
-
-    def __post_init__(self) -> None:
-        _validate_configuration(self.part_id, "a joint group", self.layout, self.home)
-
-    @property
-    def dof(self) -> int:
-        return self.layout.width
-
-    @property
-    def home_joints(self) -> tuple[float, ...]:
-        return self.home
 
     @property
     def joint_names(self) -> tuple[str, ...]:
@@ -451,6 +422,8 @@ class CameraSpec:
     optics: CameraOptics
 
     def __post_init__(self) -> None:
+        if not self.model.strip():
+            raise PartValidationError(self.part_id, "camera model id must not be empty")
         if not math.isfinite(self.fps) or self.fps <= 0.0:
             raise PartValidationError(self.part_id, "fps must be positive")
 
@@ -538,12 +511,4 @@ class ControlRates:
             raise PartValidationError(PartId("rates"), "low_level_hz must be positive")
 
 
-Part = (
-    ArmSpec
-    | JointGroupSpec
-    | GripperSpec
-    | CameraSpec
-    | MobileBaseSpec
-    | ForceTorqueSpec
-    | DeviceSpec
-)
+Part = ChainSpec | GripperSpec | CameraSpec | MobileBaseSpec | ForceTorqueSpec | DeviceSpec

@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import Final, cast
 
 from sx_contracts import CapabilityProfile, CapabilitySet, ComponentCapabilities, decode
 from sx_contracts.assets import (
@@ -77,19 +77,19 @@ from .layout import (
     VendorReadout,
 )
 from .parts import (
-    ArmSpec,
     CameraBinding,
     CameraModality,
     CameraOptics,
     CameraOpticsAuthority,
     CameraSpec,
+    ChainSpec,
     ControlRates,
     DeviceSpec,
     FactSource,
     ForceTorqueSpec,
     GraspKind,
     GripperSpec,
-    JointGroupSpec,
+    Limb,
     MimicJoint,
     MobileBaseSpec,
     Part,
@@ -97,7 +97,7 @@ from .parts import (
     SensorModel,
 )
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,11 +231,13 @@ class Embodiment:
         return joint_names(self.components, self.state, self.urdf_bytes)
 
     @property
-    def single_arm(self) -> ArmSpec:
+    def single_arm(self) -> ChainSpec:
         arms = tuple(
             component.part
             for component in self.components
-            if component.role is ComponentRole.BODY and isinstance(component.part, ArmSpec)
+            if component.role is ComponentRole.BODY
+            and isinstance(component.part, ChainSpec)
+            and component.limb is Limb.ARM
         )
         if len(arms) != 1:
             raise LayoutError(str(self.name), "operation requires exactly one arm")
@@ -389,9 +391,10 @@ class Embodiment:
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentMigration:
-    """One verified content-identity edge emitted by an embodiment converter."""
+    """One verified identity edge: a stored document at an earlier schema, read today."""
 
     source_id: EmbodimentId
+    source_version: int
     embodiment: Embodiment
 
     @property
@@ -399,93 +402,157 @@ class EmbodimentMigration:
         return self.embodiment.id
 
 
-def convert_v13_to_v14(document: Mapping[str, object]) -> EmbodimentMigration:
-    """Convert one exact schema-13 embodiment without inventing missing access facts.
+_TOP_LEVEL = frozenset(
+    {
+        "id",
+        "schema_version",
+        "name",
+        "label",
+        "kind",
+        "lineage",
+        "components",
+        "rates",
+        "base_mount",
+        "operator_mounts",
+        "assets",
+    }
+)
 
-    A prior actuator proves a direct drive only. Schema 13 never stated how a coordinate
-    was observed, so every converted axis records that absence independently. Missing
-    actuator facts remain undocumented; the converter never guesses feedback, integrated
-    control, or passivity. Both absences are recorded in the words an axis authored
-    today carries for the same absence, so conversion re-mints nothing it did not change.
+
+def migrate(document: Mapping[str, object]) -> EmbodimentMigration:
+    """Read one stored document of any earlier schema at the current schema.
+
+    Each step is a pure document converter that changes only what its schema changed and
+    never invents a fact the source did not state; the chain runs from the source's version
+    to the current one. The source id is verified against its canonical content first, so
+    the edge it returns is the identity the stored bytes really carry.
     """
 
     source = decode.exactly(
-        document,
-        {
-            "id",
-            "schema_version",
-            "name",
-            "label",
-            "kind",
-            "lineage",
-            "components",
-            "rates",
-            "base_mount",
-            "operator_mounts",
-            "assets",
-        },
-        where="schema-13 embodiment",
-        error=EmbodimentSchemaError,
+        document, set(_TOP_LEVEL), where="embodiment", error=EmbodimentSchemaError
     )
-    if decode.integer(source, "schema_version") != 13:
-        raise EmbodimentSchemaError("converter requires embodiment schema_version 13")
-    source_id = EmbodimentId(decode.text(source, "id"))
-    source_content = {key: value for key, value in source.items() if key != "id"}
-    try:
-        actual_source_id = content_id(EmbodimentId, cast("JsonObject", source_content))
-    except ValueError as exc:
-        raise EmbodimentSchemaError("schema-13 embodiment is not canonical JSON") from exc
-    if actual_source_id != source_id:
-        raise EmbodimentSchemaError("schema-13 embodiment id does not match its canonical content")
-
-    converted = copy.deepcopy(dict(document))
-    converted["schema_version"] = SCHEMA_VERSION
-    converted_components = cast(list[dict[str, object]], converted["components"])
-    for component_index, component in enumerate(decode.documents(source, "components")):
-        attachment = decode.mapping(component, "attachment")
-        part = decode.mapping(attachment, "part")
-        if "layout" not in part:
-            continue
-        axes = decode.documents(part, "layout")
-        converted_part = cast(
-            dict[str, object],
-            cast(dict[str, object], converted_components[component_index]["attachment"])["part"],
+    version = decode.integer(source, "schema_version")
+    steps = _STEPS.get(version)
+    if steps is None:
+        raise EmbodimentSchemaError(
+            f"no converter from embodiment schema_version {version!r} to {SCHEMA_VERSION}"
         )
-        converted_axes = cast(list[dict[str, object]], converted_part["layout"])
-        for axis_index, axis in enumerate(axes):
-            legacy_axis = decode.exactly(axis, {"name", "unit", "bounds", "actuator"})
-            actuator = legacy_axis["actuator"]
-            if actuator is not None:
-                try:
-                    _parse_actuator(
-                        decode.document(
-                            actuator,
-                            where=f"{axis.where}.actuator",
-                            error=EmbodimentSchemaError,
-                        )
-                    )
-                except LayoutError as error:
-                    raise EmbodimentSchemaError(
-                        f"{axis.where}.actuator is invalid: {error}"
-                    ) from error
-            raw_axis = converted_axes[axis_index]
-            raw_axis.pop("actuator")
-            raw_axis["observation"] = {
-                "kind": "unobserved",
-                "reason": UNDOCUMENTED_OBSERVATION_REASON,
-            }
-            if actuator is None:
-                raw_axis["actuation"] = {
-                    "kind": "undocumented",
-                    "reason": UNDOCUMENTED_DRIVE_REASON,
-                }
-            else:
-                raw_axis["actuation"] = {"kind": "direct", "actuator": actuator}
+    source_id = EmbodimentId(decode.text(source, "id"))
+    content = {key: value for key, value in document.items() if key != "id"}
+    try:
+        actual = content_id(EmbodimentId, cast("JsonObject", content))
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"schema-{version} embodiment is not canonical JSON") from exc
+    if actual != source_id:
+        raise EmbodimentSchemaError(
+            f"schema-{version} embodiment id does not match its canonical content"
+        )
+    converted: dict[str, object] = copy.deepcopy(dict(document))
+    for step in steps:
+        converted = step(converted)
     content = {key: value for key, value in converted.items() if key != "id"}
     converted["id"] = str(content_id(EmbodimentId, cast("JsonObject", content)))
-    # Parse now so the converter itself fails on malformed legacy content and emits
-    # one complete old -> new identity edge for persistence owners.
-    return EmbodimentMigration(source_id, Embodiment.from_dict(converted))
+    # Parse now so a malformed legacy document fails here, not in its persistence owner.
+    return EmbodimentMigration(source_id, version, Embodiment.from_dict(converted))
+
+
+def _objects(value: object, where: str) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise EmbodimentSchemaError(f"{where}: expected an array of objects")
+    if not all(isinstance(item, dict) for item in cast(list[object], value)):
+        raise EmbodimentSchemaError(f"{where}: expected an array of objects")
+    return cast(list[dict[str, object]], value)
+
+
+def _object(value: object, where: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise EmbodimentSchemaError(f"{where}: expected an object")
+    return cast(dict[str, object], value)
+
+
+def _parts(document: dict[str, object]) -> list[tuple[dict[str, object], dict[str, object]]]:
+    """Each component's attachment and part, as mutable views into ``document``."""
+    rows: list[tuple[dict[str, object], dict[str, object]]] = []
+    for component in _objects(document["components"], "components"):
+        attachment = _object(component.get("attachment"), "component.attachment")
+        rows.append((attachment, _object(attachment.get("part"), "attachment.part")))
+    return rows
+
+
+def _axes(part: dict[str, object]) -> list[dict[str, object]]:
+    return (
+        _objects(part["layout"], f"part {part.get('part_id')!r} layout") if "layout" in part else []
+    )
+
+
+def _v13_to_v14(document: dict[str, object]) -> dict[str, object]:
+    """Schema 14 split each axis's actuator into observation and actuation facts.
+
+    A prior actuator proves a direct drive only. Schema 13 never stated how a coordinate was
+    observed, so every converted axis records that absence; a missing actuator stays
+    undocumented. Both absences use the words an axis authored today carries for them.
+    """
+    for _, part in _parts(document):
+        for axis in _axes(part):
+            legacy = decode.exactly(
+                axis, {"name", "unit", "bounds", "actuator"}, error=EmbodimentSchemaError
+            )
+            actuator = legacy["actuator"]
+            axis.pop("actuator")
+            axis["observation"] = {"kind": "unobserved", "reason": UNDOCUMENTED_OBSERVATION_REASON}
+            axis["actuation"] = (
+                {"kind": "undocumented", "reason": UNDOCUMENTED_DRIVE_REASON}
+                if actuator is None
+                else {"kind": "direct", "actuator": actuator}
+            )
+    document["schema_version"] = 14
+    return document
+
+
+def _v14_to_v15(document: dict[str, object]) -> dict[str, object]:
+    """Schema 15 made arms and joint groups one chain kind and moved zeros to calibration.
+
+    An ``arm`` part becomes a chain serving the arm limb. A ``joint_group`` never said which
+    limb it served, so its chain records that absence; the channel kind and capabilities it
+    derives are unchanged. A design zero other than 0 was a per-unit fact the document
+    cannot carry any more, so it is refused rather than dropped.
+    """
+    for attachment, part in _parts(document):
+        kind = part.get("kind")
+        if kind == "arm":
+            part["kind"] = "chain"
+            attachment["limb"] = Limb.ARM.value
+        elif kind == "joint_group":
+            part["kind"] = "chain"
+            part["ready"] = None
+            part["physical"] = None
+            attachment["limb"] = Limb.UNDOCUMENTED.value
+        else:
+            attachment["limb"] = None
+        for axis in _axes(part):
+            actuation = _object(axis.get("actuation"), f"axis {axis.get('name')!r} actuation")
+            if actuation.get("kind") != "direct":
+                continue
+            actuator = _object(actuation.get("actuator"), f"axis {axis.get('name')!r} actuator")
+            decode.exactly(
+                actuator,
+                {"model", "bus", "bus_id", "sign", "zero_offset", "reduction"},
+                error=EmbodimentSchemaError,
+            )
+            zero = actuator.pop("zero_offset")
+            if zero not in (0, 0.0):
+                raise EmbodimentSchemaError(
+                    f"axis {axis.get('name')!r} carries a design zero of {zero!r}; record it "
+                    "as the motor's joint calibration"
+                )
+    document["schema_version"] = 15
+    return document
+
+
+_STEPS: Final = {
+    13: (_v13_to_v14, _v14_to_v15),
+    14: (_v14_to_v15,),
+}
 
 
 def _component_to_dict(component: Component) -> dict[str, object]:
@@ -510,6 +577,7 @@ def _component_to_dict(component: Component) -> dict[str, object]:
         "attachment": {
             "kind": attachment_kind,
             "part": _part_to_dict(attachment.part),
+            "limb": component.limb.value if component.limb is not None else None,
         },
         "mount": mount,
     }
@@ -517,19 +585,13 @@ def _component_to_dict(component: Component) -> dict[str, object]:
 
 def _part_to_dict(part: Part) -> dict[str, object]:
     common: dict[str, object] = {"part_id": str(part.part_id)}
-    if isinstance(part, ArmSpec):
+    if isinstance(part, ChainSpec):
         return common | {
-            "kind": "arm",
+            "kind": "chain",
             "layout": _layout_to_dict(part.layout),
             "home": list(part.home),
             "ready": list(part.ready) if part.ready is not None else None,
             "physical": _physical_to_dict(part.physical),
-        }
-    if isinstance(part, JointGroupSpec):
-        return common | {
-            "kind": "joint_group",
-            "layout": _layout_to_dict(part.layout),
-            "home": list(part.home),
         }
     if isinstance(part, GripperSpec):
         return common | {
@@ -555,7 +617,7 @@ def _part_to_dict(part: Part) -> dict[str, object]:
         optics = part.optics
         return common | {
             "kind": "camera",
-            "sensor_model": part.model.value,
+            "sensor_model": part.model,
             "modality": part.modality.value,
             "fps": part.fps,
             "optics": {
@@ -609,7 +671,6 @@ def _actuator_to_dict(binding: ActuatorBinding) -> dict[str, object]:
         "bus": binding.bus.value,
         "bus_id": binding.bus_id,
         "sign": binding.sign,
-        "zero_offset": binding.zero_offset,
         "reduction": binding.reduction,
     }
 
@@ -640,14 +701,21 @@ def _parse_components(document: decode.Document) -> tuple[Component, ...]:
 
 def _parse_component(document: decode.Document) -> Component:
     entry = decode.exactly(document, {"instance", "attachment", "mount"})
-    attachment_entry = decode.exactly(decode.mapping(entry, "attachment"), {"kind", "part"})
+    attachment_entry = decode.exactly(decode.mapping(entry, "attachment"), {"kind", "part", "limb"})
     attachment_kind = decode.text(attachment_entry, "kind")
     part = _parse_part(decode.mapping(attachment_entry, "part"))
+    limb_value = decode.optional_text(attachment_entry, "limb")
+    try:
+        limb = Limb(limb_value) if limb_value is not None else None
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"{attachment_entry.where}.limb is unknown") from exc
     if attachment_kind == "body":
-        attachment = BodyAttachment(part)
+        attachment = BodyAttachment(part, limb)
     elif attachment_kind == "leader":
-        attachment = LeaderAttachment(part)
+        attachment = LeaderAttachment(part, limb)
     elif attachment_kind == "sensor":
+        if limb is not None:
+            raise EmbodimentSchemaError(f"{attachment_entry.where} sensor has a limb")
         if not isinstance(part, CameraSpec | ForceTorqueSpec):
             raise EmbodimentSchemaError(f"{attachment_entry.where} sensor has a non-sensor part")
         attachment = SensorAttachment(part)
@@ -679,8 +747,7 @@ def _parse_part(document: decode.Document) -> Part:
     kind = decode.text(document, "kind")
     common = {"kind", "part_id"}
     expected_by_kind = {
-        "arm": common | {"layout", "home", "ready", "physical"},
-        "joint_group": common | {"layout", "home"},
+        "chain": common | {"layout", "home", "ready", "physical"},
         "gripper": common
         | {
             "grasp",
@@ -702,19 +769,13 @@ def _parse_part(document: decode.Document) -> Part:
     entry = decode.exactly(document, expected)
     part_id = PartId(decode.text(entry, "part_id"))
     try:
-        if kind == "arm":
-            return ArmSpec(
+        if kind == "chain":
+            return ChainSpec(
                 part_id=part_id,
                 layout=_parse_layout(entry),
                 home=decode.numbers(entry, "home"),
                 ready=_parse_optional_vector(entry, "ready"),
                 physical=_parse_physical(entry),
-            )
-        if kind == "joint_group":
-            return JointGroupSpec(
-                part_id=part_id,
-                layout=_parse_layout(entry),
-                home=decode.numbers(entry, "home"),
             )
         if kind == "gripper":
             try:
@@ -817,7 +878,7 @@ def _parse_layout(document: decode.Document) -> JointLayout:
 def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
     binding = decode.exactly(
         entry,
-        {"model", "bus", "bus_id", "sign", "zero_offset", "reduction"},
+        {"model", "bus", "bus_id", "sign", "reduction"},
     )
     try:
         model = ActuatorModel(decode.text(binding, "model"))
@@ -838,7 +899,6 @@ def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
         bus=bus,
         bus_id=decode.integer(binding, "bus_id"),
         sign=decode.integer(binding, "sign"),
-        zero_offset=decode.number(binding, "zero_offset"),
         reduction=decode.number(binding, "reduction"),
     )
 
@@ -1076,7 +1136,7 @@ def _parse_lineage(document: decode.Document) -> Lineage:
 
 def _portable_component(component: Component) -> Component:
     part = component.part
-    if isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
+    if isinstance(part, ChainSpec | GripperSpec | MobileBaseSpec):
         part = dataclasses.replace(part, assets=())
     attachment = dataclasses.replace(component.attachment, part=part)
     return dataclasses.replace(component, attachment=attachment)
@@ -1114,7 +1174,7 @@ def packaged_assets(definition: EmbodimentDefinition) -> list[PackagedAsset]:
     assets: list[PackagedAsset] = []
     for component in definition.attachments:
         part = component.part
-        if isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
+        if isinstance(part, ChainSpec | GripperSpec | MobileBaseSpec):
             assets.extend(part.assets)
     assets.extend(definition.extra_assets)
     return assets

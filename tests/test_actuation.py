@@ -1,4 +1,4 @@
-"""Independent observation and actuation facts in schema 14."""
+"""Independent observation and actuation facts, and the converters from earlier schemas."""
 
 import copy
 
@@ -10,18 +10,20 @@ from sx_embodiments import (
     ActuatorBus,
     ActuatorFeedback,
     ActuatorModel,
+    ChannelKind,
     CompositionError,
     Embodiment,
     EmbodimentSchemaError,
     EncoderReadout,
     LayoutError,
+    Limb,
     Passive,
     UndocumentedDrive,
     Unobserved,
     VendorReadout,
-    convert_v13_to_v14,
     development_embodiments,
     embodiments,
+    migrate,
 )
 from sx_embodiments.identity import EmbodimentId
 from sx_embodiments.layout import (
@@ -55,7 +57,6 @@ def test_so101_axes_carry_qualified_feetech_bindings() -> None:
         assert binding.model is ActuatorModel.FEETECH_STS3215
         assert binding.bus is ActuatorBus.FEETECH_SERIAL
         assert binding.sign == 1
-        assert binding.zero_offset == 0.0
         assert binding.reduction == 1.0
 
 
@@ -73,12 +74,12 @@ def test_b601_axes_carry_the_vendor_damiao_bindings() -> None:
     for binding in bindings[:6]:
         assert binding is not None
         assert binding.bus is ActuatorBus.DAMIAO_CAN
-        assert (binding.sign, binding.zero_offset, binding.reduction) == (1, 0.0, 1.0)
+        assert (binding.sign, binding.reduction) == (1, 1.0)
     jaw = bindings[6]
     assert jaw is not None
     assert jaw.bus is ActuatorBus.DAMIAO_CAN
     # Seeed's controller: finger = motor / -5.0 rad * 0.045 m, so motor = -joint * 5.0 / 0.045.
-    assert (jaw.sign, jaw.zero_offset) == (-1, 0.0)
+    assert jaw.sign == -1
     assert jaw.reduction == pytest.approx(5.0 / 0.045)
 
 
@@ -109,7 +110,6 @@ def test_binding_round_trips_through_the_wire_document() -> None:
             "bus": "feetech_serial",
             "bus_id": 1,
             "sign": 1,
-            "zero_offset": 0.0,
             "reduction": 1.0,
         },
     }
@@ -147,9 +147,9 @@ def test_duplicate_bus_addresses_within_one_mounted_chain_are_an_authoring_error
     # reusing an arm address must fail at authoring — not at connect time.
     from sx_embodiments.compose import MountedOn, RootMount, body_component, validate_components
     from sx_embodiments.identity import EmbodimentKind, PartId
-    from sx_embodiments.parts import ArmSpec, GripperSpec
+    from sx_embodiments.parts import ChainSpec, GripperSpec, Limb
 
-    arm = ArmSpec(
+    arm = ChainSpec(
         part_id=PartId("test-arm"),
         layout=JointLayout(
             (
@@ -164,15 +164,15 @@ def test_duplicate_bus_addresses_within_one_mounted_chain_are_an_authoring_error
         layout=JointLayout((JointAxis("g", CoordinateUnit.RADIAN, Bounds(-1.0, 1.0), _sts(2)),)),
     )
     colliding = (
-        body_component("arm", arm, RootMount("base")),
+        body_component("arm", arm, RootMount("base"), limb=Limb.ARM),
         body_component("jaw", jaw, MountedOn("arm", "tool")),
     )
     with pytest.raises(CompositionError, match="drives both 'arm/b' and 'jaw/g'"):
         validate_components("test-body", EmbodimentKind.ROBOT, colliding)
     # The same addresses on separately rooted assemblies are two chains and legal.
     separate = (
-        body_component("left", arm, RootMount("left_base")),
-        body_component("right", arm, RootMount("right_base")),
+        body_component("left", arm, RootMount("left_base"), limb=Limb.ARM),
+        body_component("right", arm, RootMount("right_base"), limb=Limb.ARM),
     )
     validate_components("test-body", EmbodimentKind.ROBOT, separate)
 
@@ -182,7 +182,6 @@ def test_duplicate_bus_addresses_within_one_mounted_chain_are_an_authoring_error
     [
         ("bus_id", 0, "bus_id must be a positive integer"),
         ("sign", 2, r"sign must be \+1 or -1"),
-        ("zero_offset", float("nan"), "zero_offset must be finite"),
         ("reduction", 0.0, "reduction must be a positive finite ratio"),
     ],
 )
@@ -211,74 +210,122 @@ def test_known_hardware_access_facts_are_explicit_without_promotion() -> None:
     assert all(isinstance(c.axis.actuation, Passive) for c in yubi.state.coordinates)
 
 
-def test_schema_13_converter_preserves_vectors_and_records_ambiguity() -> None:
-    current = embodiments["so101"].to_dict()
-    legacy = copy.deepcopy(current)
-    legacy["schema_version"] = 13
-    components = legacy["components"]
-    assert isinstance(components, list)
-    for component in components:
-        for axis in component["attachment"]["part"].get("layout", []):
-            actuation = axis.pop("actuation")
-            axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator")
-    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
+def _historical(name: str) -> dict[str, object]:
+    """The exact schema-14 document the registry published for ``name``."""
+    import json
+    from importlib import resources
 
-    migration = convert_v13_to_v14(legacy)
-    converted = migration.embodiment
-    assert str(migration.source_id) == legacy["id"]
-    assert migration.target_id == converted.id
-    assert converted.state.names == embodiments["so101"].state.names
-    assert converted.state.width == embodiments["so101"].state.width
-    assert all(
-        isinstance(item.axis.observation, Unobserved) for item in converted.state.coordinates
+    documents = [
+        json.loads(e.read_text())
+        for e in (resources.files("sx_embodiments") / "historical").iterdir()
+        if e.name.endswith(".json")
+    ]
+    (document,) = (d for d in documents if d["name"] == name and d["schema_version"] == 14)
+    return document
+
+
+def _reminted(document: dict[str, object]) -> dict[str, object]:
+    document["id"] = str(
+        content_id(EmbodimentId, {k: v for k, v in document.items() if k != "id"})  # type: ignore[arg-type]
     )
-    assert all(item.axis.actuator is not None for item in converted.state.coordinates)
+    return document
 
 
-def test_schema_13_converter_rejects_a_forged_source_identity() -> None:
-    legacy = copy.deepcopy(embodiments["so101"].to_dict())
+def _schema_13(v14: dict[str, object], *, keep_actuators: bool) -> dict[str, object]:
+    legacy = copy.deepcopy(v14)
     legacy["schema_version"] = 13
-    for component in legacy["components"]:
+    for component in legacy["components"]:  # type: ignore[union-attr]
         for axis in component["attachment"]["part"].get("layout", []):
             actuation = axis.pop("actuation")
             axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator")
-    legacy["id"] = "0" * 64
+            axis["actuator"] = actuation.get("actuator") if keep_actuators else None
+    return _reminted(legacy)
 
+
+def test_an_unchanged_body_converts_to_the_body_authored_today() -> None:
+    """Conversion re-mints nothing it did not change: SO-101 at 14 reads as SO-101 at 15."""
+    v14 = _historical("so101")
+    migration = migrate(v14)
+    assert str(migration.source_id) == v14["id"]
+    assert migration.source_version == 14
+    assert migration.embodiment == embodiments["so101"]
+    assert migration.target_id == embodiments["so101"].id
+
+
+def test_schema_14_joint_groups_become_chains_with_an_undocumented_limb() -> None:
+    migration = migrate(_historical("rby1"))
+    limbs = {c.instance: c.limb for c in migration.embodiment.components}
+    assert limbs["right_arm"] is Limb.ARM
+    assert limbs["torso"] is Limb.UNDOCUMENTED and limbs["head"] is Limb.UNDOCUMENTED
+    # What the limb derives is unchanged: a torso or head channel is a body joint, as before.
+    kinds = {c.instance: c.kind for c in migration.embodiment.state.coordinates}
+    assert kinds["torso"] is ChannelKind.BODY_JOINT and kinds["head"] is ChannelKind.BODY_JOINT
+    assert kinds["right_arm"] is ChannelKind.ARM_JOINT
+
+
+def test_a_design_zero_is_refused_not_dropped() -> None:
+    v14 = copy.deepcopy(_historical("so101"))
+    v14["components"][0]["attachment"]["part"]["layout"][0]["actuation"]["actuator"][  # type: ignore[index]
+        "zero_offset"
+    ] = 0.25
+    with pytest.raises(EmbodimentSchemaError, match="joint calibration"):
+        migrate(_reminted(v14))
+
+
+def test_schema_13_reads_through_both_steps() -> None:
+    v13 = _schema_13(_historical("so101"), keep_actuators=True)
+    migration = migrate(v13)
+    assert migration.source_version == 13
+    assert str(migration.source_id) == v13["id"]
+    converted = migration.embodiment
+    assert converted.state.names == embodiments["so101"].state.names
+    assert all(isinstance(c.axis.observation, Unobserved) for c in converted.state.coordinates)
+    assert all(c.axis.actuator is not None for c in converted.state.coordinates)
+
+
+def test_schema_13_unactuated_body_converts_to_the_body_authored_today() -> None:
+    """A schema-13 axis with no actuator is the absence today's layout records by default."""
+    body = embodiments["piper"]
+    assert all(
+        isinstance(item.axis.actuation, UndocumentedDrive)
+        and item.axis.actuation.reason == UNDOCUMENTED_DRIVE_REASON
+        and isinstance(item.axis.observation, Unobserved)
+        and item.axis.observation.reason == UNDOCUMENTED_OBSERVATION_REASON
+        for item in body.state.coordinates
+    ), "the fixture must be a body with no documented drive or observation facts"
+    migration = migrate(_schema_13(_historical("piper"), keep_actuators=False))
+    assert migration.embodiment == body
+
+
+def test_a_forged_source_identity_is_refused() -> None:
+    v14 = copy.deepcopy(_historical("so101"))
+    v14["id"] = "0" * 64
     with pytest.raises(EmbodimentSchemaError, match="id does not match"):
-        convert_v13_to_v14(legacy)
+        migrate(v14)
+    v13 = _schema_13(_historical("so101"), keep_actuators=True)
+    v13["id"] = "0" * 64
+    with pytest.raises(EmbodimentSchemaError, match="id does not match"):
+        migrate(v13)
 
 
-def test_schema_13_converter_wraps_malformed_nested_layout_as_schema_error() -> None:
-    legacy = copy.deepcopy(embodiments["so101"].to_dict())
-    legacy["schema_version"] = 13
-    for component in legacy["components"]:
-        for axis in component["attachment"]["part"].get("layout", []):
-            actuation = axis.pop("actuation")
-            axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator")
-    legacy["components"][0]["attachment"]["part"]["layout"] = "not-an-array"
-    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
+def test_the_current_schema_and_unknown_schemas_have_no_converter() -> None:
+    with pytest.raises(EmbodimentSchemaError, match="no converter"):
+        migrate(embodiments["so101"].to_dict())
+    with pytest.raises(EmbodimentSchemaError, match="no converter"):
+        migrate(_reminted({**_historical("so101"), "schema_version": 12}))
+
+
+def test_malformed_legacy_layout_and_actuators_are_schema_errors() -> None:
+    v13 = _schema_13(_historical("so101"), keep_actuators=True)
+    v13["components"][0]["attachment"]["part"]["layout"] = "not-an-array"  # type: ignore[index]
     with pytest.raises(EmbodimentSchemaError, match="expected an array"):
-        convert_v13_to_v14(legacy)
-
-
-def test_schema_13_converter_wraps_malformed_actuator_as_schema_error() -> None:
-    legacy = copy.deepcopy(embodiments["so101"].to_dict())
-    legacy["schema_version"] = 13
-    for component in legacy["components"]:
-        for axis in component["attachment"]["part"].get("layout", []):
-            actuation = axis.pop("actuation")
-            axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator")
-    legacy["components"][0]["attachment"]["part"]["layout"][0]["actuator"] = {
+        migrate(_reminted(v13))
+    v13 = _schema_13(_historical("so101"), keep_actuators=True)
+    v13["components"][0]["attachment"]["part"]["layout"][0]["actuator"] = {  # type: ignore[index]
         "model": "feetech_sts3215"
     }
-    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
-
     with pytest.raises(EmbodimentSchemaError, match="expected exactly these fields"):
-        convert_v13_to_v14(legacy)
+        migrate(_reminted(v13))
 
 
 @pytest.mark.parametrize(
@@ -289,61 +336,14 @@ def test_schema_13_converter_wraps_malformed_actuator_as_schema_error() -> None:
         ("reduction", 0.0, "reduction must be a positive finite ratio"),
     ],
 )
-def test_schema_13_converter_wraps_semantically_invalid_actuator_as_schema_error(
+def test_semantically_invalid_legacy_actuators_are_schema_errors(
     field: str, value: float, message: str
 ) -> None:
-    legacy = copy.deepcopy(embodiments["so101"].to_dict())
-    legacy["schema_version"] = 13
-    for component in legacy["components"]:
-        for axis in component["attachment"]["part"].get("layout", []):
-            actuation = axis.pop("actuation")
-            axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator")
-    legacy["components"][0]["attachment"]["part"]["layout"][0]["actuator"][field] = value
-    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
-
+    v13 = _schema_13(_historical("so101"), keep_actuators=True)
+    v13["components"][0]["attachment"]["part"]["layout"][0]["actuator"][field] = value  # type: ignore[index]
     with pytest.raises(EmbodimentSchemaError, match=message) as caught:
-        convert_v13_to_v14(legacy)
-
+        migrate(_reminted(v13))
     assert isinstance(caught.value.__cause__, LayoutError)
-
-
-def _schema_13(current: dict[str, object], *, keep_actuators: bool) -> dict[str, object]:
-    legacy = copy.deepcopy(current)
-    legacy["schema_version"] = 13
-    components = legacy["components"]
-    assert isinstance(components, list)
-    for component in components:
-        for axis in component["attachment"]["part"].get("layout", []):
-            actuation = axis.pop("actuation")
-            axis.pop("observation")
-            axis["actuator"] = actuation.get("actuator") if keep_actuators else None
-    legacy["id"] = str(content_id(EmbodimentId, {k: v for k, v in legacy.items() if k != "id"}))
-    return legacy
-
-
-def test_schema_13_unactuated_body_converts_to_the_body_authored_today() -> None:
-    """A schema-13 axis with no actuator is the absence today's layout records by default.
-
-    Recorded history and catalog rows minted at schema 13 stay readable only if the
-    converter says that absence in the same words: otherwise the converted body is a
-    different identity from the registry's, and v14 validation refuses its actions.
-    """
-    body = embodiments["piper"]
-    assert all(
-        isinstance(item.axis.actuation, UndocumentedDrive)
-        and item.axis.actuation.reason == UNDOCUMENTED_DRIVE_REASON
-        and isinstance(item.axis.observation, Unobserved)
-        and item.axis.observation.reason == UNDOCUMENTED_OBSERVATION_REASON
-        for item in body.state.coordinates
-    ), "the fixture must be a body with no documented drive or observation facts"
-    legacy = _schema_13(body.to_dict(), keep_actuators=False)
-
-    migration = convert_v13_to_v14(legacy)
-
-    assert str(migration.source_id) == legacy["id"]
-    assert migration.embodiment.id == body.id
-    assert migration.embodiment.to_dict() == body.to_dict()
 
 
 def test_stararm102_readout_does_not_claim_qualified_actuation() -> None:

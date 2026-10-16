@@ -79,6 +79,9 @@ sys.path.insert(0, str(SDK / "Python例程" / "u2can"))
 import DM_CAN  # noqa: E402  (Damiao's own module, from the pinned checkout)
 import numpy as np  # noqa: E402
 
+# The registry design carries no zero: a unit's zero is its joint calibration.
+UNCALIBRATED_ZERO = 0.0
+
 # --- the recording world ---------------------------------------------------------------------
 
 EVENTS: list[dict[str, Any]] = []
@@ -244,7 +247,7 @@ def motor_range(axis: dict[str, Any]) -> tuple[float, float]:
 def commandable(axis: dict[str, Any]) -> tuple[float, float]:
     lower, upper = motor_range(axis)
     ends = [
-        value / (axis["sign"] * axis["reduction"]) + axis["zero_offset"] for value in (lower, upper)
+        value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO for value in (lower, upper)
     ]
     return (max(axis["lower"], min(ends)), min(axis["upper"], max(ends)))
 
@@ -345,7 +348,7 @@ class Chain:
         for axis, joint in zip(self.axes, joints, strict=True):
             lower, upper = commandable(axis)
             assert lower <= joint <= upper, (axis["joint"], joint)
-            targets.append(axis["sign"] * (joint - axis["zero_offset"]) * axis["reduction"])
+            targets.append(axis["sign"] * (joint - UNCALIBRATED_ZERO) * axis["reduction"])
         if not self.enabled:
             before = self.counts()
             for motor in self.motors:
@@ -360,7 +363,7 @@ class Chain:
         self.await_answers(before)
         self.expect_all(before, 1)
         observed = [
-            float(motor.getPosition()) / (axis["sign"] * axis["reduction"]) + axis["zero_offset"]
+            float(motor.getPosition()) / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO
             for motor, axis in zip(self.motors, self.axes, strict=True)
         ]
         return {"observed": observed, "feedback": self.feedback()}

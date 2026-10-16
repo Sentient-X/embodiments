@@ -11,7 +11,7 @@ honest jaw signal is the normalized encoder aperture travelling with the capture
 from typing import Final
 
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
-from ..compose import EmbodimentDefinition, body_component
+from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
 from .sources import capture_source
@@ -55,7 +55,7 @@ INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="insta360-umi"),
     attachments=(
-        body_component("left_jaw", INSTA360_UMI_JAW),
-        body_component("right_jaw", INSTA360_UMI_JAW),
+        body_component("left_jaw", INSTA360_UMI_JAW, RootMount("left_jaw")),
+        body_component("right_jaw", INSTA360_UMI_JAW, RootMount("right_jaw")),
     ),
 )

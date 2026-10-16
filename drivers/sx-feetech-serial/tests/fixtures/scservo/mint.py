@@ -105,6 +105,9 @@ LEROBOT = checkout("LEROBOT", LEROBOT_COMMIT)
 sys.path.insert(0, str(FTSERVO))
 import scservo_sdk as scs  # noqa: E402  (Feetech's own package, from the pinned checkout)
 
+# The registry design carries no zero: a unit's zero is its joint calibration.
+UNCALIBRATED_ZERO = 0.0
+
 # --- LeRobot's unnormalization, executed from the pinned file --------------------------------
 
 MOTORS_BUS = (LEROBOT / LEROBOT_FILES[0]).read_text(encoding="utf-8")
@@ -302,7 +305,7 @@ ACTIONS = [
 
 def actuator(axis: dict[str, Any], joint: float) -> float:
     """The registry's drive map: ``sign * (joint - zero_offset) * reduction``."""
-    return axis["sign"] * (joint - axis["zero_offset"]) * axis["reduction"]
+    return axis["sign"] * (joint - UNCALIBRATED_ZERO) * axis["reduction"]
 
 
 def wire(axis: dict[str, Any], target: np.float32) -> float:

@@ -23,6 +23,10 @@ from sx_embodiments import (
 YUBI_SCHEMA_13 = {
     EmbodimentId("a645c2bc67e91aa2ebd49039368f85bcd205e90bdd5e81404adcabd6487f7afd"),
 }
+# The package it was published as under schema 14, until the schema-15 bump.
+YUBI_SCHEMA_14 = {
+    EmbodimentId("a53de59052502c6ac7c09e71d9ff61ec0c001fa3fbb954d1c3d388d609cfd932"),
+}
 
 
 def _historical_document(identity: EmbodimentId) -> dict[str, object]:
@@ -30,9 +34,9 @@ def _historical_document(identity: EmbodimentId) -> dict[str, object]:
     return json.loads(path.read_text())
 
 
-def test_historical_yubi_identities_are_the_published_schema_13_packages() -> None:
-    assert historical_identities(EmbodimentName("yubi")) == YUBI_SCHEMA_13
-    assert historical_identities(EmbodimentName("so101")) == frozenset()
+def test_historical_yubi_identities_are_the_published_earlier_packages() -> None:
+    assert historical_identities(EmbodimentName("yubi")) == YUBI_SCHEMA_13 | YUBI_SCHEMA_14
+    assert len(historical_identities(EmbodimentName("so101"))) == 1
     assert historical_identities(EmbodimentName("yubi")).isdisjoint(
         {development_embodiments["yubi"].id}
     )

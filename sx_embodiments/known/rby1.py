@@ -3,10 +3,10 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint, MobileBaseSpec
+from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint, MobileBaseSpec
 from ._authoring import bounded_layout, unbounded_layout
 from .sources import menagerie
 
@@ -43,7 +43,7 @@ RBY1_BASE: Final = MobileBaseSpec(
     assets=(RBY1_URDF, RBY1_MJCF),
 )
 
-RBY1_TORSO: Final = JointGroupSpec(
+RBY1_TORSO: Final = ChainSpec(
     part_id=PartId("rby1-torso"),
     layout=bounded_layout(
         names=tuple(f"torso_{index}" for index in range(6)),
@@ -55,9 +55,9 @@ RBY1_TORSO: Final = JointGroupSpec(
 )
 
 
-def _rby1_arm(side: Literal["left", "right"]) -> ArmSpec:
+def _rby1_arm(side: Literal["left", "right"]) -> ChainSpec:
     second = (-0.05, 3.14159) if side == "left" else (-3.14159, 0.05)
-    return ArmSpec(
+    return ChainSpec(
         part_id=PartId(f"rby1-{side}-arm"),
         layout=bounded_layout(
             names=tuple(f"{side}_arm_{index}" for index in range(7)),
@@ -86,7 +86,7 @@ def _rby1_gripper(side: Literal["left", "right"]) -> GripperSpec:
 
 RBY1_RIGHT_ARM: Final = _rby1_arm("right")
 RBY1_LEFT_ARM: Final = _rby1_arm("left")
-RBY1_HEAD: Final = JointGroupSpec(
+RBY1_HEAD: Final = ChainSpec(
     part_id=PartId("rby1-head"),
     layout=bounded_layout(
         names=("head_0", "head_1"),
@@ -105,11 +105,15 @@ RBY1_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rby1", variant="m", revision="1.3"),
     attachments=(
-        body_component("base", RBY1_BASE),
-        body_component("torso", RBY1_TORSO, MountedOn("base", "link_torso_0")),
-        body_component("right_arm", RBY1_RIGHT_ARM, MountedOn("torso", "link_right_arm_0")),
-        body_component("left_arm", RBY1_LEFT_ARM, MountedOn("torso", "link_left_arm_0")),
-        body_component("head", RBY1_HEAD, MountedOn("torso", "NECK_0")),
+        body_component("base", RBY1_BASE, RootMount("base")),
+        body_component("torso", RBY1_TORSO, MountedOn("base", "base"), limb=Limb.TORSO),
+        body_component(
+            "right_arm", RBY1_RIGHT_ARM, MountedOn("torso", "link_torso_5"), limb=Limb.ARM
+        ),
+        body_component(
+            "left_arm", RBY1_LEFT_ARM, MountedOn("torso", "link_torso_5"), limb=Limb.ARM
+        ),
+        body_component("head", RBY1_HEAD, MountedOn("torso", "link_head_0"), limb=Limb.HEAD),
         body_component(
             "right_gripper",
             RBY1_RIGHT_GRIPPER,

@@ -32,7 +32,8 @@ fn the_so101_chain_is_the_registrys_bindings_in_native_state_order() {
         assert_eq!(binding.bus.wire(), fact["bus"].as_str().unwrap());
         assert_eq!(u64::from(binding.bus_id), fact["bus_id"].as_u64().unwrap());
         assert_eq!(i64::from(binding.sign), fact["sign"].as_i64().unwrap());
-        assert_eq!(binding.zero_offset, fact["zero_offset"].as_f64().unwrap());
+        // A unit's zero is its joint calibration; the registry design carries none.
+        assert_eq!(binding.zero_offset, 0.0);
         assert_eq!(binding.reduction, fact["reduction"].as_f64().unwrap());
     }
 }

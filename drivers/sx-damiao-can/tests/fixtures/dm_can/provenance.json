@@ -25,10 +25,10 @@
    "sha256": "a8601e1e6646871d32035b46d1cf4bb37e9b140ad7ede36dcc3e8501f696f06c"
   },
   "mint.py": {
-   "sha256": "f3ec0cbb6db7b1d21baebe1f0df26a850e226aa3aa9f37629d74bae71aa2b795"
+   "sha256": "0b7ed2688bacec6e68c717a5ce2af95766aa04c97e6f7c567cfe02f3fd93e640"
   }
  },
  "transcripts.json": {
-  "sha256": "1e02b590f08164768e93a857518bfc66cfc5ed8d9a0061b01076b326cc1a17bf"
+  "sha256": "12043cb532b7ca6a9a2ed26c63454e89d0e056951fb17788c94211577539b1a2"
  }
 }
