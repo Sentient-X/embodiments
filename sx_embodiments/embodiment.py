@@ -444,7 +444,9 @@ def migrate(document: Mapping[str, object]) -> EmbodimentMigration:
     except ValueError as exc:
         raise EmbodimentSchemaError(f"schema-{version} embodiment is not canonical JSON") from exc
     if actual != source_id:
-        raise EmbodimentSchemaError(f"schema-{version} embodiment id does not match its content")
+        raise EmbodimentSchemaError(
+            f"schema-{version} embodiment id does not match its canonical content"
+        )
     converted: dict[str, object] = copy.deepcopy(dict(document))
     for step in steps:
         converted = step(converted)

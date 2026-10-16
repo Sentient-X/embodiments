@@ -42,19 +42,30 @@ def read_recorded(document: Mapping[str, object]) -> RecordedEmbodiment:
 
 
 @cache
-def _historical() -> dict[EmbodimentName, frozenset[EmbodimentId]]:
-    identities: dict[EmbodimentName, set[EmbodimentId]] = {}
+def _historical() -> dict[EmbodimentName, dict[EmbodimentId, str]]:
+    published: dict[EmbodimentName, dict[EmbodimentId, str]] = {}
     for entry in (resources.files("sx_embodiments") / "historical").iterdir():
         if not entry.name.endswith(".json"):
             continue
-        recorded = read_recorded(json.loads(entry.read_text()))
+        text = entry.read_text()
+        recorded = read_recorded(json.loads(text))
         name = recorded.embodiment.name
         if entry.name != f"{name}-{recorded.recorded_id}.json":
             raise EmbodimentSchemaError(f"historical document {entry.name} is misnamed")
-        identities.setdefault(name, set()).add(recorded.recorded_id)
-    return {name: frozenset(ids) for name, ids in identities.items()}
+        published.setdefault(name, {})[recorded.recorded_id] = text
+    return published
 
 
 def historical_identities(name: EmbodimentName) -> frozenset[EmbodimentId]:
     """The identities ``name``'s canonical package carried under earlier schemas."""
-    return _historical().get(name, frozenset())
+    return frozenset(_historical().get(name, {}))
+
+
+def historical_document(name: EmbodimentName, identity: EmbodimentId) -> dict[str, object]:
+    """The exact document ``name`` was published as under ``identity``, a fresh copy.
+
+    What a previous deployment stored or a recording embedded; read it with
+    ``read_recorded``. Raises ``KeyError`` for an identity this registry never published.
+    """
+    document: dict[str, object] = json.loads(_historical()[name][identity])
+    return document

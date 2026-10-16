@@ -49,6 +49,7 @@ PUBLIC_SURFACE = frozenset(
         # canonical identities earlier schemas published. Widened 2026-09 for the pod
         # delivery validator and the Catalog recording reader (its first consumers).
         "RecordedEmbodiment",
+        "historical_document",
         "historical_identities",
         "read_recorded",
         # A directory holding exactly one embodiment's asset closure, filled from the

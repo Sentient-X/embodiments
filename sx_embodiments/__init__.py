@@ -48,7 +48,12 @@ from .layout import (
 )
 from .materialize import materialize, materialized
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource, Limb
-from .recorded import RecordedEmbodiment, historical_identities, read_recorded
+from .recorded import (
+    RecordedEmbodiment,
+    historical_document,
+    historical_identities,
+    read_recorded,
+)
 
 __all__ = [
     "ActuationBinding",
@@ -103,6 +108,7 @@ __all__ = [
     "compose_embodiments",
     "development_embodiments",
     "embodiments",
+    "historical_document",
     "historical_identities",
     "materialize",
     "materialized",
