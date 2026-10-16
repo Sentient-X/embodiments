@@ -1,13 +1,15 @@
 """Composition: an embodiment is an ordered tuple of part attachments; views are derived.
 
-Composites are built by helper functions returning attachment tuples (``so101_side("left")``),
-never by nesting specs — Python composition of tuples IS the compositional model. The
+A body built from other descriptions takes its components from its
+:class:`~sx_embodiments.assembly.Assembly` (``Assembly.components_of``), so the component graph
+and the rendered description come from one declaration. The
 declared attachment order is the wire order (see :mod:`sx_embodiments.layout`).
 """
 
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sx_contracts import Capability, ComponentId
 
@@ -30,6 +32,9 @@ from .parts import (
     MobileBaseSpec,
     Part,
 )
+
+if TYPE_CHECKING:
+    from .assembly import Assembly
 
 
 class ComponentRole(StrEnum):
@@ -251,6 +256,9 @@ class EmbodimentDefinition:
     # Catalog intent can exist before a complete, executable revision. It does
     # not participate in that revision's physical identity or qualify its sensors.
     collection: CollectionSetup | None = None
+    # The declaration its description URDF is rendered from, when it is built from other
+    # descriptions. Not part of identity: the rendered bytes are, through the asset digest.
+    assembly: "Assembly | None" = None
 
     def __post_init__(self) -> None:
         name = str(self.name)

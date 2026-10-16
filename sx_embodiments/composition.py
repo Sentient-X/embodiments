@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import copy
 import math
-import re
-import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from functools import partial
+from xml.etree import ElementTree as ET
 
 from sx_contracts import AssetFormat, AssetRole, ProvenancedAsset
 
+from .assembly import Assembly, Member, Pose
 from .assets import description_asset_uri, generated_description
-from .compose import Component, MountedOn, OperatorMount, RootMount
+from .compose import Component, OperatorMount
 from .description import joint_names
 from .embodiment import Embodiment
 from .errors import CompositionError
@@ -21,11 +21,13 @@ from .identity import EmbodimentKind, EmbodimentName, Lineage
 
 @dataclass(frozen=True, slots=True)
 class PlacedEmbodiment:
-    """A complete body placed in the composite root frame, metres and radians."""
+    """A complete body placed on the composite root or a member's link, metres and radians."""
 
     embodiment: Embodiment
     xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
     rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    #: A namespaced link of an earlier member ("torso/head_link"); the root when None.
+    parent: str | None = None
 
     def __post_init__(self) -> None:
         if any(
@@ -44,60 +46,50 @@ def compose_embodiments(
 ) -> Embodiment:
     """Namespace and place any number of bodies, preserving optics and joint facts.
 
-    Member order is state order. The resulting body is a normal schema-14 Embodiment;
-    generated URDF bytes are retained in the digest-checked asset cache. This operation
-    declares geometry only: it neither commissions devices nor grants motion authority.
+    Member order is state order. A member mounts on the composite root or, through
+    PlacedEmbodiment.parent, on any link of a member placed before it (a camera head on
+    a humanoid's neck). The resulting body is a normal schema-14 Embodiment; generated URDF
+    bytes are retained in the digest-checked asset cache. This operation declares geometry
+    only: it neither commissions devices nor grants motion authority.
     """
     if not members:
         raise CompositionError(name, "composition needs at least one member")
-    robot = ET.Element("robot", {"name": name})
-    ET.SubElement(robot, "link", {"name": "assembly"})
+    assembly = Assembly(
+        robot=name,
+        root="assembly",
+        separator="/",
+        members=tuple(
+            Member(
+                namespace,
+                placed.embodiment.urdf_bytes,
+                Pose(placed.xyz, placed.rpy),
+                parent=placed.parent,
+                mesh_uri=partial(description_asset_uri, placed.embodiment.urdf.uri),
+            )
+            for namespace, placed in members.items()
+        ),
+    )
+    urdf = assembly.urdf()
+    parents = {
+        child.attrib["link"]: parent.attrib["link"]
+        for joint in ET.fromstring(urdf).findall("joint")
+        if (child := joint.find("child")) is not None
+        and (parent := joint.find("parent")) is not None
+    }
     components: list[Component] = []
     assets: dict[tuple[str, str], ProvenancedAsset] = {}
     operator_mounts: list[OperatorMount] = []
     for namespace, placed in members.items():
-        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", namespace) is None:
-            raise CompositionError(name, f"invalid member namespace {namespace!r}")
         body = placed.embodiment
-        prefix = namespace + "/"
-        source = ET.fromstring(body.urdf_bytes)
-        links = {link.attrib["name"] for link in source.findall("link")}
-        children = {child.attrib["link"] for child in source.findall("joint/child")}
-        roots = links - children
-        if len(roots) != 1:
-            raise CompositionError(
-                name, f"{namespace}: description needs one root, got {sorted(roots)}"
-            )
-        for element in source:
-            item = copy.deepcopy(element)
-            for node in item.iter():
-                if (
-                    node.tag in {"link", "joint", "material", "transmission", "actuator"}
-                    and "name" in node.attrib
-                ):
-                    node.set("name", prefix + node.attrib["name"])
-                if node.tag in {"parent", "child"} and "link" in node.attrib:
-                    node.set("link", prefix + node.attrib["link"])
-                if node.tag == "mimic" and "joint" in node.attrib:
-                    node.set("joint", prefix + node.attrib["joint"])
-                if node.tag == "gazebo" and "reference" in node.attrib:
-                    node.set("reference", prefix + node.attrib["reference"])
-                if node.tag in {"mesh", "texture"} and "filename" in node.attrib:
-                    filename = node.attrib["filename"]
-                    node.set("filename", description_asset_uri(body.urdf.uri, filename))
-            robot.append(item)
-        joint = ET.SubElement(robot, "joint", {"name": namespace + "/mount", "type": "fixed"})
-        ET.SubElement(joint, "parent", {"link": "assembly"})
-        ET.SubElement(joint, "child", {"link": prefix + next(iter(roots))})
-        ET.SubElement(
-            joint,
-            "origin",
-            {
-                "xyz": " ".join(map(str, placed.xyz)),
-                "rpy": " ".join(map(str, placed.rpy)),
-            },
+        prefix = assembly.prefix(namespace)
+        carrier = (
+            None if placed.parent is None else _carrier(name, placed.parent, parents, components)
         )
-        components.extend(_prefix_component(component, prefix) for component in body.components)
+        components.extend(
+            assembly.components_of(
+                namespace, body.components, instance_separator=".", carrier=carrier
+            )
+        )
         operator_mounts.extend(
             replace(
                 mount,
@@ -116,7 +108,6 @@ def compose_embodiments(
                 else asset
             )
             assets[(retained.uri, str(retained.sha256))] = retained
-    urdf = ET.tostring(robot, encoding="utf-8", xml_declaration=True)
     description = generated_description(urdf, tuple(assets.values()))
     composed = Embodiment(
         name=EmbodimentName(name),
@@ -131,16 +122,21 @@ def compose_embodiments(
     return composed
 
 
-def _prefix_component(component: Component, prefix: str) -> Component:
-    # Parts retain local coordinates and product identity. Only instance names and
-    # physical frames are namespaced; description.joint_names binds them to the URDF.
-    mount = component.mount
-    return replace(
-        component,
-        instance=prefix.replace("/", ".") + component.instance,
-        mount=(
-            MountedOn(prefix.replace("/", ".") + mount.parent, prefix + mount.frame)
-            if isinstance(mount, MountedOn)
-            else RootMount(prefix + mount.frame)
-        ),
-    )
+def _carrier(
+    name: str, link: str, parents: Mapping[str, str], components: list[Component]
+) -> str | None:
+    """The component whose joints move ``link``: the nearest strict ancestor mount frame.
+
+    ``None`` when no component's joints lie above the link (it hangs off a fixed root).
+    """
+    current = link
+    while current in parents:
+        current = parents[current]
+        owners = [c.instance for c in components if c.mount.frame == current]
+        if len(owners) > 1:
+            raise CompositionError(
+                name, f"{link!r} could ride on any of {owners}; mount on a link below one"
+            )
+        if owners:
+            return owners[0]
+    return None

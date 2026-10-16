@@ -151,6 +151,7 @@ Further deliberate divergences:
 import dataclasses
 from typing import Final
 
+from ..assembly import INSPECTION_NOTE, Assembly, Frame, Member, MountJoint, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
@@ -286,18 +287,6 @@ B601_LEADER: Final = DeviceSpec(
 )
 
 
-def b601_side(side: str) -> tuple[Component, ...]:
-    """One B601-DM follower arm + gripper block; two sides ARE the bimanual body."""
-    return (
-        body_component(f"{side}_arm", B601_ARM, RootMount(f"{side}_base_link")),
-        body_component(
-            f"{side}_gripper",
-            B601_GRIPPER,
-            MountedOn(f"{side}_arm", f"{side}_link6"),
-        ),
-    )
-
-
 B601_DM_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("b601-dm"),
     label="Seeed Studio reBot B601-DM (single arm)",
@@ -311,13 +300,80 @@ B601_DM_SPEC: Final = EmbodimentDefinition(
     # rates unbound: the pod's capture fps is a per-session parameter, not a hardware rate
 )
 
+_SIDES: Final = (
+    Member("left", B601_DM_URDF, Pose((0.0, 0.5, 0.0))),
+    Member("right", B601_DM_URDF, Pose((0.0, -0.5, 0.0))),
+)
+
+#: Two follower arms with grippers; two sides ARE the bimanual body.
+BIMANUAL_B601_DM_ASSEMBLY: Final = Assembly(
+    robot="bimanual_rebot_b601_dm", root="bimanual_origin", note=INSPECTION_NOTE, members=_SIDES
+)
+
+#: The same pair with its leaders and cameras placed for inspection; the floating frames'
+#: poses are installation defaults, never measured extrinsics.
+B601_DM_STATION_ASSEMBLY: Final = Assembly(
+    robot="rebot_b601_dm_station",
+    root="station_origin",
+    note=INSPECTION_NOTE,
+    members=_SIDES,
+    frames=(
+        Frame(
+            "left_leader",
+            "station_origin",
+            Pose((-0.55, 0.5, 0.0)),
+            MountJoint.FLOATING,
+            "leader",
+            "Left leader · surface unavailable",
+        ),
+        Frame(
+            "right_leader",
+            "station_origin",
+            Pose((-0.55, -0.5, 0.0)),
+            MountJoint.FLOATING,
+            "leader",
+            "Right leader · surface unavailable",
+        ),
+        Frame(
+            "left_wrist_camera",
+            "left_link6",
+            preview_kind="camera",
+            preview_label="Left wrist camera",
+        ),
+        Frame(
+            "right_wrist_camera",
+            "right_link6",
+            preview_kind="camera",
+            preview_label="Right wrist camera",
+        ),
+        Frame(
+            "top_camera",
+            "station_origin",
+            Pose((-0.4, 0.0, 1.2), (0.0, 0.65, 0.0)),
+            MountJoint.FLOATING,
+            "camera",
+            "Top camera",
+        ),
+    ),
+)
+
+
+def _followers(assembly: Assembly) -> tuple[Component, ...]:
+    return tuple(
+        component
+        for side in ("left", "right")
+        for component in assembly.components_of(side, B601_DM_SPEC.attachments)
+    )
+
+
 BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("bimanual-b601-dm"),
     label="Bimanual Seeed Studio reBot B601-DM",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm-bimanual"),
-    attachments=(*b601_side("left"), *b601_side("right")),
+    attachments=_followers(BIMANUAL_B601_DM_ASSEMBLY),
     extra_assets=(B601_DM_SOURCE_URDF, BIMANUAL_B601_DM_URDF),
+    assembly=BIMANUAL_B601_DM_ASSEMBLY,
 )
 
 B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
@@ -357,8 +413,8 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
     attachments=(
         leader_component("left_leader", B601_LEADER, RootMount("left_leader")),
         leader_component("right_leader", B601_LEADER, RootMount("right_leader")),
-        *b601_side("left"),
-        *b601_side("right"),
+        *_followers(B601_DM_STATION_ASSEMBLY),
     ),
     extra_assets=(B601_DM_SOURCE_URDF, B601_DM_STATION_URDF),
+    assembly=B601_DM_STATION_ASSEMBLY,
 )

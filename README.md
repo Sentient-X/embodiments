@@ -42,6 +42,16 @@ the generated URDF and its dependency assets; a local JSON round-trip does not p
 Catalog publication or remote asset availability. The assembly grammar also accepts camera
 and force/torque parts; camera optics remain required facts on each sensor part.
 
+A member may mount on any link of a member placed before it, not only on the root:
+`PlacedEmbodiment(embodiments["so101"], parent="body/head_link")` carries an arm on another
+body's head. Composition and the registry's multi-device bodies share one renderer,
+`sx_embodiments.assembly.Assembly`: members mounted on links at nominal poses, plus named
+frames for cameras and leader sites. A registered body built from other descriptions
+declares its `Assembly` beside its components, takes those components from
+`Assembly.components_of`, and its committed description is that declaration rendered by
+`tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
+Assembly poses are nominal; a measured mount is calibration and never edits the assembly.
+
 Observation and controller semantics are owned by `sx-actions`, which depends on this
 package and derives spaces from the complete object:
 
