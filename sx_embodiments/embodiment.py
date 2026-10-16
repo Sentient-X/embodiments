@@ -457,7 +457,9 @@ def migrate(document: Mapping[str, object]) -> EmbodimentMigration:
 
 
 def _objects(value: object, where: str) -> list[dict[str, object]]:
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+    if not isinstance(value, list):
+        raise EmbodimentSchemaError(f"{where}: expected an array of objects")
+    if not all(isinstance(item, dict) for item in cast(list[object], value)):
         raise EmbodimentSchemaError(f"{where}: expected an array of objects")
     return cast(list[dict[str, object]], value)
 
