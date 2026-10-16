@@ -2,18 +2,17 @@
 
 from typing import Final
 
+from ..assembly import INSPECTION_NOTE, Assembly, Frame, Member, MountJoint, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionMethod, CollectionSetup
 from ..compose import (
     EmbodimentDefinition,
-    MountedOn,
     RootMount,
-    body_component,
     leader_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..parts import DeviceSpec
-from .piper import PIPER_ARM, PIPER_GRIPPER, PIPER_SOURCE_URDF
+from .piper import PIPER_SOURCE_URDF, PIPER_SPEC, PIPER_URDF
 
 PIPER_STATION_URDF: Final = packaged_asset(
     relpath="official/agilex_piper/piper_station.urdf",
@@ -29,6 +28,27 @@ PIPER_STATION_URDF: Final = packaged_asset(
         generator="sx-embodiments/tools/compose_registered_urdfs.py",
     ),
     media_type="application/xml",
+)
+
+#: A leader and a follower side by side, with the front camera's installation default.
+PIPER_STATION_ASSEMBLY: Final = Assembly(
+    robot="piper_station",
+    root="station_origin",
+    note=INSPECTION_NOTE,
+    members=(
+        Member("leader", PIPER_URDF, Pose((0.0, 0.42, 0.0))),
+        Member("follower", PIPER_URDF, Pose((0.0, -0.42, 0.0))),
+    ),
+    frames=(
+        Frame(
+            "front_camera",
+            "station_origin",
+            Pose((-0.35, 0.0, 0.85), (0.0, 0.65, 0.0)),
+            MountJoint.FLOATING,
+            "camera",
+            "Front camera",
+        ),
+    ),
 )
 
 PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
@@ -53,12 +73,8 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
             DeviceSpec(PartId("piperx-leader"), "PiperX leader arm"),
             RootMount("leader_base_link"),
         ),
-        body_component("follower_arm", PIPER_ARM, RootMount("follower_base_link")),
-        body_component(
-            "follower_gripper",
-            PIPER_GRIPPER,
-            MountedOn("follower_arm", "follower_link6"),
-        ),
+        *PIPER_STATION_ASSEMBLY.components_of("follower", PIPER_SPEC.attachments),
     ),
     extra_assets=(PIPER_SOURCE_URDF, PIPER_STATION_URDF),
+    assembly=PIPER_STATION_ASSEMBLY,
 )

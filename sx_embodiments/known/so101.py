@@ -10,8 +10,9 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 import dataclasses
 from typing import Final
 
+from ..assembly import INSPECTION_NOTE, Assembly, Member, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import Component, EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..parts import ArmSpec, GripperSpec
@@ -90,18 +91,6 @@ SO101_JAW: Final = GripperSpec(
 )
 
 
-def so101_side(side: str) -> tuple[Component, ...]:
-    """One SO-101 arm+jaw block; composing two sides IS the bimanual body."""
-    return (
-        body_component(f"{side}_arm", SO101_ARM, RootMount(f"{side}_base_link")),
-        body_component(
-            f"{side}_jaw",
-            SO101_JAW,
-            MountedOn(f"{side}_arm", f"{side}_gripper_link"),
-        ),
-    )
-
-
 SO101_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("so101"),
     label="SO-101 (single arm)",
@@ -115,12 +104,28 @@ SO101_SPEC: Final = EmbodimentDefinition(
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )
 
+#: Two single-arm descriptions side by side; composing two sides IS the bimanual body.
+BIMANUAL_SO101_ASSEMBLY: Final = Assembly(
+    robot="bimanual_so101",
+    root="bimanual_origin",
+    note=INSPECTION_NOTE,
+    members=(
+        Member("left", SO101_URDF, Pose((0.0, 0.25, 0.0))),
+        Member("right", SO101_URDF, Pose((0.0, -0.25, 0.0))),
+    ),
+)
+
 BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("bimanual-so101"),
     label="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101", variant="bimanual"),
-    attachments=(*so101_side("left"), *so101_side("right")),
+    attachments=tuple(
+        component
+        for side in ("left", "right")
+        for component in BIMANUAL_SO101_ASSEMBLY.components_of(side, SO101_SPEC.attachments)
+    ),
     extra_assets=(SO101_SOURCE_URDF, BIMANUAL_SO101_URDF),
+    assembly=BIMANUAL_SO101_ASSEMBLY,
     # rates unbound: per-episode control_hz travels with the recordings
 )
