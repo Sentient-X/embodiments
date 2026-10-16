@@ -74,18 +74,31 @@ A declared space does not establish a simulator, and a qualified direct drive na
 driver only through its bus (see [Drivers](#drivers)); whether a body runs on a given station
 is checked by the execution owner against the exact body and requested interface.
 
-Schema v14 stores one topologically ordered component graph plus nominal rates,
-content-addressed assets, and independent per-axis observation and actuation facts. A
-joint axis may be observed through actuator feedback, a vendor interface, or an encoder
-and may be driven directly, through an integrated controller, passively, or remain
-explicitly undocumented. A qualified direct drive binds an `ActuatorModel` on an
-`ActuatorBus` with its chain address and drive map. State order, camera bindings, capabilities, arm/gripper convenience
-views, and the ID are derived from those facts. This keeps one source for morphology while
-remaining ergonomic for drivers, simulation, training, and task admission.
+Schema v15 stores one topologically ordered component graph plus nominal rates,
+content-addressed assets, and independent per-axis observation and actuation facts. Every
+articulated chain (arm, torso, head, leg, lift) is one `ChainSpec`; the `Limb` it serves is
+a fact of its mount, from which its channel kind and capabilities derive, so one design can be
+an arm on one body and a head on another. Every component names its mount frame, and that
+frame is a link of the description with the chain's joints below it: `tests/test_model_laws.py`
+composes every registered body to prove it. A joint axis may be observed through actuator
+feedback, a vendor interface, or an encoder and may be driven directly, through an integrated
+controller, passively, or remain explicitly undocumented. A qualified direct drive binds an
+`ActuatorModel` on an `ActuatorBus` with its chain address and its design drive map (`sign`,
+`reduction`); a motor's zero is measured per unit and is joint calibration, never a design
+fact. Cameras name their product by id in the open registry `sx_embodiments.cameras`, so a new
+camera is a record, not a schema change. State order, camera bindings, capabilities, arm and
+gripper convenience views, and the ID are derived from those facts.
 
 Controller semantics stay in `sx-actions`; one embodiment can expose several action interfaces
 without changing hardware identity. Per-unit calibration and runtime status belong to episodes
 or sessions, not the nominal embodiment.
+
+A stored document of any earlier schema is read with `migrate(document)`, which runs the chain
+of pure converters (13 → 14 → 15) and returns one verified identity edge: the id the bytes
+carry and the body they read as today. A converter changes only what its schema changed and
+refuses what it cannot carry (a schema-14 design zero other than 0) rather than dropping it.
+A schema bump snapshots every published body into `sx_embodiments/historical/` in the same
+change, and `tests/test_model_laws.py` reads every one of them.
 
 External-corpus ingest starts from a registered object and replaces only its verified asset
 bundle:

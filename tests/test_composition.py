@@ -118,6 +118,7 @@ def test_assembly_grammar_accepts_calibrated_camera_parts():
             "instance": component["instance"],
             "part_id": component["attachment"]["part"]["part_id"],
             "mount": component["mount"],
+            "limb": component["attachment"]["limb"],
         }
         for component in document["components"]
     ]

@@ -3,10 +3,10 @@
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset, packaged_asset
-from ..compose import EmbodimentDefinition, body_component
+from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec
+from ..parts import ChainSpec, Limb
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -72,8 +72,8 @@ _JOINT_UPPER: Final = (6.28319, 6.28319, 3.1415, 6.28319, 6.28319, 6.28319)
 _HOME: Final = (-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0)
 
 
-def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ArmSpec:
-    return ArmSpec(
+def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ChainSpec:
+    return ChainSpec(
         part_id=PartId(f"{model}-arm"),
         layout=bounded_layout(
             names=_JOINT_NAMES,
@@ -94,12 +94,12 @@ UR5E_SPEC: Final = EmbodimentDefinition(
     label="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
-    attachments=(body_component("arm", UR5E_ARM),),
+    attachments=(body_component("arm", UR5E_ARM, RootMount("base_link_inertia"), limb=Limb.ARM),),
 )
 UR10E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur10e"),
     label="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur10e"),
-    attachments=(body_component("arm", UR10E_ARM),),
+    attachments=(body_component("arm", UR10E_ARM, RootMount("base_link_inertia"), limb=Limb.ARM),),
 )

@@ -165,9 +165,10 @@ from ..compose import (
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..parts import (
-    ArmSpec,
+    ChainSpec,
     DeviceSpec,
     GripperSpec,
+    Limb,
     MimicJoint,
 )
 from ._authoring import bounded_layout
@@ -240,7 +241,7 @@ def _damiao(
     )
 
 
-B601_ARM: Final = ArmSpec(
+B601_ARM: Final = ChainSpec(
     part_id=PartId("rebot-b601dm-arm"),
     # Names and limits are the vendored URDF's revolute joints, in kinematic order.
     layout=bounded_layout(
@@ -293,7 +294,7 @@ B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
     attachments=(
-        body_component("arm", B601_ARM, RootMount("base_link")),
+        body_component("arm", B601_ARM, RootMount("base_link"), limb=Limb.ARM),
         body_component("gripper", B601_GRIPPER, MountedOn("arm", "link6")),
     ),
     extra_assets=(B601_DM_URDF,),

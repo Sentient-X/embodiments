@@ -20,7 +20,7 @@ from ..compose import (
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, ControlRates, GripperSpec, MimicJoint, PhysicalSpec
+from ..parts import ChainSpec, ControlRates, GripperSpec, Limb, MimicJoint, PhysicalSpec
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -64,7 +64,7 @@ PIPER_URDF: Final = packaged_asset(
     media_type="application/xml",
 )
 
-PIPER_ARM: Final = ArmSpec(
+PIPER_ARM: Final = ChainSpec(
     part_id=PartId("piper-arm"),
     layout=bounded_layout(
         names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"),
@@ -102,7 +102,7 @@ PIPER_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
     attachments=(
-        body_component("arm", PIPER_ARM, RootMount("base_link")),
+        body_component("arm", PIPER_ARM, RootMount("base_link"), limb=Limb.ARM),
         body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "link6")),
     ),
     extra_assets=(PIPER_URDF,),

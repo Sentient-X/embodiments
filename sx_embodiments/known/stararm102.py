@@ -14,7 +14,7 @@ from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, UndocumentedDrive, VendorReadout
-from ..parts import ArmSpec, GripperSpec, MimicJoint
+from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 
 STARARM102_URDF: Final = packaged_asset(
@@ -52,7 +52,7 @@ STARARM102_SPEC: Final = EmbodimentDefinition(
     attachments=(
         body_component(
             "arm",
-            ArmSpec(
+            ChainSpec(
                 part_id=PartId("stararm102-arm"),
                 layout=bounded_layout(
                     names=tuple(f"joint{i}" for i in range(1, 7)),
@@ -65,6 +65,7 @@ STARARM102_SPEC: Final = EmbodimentDefinition(
                 home=(0.0,) * 6,
             ),
             RootMount("world"),
+            limb=Limb.ARM,
         ),
         body_component(
             "jaw",

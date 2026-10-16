@@ -1,6 +1,6 @@
 {
   "embodiment": "b601-dm",
-  "id": "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9",
+  "id": "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa",
   "axes": [
     {
       "joint": "joint1",
@@ -10,7 +10,6 @@
       "bus": "damiao_can",
       "bus_id": 1,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -21,7 +20,6 @@
       "bus": "damiao_can",
       "bus_id": 2,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -32,7 +30,6 @@
       "bus": "damiao_can",
       "bus_id": 3,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -43,7 +40,6 @@
       "bus": "damiao_can",
       "bus_id": 4,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -54,7 +50,6 @@
       "bus": "damiao_can",
       "bus_id": 5,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -65,7 +60,6 @@
       "bus": "damiao_can",
       "bus_id": 6,
       "sign": 1,
-      "zero_offset": 0.0,
       "reduction": 1.0
     },
     {
@@ -76,7 +70,6 @@
       "bus": "damiao_can",
       "bus_id": 7,
       "sign": -1,
-      "zero_offset": 0.0,
       "reduction": 111.11111111111111
     }
   ]

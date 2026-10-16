@@ -3,10 +3,10 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, GripperSpec, MimicJoint
+from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -40,8 +40,8 @@ _ARM_UPPER: Final = (3.14158, 1.25664, 1.6057, 3.14158, 2.23402, 3.14158)
 _ARM_HOME: Final = (0.0, -0.96, 1.16, 0.0, -0.3, 0.0)
 
 
-def _aloha_arm(side: Literal["left", "right"]) -> ArmSpec:
-    return ArmSpec(
+def _aloha_arm(side: Literal["left", "right"]) -> ChainSpec:
+    return ChainSpec(
         part_id=PartId(f"aloha-{side}-arm"),
         layout=bounded_layout(
             names=tuple(
@@ -90,13 +90,13 @@ ALOHA_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
     attachments=(
-        body_component("left_arm", ALOHA_LEFT_ARM),
+        body_component("left_arm", ALOHA_LEFT_ARM, RootMount("left/base_link"), limb=Limb.ARM),
         body_component(
             "left_gripper",
             ALOHA_LEFT_GRIPPER,
             MountedOn("left_arm", "left/gripper_link"),
         ),
-        body_component("right_arm", ALOHA_RIGHT_ARM),
+        body_component("right_arm", ALOHA_RIGHT_ARM, RootMount("right/base_link"), limb=Limb.ARM),
         body_component(
             "right_gripper",
             ALOHA_RIGHT_GRIPPER,

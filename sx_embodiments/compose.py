@@ -14,21 +14,22 @@ from typing import TYPE_CHECKING
 from sx_contracts import Capability, ComponentId
 
 from .assets import PackagedAsset
+from .cameras import camera_label
 from .collection import CollectionDevice, CollectionDeviceKind, CollectionSetup
 from .errors import ComponentGraphError, CompositionError, LayoutError
 from .identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import ActuatorBus, ChannelKind, StateCoordinate, StateSpace
 from .parts import (
-    ArmSpec,
     CameraBinding,
     CameraModality,
     CameraSpec,
+    ChainSpec,
     ControlRates,
     DeviceSpec,
     ForceTorqueSpec,
     GraspKind,
     GripperSpec,
-    JointGroupSpec,
+    Limb,
     MobileBaseSpec,
     Part,
 )
@@ -140,14 +141,31 @@ class BaseMount:
             raise ComponentGraphError("base mount clearance_m must be finite and non-negative")
 
 
+def _require_limb(part: Part, limb: Limb | None) -> None:
+    if isinstance(part, ChainSpec) != (limb is not None):
+        raise ComponentGraphError(
+            f"{part.part_id}: a chain is mounted as a limb, and only a chain is"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class BodyAttachment:
+    """A part contributing channels; a chain says which limb it serves here."""
+
     part: Part
+    limb: Limb | None = None
+
+    def __post_init__(self) -> None:
+        _require_limb(self.part, self.limb)
 
 
 @dataclass(frozen=True, slots=True)
 class LeaderAttachment:
     part: Part
+    limb: Limb | None = None
+
+    def __post_init__(self) -> None:
+        _require_limb(self.part, self.limb)
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,52 +205,59 @@ class Component:
         return self.part.part_id
 
     @property
+    def limb(self) -> Limb | None:
+        attachment = self.attachment
+        return None if isinstance(attachment, SensorAttachment) else attachment.limb
+
+    @property
     def kind(self) -> ComponentKind:
-        return component_kind(self.part)
+        return component_kind(self.part, self.limb)
 
     @property
     def capabilities(self) -> tuple[Capability, ...]:
-        return capabilities_for_part(self.part)
+        return capabilities_for_part(self.part, self.limb)
 
 
 def body_component(
     instance: str,
     part: Part,
-    mount: ComponentMount | None = None,
+    mount: ComponentMount,
+    limb: Limb | None = None,
 ) -> Component:
     return Component(
         instance,
-        BodyAttachment(part),
-        mount if mount is not None else RootMount(instance),
+        BodyAttachment(part, limb),
+        mount,
     )
 
 
 def leader_component(
     instance: str,
     part: Part,
-    mount: ComponentMount | None = None,
+    mount: ComponentMount,
+    limb: Limb | None = None,
 ) -> Component:
     return Component(
         instance,
-        LeaderAttachment(part),
-        mount if mount is not None else RootMount(instance),
+        LeaderAttachment(part, limb),
+        mount,
     )
 
 
 def sensor_component(
     instance: str,
     part: CameraSpec | ForceTorqueSpec,
-    mount: ComponentMount | None = None,
+    mount: ComponentMount,
 ) -> Component:
     return Component(
         instance,
         SensorAttachment(part),
-        mount if mount is not None else RootMount(instance),
+        mount,
     )
 
 
 _SENSOR_PARTS = (CameraSpec, ForceTorqueSpec)
-_BODY_PARTS = (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
+_BODY_PARTS = (ChainSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,7 +307,7 @@ class EmbodimentDefinition:
         return self.collection.devices + tuple(
             CollectionDevice(
                 kind=CollectionDeviceKind.CAMERA,
-                label=part.model.value.replace("_", " "),
+                label=camera_label(part.model),
                 quantity=1,
                 placement=str(component.component_id).replace("_", " "),
                 details=f"{part.modality.value.upper()} camera. Optics are "
@@ -362,7 +387,7 @@ def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -
             component.instance if not isinstance(mount, MountedOn) else roots[mount.parent]
         )
         part = component.part
-        if not isinstance(part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec):
+        if not isinstance(part, ChainSpec | GripperSpec | MobileBaseSpec):
             continue
         for axis in part.layout.axes:
             if axis.actuator is None:
@@ -396,15 +421,13 @@ def state_space(name: str, components: tuple[Component, ...]) -> StateSpace:
     physical = tuple(
         component
         for component in components
-        if isinstance(component.part, ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec)
+        if isinstance(component.part, ChainSpec | GripperSpec | MobileBaseSpec)
     )
     coordinates: list[StateCoordinate] = []
     for attachment in physical:
         part = attachment.part
-        if isinstance(part, ArmSpec):
-            kind = ChannelKind.ARM_JOINT
-        elif isinstance(part, JointGroupSpec):
-            kind = ChannelKind.BODY_JOINT
+        if isinstance(part, ChainSpec):
+            kind = ChannelKind.ARM_JOINT if attachment.limb is Limb.ARM else ChannelKind.BODY_JOINT
         elif isinstance(part, GripperSpec):
             kind = ChannelKind.GRIPPER
         elif isinstance(part, MobileBaseSpec):
@@ -436,9 +459,9 @@ def camera_bindings(components: tuple[Component, ...]) -> tuple[CameraBinding, .
     )
 
 
-def capabilities_for_part(part: object) -> tuple[Capability, ...]:
-    if isinstance(part, ArmSpec):
-        return (Capability.SPATIAL_MOTION_SE3,)
+def capabilities_for_part(part: object, limb: Limb | None = None) -> tuple[Capability, ...]:
+    if isinstance(part, ChainSpec):
+        return (Capability.SPATIAL_MOTION_SE3,) if limb is Limb.ARM else ()
     if isinstance(part, GripperSpec):
         return (
             Capability.SPATIAL_MOTION_SE3,
@@ -460,11 +483,9 @@ def capabilities_for_part(part: object) -> tuple[Capability, ...]:
     return ()
 
 
-def component_kind(part: object) -> ComponentKind:
-    if isinstance(part, ArmSpec):
-        return ComponentKind.MANIPULATOR
-    if isinstance(part, JointGroupSpec):
-        return ComponentKind.JOINT_GROUP
+def component_kind(part: object, limb: Limb | None = None) -> ComponentKind:
+    if isinstance(part, ChainSpec):
+        return ComponentKind.MANIPULATOR if limb is Limb.ARM else ComponentKind.JOINT_GROUP
     if isinstance(part, GripperSpec):
         return ComponentKind.EFFECTOR
     if isinstance(part, MobileBaseSpec):

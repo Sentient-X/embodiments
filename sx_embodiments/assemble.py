@@ -33,11 +33,9 @@ from .errors import AssemblyError, EmbodimentSchemaError
 from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
 from .layout import Bounds, UndocumentedDrive
-from .parts import ArmSpec, CameraSpec, ForceTorqueSpec, GripperSpec, JointGroupSpec, MobileBaseSpec
+from .parts import CameraSpec, ChainSpec, ForceTorqueSpec, GripperSpec, Limb, MobileBaseSpec
 
-ComposablePart = (
-    ArmSpec | JointGroupSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
-)
+ComposablePart = ChainSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
 
 _MOVABLE_JOINTS = {"revolute", "prismatic", "continuous"}
 _LIMIT_TOLERANCE = 1e-6
@@ -76,7 +74,7 @@ def part_from_dict(document: Mapping[str, object]) -> ComposablePart:
     if not isinstance(part, ComposablePart):
         raise AssemblyError(
             str(part.part_id),
-            "admissible parts are arm, joint_group, gripper, mobile_base, camera, force_torque",
+            "admissible parts are chain, gripper, mobile_base, camera, force_torque",
         )
     return part
 
@@ -106,11 +104,7 @@ def admit_part(
 
     part = part_from_dict(document)
     subject = str(part.part_id)
-    axes = (
-        part.layout.axes
-        if isinstance(part, (ArmSpec, JointGroupSpec, GripperSpec, MobileBaseSpec))
-        else ()
-    )
+    axes = part.layout.axes if isinstance(part, (ChainSpec, GripperSpec, MobileBaseSpec)) else ()
     for axis in axes:
         if isinstance(axis.actuation, UndocumentedDrive):
             raise AssemblyError(
@@ -250,7 +244,7 @@ def assemble(
         parts = composable_parts()
     components: list[Component] = []
     for raw in decode.documents(entry, "attachments"):
-        attachment = decode.exactly(raw, {"instance", "part_id", "mount"})
+        attachment = decode.exactly(raw, {"instance", "part_id", "mount", "limb"})
         part_id = PartId(decode.text(attachment, "part_id"))
         part = parts.get(part_id)
         if part is None:
@@ -261,11 +255,19 @@ def assemble(
             )
         instance = decode.text(attachment, "instance")
         mount = _parse_component_mount(decode.mapping(attachment, "mount"))
-        component = (
-            sensor_component(instance, part, mount)
-            if isinstance(part, (CameraSpec, ForceTorqueSpec))
-            else body_component(instance, part, mount)
-        )
+        limb_value = decode.optional_text(attachment, "limb")
+        try:
+            limb = Limb(limb_value) if limb_value is not None else None
+        except ValueError as exc:
+            raise AssemblyError(name, f"{instance!r}: limb is unknown") from exc
+        if limb is Limb.UNDOCUMENTED:
+            raise AssemblyError(name, f"{instance!r}: say which limb this chain serves")
+        if isinstance(part, (CameraSpec, ForceTorqueSpec)):
+            if limb is not None:
+                raise AssemblyError(name, f"{instance!r}: a sensor serves no limb")
+            component = sensor_component(instance, part, mount)
+        else:
+            component = body_component(instance, part, mount, limb)
         components.append(component)
     try:
         embodiment = Embodiment(

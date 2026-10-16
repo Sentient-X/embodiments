@@ -10,10 +10,10 @@ the hardware URDF limits below win at the execution boundary.
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, JointGroupSpec
+from ..parts import ChainSpec, Limb
 from ._authoring import bounded_layout
 
 SENTIENT_HUMANOID_URDF: Final = packaged_asset(
@@ -45,7 +45,7 @@ SENTIENT_HUMANOID_MJCF: Final = packaged_asset(
     media_type="application/xml",
 )
 
-SENTIENT_HUMANOID_TORSO: Final = JointGroupSpec(
+SENTIENT_HUMANOID_TORSO: Final = ChainSpec(
     part_id=PartId("sentient-humanoid-torso"),
     layout=bounded_layout(
         names=("torso_joint", "waist_roll_joint", "waist_pitch_joint"),
@@ -57,11 +57,11 @@ SENTIENT_HUMANOID_TORSO: Final = JointGroupSpec(
 )
 
 
-def _humanoid_arm(side: Literal["left", "right"]) -> ArmSpec:
+def _humanoid_arm(side: Literal["left", "right"]) -> ChainSpec:
     shoulder_roll = (
         (-0.356919832033, 3.14159265359) if side == "left" else (-3.14159265359, 0.356919832033)
     )
-    return ArmSpec(
+    return ChainSpec(
         part_id=PartId(f"sentient-humanoid-{side}-arm"),
         layout=bounded_layout(
             names=tuple(
@@ -94,8 +94,8 @@ def _humanoid_arm(side: Literal["left", "right"]) -> ArmSpec:
     )
 
 
-def _humanoid_leg(side: Literal["left", "right"]) -> JointGroupSpec:
-    return JointGroupSpec(
+def _humanoid_leg(side: Literal["left", "right"]) -> ChainSpec:
+    return ChainSpec(
         part_id=PartId(f"sentient-humanoid-{side}-leg"),
         layout=bounded_layout(
             names=tuple(
@@ -135,11 +135,22 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),
     attachments=(
-        body_component("torso", SENTIENT_HUMANOID_TORSO),
-        body_component("right_arm", SENTIENT_HUMANOID_RIGHT_ARM, MountedOn("torso", "chest_link")),
-        body_component("left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link")),
-        body_component("right_leg", SENTIENT_HUMANOID_RIGHT_LEG),
-        body_component("left_leg", SENTIENT_HUMANOID_LEFT_LEG),
+        body_component("torso", SENTIENT_HUMANOID_TORSO, RootMount("base_link"), limb=Limb.TORSO),
+        body_component(
+            "right_arm",
+            SENTIENT_HUMANOID_RIGHT_ARM,
+            MountedOn("torso", "chest_link"),
+            limb=Limb.ARM,
+        ),
+        body_component(
+            "left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link"), limb=Limb.ARM
+        ),
+        body_component(
+            "right_leg", SENTIENT_HUMANOID_RIGHT_LEG, RootMount("base_link"), limb=Limb.LEG
+        ),
+        body_component(
+            "left_leg", SENTIENT_HUMANOID_LEFT_LEG, RootMount("base_link"), limb=Limb.LEG
+        ),
     ),
     extra_assets=(SENTIENT_HUMANOID_URDF, SENTIENT_HUMANOID_MJCF),
 )

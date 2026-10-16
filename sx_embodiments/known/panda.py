@@ -12,14 +12,16 @@ from ..compose import (
     EmbodimentDefinition,
     MountedOn,
     MountKind,
+    RootMount,
     body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..parts import (
-    ArmSpec,
+    ChainSpec,
     ControlRates,
     GripperSpec,
+    Limb,
     MimicJoint,
     MobileBaseSpec,
     PhysicalSpec,
@@ -52,7 +54,7 @@ PANDA_URDF: Final = packaged_asset(
     media_type="application/xml",
 )
 
-PANDA_ARM: Final = ArmSpec(
+PANDA_ARM: Final = ChainSpec(
     part_id=PartId("panda-arm"),
     layout=bounded_layout(
         names=(
@@ -102,8 +104,8 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda", variant="omron"),
     attachments=(
-        body_component("base", OMRON_BASE),
-        body_component("arm", PANDA_ARM, MountedOn("base", "top_plate")),
+        body_component("base", OMRON_BASE, RootMount("panda_link0")),
+        body_component("arm", PANDA_ARM, MountedOn("base", "panda_link0"), limb=Limb.ARM),
         body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
     ),
     rates=ControlRates(policy_hz=20.0),
@@ -122,7 +124,7 @@ FRANKA_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda"),
     attachments=(
-        body_component("arm", PANDA_ARM),
+        body_component("arm", PANDA_ARM, RootMount("panda_link0"), limb=Limb.ARM),
         body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
     ),
     # Footprint measured from the menagerie link0 collision geometry (xy AABB).

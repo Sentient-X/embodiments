@@ -27,10 +27,10 @@ bindings yet.
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, GripperSpec, JointGroupSpec, MimicJoint
+from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 from .sources import ai_worker
 
@@ -59,8 +59,8 @@ _ARM_R_UPPER: Final = (3.14, 0.0, 3.14, 1.0786, 3.14, 1.57, 1.8201)
 _ARM_HOME: Final = (0.0,) * 7  # ffw_bringup initial_positions.yaml: all-zero home
 
 
-def _ffw_arm(side: Literal["l", "r"]) -> ArmSpec:
-    return ArmSpec(
+def _ffw_arm(side: Literal["l", "r"]) -> ChainSpec:
+    return ChainSpec(
         part_id=PartId(f"ffw-bg2-{side}-arm"),
         layout=bounded_layout(
             names=tuple(f"arm_{side}_joint{i}" for i in range(1, 8)),
@@ -89,7 +89,7 @@ def _ffw_gripper(side: Literal["l", "r"]) -> GripperSpec:
     )
 
 
-FFW_BG2_TORSO: Final = JointGroupSpec(
+FFW_BG2_TORSO: Final = ChainSpec(
     part_id=PartId("ffw-bg2-torso"),
     layout=bounded_layout(
         names=("lift_joint",),
@@ -100,7 +100,7 @@ FFW_BG2_TORSO: Final = JointGroupSpec(
     home=(0.0,),
 )
 
-FFW_BG2_HEAD: Final = JointGroupSpec(
+FFW_BG2_HEAD: Final = ChainSpec(
     part_id=PartId("ffw-bg2-head"),
     layout=bounded_layout(
         names=("head_joint1", "head_joint2"),
@@ -122,10 +122,14 @@ FFW_BG2_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="ffw", variant="bg2-rev4"),
     attachments=(
-        body_component("torso", FFW_BG2_TORSO),
-        body_component("head", FFW_BG2_HEAD, MountedOn("torso", "arm_base_link")),
-        body_component("left_arm", FFW_BG2_LEFT_ARM, MountedOn("torso", "arm_base_link")),
-        body_component("right_arm", FFW_BG2_RIGHT_ARM, MountedOn("torso", "arm_base_link")),
+        body_component("torso", FFW_BG2_TORSO, RootMount("base_link"), limb=Limb.TORSO),
+        body_component("head", FFW_BG2_HEAD, MountedOn("torso", "arm_base_link"), limb=Limb.HEAD),
+        body_component(
+            "left_arm", FFW_BG2_LEFT_ARM, MountedOn("torso", "arm_base_link"), limb=Limb.ARM
+        ),
+        body_component(
+            "right_arm", FFW_BG2_RIGHT_ARM, MountedOn("torso", "arm_base_link"), limb=Limb.ARM
+        ),
         body_component("left_gripper", FFW_BG2_LEFT_GRIPPER, MountedOn("left_arm", "arm_l_link7")),
         body_component(
             "right_gripper", FFW_BG2_RIGHT_GRIPPER, MountedOn("right_arm", "arm_r_link7")

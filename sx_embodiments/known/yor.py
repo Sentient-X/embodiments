@@ -3,10 +3,10 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, body_component
+from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..parts import ArmSpec, JointGroupSpec, MobileBaseSpec
+from ..parts import ChainSpec, Limb, MobileBaseSpec
 from ._authoring import bounded_layout, unbounded_layout
 
 YOR_MJCF: Final = packaged_asset(
@@ -56,7 +56,7 @@ YOR_BASE: Final = MobileBaseSpec(
     ),
     assets=(YOR_URDF, YOR_MJCF),
 )
-YOR_LIFT: Final = JointGroupSpec(
+YOR_LIFT: Final = ChainSpec(
     part_id=PartId("yor-telescoping-lift"),
     layout=bounded_layout(
         names=("Slider_1", "Slider_2"),
@@ -68,9 +68,9 @@ YOR_LIFT: Final = JointGroupSpec(
 )
 
 
-def _yor_arm(side: Literal["left", "right"]) -> ArmSpec:
+def _yor_arm(side: Literal["left", "right"]) -> ChainSpec:
     wrist_home = 0.78 if side == "left" else -0.78
-    return ArmSpec(
+    return ChainSpec(
         part_id=PartId(f"yor-{side}-piper-arm"),
         layout=bounded_layout(
             names=tuple(f"{side}_arm_joint{index}" for index in range(1, 7)),
@@ -91,9 +91,9 @@ YOR_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="yor"),
     attachments=(
-        body_component("base", YOR_BASE),
-        body_component("lift", YOR_LIFT, MountedOn("base", "base_profile_short")),
-        body_component("left_arm", YOR_LEFT_ARM, MountedOn("lift", "Lift_Top")),
-        body_component("right_arm", YOR_RIGHT_ARM, MountedOn("lift", "Lift_Top")),
+        body_component("base", YOR_BASE, RootMount("base_profile_short")),
+        body_component("lift", YOR_LIFT, MountedOn("base", "base_profile_short"), limb=Limb.LIFT),
+        body_component("left_arm", YOR_LEFT_ARM, MountedOn("lift", "Lift_Top"), limb=Limb.ARM),
+        body_component("right_arm", YOR_RIGHT_ARM, MountedOn("lift", "Lift_Top"), limb=Limb.ARM),
     ),
 )

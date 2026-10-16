@@ -2,7 +2,7 @@
  "source": "https://gitee.com/kit-miao/motor-sdk@fb0e9fc5455ecb02ed13cc1f43de58078be61b07 Python例程/u2can/DM_CAN.py",
  "bindings": {
   "embodiment": "b601-dm",
-  "id": "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9"
+  "id": "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa"
  },
  "vectors": {
   "float_to_uint": [

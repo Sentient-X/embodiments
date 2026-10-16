@@ -1,0 +1,187 @@
+{
+  "assets": [
+    {
+      "asset": {
+        "content": {
+          "sha256": "3e3b040f4bb12207d6e2ec95078108dbcd58e4d7d2e21a5a7806c9b8839a7a06",
+          "size_bytes": 11877
+        },
+        "format": "urdf",
+        "location": "package://sx-embodiments/official/universal_robots/ur10e.urdf",
+        "logical_path": "official/universal_robots/ur10e.urdf",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": "xacro 2.1.1 ur_type=ur10e",
+        "license_id": "BSD-3-Clause",
+        "path": "urdf/ur.urdf.xacro",
+        "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+        "revision": "8c2adeb88e58efa6d5ae376631bd61be7ec49027"
+      }
+    },
+    {
+      "asset": {
+        "content": {
+          "sha256": "7495b8efe33e497ffe892b9279acb010671c2b4b5955f499aa2b1d320dd8c871",
+          "size_bytes": 6938
+        },
+        "format": "mjcf",
+        "location": "package://sx-embodiments/menagerie/universal_robots_ur10e/ur10e.xml",
+        "logical_path": "menagerie/universal_robots_ur10e/ur10e.xml",
+        "media_type": "application/xml",
+        "role": "description"
+      },
+      "provenance": {
+        "generator": null,
+        "license_id": "BSD-3-Clause",
+        "path": "universal_robots_ur10e/ur10e.xml",
+        "repository": "https://github.com/google-deepmind/mujoco_menagerie",
+        "revision": "71f066ad0be9cd271f7ed58c030243ef157af9f4"
+      }
+    }
+  ],
+  "base_mount": null,
+  "components": [
+    {
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "home": [
+            -1.5708,
+            -1.5708,
+            1.5708,
+            -1.5708,
+            -1.5708,
+            0.0
+          ],
+          "kind": "arm",
+          "layout": [
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -6.28319,
+                "upper": 6.28319
+              },
+              "name": "shoulder_pan_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -6.28319,
+                "upper": 6.28319
+              },
+              "name": "shoulder_lift_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.1415,
+                "upper": 3.1415
+              },
+              "name": "elbow_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -6.28319,
+                "upper": 6.28319
+              },
+              "name": "wrist_1_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -6.28319,
+                "upper": 6.28319
+              },
+              "name": "wrist_2_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            },
+            {
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              },
+              "bounds": {
+                "kind": "bounded",
+                "lower": -6.28319,
+                "upper": 6.28319
+              },
+              "name": "wrist_3_joint",
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "unit": "rad"
+            }
+          ],
+          "part_id": "ur10e-arm",
+          "physical": null,
+          "ready": null
+        }
+      },
+      "instance": "arm",
+      "mount": {
+        "frame": "arm",
+        "kind": "root"
+      }
+    }
+  ],
+  "id": "8beb4619bd17e533d931b27f6a943469eca32c2b98f61778e38949da889dc721",
+  "kind": "robot",
+  "label": "Universal Robots UR10e",
+  "lineage": {
+    "family": "universal-robots",
+    "revision": "",
+    "variant": "ur10e"
+  },
+  "name": "ur10e",
+  "operator_mounts": [],
+  "rates": null,
+  "schema_version": 14
+}

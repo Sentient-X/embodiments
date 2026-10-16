@@ -45,7 +45,7 @@ def test_collection_catalog_does_not_materialize_or_promote_geometry(monkeypatch
 def test_declared_camera_inventory_tracks_component_changes():
     left = QUEST_EGO_SPEC.attachments[0]
     assert isinstance(left.part, CameraSpec)
-    updated = replace(left.part, model=SensorModel.REALSENSE_D405)
+    updated = replace(left.part, model=SensorModel("realsense_d405"))
     definition = replace(
         QUEST_EGO_SPEC,
         attachments=(replace(left, attachment=SensorAttachment(updated)),),
@@ -54,7 +54,7 @@ def test_declared_camera_inventory_tracks_component_changes():
     assert len(cameras) == 1
     assert cameras[0].quantity == 1
     assert cameras[0].kind is CollectionDeviceKind.CAMERA
-    assert cameras[0].label == updated.model.value.replace("_", " ")
+    assert cameras[0].label == "Intel RealSense D405"
     assert cameras[0].source == updated.optics.source
     assert definition.collection.devices == ()
 

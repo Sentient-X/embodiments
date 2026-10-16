@@ -15,7 +15,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
-from ..parts import ArmSpec, GripperSpec
+from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
 
 
@@ -64,7 +64,7 @@ BIMANUAL_SO101_URDF: Final = packaged_asset(
     media_type="application/xml",
 )
 
-SO101_ARM: Final = ArmSpec(
+SO101_ARM: Final = ChainSpec(
     part_id=PartId("so101-arm"),
     layout=bounded_layout(
         names=("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"),
@@ -97,7 +97,7 @@ SO101_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
     attachments=(
-        body_component("arm", SO101_ARM, RootMount("base_link")),
+        body_component("arm", SO101_ARM, RootMount("base_link"), limb=Limb.ARM),
         body_component("jaw", SO101_JAW, MountedOn("arm", "gripper_link")),
     ),
     extra_assets=(SO101_URDF,),

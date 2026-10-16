@@ -35,9 +35,9 @@ from sx_embodiments.known.universal_robots import (
     UR10E_MJCF,
 )
 from sx_embodiments.known.yor import YOR_LEFT_ARM, YOR_LIFT, YOR_MJCF, YOR_RIGHT_ARM, YOR_URDF
-from sx_embodiments.parts import ArmSpec, GripperSpec, JointGroupSpec
+from sx_embodiments.parts import ChainSpec, GripperSpec
 
-JointPart = ArmSpec | JointGroupSpec | GripperSpec
+JointPart = ChainSpec | GripperSpec
 
 
 def _joint_ranges(asset: PackagedAsset) -> dict[str, tuple[float, float]]:

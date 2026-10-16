@@ -26,11 +26,13 @@ def _so101_definition() -> dict[str, object]:
                 "instance": "arm",
                 "part_id": "so101-arm",
                 "mount": {"kind": "root", "frame": "base_link"},
+                "limb": "arm",
             },
             {
                 "instance": "jaw",
                 "part_id": "so101-jaw",
                 "mount": {"kind": "mounted_on", "parent": "arm", "frame": "gripper_link"},
+                "limb": None,
             },
         ],
         "assets": source["assets"],
@@ -209,6 +211,7 @@ def test_an_admitted_part_composes_through_assemble() -> None:
         "instance": "jaw",
         "part_id": "acme-jaw",
         "mount": {"kind": "mounted_on", "parent": "arm", "frame": "gripper_link"},
+        "limb": None,
     }
     merged = {**composable_parts(), PartId("acme-jaw"): hand}
     # The so101 description does not carry the acme jaw, so parity refuses — which is
