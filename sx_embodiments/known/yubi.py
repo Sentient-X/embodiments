@@ -27,6 +27,7 @@ from ..compose import (
 from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, EncoderReadout, Passive
+from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
 from ._authoring import bounded_layout
 from .sources import capture_source
@@ -192,6 +193,16 @@ YUBI_JAW: Final = GripperSpec(
     assets=(YUBI_HANDS_URDF,),
 )
 
+YUBI_MODULE: Final = Module(
+    module_id=ModuleId("yubi"),
+    label="YUBI handheld jaws",
+    description=YUBI_HANDS_URDF,
+    components=(
+        body_component("left_jaw", YUBI_JAW, RootMount("left_hand_root")),
+        body_component("right_jaw", YUBI_JAW, RootMount("right_hand_root")),
+    ),
+)
+
 YUBI_SPEC: Final = EmbodimentDefinition(
     collection=CollectionSetup(
         method=CollectionMethod.UMI,
@@ -232,10 +243,7 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     label="YUBI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="yubi", revision="description7-sx1"),
-    attachments=(
-        body_component("left_jaw", YUBI_JAW, RootMount("left_hand_root")),
-        body_component("right_jaw", YUBI_JAW, RootMount("right_hand_root")),
-    ),
+    build=Build.of(YUBI_MODULE),
     extra_assets=(YUBI_HANDS_URDF, *YUBI_MESHES),
     operator_mounts=(
         OperatorMount(

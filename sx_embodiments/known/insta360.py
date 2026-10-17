@@ -13,6 +13,7 @@ from typing import Final
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..mechanical import Build, Module, ModuleId
 from ..parts import DeviceSpec
 from .sources import capture_source
 
@@ -20,6 +21,16 @@ INSTA360_UMI_JAW: Final = DeviceSpec(
     part_id=PartId("insta360-umi-jaw"),
     description="UMI parallel jaw with AMT212A-V 12-bit absolute encoder; kinematics and "
     "bench aperture widths not yet measured",
+)
+
+INSTA360_UMI_MODULE: Final = Module(
+    module_id=ModuleId("insta360-umi"),
+    label="Insta360-UMI handheld gripper pair",
+    description=None,
+    components=(
+        body_component("left_jaw", INSTA360_UMI_JAW, RootMount("left_jaw")),
+        body_component("right_jaw", INSTA360_UMI_JAW, RootMount("right_jaw")),
+    ),
 )
 
 INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
@@ -54,8 +65,5 @@ INSTA360_UMI_SPEC: Final = EmbodimentDefinition(
     label="Insta360-UMI handheld gripper pair (X5 dual-fisheye)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="insta360-umi"),
-    attachments=(
-        body_component("left_jaw", INSTA360_UMI_JAW, RootMount("left_jaw")),
-        body_component("right_jaw", INSTA360_UMI_JAW, RootMount("right_jaw")),
-    ),
+    build=Build.of(INSTA360_UMI_MODULE),
 )

@@ -6,8 +6,9 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from sx_embodiments import PlacedEmbodiment, compose_embodiments, embodiments
-from sx_embodiments.assembly import Assembly, Member, Pose, Subtree
-from sx_embodiments.errors import CompositionError
+from sx_embodiments.assembly import Assembly, Member, Subtree
+from sx_embodiments.compose import MountedOn
+from sx_embodiments.errors import CompositionError, InterfaceMismatchError
 from sx_embodiments.instance import (
     InstanceError,
     drive_document,
@@ -16,15 +17,18 @@ from sx_embodiments.instance import (
 )
 from sx_embodiments.kinematics import IDENTITY, Kinematics
 from sx_embodiments.known.humanoid import (
-    HEAD,
-    SENTIENT_HUMANOID_ASSEMBLY,
+    HEAD_MODULE,
+    LEG_MODULES,
+    SENTIENT_HUMANOID_BUILD,
     SENTIENT_HUMANOID_SPEC,
-    SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY,
+    SENTIENT_HUMANOID_UPPER_BODY_BUILD,
     SENTIENT_HUMANOID_UPPER_BODY_SPEC,
     SENTIENT_HUMANOID_URDF,
+    UPPER_BODY_MODULE,
 )
 from sx_embodiments.known.so101 import SO101_URDF
 from sx_embodiments.layout import ActuatorBus, ActuatorModel, DirectDrive, UndocumentedDrive
+from sx_embodiments.mechanical import Build, Mate, Placed
 from sx_embodiments.parts import Limb
 
 
@@ -39,7 +43,7 @@ def _movable(urdf: bytes) -> list[str]:
 def test_the_reassembled_parts_are_the_vendors_robot() -> None:
     """Every link of the source sits where the source puts it, at any joint values."""
     source = SENTIENT_HUMANOID_URDF.path().read_bytes()
-    rejoined = SENTIENT_HUMANOID_ASSEMBLY.urdf()
+    rejoined = SENTIENT_HUMANOID_BUILD.urdf()
     assert sorted(_movable(source)) == sorted(_movable(rejoined))
     source_links = {
         link.attrib["name"]: ET.canonicalize(ET.tostring(link), strip_text=True)
@@ -63,12 +67,11 @@ def test_the_reassembled_parts_are_the_vendors_robot() -> None:
 
 def test_the_upper_body_is_the_humanoid_without_its_legs() -> None:
     full = {
-        link.attrib["name"]
-        for link in ET.fromstring(SENTIENT_HUMANOID_ASSEMBLY.urdf()).iter("link")
+        link.attrib["name"] for link in ET.fromstring(SENTIENT_HUMANOID_BUILD.urdf()).iter("link")
     }
     upper = {
         link.attrib["name"]
-        for link in ET.fromstring(SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY.urdf()).iter("link")
+        for link in ET.fromstring(SENTIENT_HUMANOID_UPPER_BODY_BUILD.urdf()).iter("link")
     }
     legs = full - upper
     assert upper < full
@@ -151,8 +154,34 @@ def test_a_cut_names_joints_the_description_has() -> None:
         Subtree(SENTIENT_HUMANOID_URDF, below="no_such_joint").urdf()
     with pytest.raises(CompositionError):
         Subtree(SENTIENT_HUMANOID_URDF, without=("no_such_joint",)).urdf()
-    with pytest.raises(CompositionError):
-        Member("head", HEAD, Pose((0.0, 0.0, 1.0)), seat=HEAD)
+
+
+def test_a_part_mates_only_on_its_own_seat() -> None:
+    """A leg on the neck seat is a typed refusal, not a leg growing out of the chest."""
+    upper = Placed("upper_body", UPPER_BODY_MODULE, namespaced=False)
+    with pytest.raises(InterfaceMismatchError):
+        Build(
+            robot="wrong",
+            root="origin",
+            placed=(upper,),
+            mates=(Mate("leg", LEG_MODULES[0], "upper_body", "neck", namespaced=False),),
+        )
+    with pytest.raises(CompositionError, match="already carries"):
+        Build(
+            robot="twice",
+            root="origin",
+            placed=(upper,),
+            mates=(
+                Mate("head", HEAD_MODULE, "upper_body", "neck", namespaced=False),
+                Mate("again", HEAD_MODULE, "upper_body", "neck"),
+            ),
+        )
+
+
+def test_the_head_camera_rides_with_the_torso() -> None:
+    """The head sits on the chest the torso turns, so its camera is carried by the torso."""
+    (camera,) = (c for c in SENTIENT_HUMANOID_UPPER_BODY_SPEC.attachments if c.instance == "head")
+    assert camera.mount == MountedOn("torso", "head_camera_color_optical")
 
 
 def test_parts_keeping_their_names_still_cannot_collide() -> None:

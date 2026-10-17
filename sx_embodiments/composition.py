@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 from xml.etree import ElementTree as ET
@@ -11,12 +11,14 @@ from xml.etree import ElementTree as ET
 from sx_contracts import AssetFormat, AssetRole, ProvenancedAsset
 
 from .assembly import Assembly, Member, Pose
-from .assets import description_asset_uri, generated_description
+from .assets import PackagedAsset, description_asset_uri, generated_description
 from .compose import Component, OperatorMount
 from .description import joint_names
-from .embodiment import Embodiment
+from .embodiment import Embodiment, portable_component
 from .errors import CompositionError
 from .identity import EmbodimentKind, EmbodimentName, Lineage
+from .mechanical import Build, Module, carrier, source
+from .parts import ChainSpec, GripperSpec, MobileBaseSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,10 +98,10 @@ def compose_embodiments(
     for namespace, placed in members.items():
         body = placed.embodiment
         prefix = assembly.prefix(namespace)
-        carrier = None if placed.parent is None else _carrier(placed.parent, parents, owners)
+        rides = None if placed.parent is None else carrier(placed.parent, parents, owners)
         components.extend(
             assembly.components_of(
-                namespace, body.components, instance_separator=".", carrier=carrier
+                namespace, body.components, instance_separator=".", carrier=rides
             )
         )
         operator_mounts.extend(
@@ -134,18 +136,51 @@ def compose_embodiments(
     return composed
 
 
-def _carrier(
-    link: str, parents: Mapping[str, tuple[str, str]], owners: Mapping[str, str]
-) -> str | None:
-    """The component whose joints move ``link``: the owner of the nearest joint above it.
+def compose_build(
+    build: Build, *, name: str, label: str, kind: EmbodimentKind = EmbodimentKind.ROBOT
+) -> Embodiment:
+    """A body made of modules at runtime: a gripper on another robot's flange, a camera on a
+    wrist, a neck in a head's place, as one normal Embodiment.
 
-    ``None`` when no component's joint lies above the link (it hangs off a fixed root). A
-    component mounted on an ancestor link does not carry it: two arms on a chest do not move
-    the head above the chest; the torso below it does.
+    The build renders with each module's mesh references resolved to its packaged source, and
+    the generated description is retained like :func:`compose_embodiments`' with every source's
+    licence. Every interface check is the build's own; this declares geometry only.
     """
-    current = link
-    while current in parents:
-        current, joint = parents[current]
-        if joint in owners:
-            return owners[joint]
-    return None
+    if build.root is None:
+        raise CompositionError(name, "a runtime composition is a rooted build")
+    urdf = build.assembly(mesh_uri=_mesh_uri).urdf()
+    components = build.components()
+    sources: dict[tuple[str, str], ProvenancedAsset] = {}
+    packaged = [
+        asset
+        for component in components
+        if isinstance(component.part, ChainSpec | GripperSpec | MobileBaseSpec)
+        for asset in component.part.assets
+    ]
+    for entry in (*build.placed, *build.mates):
+        file = source(entry.module.description)
+        if isinstance(file, PackagedAsset):
+            packaged.append(file)
+    for asset in packaged:
+        provenanced = asset.provenanced_asset()
+        retained = replace(provenanced, asset=replace(provenanced.asset, role=AssetRole.OTHER))
+        sources[(retained.uri, str(retained.sha256))] = retained
+    description = generated_description(urdf, tuple(sources.values()))
+    assets = (*sources.values(), description)
+    composed = Embodiment(
+        name=EmbodimentName(name),
+        label=label,
+        kind=kind,
+        lineage=Lineage(family="composition"),
+        components=tuple(portable_component(component) for component in components),
+        assets=assets,
+    ).with_assets(assets, urdf=urdf)
+    joint_names(composed.components, composed.state, urdf)
+    return composed
+
+
+def _mesh_uri(module: Module) -> Callable[[str], str] | None:
+    file = source(module.description)
+    if not isinstance(file, PackagedAsset):
+        return None
+    return partial(description_asset_uri, file.provenanced_asset().uri)

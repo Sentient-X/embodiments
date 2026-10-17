@@ -11,15 +11,20 @@ from sx_contracts.assets import AssetIntegrityError
 from ..assets import AssetAudience, PackagedAsset, audience
 from ..compose import EmbodimentDefinition
 from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
-from ..errors import UnknownEmbodimentError
+from ..errors import CompositionError, UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
+from ..mechanical import Module
 from ._previews import PREVIEWS
 from .aloha import ALOHA_SPEC
 from .b601 import B601_DM_SPEC, B601_DM_STATION_SPEC, BIMANUAL_B601_DM_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .ffw import FFW_BG2_SPEC
 from .g1 import UNITREE_G1_SPEC
-from .humanoid import SENTIENT_HUMANOID_SPEC, SENTIENT_HUMANOID_UPPER_BODY_SPEC
+from .humanoid import (
+    SENTIENT_HUMANOID_SPEC,
+    SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC,
+    SENTIENT_HUMANOID_UPPER_BODY_SPEC,
+)
 from .insta360 import INSTA360_UMI_SPEC
 from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
@@ -106,6 +111,10 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
     SENTIENT_RWH_SPEC.name: DevelopmentEmbodiment(
         spec=SENTIENT_RWH_SPEC,
         reason=DevelopmentReason.MISSING_JOINT_LIMITS,
+    ),
+    SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC.name: DevelopmentEmbodiment(
+        spec=SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC,
+        reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
     ),
 }
 
@@ -216,6 +225,26 @@ def asset_audiences() -> Mapping[str, AssetAudience]:
 def definitions() -> tuple[EmbodimentDefinition, ...]:
     """All known hardware, including incomplete revisions; never a hand-picked subset."""
     return (*_ALL_SPECS, *(entry.spec for entry in DEVELOPMENT_EMBODIMENTS.values()))
+
+
+def modules() -> tuple[Module, ...]:
+    """Every module the registry's bodies are built from, fitted ones included, once each."""
+    found: dict[str, Module] = {}
+
+    def visit(module: Module) -> None:
+        known = found.setdefault(str(module.module_id), module)
+        if known is not module:
+            if known != module:
+                raise CompositionError(str(module.module_id), "two modules share one id")
+            return
+        for socket in module.sockets:
+            if socket.fitted is not None:
+                visit(socket.fitted)
+
+    for definition in definitions():
+        for entry in (*definition.build.placed, *definition.build.mates):
+            visit(entry.module)
+    return tuple(found.values())
 
 
 def preview_asset(embodiment: Embodiment) -> PackagedAsset | None:

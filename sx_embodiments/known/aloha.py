@@ -2,10 +2,12 @@
 
 from typing import Final, Literal
 
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Slot, Socket
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 from .sources import menagerie
@@ -84,23 +86,53 @@ ALOHA_RIGHT_ARM: Final = _aloha_arm("right")
 ALOHA_LEFT_GRIPPER: Final = _aloha_gripper("left")
 ALOHA_RIGHT_GRIPPER: Final = _aloha_gripper("right")
 
+_GRIPPER_SEAT: Final = InterfaceId("interbotix-xs-gripper")
+_GRIPPERS: Final[tuple[tuple[Literal["left", "right"], GripperSpec], ...]] = (
+    ("left", ALOHA_LEFT_GRIPPER),
+    ("right", ALOHA_RIGHT_GRIPPER),
+)
+
+
+def _gripper_module(side: Literal["left", "right"], gripper: GripperSpec) -> Module:
+    """The X-Series gripper as the description fits it: everything below ``<side>/ee_arm``."""
+    return Module(
+        module_id=ModuleId(f"aloha-{side}-gripper"),
+        label=f"ALOHA {side} gripper",
+        description=Subtree(ALOHA_URDF, below=f"{side}/ee_arm"),
+        plug=_GRIPPER_SEAT,
+        components=(body_component(f"{side}_gripper", gripper, RootMount(f"{side}/ee_arm_mount")),),
+    )
+
+
+#: Both arms as the description ships them, each wrist fitted with its gripper; the state order
+#: is each arm followed by its gripper.
+ALOHA_MODULE: Final = Module(
+    module_id=ModuleId("aloha"),
+    label="ALOHA 2 follower pair",
+    description=ALOHA_URDF,
+    components=(
+        body_component("left_arm", ALOHA_LEFT_ARM, RootMount("left/base_link"), limb=Limb.ARM),
+        Slot("left_wrist"),
+        body_component("right_arm", ALOHA_RIGHT_ARM, RootMount("right/base_link"), limb=Limb.ARM),
+        Slot("right_wrist"),
+    ),
+    sockets=tuple(
+        Socket(
+            f"{side}_wrist",
+            _GRIPPER_SEAT,
+            f"{side}/gripper_link",
+            Pose((0.042825, 0.0, 0.0)),
+            carrier=f"{side}_arm",
+            fitted=_gripper_module(side, gripper),
+        )
+        for side, gripper in _GRIPPERS
+    ),
+)
+
 ALOHA_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("aloha"),
     label="ALOHA 2",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
-    attachments=(
-        body_component("left_arm", ALOHA_LEFT_ARM, RootMount("left/base_link"), limb=Limb.ARM),
-        body_component(
-            "left_gripper",
-            ALOHA_LEFT_GRIPPER,
-            MountedOn("left_arm", "left/gripper_link"),
-        ),
-        body_component("right_arm", ALOHA_RIGHT_ARM, RootMount("right/base_link"), limb=Limb.ARM),
-        body_component(
-            "right_gripper",
-            ALOHA_RIGHT_GRIPPER,
-            MountedOn("right_arm", "right/gripper_link"),
-        ),
-    ),
+    build=Build.of(ALOHA_MODULE),
 )

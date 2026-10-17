@@ -44,22 +44,43 @@ and force/torque parts; camera optics remain required facts on each sensor part.
 
 A member may mount on any link of a member placed before it, not only on the root:
 `PlacedEmbodiment(embodiments["so101"], parent="body/head_link")` carries an arm on another
-body's head. Composition and the registry's multi-device bodies share one renderer,
-`sx_embodiments.assembly.Assembly`: members mounted on links at nominal poses, plus named
-frames for cameras and leader sites. A registered body built from other descriptions
-declares its `Assembly` beside its components, takes those components from
-`Assembly.components_of`, and its committed description is that declaration rendered by
-`tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
+body's head. Composition and the registry share one renderer, `sx_embodiments.assembly.Assembly`:
+members mounted on links at nominal poses, plus named frames for cameras and leader sites.
 Assembly poses are nominal; a measured mount is calibration and never edits the assembly.
 
-A member can also be a part of a description rather than the whole of it. `Subtree` cuts the
-part below one joint (or the description without some joints), keeping the cut joint under a
-`<joint>_mount` root so a revolute hip still moves; a member `seat`ed on that part sits where
-the part hung from its source, and `namespaced=False` keeps the source's names. The Sentient
-humanoid is built this way from its one vendor URDF: the upper body (the robot in service) and
-the full humanoid (upper body plus two legs), and `tests/test_humanoid.py` holds the rejoined
-parts to the vendor's robot by forward kinematics. An SO-101 neck is a composition on the upper
-body's `head_link`, not a registered body, while neck motors are undecided.
+Every registered body is a `Build` of **modules** (`sx_embodiments.mechanical`). A module is
+one mechanical unit (an arm, a gripper, a camera, a pan-tilt neck, an adapter plate, a fingertip
+pad): its description, the **mechanical interface** its root link joins by (its plug; an ISO
+9409-1 flange, a vendor's wrist flange, the 1/4-20 camera thread), the **sockets** it offers
+(an interface at a pose on one of its links, and the component that moves that link), and the
+components it carries in its own names. A build places modules at installation poses and mates
+modules plug to socket; two sites join only when their interface ids are equal, and a wrong
+pairing, a taken socket or an unknown one is a typed refusal (`InterfaceMismatchError`,
+`SocketError`). Interfaces are an open registry, `MECHANICAL_INTERFACES`, like the camera models.
+A passive element is a module with no components (`rigid_module`, a solid with its mass and
+inertia), and `known/realsense.py` makes Intel's D405 and D435 descriptions camera modules.
+
+A vendor that ships an arm with its gripper in one file has its flange **fitted**: the socket
+carries the gripper module, cut from that file by `Subtree` below the joint it hangs from. A
+build that keeps every fitted module renders the vendor's bytes, so no identity moves; mating
+something else on a fitted socket cuts the fitted module out, which is a gripper swap.
+`tests/test_mechanical.py` holds that every fitted module is detachable (cut out and mated back,
+every link sits where the vendor put it and the components are the same), that every socket
+names the component that moves it, and that swaps compose: a Franka Hand on a UR5e's ISO flange,
+a B601 gripper on a Piper through an adapter, a D435 on a wrist through a bracket, an SO-101 in
+the humanoid's head's place. `composition.compose_build` makes any build a normal `Embodiment`
+at runtime. A registered rooted build's committed description is its rendering by
+`tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
+
+`Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves, and a
+part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
+way from its one vendor URDF: the upper body (the robot in service) offers a neck seat, two hip
+seats and two wrists; the full humanoid mates the legs back on, and `tests/test_humanoid.py`
+holds the rejoined parts to the vendor's robot by forward kinematics. The head's camera holder is
+a socket fitted with the CAD's D435, a camera module that adds its own optical frame (a module's
+`frames`) and carries the colour stream, riding on the torso that turns the chest. Its parallel
+grippers are modules whose servo and jaw no source describes, so the body with them,
+`sentient-humanoid-upper-body-grippers`, is a development body.
 
 Observation and controller semantics are owned by `sx-actions`, which depends on this
 package and derives spaces from the complete object:

@@ -1,13 +1,13 @@
 """Composition: an embodiment is an ordered tuple of part attachments; views are derived.
 
-A body built from other descriptions takes its components from its
-:class:`~sx_embodiments.assembly.Assembly` (``Assembly.components_of``), so the component graph
-and the rendered description come from one declaration. The
-declared attachment order is the wire order (see :mod:`sx_embodiments.layout`).
+A registered body is a :class:`~sx_embodiments.mechanical.Build` of modules, and takes its
+components from it, so the component graph and the rendered description come from one
+declaration. The declared attachment order is the wire order (see
+:mod:`sx_embodiments.layout`).
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -35,7 +35,7 @@ from .parts import (
 )
 
 if TYPE_CHECKING:
-    from .assembly import Assembly
+    from .mechanical import Build
 
 
 class ComponentRole(StrEnum):
@@ -266,14 +266,14 @@ class EmbodimentDefinition:
 
     Package-internal despite the public name: neither it nor the components it holds are
     exported from ``sx_embodiments``, so the only place a definition can be written is the
-    ``known/`` registry beside the assets it names.
+    ``known/`` registry beside the assets it names. Its components are its build's.
     """
 
     name: EmbodimentName
     label: str
     kind: EmbodimentKind
     lineage: Lineage
-    attachments: tuple[Component, ...]
+    build: "Build"
     rates: ControlRates | None = None
     extra_assets: tuple[PackagedAsset, ...] = ()
     base_mount: BaseMount | None = None
@@ -281,9 +281,7 @@ class EmbodimentDefinition:
     # Catalog intent can exist before a complete, executable revision. It does
     # not participate in that revision's physical identity or qualify its sensors.
     collection: CollectionSetup | None = None
-    # The declaration its description URDF is rendered from, when it is built from other
-    # descriptions. Not part of identity: the rendered bytes are, through the asset digest.
-    assembly: "Assembly | None" = None
+    attachments: tuple[Component, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         name = str(self.name)
@@ -293,8 +291,10 @@ class EmbodimentDefinition:
             raise CompositionError(name, "label must not be empty")
         if not self.lineage.family.strip():
             raise CompositionError(name, "family must not be empty")
-        validate_components(name, self.kind, self.attachments)
+        components = self.build.components()
+        validate_components(name, self.kind, components)
         validate_operator_mounts(name, self.kind, self.operator_mounts)
+        object.__setattr__(self, "attachments", components)
 
     def body_attachments(self) -> tuple[Component, ...]:
         return tuple(a for a in self.attachments if a.role is ComponentRole.BODY)

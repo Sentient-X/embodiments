@@ -2,7 +2,7 @@
 
 from typing import Final
 
-from ..assembly import INSPECTION_NOTE, Assembly, Frame, Member, MountJoint, Pose
+from ..assembly import INSPECTION_NOTE, Frame, MountJoint, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionMethod, CollectionSetup
 from ..compose import (
@@ -11,8 +11,9 @@ from ..compose import (
     leader_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..mechanical import Build, Module, ModuleId, Placed
 from ..parts import DeviceSpec
-from .piper import PIPER_SOURCE_URDF, PIPER_SPEC, PIPER_URDF
+from .piper import PIPER_MODULE, PIPER_SOURCE_URDF, PIPER_URDF
 
 PIPER_STATION_URDF: Final = packaged_asset(
     relpath="official/agilex_piper/piper_station.urdf",
@@ -30,14 +31,20 @@ PIPER_STATION_URDF: Final = packaged_asset(
     media_type="application/xml",
 )
 
+#: The leader is a Piper description with no drive declared; the station's leader device sits
+#: on its base.
+_PIPER_LEADER_MODULE: Final = Module(
+    module_id=ModuleId("piperx-leader"), label="PiperX leader arm", description=PIPER_URDF
+)
+
 #: A leader and a follower side by side, with the front camera's installation default.
-PIPER_STATION_ASSEMBLY: Final = Assembly(
+PIPER_STATION_BUILD: Final = Build(
     robot="piper_station",
     root="station_origin",
     note=INSPECTION_NOTE,
-    members=(
-        Member("leader", PIPER_URDF, Pose((0.0, 0.42, 0.0))),
-        Member("follower", PIPER_URDF, Pose((0.0, -0.42, 0.0))),
+    placed=(
+        Placed("leader", _PIPER_LEADER_MODULE, Pose((0.0, 0.42, 0.0))),
+        Placed("follower", PIPER_MODULE, Pose((0.0, -0.42, 0.0))),
     ),
     frames=(
         Frame(
@@ -47,6 +54,13 @@ PIPER_STATION_ASSEMBLY: Final = Assembly(
             MountJoint.FLOATING,
             "camera",
             "Front camera",
+        ),
+    ),
+    devices=(
+        leader_component(
+            "leader",
+            DeviceSpec(PartId("piperx-leader"), "PiperX leader arm"),
+            RootMount("leader_base_link"),
         ),
     ),
 )
@@ -67,14 +81,6 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
     label="PiperX leader-follower station",
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="piper", variant="piperx"),
-    attachments=(
-        leader_component(
-            "leader",
-            DeviceSpec(PartId("piperx-leader"), "PiperX leader arm"),
-            RootMount("leader_base_link"),
-        ),
-        *PIPER_STATION_ASSEMBLY.components_of("follower", PIPER_SPEC.attachments),
-    ),
+    build=PIPER_STATION_BUILD,
     extra_assets=(PIPER_SOURCE_URDF, PIPER_STATION_URDF),
-    assembly=PIPER_STATION_ASSEMBLY,
 )

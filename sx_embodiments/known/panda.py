@@ -6,9 +6,11 @@ scene names such as ``robot0_joint1`` remain consumer-local per the name boundar
 
 from typing import Final
 
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
+    Component,
     EmbodimentDefinition,
     MountedOn,
     MountKind,
@@ -17,6 +19,7 @@ from ..compose import (
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import (
     ChainSpec,
     ControlRates,
@@ -96,6 +99,38 @@ PANDA_GRIPPER: Final = GripperSpec(
     mimic_joints=(MimicJoint("panda_finger_joint2", of="panda_finger_joint1", multiplier=1.0),),
 )
 
+#: The Franka Hand, fitted on the arm in the description: everything below ``panda_hand_joint``.
+PANDA_HAND_MODULE: Final = Module(
+    module_id=ModuleId("franka-hand"),
+    label="Franka Hand",
+    description=Subtree(PANDA_URDF, below="panda_hand_joint"),
+    plug=InterfaceId("iso-9409-1-50-4-m6"),
+    components=(body_component("gripper", PANDA_GRIPPER, RootMount("panda_hand_joint_mount")),),
+)
+
+#: The flange's ISO pattern sits 45 degrees about the approach axis from ``panda_link8``.
+_PANDA_FLANGE: Final = Pose(rpy=(0.0, 0.0, -0.7853981633974483))
+
+
+def _panda(module_id: str, label: str, *components: Component) -> Module:
+    return Module(
+        module_id=ModuleId(module_id),
+        label=label,
+        description=PANDA_URDF,
+        components=components,
+        sockets=(
+            Socket(
+                "flange",
+                InterfaceId("iso-9409-1-50-4-m6"),
+                "panda_link8",
+                _PANDA_FLANGE,
+                carrier="arm",
+                fitted=PANDA_HAND_MODULE,
+            ),
+        ),
+    )
+
+
 OMRON_BASE: Final = MobileBaseSpec(part_id=PartId("omron-ld"))  # commanded outside joint space
 
 PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
@@ -103,10 +138,13 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     label="Franka Panda on Omron LD mobile base",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda", variant="omron"),
-    attachments=(
-        body_component("base", OMRON_BASE, RootMount("panda_link0")),
-        body_component("arm", PANDA_ARM, MountedOn("base", "panda_link0"), limb=Limb.ARM),
-        body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
+    build=Build.of(
+        _panda(
+            "franka-panda-omron",
+            "Franka Panda on an Omron LD base",
+            body_component("base", OMRON_BASE, RootMount("panda_link0")),
+            body_component("arm", PANDA_ARM, MountedOn("base", "panda_link0"), limb=Limb.ARM),
+        )
     ),
     rates=ControlRates(policy_hz=20.0),
     # Omron LD-60 chassis footprint (datasheet 699 x 500 mm); it drives on the floor
@@ -118,15 +156,19 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     ),
 )
 
+#: The fixed-base arm with its hand fitted.
+PANDA_MODULE: Final = _panda(
+    "franka-panda",
+    "Franka Panda arm",
+    body_component("arm", PANDA_ARM, RootMount("panda_link0"), limb=Limb.ARM),
+)
+
 FRANKA_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("franka"),
     label="Franka Panda (fixed base)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="panda"),
-    attachments=(
-        body_component("arm", PANDA_ARM, RootMount("panda_link0"), limb=Limb.ARM),
-        body_component("gripper", PANDA_GRIPPER, MountedOn("arm", "panda_link8")),
-    ),
+    build=Build.of(PANDA_MODULE),
     # Footprint measured from the menagerie link0 collision geometry (xy AABB).
     base_mount=BaseMount(
         kind=MountKind.BOLT_DOWN,

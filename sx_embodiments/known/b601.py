@@ -151,19 +151,18 @@ Further deliberate divergences:
 import dataclasses
 from typing import Final
 
-from ..assembly import INSPECTION_NOTE, Assembly, Frame, Member, MountJoint, Pose
+from ..assembly import INSPECTION_NOTE, Frame, MountJoint, Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
-    Component,
     EmbodimentDefinition,
-    MountedOn,
     RootMount,
     body_component,
     leader_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed, Socket
 from ..parts import (
     ChainSpec,
     DeviceSpec,
@@ -288,36 +287,61 @@ B601_LEADER: Final = DeviceSpec(
 )
 
 
+#: The gripper, which upstream ships fitted on the arm: everything below ``gripper_joint``.
+B601_GRIPPER_MODULE: Final = Module(
+    module_id=ModuleId("rebot-b601dm-gripper"),
+    label="Seeed reBot B601-DM parallel gripper",
+    description=Subtree(B601_DM_URDF, below="gripper_joint"),
+    plug=InterfaceId("seeed-b601-flange"),
+    components=(body_component("gripper", B601_GRIPPER, RootMount("gripper_joint_mount")),),
+)
+
+#: The follower arm as Seeed ships it, its flange fitted with the gripper.
+B601_DM_MODULE: Final = Module(
+    module_id=ModuleId("rebot-b601dm"),
+    label="Seeed reBot B601-DM arm",
+    description=B601_DM_URDF,
+    components=(body_component("arm", B601_ARM, RootMount("base_link"), limb=Limb.ARM),),
+    sockets=(
+        Socket(
+            "flange",
+            InterfaceId("seeed-b601-flange"),
+            "link6",
+            Pose((0.0, 0.0, 0.15971), (0.0, -1.5708, 0.0)),
+            carrier="arm",
+            fitted=B601_GRIPPER_MODULE,
+        ),
+    ),
+)
+
 B601_DM_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("b601-dm"),
     label="Seeed Studio reBot B601-DM (single arm)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
-    attachments=(
-        body_component("arm", B601_ARM, RootMount("base_link"), limb=Limb.ARM),
-        body_component("gripper", B601_GRIPPER, MountedOn("arm", "link6")),
-    ),
+    build=Build.of(B601_DM_MODULE),
     extra_assets=(B601_DM_URDF,),
     # rates unbound: the pod's capture fps is a per-session parameter, not a hardware rate
 )
 
 _SIDES: Final = (
-    Member("left", B601_DM_URDF, Pose((0.0, 0.5, 0.0))),
-    Member("right", B601_DM_URDF, Pose((0.0, -0.5, 0.0))),
+    Placed("left", B601_DM_MODULE, Pose((0.0, 0.5, 0.0))),
+    Placed("right", B601_DM_MODULE, Pose((0.0, -0.5, 0.0))),
 )
 
 #: Two follower arms with grippers; two sides ARE the bimanual body.
-BIMANUAL_B601_DM_ASSEMBLY: Final = Assembly(
-    robot="bimanual_rebot_b601_dm", root="bimanual_origin", note=INSPECTION_NOTE, members=_SIDES
+BIMANUAL_B601_DM_BUILD: Final = Build(
+    robot="bimanual_rebot_b601_dm", root="bimanual_origin", note=INSPECTION_NOTE, placed=_SIDES
 )
 
 #: The same pair with its leaders and cameras placed for inspection; the floating frames'
-#: poses are installation defaults, never measured extrinsics.
-B601_DM_STATION_ASSEMBLY: Final = Assembly(
+#: poses are installation defaults, never measured extrinsics. The leaders have no captured
+#: description, so they are devices on their frames.
+B601_DM_STATION_BUILD: Final = Build(
     robot="rebot_b601_dm_station",
     root="station_origin",
     note=INSPECTION_NOTE,
-    members=_SIDES,
+    placed=_SIDES,
     frames=(
         Frame(
             "left_leader",
@@ -356,15 +380,11 @@ B601_DM_STATION_ASSEMBLY: Final = Assembly(
             "Top camera",
         ),
     ),
+    devices=(
+        leader_component("left_leader", B601_LEADER, RootMount("left_leader")),
+        leader_component("right_leader", B601_LEADER, RootMount("right_leader")),
+    ),
 )
-
-
-def _followers(assembly: Assembly) -> tuple[Component, ...]:
-    return tuple(
-        component
-        for side in ("left", "right")
-        for component in assembly.components_of(side, B601_DM_SPEC.attachments)
-    )
 
 
 BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
@@ -372,9 +392,8 @@ BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
     label="Bimanual Seeed Studio reBot B601-DM",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm-bimanual"),
-    attachments=_followers(BIMANUAL_B601_DM_ASSEMBLY),
+    build=BIMANUAL_B601_DM_BUILD,
     extra_assets=(B601_DM_SOURCE_URDF, BIMANUAL_B601_DM_URDF),
-    assembly=BIMANUAL_B601_DM_ASSEMBLY,
 )
 
 B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
@@ -411,11 +430,6 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
     label="Seeed Studio reBot B601-DM bimanual teleop station",
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="rebot-b601", variant="dm-station"),
-    attachments=(
-        leader_component("left_leader", B601_LEADER, RootMount("left_leader")),
-        leader_component("right_leader", B601_LEADER, RootMount("right_leader")),
-        *_followers(B601_DM_STATION_ASSEMBLY),
-    ),
+    build=B601_DM_STATION_BUILD,
     extra_assets=(B601_DM_SOURCE_URDF, B601_DM_STATION_URDF),
-    assembly=B601_DM_STATION_ASSEMBLY,
 )

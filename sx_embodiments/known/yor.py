@@ -6,6 +6,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb, MobileBaseSpec
 from ._authoring import bounded_layout, unbounded_layout
 
@@ -85,15 +86,22 @@ def _yor_arm(side: Literal["left", "right"]) -> ChainSpec:
 YOR_LEFT_ARM: Final = _yor_arm("left")
 YOR_RIGHT_ARM: Final = _yor_arm("right")
 
-YOR_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("yor"),
-    label="YOR bimanual mobile robot",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="yor"),
-    attachments=(
+YOR_MODULE: Final = Module(
+    module_id=ModuleId("yor"),
+    label="YOR",
+    description=YOR_URDF,
+    components=(
         body_component("base", YOR_BASE, RootMount("base_profile_short")),
         body_component("lift", YOR_LIFT, MountedOn("base", "base_profile_short"), limb=Limb.LIFT),
         body_component("left_arm", YOR_LEFT_ARM, MountedOn("lift", "Lift_Top"), limb=Limb.ARM),
         body_component("right_arm", YOR_RIGHT_ARM, MountedOn("lift", "Lift_Top"), limb=Limb.ARM),
     ),
+)
+
+YOR_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("yor"),
+    label="YOR bimanual mobile robot",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="yor"),
+    build=Build.of(YOR_MODULE),
 )

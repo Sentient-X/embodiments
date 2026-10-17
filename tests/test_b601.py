@@ -6,6 +6,7 @@ development record until its installed camera extrinsics are captured.
 """
 
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 import pytest
 from sx_contracts import Capability
@@ -242,7 +243,7 @@ def test_a_station_without_a_leader_is_rejected() -> None:
             label="B601-DM followers with no leader",
             kind=EmbodimentKind.TELEOP_STATION,
             lineage=B601_DM_STATION_SPEC.lineage,
-            attachments=B601_DM_STATION_SPEC.body_attachments(),
+            build=replace(B601_DM_STATION_SPEC.build, devices=()),
         )
 
 

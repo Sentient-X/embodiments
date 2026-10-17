@@ -14,6 +14,7 @@ from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, UndocumentedDrive, VendorReadout
+from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 
@@ -44,12 +45,11 @@ STARARM102_DRIVE: Final = UndocumentedDrive(
     "encoder-to-model mapping are not qualified. See docs/STARARM102.md."
 )
 
-STARARM102_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("stararm102-ld"),
-    label="StarArm102-LD leader (development kinematics)",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="stararm102", variant="ld"),
-    attachments=(
+STARARM102_MODULE: Final = Module(
+    module_id=ModuleId("stararm102-ld"),
+    label="StarArm102-LD leader with its jaw",
+    description=STARARM102_URDF,
+    components=(
         body_component(
             "arm",
             ChainSpec(
@@ -84,5 +84,13 @@ STARARM102_SPEC: Final = EmbodimentDefinition(
             MountedOn("arm", "link6"),
         ),
     ),
+)
+
+STARARM102_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("stararm102-ld"),
+    label="StarArm102-LD leader (development kinematics)",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="stararm102", variant="ld"),
+    build=Build.of(STARARM102_MODULE),
     extra_assets=(STARARM102_URDF,),
 )
