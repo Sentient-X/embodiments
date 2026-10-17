@@ -126,11 +126,13 @@ def test_every_driven_or_encoder_read_coordinate_is_a_slot(body: Embodiment) -> 
 
 
 def test_the_nominal_zero_is_the_zero_every_driver_transcript_was_minted_with() -> None:
-    """The Rust drive maps were recorded at the uncalibrated zero this module names."""
+    """The Rust drivers and their transcripts use the uncalibrated zero this module names."""
     minters = sorted(DRIVERS.glob("*/tests/fixtures/*/mint.py"))
     assert minters
     for minter in minters:
         assert f"UNCALIBRATED_ZERO = {UNCALIBRATED_ZERO!r}" in minter.read_text(), minter
+    binding = (DRIVERS / "sx-embodiment-drivers/src/binding.rs").read_text()
+    assert f"pub const UNCALIBRATED_ZERO: f64 = {UNCALIBRATED_ZERO!r};" in binding
 
 
 @pytest.mark.parametrize(
