@@ -70,21 +70,33 @@ def compose_embodiments(
         ),
     )
     urdf = assembly.urdf()
+    rendered = ET.fromstring(urdf)
     parents = {
-        child.attrib["link"]: parent.attrib["link"]
-        for joint in ET.fromstring(urdf).findall("joint")
+        child.attrib["link"]: (parent.attrib["link"], joint.attrib["name"])
+        for joint in rendered.findall("joint")
         if (child := joint.find("child")) is not None
         and (parent := joint.find("parent")) is not None
     }
+    # Which component's motion each rendered joint is: its state coordinates, and the mimic
+    # joints that follow one of them.
+    owners = {
+        assembly.prefix(namespace) + joint: f"{namespace}.{coordinate.instance}"
+        for namespace, placed in members.items()
+        for coordinate, joint in zip(
+            placed.embodiment.state.coordinates, placed.embodiment.joint_names, strict=True
+        )
+    }
+    for joint in rendered.findall("joint"):
+        mimic = joint.find("mimic")
+        if mimic is not None and mimic.get("joint") in owners:
+            owners[joint.attrib["name"]] = owners[mimic.attrib["joint"]]
     components: list[Component] = []
     assets: dict[tuple[str, str], ProvenancedAsset] = {}
     operator_mounts: list[OperatorMount] = []
     for namespace, placed in members.items():
         body = placed.embodiment
         prefix = assembly.prefix(namespace)
-        carrier = (
-            None if placed.parent is None else _carrier(name, placed.parent, parents, components)
-        )
+        carrier = None if placed.parent is None else _carrier(placed.parent, parents, owners)
         components.extend(
             assembly.components_of(
                 namespace, body.components, instance_separator=".", carrier=carrier
@@ -123,20 +135,17 @@ def compose_embodiments(
 
 
 def _carrier(
-    name: str, link: str, parents: Mapping[str, str], components: list[Component]
+    link: str, parents: Mapping[str, tuple[str, str]], owners: Mapping[str, str]
 ) -> str | None:
-    """The component whose joints move ``link``: the nearest strict ancestor mount frame.
+    """The component whose joints move ``link``: the owner of the nearest joint above it.
 
-    ``None`` when no component's joints lie above the link (it hangs off a fixed root).
+    ``None`` when no component's joint lies above the link (it hangs off a fixed root). A
+    component mounted on an ancestor link does not carry it: two arms on a chest do not move
+    the head above the chest; the torso below it does.
     """
     current = link
     while current in parents:
-        current = parents[current]
-        owners = [c.instance for c in components if c.mount.frame == current]
-        if len(owners) > 1:
-            raise CompositionError(
-                name, f"{link!r} could ride on any of {owners}; mount on a link below one"
-            )
-        if owners:
-            return owners[0]
+        current, joint = parents[current]
+        if joint in owners:
+            return owners[joint]
     return None

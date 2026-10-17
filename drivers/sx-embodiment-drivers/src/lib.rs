@@ -7,7 +7,8 @@
 //! the unit's joint calibration. The chain's axes are listed in the
 //! embodiment's native state order, so a command vector and an observed vector are indexed
 //! exactly as `robot.state.coordinates`. A driver reads those facts from the registry's
-//! rendered [`BodyBindings`], never spells them.
+//! rendered [`BodyBindings`], never spells them, and calibrates them from one built robot's
+//! [`InstanceDrive`], which the registry resolves from its robot instance.
 //!
 //! [`ActuatorChain`] is that surface: command the joint vector, stop with a report of what
 //! each actuator's answer proves, each failure classified as a [`ChainFailure`]. A
@@ -24,6 +25,7 @@ pub mod body;
 pub mod can;
 pub mod chain;
 pub mod composite;
+pub mod drive;
 pub mod serial;
 
 pub use binding::{
@@ -36,3 +38,4 @@ pub use chain::{
     StopReport, TargetError, check_targets,
 };
 pub use composite::{Composite, CompositeError};
+pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};

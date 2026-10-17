@@ -14,7 +14,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde.workspace = true
-serde_json.workspace = true
+# Exact float parsing: the transcripts compare decoded positions bit for bit.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2.workspace = true
 
 [lints]

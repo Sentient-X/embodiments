@@ -16,13 +16,15 @@ The reference, run here unmodified:
 - ``vectors``: ``float_to_uint`` and ``uint_to_float`` over edge values, ``controlMIT`` frames
   for free MIT vectors (clamped gains, positions past ``Q_MAX``, nonzero velocity and torque),
   and feedback frames decoded into ``Motor`` state, each produced by DM_CAN.py itself.
-- ``sessions``: the B601-DM chain's bus traffic, every write with the motors' answers and every
-  wait, for a whole session (open, three commands, stop), a stop with a faulted and a silent
-  motor, and an open whose motor reports a VMAX register its limit row does not carry. The
-  chain's own sequencing (``src/chain.rs``) is mirrored below by calling DM_CAN.py's functions
-  in the same order; the waits the chain adds between polls are recorded beside the vendor's.
-  Axes and bindings are the registry's (``bindings/b601-dm.json`` in this crate); master ids,
-  gains and the gripper motor's range are Seeed's (``src/b601.rs`` cites them).
+- ``sessions``: each body's chain bus traffic, every write with the motors' answers and every
+  wait. For the B601-DM: a whole session (open, three commands, stop), a stop with a faulted
+  and a silent motor, and an open whose motor reports a VMAX register its limit row does not
+  carry. For the Sentient humanoid upper body: a whole session over its eleven DM8009 and
+  DM4340 motors. The chain's own sequencing (``src/chain.rs``) is mirrored below by calling
+  DM_CAN.py's functions in the same order; the waits the chain adds between polls are recorded
+  beside the vendor's. Axes and bindings are the registry's (``bindings/*.json`` in this
+  crate); master ids, gains and motor ranges are each body's sources (``src/b601.rs`` and
+  ``src/humanoid.rs`` cite them).
 - ``cross_checks``: the same MIT vectors and decodes through two other implementations, and
   every place they diverge from DM_CAN.py, stated rather than averaged away:
   ``Sentient-X/sentient_can`` at 3837d224327d89ed30b6fdee3577769d8dae5f94 through its own
@@ -57,7 +59,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "transcripts.json"
-BINDINGS = HERE.parents[2] / "bindings/b601-dm.json"
+BINDINGS = HERE.parents[2] / "bindings"
 
 MOTOR_SDK_COMMIT = "fb0e9fc5455ecb02ed13cc1f43de58078be61b07"
 LEROBOT_COMMIT = "ff71cae1ae2d09fd035553c35da65888ed6c8304"
@@ -209,11 +211,12 @@ ANSWER_POLL_INTERVAL = 0.001
 DM_TYPE = {
     "damiao_dm4310": DM_CAN.DM_Motor_Type.DM4310,
     "damiao_dm4340": DM_CAN.DM_Motor_Type.DM4340,
+    "damiao_dm8009": DM_CAN.DM_Motor_Type.DM8009,
 }
 # src/b601.rs: master = id + 0x10; kp/kd from reBotArm_control_py's rebotarm_dm.yaml (the 4340P's
 # kd 8 declared as 5, the MIT maximum); motor ranges are the URDF limits intersected with
 # LeRobot's DM_PROFILE.joint_limits soft box (degrees), and the gripper motor's position_limits.
-CONTROLLER = {
+B601_CONTROLLER = {
     1: (120.0, 5.0, (-150.0, 150.0)),
     2: (120.0, 5.0, (-200.0, 1.0)),
     3: (120.0, 5.0, (-200.0, 1.0)),
@@ -221,6 +224,22 @@ CONTROLLER = {
     5: (18.0, 2.0, (-90.0, 90.0)),
     6: (18.0, 2.0, (-90.0, 90.0)),
     7: (8.0, 1.0, None),
+}
+# src/humanoid.rs: master = id + 0x20 (sentient_can's recv_can_ids); kp/kd from
+# humanoid-simrealgap's training_actuator_params_20260606.csv; no soft box, so every motor's
+# range is its joint's URDF bounds.
+HUMANOID_CONTROLLER: dict[int, tuple[float, float, tuple[float, float] | None]] = {
+    0x0F: (350.0, 5.0, None),
+    0x10: (100.0, 5.0, None),
+    0x11: (40.0, 2.8, None),
+    0x12: (54.772, 5.0, None),
+    0x13: (54.772, 5.0, None),
+    0x14: (54.772, 5.0, None),
+    0x18: (40.0, 2.6595, None),
+    0x19: (100.0, 5.0, None),
+    0x1A: (54.772, 4.861, None),
+    0x1B: (110.0, 5.0, None),
+    0x1C: (54.772, 4.07530153, None),
 }
 GRIPPER_MOTOR_RANGE = (-5.0, 0.0)
 # The DM4340 velocity ranges Damiao publishes: DM_CAN.py's row, then C++例程 damiao.h's.
@@ -237,19 +256,45 @@ def restore_vendor_limits() -> None:
         row[:] = original
 
 
-def motor_range(axis: dict[str, Any]) -> tuple[float, float]:
-    _kp, _kd, soft = CONTROLLER[axis["bus_id"]]
-    if soft is None:
-        return GRIPPER_MOTOR_RANGE
-    return (max(axis["lower"], math.radians(soft[0])), min(axis["upper"], math.radians(soft[1])))
+class Body:
+    """One body's chain configuration beyond the registry's bindings."""
+
+    def __init__(
+        self,
+        name: str,
+        master_offset: int,
+        controller: dict[int, tuple[float, float, tuple[float, float] | None]],
+        soft_box: bool,
+    ) -> None:
+        self.name = name
+        self.master_offset = master_offset
+        self.controller = controller
+        self.soft_box = soft_box
+        self.document = json.loads((BINDINGS / f"{name}.json").read_text())
+        self.axes: list[dict[str, Any]] = self.document["axes"]
+
+    def motor_range(self, axis: dict[str, Any]) -> tuple[float, float]:
+        if not self.soft_box:
+            return (axis["lower"], axis["upper"])
+        _kp, _kd, soft = self.controller[axis["bus_id"]]
+        if soft is None:
+            return GRIPPER_MOTOR_RANGE
+        return (
+            max(axis["lower"], math.radians(soft[0])),
+            min(axis["upper"], math.radians(soft[1])),
+        )
+
+    def commandable(self, axis: dict[str, Any]) -> tuple[float, float]:
+        lower, upper = self.motor_range(axis)
+        ends = [
+            value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO
+            for value in (lower, upper)
+        ]
+        return (max(axis["lower"], min(ends)), min(axis["upper"], max(ends)))
 
 
-def commandable(axis: dict[str, Any]) -> tuple[float, float]:
-    lower, upper = motor_range(axis)
-    ends = [
-        value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO for value in (lower, upper)
-    ]
-    return (max(axis["lower"], min(ends)), min(axis["upper"], max(ends)))
+B601 = Body("b601-dm", 0x10, B601_CONTROLLER, soft_box=True)
+HUMANOID = Body("sentient-humanoid-upper-body", 0x20, HUMANOID_CONTROLLER, soft_box=False)
 
 
 class ChainRefusalError(Exception):
@@ -259,13 +304,16 @@ class ChainRefusalError(Exception):
 
 
 class Chain:
-    def __init__(self, axes: list[dict[str, Any]], serial: FakeSerial) -> None:
-        self.axes = axes
+    def __init__(self, body: Body, serial: FakeSerial) -> None:
+        self.body = body
+        self.axes = body.axes
         self.serial = serial
         self.control = DM_CAN.MotorControl(serial)
         self.motors = []
-        for axis in axes:
-            motor = DM_CAN.Motor(DM_TYPE[axis["model"]], axis["bus_id"], axis["bus_id"] + 0x10)
+        for axis in self.axes:
+            motor = DM_CAN.Motor(
+                DM_TYPE[axis["model"]], axis["bus_id"], axis["bus_id"] + body.master_offset
+            )
             self.control.addMotor(motor)
             self.motors.append(motor)
         self.enabled = False
@@ -346,7 +394,7 @@ class Chain:
             raise ChainRefusalError({"stop_pending": True})
         targets = []
         for axis, joint in zip(self.axes, joints, strict=True):
-            lower, upper = commandable(axis)
+            lower, upper = self.body.commandable(axis)
             assert lower <= joint <= upper, (axis["joint"], joint)
             targets.append(axis["sign"] * (joint - UNCALIBRATED_ZERO) * axis["reduction"])
         if not self.enabled:
@@ -358,7 +406,7 @@ class Chain:
             self.enabled = True
         before = self.counts()
         for motor, target in zip(self.motors, targets, strict=True):
-            kp, kd, _soft = CONTROLLER[motor.SlaveID]
+            kp, kd, _soft = self.body.controller[motor.SlaveID]
             self.control.controlMIT(motor, kp, kd, target, 0.0, 0.0)
         self.await_answers(before)
         self.expect_all(before, 1)
@@ -394,9 +442,10 @@ class Chain:
         return {"unproven": unproven, "faults": faults}
 
 
-def fake_motors(axes: list[dict[str, Any]]) -> list[FakeMotor]:
+def fake_motors(body: Body) -> list[FakeMotor]:
     return [
-        FakeMotor(axis["bus_id"], axis["bus_id"] + 0x10, DM_TYPE[axis["model"]]) for axis in axes
+        FakeMotor(axis["bus_id"], axis["bus_id"] + body.master_offset, DM_TYPE[axis["model"]])
+        for axis in body.axes
     ]
 
 
@@ -406,6 +455,13 @@ ACTIONS = [
     # The commandable edges: soft box on joint1, joint4's lower, joint6; URDF elsewhere; the
     # gripper at the motor's open angle.
     [math.radians(-150.0), -3.14, 0.0, 1.57, 1.57, math.radians(-90.0), 0.045],
+]
+# The humanoid's torso yaw and both arms: rest, a reach, then each joint at an edge of its URDF
+# bounds, alternating lower and upper.
+HUMANOID_ACTIONS = [
+    [0.0] * 11,
+    [0.3, -0.5, -0.2, 0.4, -0.6, 0.25, 0.5, 0.2, -0.4, 0.6, -0.25],
+    [axis["upper"] if index % 2 else axis["lower"] for index, axis in enumerate(HUMANOID.axes)],
 ]
 SEQUENCING = (
     "chain sequencing over vendor primitives: the order of calls is src/chain.rs's, mirrored "
@@ -418,23 +474,27 @@ def step(entry: dict[str, Any]) -> dict[str, Any]:
     return {**entry, "event_count": len(EVENTS)}
 
 
-def run_session(axes: list[dict[str, Any]], script: str) -> dict[str, Any]:
+def run_session(body: Body, script: str) -> dict[str, Any]:
     EVENTS.clear()
     FEEDBACK_COUNTS.clear()
     restore_vendor_limits()
-    motors = fake_motors(axes)
+    motors = fake_motors(body)
     if script == "vmax_8":
         for motor in motors[:3]:
             motor.registers[int(DM_CAN.DM_variable.VMAX)] = 8.0
     if script == "limit_mismatch":
         motors[1].registers[int(DM_CAN.DM_variable.VMAX)] = 9.0
     serial = FakeSerial(motors)
-    chain = Chain(axes, serial)
+    chain = Chain(body, serial)
     steps: list[dict[str, Any]] = []
     try:
         limits = chain.open()
         steps.append(step({"step": "open", "limits": limits}))
-        if script in ("session", "vmax_8"):
+        if script == "humanoid_session":
+            for action in HUMANOID_ACTIONS:
+                steps.append(step({"step": "command", "joints": action, **chain.command(action)}))
+            steps.append(step({"step": "stop", "report": chain.stop()}))
+        elif script in ("session", "vmax_8"):
             for action in ACTIONS if script == "session" else ACTIONS[1:2]:
                 steps.append(step({"step": "command", "joints": action, **chain.command(action)}))
             steps.append(step({"step": "stop", "report": chain.stop()}))
@@ -456,13 +516,20 @@ def run_session(axes: list[dict[str, Any]], script: str) -> dict[str, Any]:
     except ChainRefusalError as failure:
         steps.append(step({"step": "open", "error": failure.error}))
     restore_vendor_limits()
-    return {"name": script, "sequencing": SEQUENCING, "events": list(EVENTS), "steps": steps}
+    return {
+        "name": script,
+        "body": body.name,
+        "sequencing": SEQUENCING,
+        "events": list(EVENTS),
+        "steps": steps,
+    }
 
 
 # --- vectors ---------------------------------------------------------------------------------
 
 DM4310 = int(DM_CAN.DM_Motor_Type.DM4310)
 DM4340 = int(DM_CAN.DM_Motor_Type.DM4340)
+DM8009 = int(DM_CAN.DM_Motor_Type.DM8009)
 MIT_VECTORS = [
     # motor_type, kp, kd, q, dq, tau
     (DM4310, 10.0, 0.5, 1.234, -2.5, 1.5),
@@ -471,6 +538,8 @@ MIT_VECTORS = [
     (DM4310, 501.0, -1.0, 13.0, 31.0, -11.0),  # every field past its range
     (DM4310, 0.0, 0.0, 0.0, 0.0, 0.0),
     (DM4310, 8.0, 1.0, -5.0, 0.0, 0.0),
+    (DM8009, 350.0, 5.0, 1.5708, -12.0, 20.0),
+    (DM8009, 40.0, 2.8, -12.6, 46.0, -55.0),  # q, dq and tau past DM8009's row
 ]
 FLOAT_TO_UINT = [
     (0.0, -12.5, 12.5, 16),
@@ -496,6 +565,7 @@ DECODES = [
     (0x04, DM4310, "04ffff000fff2a2b"),
     (0x07, DM4310, "a7000080080000ff"),
     (0x02, DM4340, "e2123456789abcde"),
+    (0x0F, DM8009, "1f9a3c80c7ff1e20"),
 ]
 
 
@@ -569,7 +639,7 @@ def vectors() -> dict[str, Any]:
 
 # --- cross-checks ----------------------------------------------------------------------------
 
-SENTIENT_CAN_TYPE = {DM4310: 1, DM4340: 3}  # sentient_can MotorType numbering
+SENTIENT_CAN_TYPE = {DM4310: 1, DM4340: 3, DM8009: 7}  # sentient_can MotorType numbering
 
 
 def sentient_can(requests: list[str]) -> list[str]:
@@ -606,7 +676,11 @@ def lerobot_methods() -> types.SimpleNamespace:
 
 def cross_checks(vendor: dict[str, Any]) -> dict[str, Any]:
     lerobot = lerobot_methods()
-    lerobot_type = {DM4310: lerobot.MotorType.DM4310, DM4340: lerobot.MotorType.DM4340}
+    lerobot_type = {
+        DM4310: lerobot.MotorType.DM4310,
+        DM4340: lerobot.MotorType.DM4340,
+        DM8009: lerobot.MotorType.DM8009,
+    }
     divergences: list[str] = []
 
     sc_frames = sentient_can(
@@ -694,19 +768,21 @@ def sha256(path: Path) -> str:
 
 
 def main() -> None:
-    bindings = json.loads(BINDINGS.read_text())
-    axes = bindings["axes"]
     vendor = vectors()
     document = {
         "source": f"https://gitee.com/kit-miao/motor-sdk@{MOTOR_SDK_COMMIT} "
         "Python例程/u2can/DM_CAN.py",
-        "bindings": {"embodiment": bindings["embodiment"], "id": bindings["id"]},
+        "bindings": [
+            {"embodiment": body.document["embodiment"], "id": body.document["id"]}
+            for body in (B601, HUMANOID)
+        ],
         "vectors": vendor,
         "sessions": [
-            run_session(axes, "session"),
-            run_session(axes, "vmax_8"),
-            run_session(axes, "stop_fault"),
-            run_session(axes, "limit_mismatch"),
+            run_session(B601, "session"),
+            run_session(B601, "vmax_8"),
+            run_session(B601, "stop_fault"),
+            run_session(B601, "limit_mismatch"),
+            run_session(HUMANOID, "humanoid_session"),
         ],
         "cross_checks": cross_checks(vendor),
     }

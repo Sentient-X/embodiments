@@ -2,7 +2,8 @@
   "models": [
     "feetech_sts3215",
     "damiao_dm4310",
-    "damiao_dm4340"
+    "damiao_dm4340",
+    "damiao_dm8009"
   ],
   "buses": [
     "feetech_serial",

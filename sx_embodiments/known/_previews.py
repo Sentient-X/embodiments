@@ -126,11 +126,28 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "a4e511c8eb27817aa83c387f2448f0c925647c0864fa0be542e5fe376dad2d80"
+        "4d7ee4df1a00ec14ae164727c196255335a859ad9fb7ad36acc2786c0f7e70cd"
     ): packaged_asset(
-        relpath="humanoid_pkg/previews/a4e511c8eb27817aa83c387f2448f0c925647c0864fa0be542e5fe376dad2d80.webp",
+        relpath="humanoid_pkg/previews/4d7ee4df1a00ec14ae164727c196255335a859ad9fb7ad36acc2786c0f7e70cd.webp",
         sha256="83611778a1e1f078653610cd9bd1fff44fbffc015ed7c43228a64769fb37425e",
         size_bytes=4548,
+        format=AssetFormat.OTHER,
+        role=AssetRole.OTHER,
+        media_type="image/webp",
+        provenance=AssetProvenance(
+            repository="https://github.com/Sentient-X/humanoid_pkg",
+            revision="666bc6b5e00c76b8388a70fcc40a6987e0f1da7a",
+            path="urdf/urdf_robot_acc.urdf",
+            license_id="BSD-3-Clause",
+            generator="worlds/render_embodiment_previews/v1; arm practice initial posture",
+        ),
+    ),
+    EmbodimentId(
+        "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206"
+    ): packaged_asset(
+        relpath="humanoid_pkg/previews/e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206.webp",
+        sha256="8c8742c91ec2f76eb16691a11c4e7735b393d9ef47bc9699365664599fd92879",
+        size_bytes=4722,
         format=AssetFormat.OTHER,
         role=AssetRole.OTHER,
         media_type="image/webp",

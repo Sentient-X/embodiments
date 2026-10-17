@@ -36,6 +36,7 @@ from .layout import EncoderReadout
 from .parts import CameraOptics, CameraSpec
 
 INSTANCE_SCHEMA: Final = "sx.robot-instance/v1"
+DRIVE_SCHEMA: Final = "sx.instance-drive/v1"
 
 
 class InstanceError(CalibrationError):
@@ -320,6 +321,39 @@ def resolve(
             )
         )
     return ResolvedInstance(instance, tuple(cameras), tuple(joints), tuple(frames))
+
+
+def drive_document(embodiment: Embodiment, resolved: ResolvedInstance) -> dict[str, JsonValue]:
+    """What a driver applies to one built robot: each driven joint's zero and direction.
+
+    Rendered from :func:`resolve`, in native state order, so a driver never binds an instance
+    to its body itself: ``sx_embodiment_drivers::InstanceDrive`` reads this, refuses one of
+    another body, and applies each joint through ``BoundAxis::calibrated``. An unmeasured joint
+    carries the nominal zero and direction and no calibration id.
+    """
+    if resolved.instance.embodiment != embodiment.id:
+        raise InstanceError("the instance is of a different embodiment")
+    joints: list[JsonValue] = []
+    for coordinate in embodiment.state.coordinates:
+        if coordinate.axis.actuator is None:
+            continue
+        joint = resolved.joint(
+            Slot(SlotKind.ACTUATOR, f"{coordinate.instance}/{coordinate.axis.name}")
+        )
+        joints.append(
+            {
+                "joint": coordinate.joint_name,
+                "zero": joint.zero_offset,
+                "direction": joint.direction,
+                "calibration": None if joint.measured is None else str(joint.measured),
+            }
+        )
+    return {
+        "schema": DRIVE_SCHEMA,
+        "embodiment": str(embodiment.id),
+        "instance": str(resolved.instance.id),
+        "joints": joints,
+    }
 
 
 def description_links(urdf: bytes) -> frozenset[str]:

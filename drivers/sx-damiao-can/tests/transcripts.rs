@@ -14,14 +14,45 @@ use std::time::Duration;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sx_damiao_can::b601::b601;
+use sx_damiao_can::chain::DamiaoAxis;
 use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, MotorFeedback, MotorLimits, MotorState};
 use sx_damiao_can::dm_can::{
     DmCanError, DmMotorType, DmVariable, Motor, MotorControl, ParamValue, float_to_uint,
     uint_to_float,
 };
+use sx_damiao_can::humanoid::humanoid_upper_body;
 use sx_damiao_can::usb2can::Usb2CanPort;
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
-use sx_embodiment_drivers::{ActuatorChain, Evidence, StopReport};
+use sx_embodiment_drivers::{ActuatorChain, Evidence, InstanceDrive, StopReport};
+
+/// A body's nominal instance, as the registry renders its drive.
+fn nominal_of(body: &str) -> InstanceDrive {
+    let drives: Value = serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");
+    InstanceDrive::parse(
+        &drives[body]["nominal"].to_string(),
+        drives[body]["nominal"]["instance"]
+            .as_str()
+            .expect("an instance"),
+    )
+    .expect("a drive")
+}
+
+/// The B601-DM's nominal instance.
+fn nominal() -> InstanceDrive {
+    nominal_of("b601-dm")
+}
+
+/// The chain a recorded session drove, nominal.
+fn chain_of(session: &Value) -> Vec<DamiaoAxis> {
+    match session["body"].as_str().expect("a session names its body") {
+        "b601-dm" => b601(&nominal()).expect("the B601-DM composes"),
+        "sentient-humanoid-upper-body" => {
+            humanoid_upper_body(&nominal_of("sentient-humanoid-upper-body"))
+                .expect("the humanoid upper body composes")
+        }
+        other => panic!("no chain for {other}"),
+    }
+}
 
 fn transcripts() -> Value {
     serde_json::from_str(include_str!("fixtures/dm_can/transcripts.json")).expect("transcripts")
@@ -56,6 +87,7 @@ fn motor_type(index: &Value) -> DmMotorType {
     match index.as_u64().expect("motor type") {
         0 => DmMotorType::DM4310,
         2 => DmMotorType::DM4340,
+        6 => DmMotorType::DM8009,
         other => panic!("motor type {other} is not in the transcript's vocabulary"),
     }
 }
@@ -349,8 +381,7 @@ fn replay(name: &str) {
     let session = session(name);
     let stream = ReplayStream::new(session["events"].as_array().unwrap());
     let steps = session["steps"].as_array().unwrap();
-    let mut chain =
-        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")).expect("open");
+    let mut chain = DamiaoChain::open(stream.port(), chain_of(&session)).expect("open");
     assert_eq!(steps[0]["step"], "open");
     assert_eq!(chain.limits(), limits(&steps[0]).as_slice());
     for step in &steps[1..] {
@@ -385,6 +416,11 @@ fn a_whole_b601_session_is_the_vendors_bus_traffic() {
 }
 
 #[test]
+fn a_whole_humanoid_upper_body_session_is_the_vendors_bus_traffic() {
+    replay("humanoid_session");
+}
+
+#[test]
 fn a_dm4340_reporting_damiaos_other_velocity_range_is_scaled_by_it() {
     replay("vmax_8");
 }
@@ -398,7 +434,10 @@ fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
 fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     let session = session("limit_mismatch");
     let stream = ReplayStream::new(session["events"].as_array().unwrap());
-    match DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")) {
+    match DamiaoChain::open(
+        stream.port(),
+        b601(&nominal()).expect("the B601-DM composes"),
+    ) {
         Err(DamiaoChainError::LimitMismatch {
             bus_id,
             register,
@@ -423,8 +462,11 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
     let events = session["events"].as_array().unwrap();
     let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
     let stream = ReplayStream::new(&events[..opened]);
-    let mut chain =
-        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")).expect("open");
+    let mut chain = DamiaoChain::open(
+        stream.port(),
+        b601(&nominal()).expect("the B601-DM composes"),
+    )
+    .expect("open");
     let mut targets = vec![0.0; 7];
     targets[1] = 0.1; // joint2 stops at 0
     assert!(matches!(
@@ -454,7 +496,7 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
 // 3.14 is the URDF's own limit, not an approximation of pi.
 #[allow(clippy::approx_constant)]
 fn the_commandable_ranges_are_the_urdf_inside_the_soft_box_and_the_reachable_gripper() {
-    let ranges: Vec<(f64, f64)> = b601()
+    let ranges: Vec<(f64, f64)> = b601(&nominal())
         .expect("the B601-DM composes")
         .iter()
         .map(|motor| {
@@ -490,16 +532,28 @@ fn the_transcripts_are_the_bytes_the_provenance_names() {
 
 #[test]
 fn every_recorded_stop_waits_inside_the_chains_stop_budget() {
-    let budget = {
-        let session = session("session");
+    let budget_of = |name: &str| {
+        let session = session(name);
         let events = session["events"].as_array().unwrap();
         let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
         let stream = ReplayStream::new(&events[..opened]);
-        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes"))
+        DamiaoChain::open(stream.port(), chain_of(&session))
             .expect("open")
             .stop_budget()
     };
+    let budgets = [
+        ("b601-dm", budget_of("session")),
+        (
+            "sentient-humanoid-upper-body",
+            budget_of("humanoid_session"),
+        ),
+    ];
     for session in transcripts()["sessions"].as_array().unwrap() {
+        let budget = budgets
+            .iter()
+            .find(|(body, _)| session["body"] == *body)
+            .map(|(_, budget)| *budget)
+            .expect("a budget for the session's body");
         let events = session["events"].as_array().unwrap();
         let mut start = 0;
         for step in session["steps"].as_array().unwrap() {

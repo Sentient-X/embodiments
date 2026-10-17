@@ -7,7 +7,7 @@ import pytest
 
 from sx_embodiments import PlacedEmbodiment, compose_embodiments, embodiments
 from sx_embodiments.assembly import Assembly, Frame, Member, Pose
-from sx_embodiments.assets import AssetRole
+from sx_embodiments.assets import AssetFormat, AssetRole
 from sx_embodiments.compose import MountedOn, RootMount
 from sx_embodiments.errors import CompositionError
 from sx_embodiments.known import definitions
@@ -22,10 +22,16 @@ def test_every_multi_device_description_is_rendered_from_its_declaration() -> No
         "bimanual-b601-dm",
         "b601-dm-station",
         "piperx-station",
+        "sentient-humanoid",
+        "sentient-humanoid-upper-body",
     }
     for definition in ASSEMBLED:
         assert definition.assembly is not None
-        (description,) = (a for a in definition.extra_assets if a.role is AssetRole.DESCRIPTION)
+        (description,) = (
+            a
+            for a in definition.extra_assets
+            if a.role is AssetRole.DESCRIPTION and a.format is AssetFormat.URDF
+        )
         assert definition.assembly.urdf() == description.path().read_bytes(), (
             f"{definition.name}: run tools/compose_registered_urdfs.py and repin the digest"
         )
