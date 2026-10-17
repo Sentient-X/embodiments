@@ -314,6 +314,11 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-24": QuestApkBuildId(
             "sha256:d5b51230bc6d502ce1f0361e0bb27807681b67a9e9e9e083221faa37e1bbac44"
         ),
+        # 2026-10-17, OpenQuestCapture 1.5.0 build 26 (OQC 5d34fcd, QuestCameraLib 51a4868),
+        # the final headset build.
+        "1.5.0-26": QuestApkBuildId(
+            "sha256:6aab166a88c48ea68f525b3598e762fe18ae2c2519aa0dd11af606a6d9d5787a"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
