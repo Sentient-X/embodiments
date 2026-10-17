@@ -477,6 +477,9 @@ def capabilities_for_part(part: object, limb: Limb | None = None) -> tuple[Capab
             return (Capability.SENSING_RGB,)
         if part.modality is CameraModality.DEPTH:
             return (Capability.SENSING_DEPTH,)
+        if part.modality is CameraModality.INFRARED:
+            # An infrared imager is neither colour nor depth; no capability names it yet.
+            return ()
         return (Capability.SENSING_RGB, Capability.SENSING_DEPTH)
     if isinstance(part, ForceTorqueSpec):
         return (Capability.SENSING_FORCE_TORQUE,)

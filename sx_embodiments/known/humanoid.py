@@ -80,6 +80,7 @@ from ..layout import (
     Unobserved,
 )
 from ..mechanical import Build, InterfaceId, Mate, Module, ModuleId, Placed, Socket
+from ..media import MediaRig, StereoPair
 from ..parts import (
     CameraModality,
     CameraOptics,
@@ -452,6 +453,99 @@ SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_BUILD: Final = Build(
     ),
 )
 
+
+def _infrared(name: str) -> CameraSpec:
+    """One D435 infrared imager at 848x480 and 60 fps, its optics from Intel's stated field of
+    view (87 x 58 degrees, the depth module's, which the imagers set)."""
+    return CameraSpec(
+        part_id=PartId(f"realsense-d435-{name}"),
+        model=SensorModel("realsense_d435"),
+        modality=CameraModality.INFRARED,
+        fps=60.0,
+        optics=CameraOptics(
+            width=848,
+            height=480,
+            image_from_camera=(
+                424.0 / math.tan(math.radians(87.0) / 2),
+                0.0,
+                424.0,
+                0.0,
+                240.0 / math.tan(math.radians(58.0) / 2),
+                240.0,
+                0.0,
+                0.0,
+                1.0,
+            ),
+            distortion_model="none",
+            distortion_coefficients=(),
+            authority=CameraOpticsAuthority.MODEL_NOMINAL,
+            source=FactSource(
+                repository="https://www.realsenseai.com/wp-content/uploads/2020/06/"
+                "Intel-RealSense-D400-Series-Datasheet-June-2020.pdf",
+                revision="337029-009",
+                path="Depth module properties: depth field of view (HD 16:9)",
+            ),
+        ),
+    )
+
+
+#: The imagers' optical frames on the CAD camera link, placed from the colour frame by Intel's
+#: nominal D435 offsets (``_d435.urdf.xacro``: infrared 1 is 15 mm right of colour, infrared 2 a
+#: 50 mm baseline further), seen from behind the camera.
+HEAD_INFRARED_FRAMES: Final = tuple(
+    Frame(
+        f"head_camera_{name}_optical",
+        "camera_link",
+        Pose((0.0, offset, 0.0), (-math.pi / 2, 0.0, -math.pi / 2)),
+        preview_kind="camera",
+        preview_label=label,
+        camera_optical=True,
+    )
+    for name, offset, label in (
+        ("infrared_1", -0.015, "Head infrared, left"),
+        ("infrared_2", -0.065, "Head infrared, right"),
+    )
+)
+
+#: The head's D435 publishing its infrared pair instead of its colour stream: a body option for
+#: stereo viewing, not a registered body. Its pair is one ``head`` track
+#: (:data:`HEAD_INFRARED_RIG`).
+HEAD_INFRARED_CAMERA_MODULE: Final = Module(
+    module_id=ModuleId("sentient-humanoid-head-infrared-camera"),
+    label="Intel RealSense D435 in the humanoid's head, infrared pair",
+    description=Subtree(SENTIENT_HUMANOID_URDF, below="camera_joint"),
+    plug=CAMERA_HOLDER,
+    frames=HEAD_INFRARED_FRAMES,
+    components=tuple(
+        sensor_component(side, _infrared(stream), RootMount(frame.name))
+        for side, stream, frame in zip(
+            ("head_left", "head_right"),
+            ("infrared-1", "infrared-2"),
+            HEAD_INFRARED_FRAMES,
+            strict=True,
+        )
+    ),
+)
+
+#: The upper body with its head camera publishing the infrared pair.
+SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD: Final = Build(
+    robot="sentient_humanoid_upper_body",
+    root="humanoid_origin",
+    placed=(_UPPER,),
+    mates=(
+        _HEAD,
+        Mate(
+            "head_camera",
+            HEAD_INFRARED_CAMERA_MODULE,
+            host="head",
+            socket="camera",
+            namespaced=False,
+        ),
+    ),
+)
+
+#: The infrared pair as one side-by-side track.
+HEAD_INFRARED_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))
 
 SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-humanoid-upper-body"),

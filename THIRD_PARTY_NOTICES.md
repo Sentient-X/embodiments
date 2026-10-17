@@ -48,3 +48,9 @@ RBY1 and Interbotix ALOHA mesh dependencies. These files retain their upstream b
 ALOHA gripper mesh references now point to `official/aloha/meshes/`, sourced from Interbotix;
 they are not MuJoCo Menagerie assets. Collada-to-OBJ conversion happens only in the simulator's
 local cache; the packaged Collada files remain unchanged.
+
+Test fixtures carrying third-party facts:
+
+| File | Origin | License |
+|------|--------|---------|
+| `drivers/sx-realsense/tests/fixtures/factory-luvira-d435i-color.json` | The colour profile of [`ilaydayaman/LuViRA_Dataset`](https://github.com/ilaydayaman/LuViRA_Dataset), `db30d579a24aec5f784de866f1b1a81bb9aaa4e8`, `vision/camera_factory_cal.txt` (a RealSense D435i's `rs-enumerate-devices -c` output), re-rendered as `sx.factory-intrinsics/v1`; the dump names no serial or firmware, so those are placeholders. | CC-BY-4.0 |

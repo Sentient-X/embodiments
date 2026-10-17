@@ -1,0 +1,23 @@
+{
+  "schema": "sx.factory-intrinsics/v1",
+  "vendor": "realsense",
+  "product": "Intel RealSense D435I",
+  "firmware": "unrecorded",
+  "unit": "000000000000/color",
+  "serial": "000000000000",
+  "stream": "color",
+  "width": 640,
+  "height": 480,
+  "fx": 606.9658813476562,
+  "fy": 605.6773071289062,
+  "ppx": 310.7396545410156,
+  "ppy": 242.00755310058594,
+  "distortion": "inverse_brown_conrady",
+  "coefficients": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ]
+}

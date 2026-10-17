@@ -16,8 +16,10 @@ address, model, sign or reduction is spelled in Rust. ``vocabulary.json`` is the
 its nominal instance and for one with a measured, reversed first joint, which the crate's
 openers are tested against. ``tests/fixtures/media-plans.json`` in ``sx-embodiment-drivers``
 holds the ``sx.media-plan/v1`` documents :func:`sx_embodiments.media.media_document`
-renders, which the crate's ``MediaPlan`` is tested against. ``tests/test_driver_bindings.py``
-runs the same check.
+renders, which the crate's ``MediaPlan`` is tested against, and
+``tests/fixtures/media-plans.json`` in ``sx-realsense`` the humanoid's head D435 planned with
+its imagers placed by unit, as colour and as the infrared-pair body option.
+``tests/test_driver_bindings.py`` runs the same check.
 """
 
 import argparse
@@ -32,6 +34,7 @@ from sx_embodiments.calibration import (
     Measurement,
     UnitSerial,
 )
+from sx_embodiments.composition import compose_build
 from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.instance import (
     RobotInstance,
@@ -40,6 +43,10 @@ from sx_embodiments.instance import (
     drive_document,
     nominal_instance,
     resolve,
+)
+from sx_embodiments.known.humanoid import (
+    HEAD_INFRARED_RIG,
+    SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
 )
 from sx_embodiments.layout import ActuatorBus, ActuatorModel
 from sx_embodiments.media import NO_RIG, MediaRig, MicrophoneSpec, StereoPair, media_document
@@ -56,6 +63,9 @@ BINDINGS: dict[Path, str] = {
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
 DRIVES = ROOT / "drivers/sx-damiao-can/tests/fixtures/drives.json"
 MEDIA = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-plans.json"
+REALSENSE_MEDIA = ROOT / "drivers/sx-realsense/tests/fixtures/media-plans.json"
+#: A placeholder device serial for the humanoid's head D435.
+HEAD_D435 = "923322071108"
 #: The Quest head's two cameras as one stereo track, with a microphone on the headset.
 QUEST_RIG = MediaRig(
     stereo=(StereoPair("head", "head_left", "head_right"),),
@@ -108,11 +118,40 @@ def media() -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def realsense_media() -> str:
+    """The humanoid's head D435 with its imagers placed: colour, and the infrared pair."""
+    colour = embodiments["sentient-humanoid-upper-body"]
+    infrared = compose_build(
+        SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
+        name="sentient-humanoid-upper-body-infrared",
+        label="Sentient humanoid upper body, head infrared pair",
+    )
+
+    def placed(body: Embodiment, units: dict[str, str], rig: MediaRig = NO_RIG) -> object:
+        instance = RobotInstance.of(
+            body.id,
+            {Slot(SlotKind.CAMERA, camera): UnitSerial(unit) for camera, unit in units.items()},
+            (),
+        )
+        return media_document(body, resolve(body, instance, ()), rig)
+
+    document = {
+        "humanoid-head-color": placed(colour, {"head": f"{HEAD_D435}/color"}),
+        "humanoid-head-infrared": placed(
+            infrared,
+            {"head_left": f"{HEAD_D435}/infrared_1", "head_right": f"{HEAD_D435}/infrared_2"},
+            HEAD_INFRARED_RIG,
+        ),
+    }
+    return json.dumps(document, indent=2) + "\n"
+
+
 def rendered() -> dict[Path, str]:
     files = {path: render(name) for path, name in BINDINGS.items()}
     files[VOCABULARY] = vocabulary()
     files[DRIVES] = drives()
     files[MEDIA] = media()
+    files[REALSENSE_MEDIA] = realsense_media()
     return files
 
 

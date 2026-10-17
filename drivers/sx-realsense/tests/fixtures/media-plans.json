@@ -1,0 +1,129 @@
+{
+  "humanoid-head-color": {
+    "schema": "sx.media-plan/v1",
+    "embodiment": "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc",
+    "instance": "d2177cb712284bea668a69509e706136d805d1318bb75343aaf1a19b9d8289f6",
+    "tracks": [
+      {
+        "track": "head",
+        "fps": 30.0,
+        "views": [
+          {
+            "camera": "head",
+            "model": "realsense_d435",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 720,
+            "fps": 30.0,
+            "image_from_camera": [
+              924.3,
+              0.0,
+              640.0,
+              0.0,
+              925.7,
+              360.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": "923322071108/color",
+            "calibration": null,
+            "mount_frame": "head_camera_color_optical",
+            "root_frame": "humanoid_origin",
+            "root_from_mount": null,
+            "moves_with": [
+              "torso_joint",
+              "waist_roll_joint",
+              "waist_pitch_joint",
+              "neck_yaw_joint",
+              "head_joint"
+            ]
+          }
+        ]
+      }
+    ],
+    "microphones": []
+  },
+  "humanoid-head-infrared": {
+    "schema": "sx.media-plan/v1",
+    "embodiment": "4d5a2c7d9e0de23bac98ee7fc6b3fcf1235d66d58cb7d14934ce7dde05a47bc5",
+    "instance": "bfa0fd9e55de6c810b3baddd34e5ddf9aebaa8c93297edc9c4d3b6de66938452",
+    "tracks": [
+      {
+        "track": "head",
+        "fps": 60.0,
+        "views": [
+          {
+            "camera": "head_left",
+            "model": "realsense_d435",
+            "modality": "infrared",
+            "width": 848,
+            "height": 480,
+            "fps": 60.0,
+            "image_from_camera": [
+              446.8027731191281,
+              0.0,
+              424.0,
+              0.0,
+              432.97146126514167,
+              240.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": "923322071108/infrared_1",
+            "calibration": null,
+            "mount_frame": "head_camera_infrared_1_optical",
+            "root_frame": "humanoid_origin",
+            "root_from_mount": null,
+            "moves_with": [
+              "torso_joint",
+              "waist_roll_joint",
+              "waist_pitch_joint",
+              "neck_yaw_joint",
+              "head_joint"
+            ]
+          },
+          {
+            "camera": "head_right",
+            "model": "realsense_d435",
+            "modality": "infrared",
+            "width": 848,
+            "height": 480,
+            "fps": 60.0,
+            "image_from_camera": [
+              446.8027731191281,
+              0.0,
+              424.0,
+              0.0,
+              432.97146126514167,
+              240.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": "923322071108/infrared_2",
+            "calibration": null,
+            "mount_frame": "head_camera_infrared_2_optical",
+            "root_frame": "humanoid_origin",
+            "root_from_mount": null,
+            "moves_with": [
+              "torso_joint",
+              "waist_roll_joint",
+              "waist_pitch_joint",
+              "neck_yaw_joint",
+              "head_joint"
+            ]
+          }
+        ]
+      }
+    ],
+    "microphones": []
+  }
+}
