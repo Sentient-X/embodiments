@@ -57,6 +57,8 @@ pub enum BodyError {
     Binding(#[from] BindingError),
     #[error("a drive of body {found} cannot calibrate {embodiment}")]
     Instance { embodiment: String, found: String },
+    #[error("a drive resolved for robot instance {found} cannot calibrate instance {expected}")]
+    Unit { expected: String, found: String },
     #[error("{embodiment} has no joint {joint}")]
     MissingJoint { embodiment: String, joint: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]

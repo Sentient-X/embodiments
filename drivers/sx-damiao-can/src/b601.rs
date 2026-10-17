@@ -173,7 +173,13 @@ mod tests {
 
     fn drive(which: &str) -> InstanceDrive {
         let drives: serde_json::Value = serde_json::from_str(DRIVES).expect("drives");
-        InstanceDrive::parse(&drives["b601-dm"][which].to_string()).expect("a drive")
+        InstanceDrive::parse(
+            &drives["b601-dm"][which].to_string(),
+            drives["b601-dm"][which]["instance"]
+                .as_str()
+                .expect("an instance"),
+        )
+        .expect("a drive")
     }
 
     #[test]

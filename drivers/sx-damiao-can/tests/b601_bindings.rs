@@ -13,7 +13,13 @@ use sx_embodiment_drivers::{BodyBindings, InstanceDrive};
 /// The B601-DM's nominal instance, as the registry renders its drive.
 fn nominal() -> InstanceDrive {
     let drives: Value = serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");
-    InstanceDrive::parse(&drives["b601-dm"]["nominal"].to_string()).expect("a drive")
+    InstanceDrive::parse(
+        &drives["b601-dm"]["nominal"].to_string(),
+        drives["b601-dm"]["nominal"]["instance"]
+            .as_str()
+            .expect("an instance"),
+    )
+    .expect("a drive")
 }
 
 #[test]

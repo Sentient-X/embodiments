@@ -11,7 +11,13 @@ use sx_embodiment_drivers::{BodyBindings, BodyError, InstanceDrive};
 
 fn drive(body: &str, which: &str) -> InstanceDrive {
     let drives: Value = serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");
-    InstanceDrive::parse(&drives[body][which].to_string()).expect("a drive")
+    InstanceDrive::parse(
+        &drives[body][which].to_string(),
+        drives[body][which]["instance"]
+            .as_str()
+            .expect("an instance"),
+    )
+    .expect("a drive")
 }
 
 #[test]

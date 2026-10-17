@@ -148,6 +148,15 @@ class Subtree:
                 kept_joints.append(joint)
                 kept_links.add(_child(joint))
                 stack.append(_child(joint))
+        kept_names = {joint.get("name") for joint in kept_joints}
+        for joint in kept_joints:
+            mimic = joint.find("mimic")
+            if mimic is not None and mimic.get("joint") not in kept_names:
+                raise CompositionError(
+                    self.source.relpath,
+                    f"{joint.get('name')!r} mimics {mimic.get('joint')!r}, "
+                    "which the cut leaves out",
+                )
         part = ET.Element("robot", dict(robot.attrib))
         if cut is not None:
             assert self.mount_link is not None

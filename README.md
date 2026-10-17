@@ -119,8 +119,9 @@ document and carrying its method, time, residual and evidence:
 
 A driver opens a built robot from its instance: `drive_document(body, resolve(...))` renders
 `sx.instance-drive/v1`, each driven joint's zero and direction in state order, and
-`sx_embodiment_drivers::InstanceDrive` reads it into `BodyBindings::calibrated`, which refuses a
-drive of another body. Every Damiao opener takes one.
+`sx_embodiment_drivers::InstanceDrive::parse(document, instance)` reads it only for the robot
+instance the caller is configured as, so another unit's zeros are refused;
+`BodyBindings::calibrated` then refuses a drive of another body. Every Damiao opener takes one.
 
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,

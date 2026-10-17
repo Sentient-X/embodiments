@@ -4,10 +4,12 @@
 //! body's slots and selects their calibrations; `sx_embodiments.instance.resolve` binds the two
 //! and `drive_document` renders, for every driven joint in native state order, the zero and
 //! direction its unit was measured at, or the nominal ones. That rendering is the one source
-//! here: a driver never binds an instance to its body itself. [`BodyBindings::calibrated`]
-//! refuses a document of another body and any joint missing, extra or out of order, then
-//! applies each through [`BoundAxis::calibrated`](crate::BoundAxis::calibrated), the one seam a
-//! joint calibration enters.
+//! here: a driver never binds an instance to its body itself. [`InstanceDrive::parse`] takes the
+//! robot instance the caller is configured as and refuses a document resolved for any other, so
+//! a drive belongs to one physical robot; [`BodyBindings::calibrated`] refuses one of another
+//! body and any joint missing, extra or out of order, then applies each through
+//! [`BoundAxis::calibrated`](crate::BoundAxis::calibrated), the one seam a joint calibration
+//! enters.
 
 use serde::Deserialize;
 
@@ -47,12 +49,15 @@ struct Document {
 }
 
 impl InstanceDrive {
-    /// Parse a rendered `sx.instance-drive/v1` document.
+    /// Parse a rendered `sx.instance-drive/v1` document resolved for `expected`, the content id
+    /// of the robot instance the caller is configured as: another unit of the same body has
+    /// other zeros, so its drive is refused.
     ///
     /// # Errors
     ///
-    /// Returns [`BodyError::Document`] for anything else.
-    pub fn parse(document: &str) -> Result<Self, BodyError> {
+    /// Returns [`BodyError::Document`] for anything but such a document, and
+    /// [`BodyError::Unit`] for one resolved for another instance.
+    pub fn parse(document: &str, expected: &str) -> Result<Self, BodyError> {
         let Document {
             schema,
             embodiment,
@@ -64,6 +69,12 @@ impl InstanceDrive {
             return Err(BodyError::Document(format!(
                 "not a {DRIVE_SCHEMA} document"
             )));
+        }
+        if instance != expected {
+            return Err(BodyError::Unit {
+                expected: expected.to_owned(),
+                found: instance,
+            });
         }
         Ok(Self {
             embodiment,
@@ -118,10 +129,13 @@ mod tests {
         BodyBindings::parse(BODY).expect("parses")
     }
 
+    fn drive(document: &str) -> InstanceDrive {
+        InstanceDrive::parse(document, "i").expect("parses")
+    }
+
     #[test]
     fn a_drive_calibrates_each_joint_once() {
-        let drive = InstanceDrive::parse(DRIVE).expect("parses");
-        let body = body().calibrated(&drive).expect("calibrates");
+        let body = body().calibrated(&drive(DRIVE)).expect("calibrates");
         let j1 = body.axis("j1").expect("j1");
         assert!((j1.zero - 0.1).abs() < f64::EPSILON);
         assert_eq!(j1.direction, -1);
@@ -129,38 +143,42 @@ mod tests {
     }
 
     #[test]
-    fn a_drive_of_another_body_or_other_joints_is_refused() {
-        let other =
-            InstanceDrive::parse(&DRIVE.replace(r#""embodiment": "0""#, r#""embodiment": "1""#))
-                .expect("parses");
+    fn a_drive_of_another_robot_body_or_joints_is_refused() {
+        assert!(matches!(
+            InstanceDrive::parse(DRIVE, "another unit of the same body"),
+            Err(BodyError::Unit { .. })
+        ));
+        let other = drive(&DRIVE.replace(r#""embodiment": "0""#, r#""embodiment": "1""#));
         assert!(matches!(
             body().calibrated(&other),
             Err(BodyError::Instance { .. })
         ));
-        let swapped = InstanceDrive::parse(
+        let swapped = drive(
             &DRIVE
                 .replace(r#""joint": "j1""#, r#""joint": "jx""#)
                 .replace(r#""joint": "j2""#, r#""joint": "j1""#)
                 .replace(r#""joint": "jx""#, r#""joint": "j2""#),
-        )
-        .expect("parses");
+        );
         assert!(matches!(
             body().calibrated(&swapped),
             Err(BodyError::Joints { .. })
         ));
-        let reversed_twice =
-            InstanceDrive::parse(&DRIVE.replace(r#""direction": -1"#, r#""direction": 2"#))
-                .expect("parses");
+        let reversed_twice = drive(&DRIVE.replace(r#""direction": -1"#, r#""direction": 2"#));
         assert_eq!(
             body().calibrated(&reversed_twice),
             Err(BodyError::Binding(BindingError::Direction("j1".to_owned())))
         );
         assert!(
-            InstanceDrive::parse(&DRIVE.replace("instance-drive/v1", "instance-drive/v2")).is_err()
+            InstanceDrive::parse(
+                &DRIVE.replace("instance-drive/v1", "instance-drive/v2"),
+                "i"
+            )
+            .is_err()
         );
         assert!(
             InstanceDrive::parse(
-                &DRIVE.replace(r#""calibration": null"#, r#""calibration": null, "x": 1"#)
+                &DRIVE.replace(r#""calibration": null"#, r#""calibration": null, "x": 1"#),
+                "i"
             )
             .is_err()
         );

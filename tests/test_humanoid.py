@@ -270,3 +270,10 @@ def test_a_drive_is_rendered_from_the_resolved_instance_and_only_for_its_body() 
     other = embodiments["b601-dm"]
     with pytest.raises(InstanceError):
         drive_document(other, resolve(body, nominal_instance(body), ()))
+
+
+def test_a_cut_that_leaves_a_mimic_leader_out_is_refused() -> None:
+    from sx_embodiments.known.b601 import B601_DM_URDF
+
+    with pytest.raises(CompositionError, match="mimics"):
+        Subtree(B601_DM_URDF, without=("gripper_joint1",)).urdf()
