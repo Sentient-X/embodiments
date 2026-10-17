@@ -20,6 +20,18 @@ use thiserror::Error;
 /// The schema `media_document` renders.
 pub const MEDIA_SCHEMA: &str = "sx.media-plan/v1";
 
+/// Whether `name` is a track or microphone name (`sx_embodiments.media.TRACK_NAME`): it names
+/// a published track and the journal file beside it, so it is never a path.
+#[must_use]
+pub fn is_track_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=63).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase() | bytes[0].is_ascii_digit()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-')
+}
+
 /// A rendered media plan that is not one for this robot.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum MediaPlanError {
@@ -177,6 +189,12 @@ impl MediaPlan {
                     track.track
                 )));
             }
+            if !is_track_name(&track.track) {
+                return Err(MediaPlanError::Document(format!(
+                    "{:?} is not a track name",
+                    track.track
+                )));
+            }
             if !names.insert(track.track.clone()) {
                 return Err(MediaPlanError::Document(format!(
                     "two tracks are named {}",
@@ -185,7 +203,8 @@ impl MediaPlan {
             }
         }
         for microphone in &microphones {
-            if !names.insert(microphone.microphone.clone())
+            if !is_track_name(&microphone.microphone)
+                || !names.insert(microphone.microphone.clone())
                 || !matches!(microphone.sample_rate_hz, 16_000 | 24_000 | 32_000 | 48_000)
                 || !matches!(microphone.channels, 1 | 2)
             {
@@ -354,6 +373,14 @@ mod tests {
             MediaPlan::parse(&value.to_string(), &instance(&document)),
             Err(MediaPlanError::Document(_))
         ));
+        for name in ["../escape", "/tmp/x", "Head", ""] {
+            let mut value: serde_json::Value = serde_json::from_str(&document).expect("plan");
+            value["tracks"][0]["track"] = serde_json::json!(name);
+            assert!(matches!(
+                MediaPlan::parse(&value.to_string(), &instance(&document)),
+                Err(MediaPlanError::Document(_))
+            ));
+        }
         let mut value: serde_json::Value = serde_json::from_str(&document).expect("plan");
         value["tracks"][0]["views"][0]["lens"] = serde_json::json!("extra");
         assert!(matches!(

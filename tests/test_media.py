@@ -76,6 +76,11 @@ def test_a_pair_must_be_one_exposure_and_name_declared_cameras() -> None:
         _plan(quest, MediaRig(microphones=(MicrophoneSpec("m", "x", 48_000, 1, "nowhere"),)))
     with pytest.raises(MediaRigError, match="Hz"):
         MicrophoneSpec("m", "x", 44_100, 1, "quest3s_head")
+    for name in ("../escape", "/tmp/x", "Head", ""):
+        with pytest.raises(MediaRigError, match="not a track name"):
+            StereoPair(name, "head_left", "head_right")
+        with pytest.raises(MediaRigError, match="not a track name"):
+            MicrophoneSpec(name, "x", 48_000, 1, "quest3s_head")
 
 
 def test_a_plan_is_rendered_only_for_its_own_body() -> None:

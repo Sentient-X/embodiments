@@ -20,6 +20,7 @@ compute.
 from __future__ import annotations
 
 import math
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Final
@@ -31,12 +32,19 @@ from .errors import EmbodimentSchemaError
 from .instance import InstanceError, ResolvedCamera, ResolvedInstance
 
 MEDIA_SCHEMA: Final = "sx.media-plan/v1"
+#: A track or microphone name: it names a published track and the journal file beside it.
+TRACK_NAME: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 #: The rates a published microphone track may run at: what WebRTC's audio path accepts.
 MICROPHONE_RATES_HZ: Final = frozenset({16_000, 24_000, 32_000, 48_000})
 
 
 class MediaRigError(EmbodimentSchemaError):
     """A media rig names cameras or microphones its body cannot stream."""
+
+
+def _require_track_name(name: str) -> None:
+    if TRACK_NAME.fullmatch(name) is None:
+        raise MediaRigError(f"{name!r} is not a track name ({TRACK_NAME.pattern})")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +54,9 @@ class StereoPair:
     track: str
     left: str
     right: str
+
+    def __post_init__(self) -> None:
+        _require_track_name(self.track)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +70,8 @@ class MicrophoneSpec:
     mount_frame: str
 
     def __post_init__(self) -> None:
-        if not self.name.strip() or not self.model.strip() or not self.mount_frame.strip():
+        _require_track_name(self.name)
+        if not self.model.strip() or not self.mount_frame.strip():
             raise MediaRigError("a microphone names itself, its model and its mount link")
         if self.sample_rate_hz not in MICROPHONE_RATES_HZ:
             raise MediaRigError(
@@ -279,6 +291,7 @@ def media_document(
     for camera in resolved.cameras:
         if camera.name in paired:
             continue
+        _require_track_name(camera.name)
         tracks.append(
             {
                 "track": camera.name,

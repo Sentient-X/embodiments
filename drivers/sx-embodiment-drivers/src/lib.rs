@@ -46,5 +46,5 @@ pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
-    MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View,
+    MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,
 };
