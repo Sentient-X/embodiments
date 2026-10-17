@@ -6,11 +6,12 @@
 //! it reads them from the document `tools/render_driver_bindings.py` renders from the registry
 //! ([`crate::body::BodyBindings`]).
 //!
-//! The drive map is `actuator = sign * (joint - zero) * reduction`. Sign and reduction are the
-//! design's; the zero is measured per motor, so it is a joint calibration of the unit and sits
-//! on [`BoundAxis`], never on the binding. [`BoundAxis::calibrated`] is the one place a
+//! The drive map is `actuator = sign * direction * (joint - zero) * reduction`. Sign and
+//! reduction are the design's; the zero and the direction are measured per motor, so they are
+//! the unit's joint calibration (`sx_embodiments.calibration.JointUnitCalibration`) and sit on
+//! [`BoundAxis`], never on the binding. [`BoundAxis::calibrated`] is the one place a
 //! calibration is applied; until a unit's calibration is supplied, every axis carries
-//! [`UNCALIBRATED_ZERO`].
+//! [`UNCALIBRATED_ZERO`] and [`UNCALIBRATED_DIRECTION`].
 
 use thiserror::Error;
 
@@ -85,6 +86,9 @@ pub struct ActuatorBinding {
 /// The zero of a joint whose unit has no joint calibration yet: the design's own zero.
 pub const UNCALIBRATED_ZERO: f64 = 0.0;
 
+/// The direction of a unit with no joint calibration yet: it turns as the design says.
+pub const UNCALIBRATED_DIRECTION: i8 = 1;
+
 impl ActuatorBinding {
     /// Refuse what `ActuatorBinding.__post_init__` refuses.
     ///
@@ -117,31 +121,46 @@ pub struct BoundAxis {
     /// The joint coordinate at the actuator's zero: this unit's joint calibration, or
     /// [`UNCALIBRATED_ZERO`].
     pub zero: f64,
+    /// `-1` when this unit turns against its design sign: its joint calibration, or
+    /// [`UNCALIBRATED_DIRECTION`].
+    pub direction: i8,
 }
 
 impl BoundAxis {
-    /// This axis with a unit's measured zero applied: the one seam a joint calibration enters.
+    /// This axis with a unit's measured zero and direction applied: the one seam a joint
+    /// calibration (`JointUnitCalibration.zero_offset` and `.direction`) enters.
     ///
     /// # Errors
     ///
-    /// Refuses a non-finite zero.
-    pub fn calibrated(self, zero: f64) -> Result<Self, BindingError> {
+    /// Refuses a non-finite zero and a direction other than 1 or -1.
+    pub fn calibrated(self, zero: f64, direction: i8) -> Result<Self, BindingError> {
         if !zero.is_finite() {
             return Err(BindingError::Zero(self.joint));
         }
-        Ok(Self { zero, ..self })
+        if !matches!(direction, -1 | 1) {
+            return Err(BindingError::Direction(self.joint));
+        }
+        Ok(Self {
+            zero,
+            direction,
+            ..self
+        })
     }
 
-    /// `actuator = sign * (joint - zero) * reduction`.
+    fn signed(&self) -> f64 {
+        f64::from(self.binding.sign) * f64::from(self.direction)
+    }
+
+    /// `actuator = sign * direction * (joint - zero) * reduction`.
     #[must_use]
     pub fn actuator_from_joint(&self, joint: f64) -> f64 {
-        f64::from(self.binding.sign) * (joint - self.zero) * self.binding.reduction
+        self.signed() * (joint - self.zero) * self.binding.reduction
     }
 
     /// The inverse map, from the actuator's own coordinate to the joint's.
     #[must_use]
     pub fn joint_from_actuator(&self, actuator: f64) -> f64 {
-        actuator / (f64::from(self.binding.sign) * self.binding.reduction) + self.zero
+        actuator / (self.signed() * self.binding.reduction) + self.zero
     }
 
     /// Refuse empty bounds and an invalid binding.
@@ -155,6 +174,9 @@ impl BoundAxis {
         }
         if !self.zero.is_finite() {
             return Err(BindingError::Zero(self.joint.clone()));
+        }
+        if !matches!(self.direction, -1 | 1) {
+            return Err(BindingError::Direction(self.joint.clone()));
         }
         self.binding.validate()
     }
@@ -198,6 +220,8 @@ pub enum BindingError {
     Sign(u16),
     #[error("joint {0} has a non-finite zero")]
     Zero(String),
+    #[error("joint {0} has a direction other than 1 or -1")]
+    Direction(String),
     #[error("the actuator at bus_id {0} has a reduction that is not a positive finite ratio")]
     Reduction(u16),
     #[error("joint {0} has bounds that are not finite lower < upper")]
@@ -226,6 +250,7 @@ mod tests {
                 reduction: 4.0,
             },
             zero: 0.25,
+            direction: UNCALIBRATED_DIRECTION,
         }
     }
 
@@ -235,8 +260,13 @@ mod tests {
         let actuator = bound.actuator_from_joint(0.75);
         assert!((actuator - -2.0).abs() < 1e-12);
         assert!((bound.joint_from_actuator(actuator) - 0.75).abs() < 1e-12);
-        let recalibrated = bound.calibrated(0.5).expect("a finite zero");
+        let recalibrated = bound.clone().calibrated(0.5, 1).expect("a finite zero");
         assert!((recalibrated.actuator_from_joint(0.75) - -1.0).abs() < 1e-12);
+        let reversed = bound
+            .calibrated(0.5, -1)
+            .expect("a unit turning against its design");
+        assert!((reversed.actuator_from_joint(0.75) - 1.0).abs() < 1e-12);
+        assert!((reversed.joint_from_actuator(1.0) - 0.75).abs() < 1e-12);
     }
 
     #[test]
@@ -254,8 +284,12 @@ mod tests {
         bad.zero = f64::NAN;
         assert!(matches!(bad.validate(), Err(BindingError::Zero(_))));
         assert!(matches!(
-            axis(1).calibrated(f64::INFINITY),
+            axis(1).calibrated(f64::INFINITY, 1),
             Err(BindingError::Zero(_))
+        ));
+        assert!(matches!(
+            axis(1).calibrated(0.0, 0),
+            Err(BindingError::Direction(_))
         ));
         let mut bad = axis(1);
         bad.upper = bad.lower;

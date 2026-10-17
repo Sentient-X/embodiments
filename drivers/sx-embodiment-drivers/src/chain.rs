@@ -208,6 +208,7 @@ mod tests {
                 reduction: 1.0,
             },
             zero: crate::binding::UNCALIBRATED_ZERO,
+            direction: crate::binding::UNCALIBRATED_DIRECTION,
         }];
         assert_eq!(check_targets(&axes, &[0.5]), Ok(()));
         assert_eq!(

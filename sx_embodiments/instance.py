@@ -281,9 +281,9 @@ def resolve(
         chosen = by_slot.get(slot)
         measured = cast("CameraUnitCalibration | None", chosen[1] if chosen else None)
         nominal = camera.camera.optics
-        if (
-            measured is not None
-            and (measured.width, measured.height) != (nominal.width, nominal.height)
+        if measured is not None and (measured.width, measured.height) != (
+            nominal.width,
+            nominal.height,
         ):
             raise InstanceError(
                 f"{camera.name}: measured {measured.width}x{measured.height}, "

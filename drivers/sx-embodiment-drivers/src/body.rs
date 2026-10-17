@@ -10,8 +10,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::binding::{
-    ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_ZERO,
-    validate_chain,
+    ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
+    UNCALIBRATED_ZERO, validate_chain,
 };
 
 /// One registered body's bound axes, in native state order, uncalibrated.
@@ -102,6 +102,7 @@ impl BodyBindings {
                         reduction: axis.reduction,
                     },
                     zero: UNCALIBRATED_ZERO,
+                    direction: UNCALIBRATED_DIRECTION,
                 })
             })
             .collect::<Result<Vec<_>, BodyError>>()?;

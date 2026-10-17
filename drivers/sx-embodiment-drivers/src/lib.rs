@@ -2,8 +2,9 @@
 //!
 //! A driver drives a chain of qualified actuators on one bus. Each actuator is bound to one
 //! joint axis by the registry's `ActuatorBinding` (`sx_embodiments/layout.py`): a model on a
-//! bus at a chain address, and the drive map `actuator = sign * (joint - zero) * reduction`,
-//! the zero being the unit's joint calibration. The chain's axes are listed in the
+//! bus at a chain address, and the drive map
+//! `actuator = sign * direction * (joint - zero) * reduction`, the zero and direction being
+//! the unit's joint calibration. The chain's axes are listed in the
 //! embodiment's native state order, so a command vector and an observed vector are indexed
 //! exactly as `robot.state.coordinates`. A driver reads those facts from the registry's
 //! rendered [`BodyBindings`], never spells them.
@@ -26,8 +27,8 @@ pub mod composite;
 pub mod serial;
 
 pub use binding::{
-    ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_ZERO,
-    validate_chain,
+    ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
+    UNCALIBRATED_ZERO, validate_chain,
 };
 pub use body::{BodyBindings, BodyError};
 pub use chain::{

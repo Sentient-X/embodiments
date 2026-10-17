@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 from sx_contracts import Sha256Digest
@@ -133,6 +134,8 @@ def test_the_nominal_zero_is_the_zero_every_driver_transcript_was_minted_with() 
         assert f"UNCALIBRATED_ZERO = {UNCALIBRATED_ZERO!r}" in minter.read_text(), minter
     binding = (DRIVERS / "sx-embodiment-drivers/src/binding.rs").read_text()
     assert f"pub const UNCALIBRATED_ZERO: f64 = {UNCALIBRATED_ZERO!r};" in binding
+    assert "pub const UNCALIBRATED_DIRECTION: i8 = 1;" in binding
+    assert "pub fn calibrated(self, zero: f64, direction: i8)" in binding
 
 
 @pytest.mark.parametrize(
@@ -159,9 +162,21 @@ def test_each_kind_round_trips_through_its_one_document(calibration: Calibration
 
 
 def test_an_unknown_field_or_kind_is_refused() -> None:
+    """A field the reader would drop is one the id does not cover, so it is refused."""
     document = calibration_to_dict(_joint())
     with pytest.raises(CalibrationError):
         calibration_from_dict({**document, "sign": 1})
+    measurement = cast("dict[str, object]", document["measurement"])
+    with pytest.raises(CalibrationError):
+        calibration_from_dict({**document, "measurement": {**measurement, "operator": "x"}})
+    camera = calibration_to_dict(_camera())
+    measured = cast("dict[str, object]", camera["measurement"])
+    residual = {**cast("dict[str, object]", measured["residual"]), "std": 0.1}
+    with pytest.raises(CalibrationError):
+        calibration_from_dict({**camera, "measurement": {**measured, "residual": residual}})
+    evidence = [{"kind": "image", "reference": "a" * 64, "note": "x"}]
+    with pytest.raises(CalibrationError):
+        calibration_from_dict({**camera, "measurement": {**measured, "evidence": evidence}})
     with pytest.raises(CalibrationError):
         calibration_from_dict({**document, "kind": "hand_eye"})
     with pytest.raises(CalibrationError):
@@ -194,6 +209,15 @@ def test_an_unknown_field_or_kind_is_refused() -> None:
             matrix_from_pose((0.1, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
             RigidReference.ABSOLUTE,
             None,
+            (),
+            MEASURED,
+        ),
+        lambda: RigidCalibration(
+            "a",
+            "a",
+            matrix_from_pose((1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+            RigidReference.DESCRIPTION,
+            Sha256Digest("c" * 64),
             (),
             MEASURED,
         ),

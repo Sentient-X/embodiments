@@ -128,12 +128,19 @@ class Measurement:
 
     @classmethod
     def from_dict(cls, document: Mapping[str, object]) -> Measurement:
+        if set(document) != {"method", "measured_at", "residual", "evidence"}:
+            raise CalibrationError("a measurement has exactly its four fields")
         measured_at = document.get("measured_at")
         residual = document.get("residual")
         evidence = document.get("evidence")
         if not isinstance(evidence, list):
             raise CalibrationError("measurement evidence is a list")
         residual_object = _object(residual, "residual") if residual is not None else None
+        if residual_object is not None and set(residual_object) != {"value", "unit"}:
+            raise CalibrationError("a residual has exactly a value and a unit")
+        entries = [_object(item, "evidence") for item in cast("list[object]", evidence)]
+        if any(set(entry) != {"kind", "reference"} for entry in entries):
+            raise CalibrationError("evidence has exactly a kind and a reference")
         return cls(
             method=CalibrationMethod(_text(document, "method")),
             measured_at=(
@@ -152,7 +159,7 @@ class Measurement:
                     EvidenceKind(_text(entry, "kind")),
                     _text(entry, "reference"),
                 )
-                for entry in (_object(item, "evidence") for item in cast("list[object]", evidence))
+                for entry in entries
             ),
         )
 
@@ -256,13 +263,11 @@ class RigidCalibration:
         for frame in (self.parent_frame, self.child_frame):
             if not frame.strip() or frame != frame.strip():
                 raise CalibrationError("a rigid calibration names both of its frames")
-        if (
-            self.parent_frame == self.child_frame
-            and self.reference is RigidReference.ABSOLUTE
-            and any(
-                abs(a - b) > 1e-9
-                for a, b in zip(self.parent_from_child, IDENTITY_TRANSFORM, strict=False)
-            )
+        if self.parent_frame == self.child_frame and self.reference is RigidReference.DESCRIPTION:
+            raise CalibrationError("a correction corrects the transform between two frames")
+        if self.parent_frame == self.child_frame and any(
+            abs(a - b) > 1e-9
+            for a, b in zip(self.parent_from_child, IDENTITY_TRANSFORM, strict=False)
         ):
             raise CalibrationError("a frame's absolute transform to itself is the identity")
         if (self.reference is RigidReference.DESCRIPTION) != (self.description_sha256 is not None):

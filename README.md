@@ -104,8 +104,9 @@ document and carrying its method, time, residual and evidence:
   one exact description's own transform (mount corrections, hand-eye, stereo pairs, depth to
   colour).
 - `JointUnitCalibration`: one actuator or encoder unit's zero, direction and measured range.
-  `zero_offset` is the joint value at the unit's zero, the `zero_offset` of the drive map every
-  driver applies; unmeasured it is `UNCALIBRATED_ZERO`.
+  Every driver applies `actuator = sign * direction * (joint - zero_offset) * reduction`, the
+  unit's zero and direction entering at the one Rust seam `BoundAxis::calibrated`; unmeasured
+  they are `UNCALIBRATED_ZERO` and 1.
 
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,
