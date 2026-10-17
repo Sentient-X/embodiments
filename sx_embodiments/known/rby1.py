@@ -2,10 +2,12 @@
 
 from typing import Final, Literal
 
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint, MobileBaseSpec
 from ._authoring import bounded_layout, unbounded_layout
 from .sources import menagerie
@@ -99,12 +101,31 @@ RBY1_HEAD: Final = ChainSpec(
 RBY1_RIGHT_GRIPPER: Final = _rby1_gripper("right")
 RBY1_LEFT_GRIPPER: Final = _rby1_gripper("left")
 
-RBY1_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("rby1"),
-    label="Rainbow Robotics RBY1-M v1.3",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="rby1", variant="m", revision="1.3"),
-    attachments=(
+_FLANGE: Final = InterfaceId("rainbow-rby1-flange")
+_GRIPPERS: Final[tuple[tuple[Literal["left", "right"], GripperSpec], ...]] = (
+    ("right", RBY1_RIGHT_GRIPPER),
+    ("left", RBY1_LEFT_GRIPPER),
+)
+
+
+def _gripper_module(side: Literal["left", "right"], gripper: GripperSpec) -> Module:
+    """A gripper as the description fits it: everything below the arm's ``END`` joint."""
+    end = f"END_{side}"
+    return Module(
+        module_id=ModuleId(f"rby1-{side}-gripper"),
+        label=f"RB-Y1 {side} gripper",
+        description=Subtree(RBY1_URDF, below=end),
+        plug=_FLANGE,
+        components=(body_component(f"{side}_gripper", gripper, RootMount(f"{end}_mount")),),
+    )
+
+
+#: The whole robot as the description ships it, each wrist fitted with its gripper.
+RBY1_MODULE: Final = Module(
+    module_id=ModuleId("rby1"),
+    label="Rainbow Robotics RB-Y1",
+    description=RBY1_URDF,
+    components=(
         body_component("base", RBY1_BASE, RootMount("base")),
         body_component("torso", RBY1_TORSO, MountedOn("base", "base"), limb=Limb.TORSO),
         body_component(
@@ -114,15 +135,24 @@ RBY1_SPEC: Final = EmbodimentDefinition(
             "left_arm", RBY1_LEFT_ARM, MountedOn("torso", "link_torso_5"), limb=Limb.ARM
         ),
         body_component("head", RBY1_HEAD, MountedOn("torso", "link_head_0"), limb=Limb.HEAD),
-        body_component(
-            "right_gripper",
-            RBY1_RIGHT_GRIPPER,
-            MountedOn("right_arm", "link_right_arm_6"),
-        ),
-        body_component(
-            "left_gripper",
-            RBY1_LEFT_GRIPPER,
-            MountedOn("left_arm", "link_left_arm_6"),
-        ),
     ),
+    sockets=tuple(
+        Socket(
+            f"{side}_flange",
+            _FLANGE,
+            f"link_{side}_arm_6",
+            Pose((0.0, 0.0, -0.125)),
+            carrier=f"{side}_arm",
+            fitted=_gripper_module(side, gripper),
+        )
+        for side, gripper in _GRIPPERS
+    ),
+)
+
+RBY1_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("rby1"),
+    label="Rainbow Robotics RBY1-M v1.3",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="rby1", variant="m", revision="1.3"),
+    build=Build.of(RBY1_MODULE),
 )

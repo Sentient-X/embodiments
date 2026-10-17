@@ -202,11 +202,9 @@ class Member:
     ``parent`` is a link already in the assembly (the root when ``None``), so a member can
     sit on another member: an arm on a torso, a camera head on a neck. ``mesh_uri`` rewrites
     mesh and texture references when the rendered bytes will not sit beside the source.
-    ``seat`` puts the member where a cut part hangs from its source, on the cut joint's
-    parent link at its origin, read when the assembly renders: the vendor head rejoining the
-    chest, or another body taking the head's place. ``namespaced`` is false for a part
-    rejoining the body it was cut from, which keeps the source's names; the assembly still
-    refuses any name two members share.
+    ``namespaced`` is false for a part rejoining the body it was cut from, which keeps the
+    source's names; the assembly still refuses any name two members share. Which member may
+    sit where is a module's socket (:mod:`sx_embodiments.mechanical`), not this renderer's.
     """
 
     name: str
@@ -216,19 +214,10 @@ class Member:
     joint: MountJoint = MountJoint.FIXED
     mesh_uri: Callable[[str], str] | None = None
     namespaced: bool = True
-    seat: Subtree | None = None
 
     def __post_init__(self) -> None:
         if _NAME.fullmatch(self.name) is None:
             raise CompositionError(self.name, f"invalid member name {self.name!r}")
-        if self.seat is not None and (self.pose != Pose() or self.parent is not None):
-            raise CompositionError(self.name, "a seated member takes its pose from the seat")
-
-    def mount(self) -> tuple[str | None, Pose]:
-        """The link this member mounts on (the root when ``None``) and its pose there."""
-        if self.seat is None:
-            return self.parent, self.pose
-        return self.seat.parent(), self.seat.pose()
 
     def source(self) -> ET.Element:
         match self.description:
@@ -320,8 +309,7 @@ class Assembly:
             source = member.source()
             prefix = self.prefix(member.name)
             items = _prefixed(source, prefix, member.mesh_uri)
-            parent, pose = member.mount()
-            parent = parent if parent is not None else self.root
+            parent = member.parent if member.parent is not None else self.root
             if parent not in links:
                 raise CompositionError(
                     self.robot,
@@ -334,7 +322,7 @@ class Assembly:
                 parent=parent,
                 child=prefix + _root_link(source),
                 name=f"{parent}_to_{member.name}",
-                pose=pose,
+                pose=member.pose,
                 joint=member.joint,
             )
         for frame in self.frames:

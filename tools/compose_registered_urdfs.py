@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Render the registry's generated URDFs: every declared assembly, and Piper's canonical form.
+"""Render the registry's generated URDFs: every rooted build, and Piper's canonical form.
 
-A body built from other descriptions declares its :class:`~sx_embodiments.assembly.Assembly`
+A body built from several modules declares its :class:`~sx_embodiments.mechanical.Build`
 beside its components in ``sx_embodiments/known``; this writes each rendering to the path of
 the body's description asset. ``tests/test_assembly.py`` fails when a committed file differs
 from its declaration, so run this after changing one and update the asset's digest.
@@ -45,14 +45,14 @@ def render() -> None:
         ROOT / "assets/official/agilex_piper/piper_canonical.urdf",
     )
     for definition in definitions():
-        if definition.assembly is None:
+        if definition.build.root is None:
             continue
         (description,) = (
             asset
             for asset in definition.extra_assets
             if asset.role is AssetRole.DESCRIPTION and asset.format is AssetFormat.URDF
         )
-        (ROOT / "assets" / description.relpath).write_bytes(definition.assembly.urdf())
+        (ROOT / "assets" / description.relpath).write_bytes(definition.build.urdf())
 
 
 if __name__ == "__main__":

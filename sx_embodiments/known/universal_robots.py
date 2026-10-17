@@ -6,6 +6,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset, pac
 from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, Limb
 from ._authoring import bounded_layout
 from .sources import menagerie
@@ -89,17 +90,32 @@ def _ur_arm(model: str, urdf: PackagedAsset, mjcf: PackagedAsset) -> ChainSpec:
 UR5E_ARM: Final = _ur_arm("ur5e", UR5E_URDF, UR5E_MJCF)
 UR10E_ARM: Final = _ur_arm("ur10e", UR10E_URDF, UR10E_MJCF)
 
+
+def _ur_module(model: str, arm: ChainSpec, urdf: PackagedAsset) -> Module:
+    """The bare arm; its tool flange ``tool0`` is the ISO 9409-1-50-4-M6 face, free for a tool."""
+    return Module(
+        module_id=ModuleId(model),
+        label=f"Universal Robots {model.upper()}",
+        description=urdf,
+        components=(body_component("arm", arm, RootMount("base_link_inertia"), limb=Limb.ARM),),
+        sockets=(Socket("flange", InterfaceId("iso-9409-1-50-4-m6"), "tool0", carrier="arm"),),
+    )
+
+
+UR5E_MODULE: Final = _ur_module("ur5e", UR5E_ARM, UR5E_URDF)
+UR10E_MODULE: Final = _ur_module("ur10e", UR10E_ARM, UR10E_URDF)
+
 UR5E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur5e"),
     label="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
-    attachments=(body_component("arm", UR5E_ARM, RootMount("base_link_inertia"), limb=Limb.ARM),),
+    build=Build.of(UR5E_MODULE),
 )
 UR10E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur10e"),
     label="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="universal-robots", variant="ur10e"),
-    attachments=(body_component("arm", UR10E_ARM, RootMount("base_link_inertia"), limb=Limb.ARM),),
+    build=Build.of(UR10E_MODULE),
 )

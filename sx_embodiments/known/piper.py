@@ -9,17 +9,18 @@ deployed limits win on conflict because live safety constraints are derived from
 
 from typing import Final
 
+from ..assembly import Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
     EmbodimentDefinition,
-    MountedOn,
     MountKind,
     RootMount,
     body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, ControlRates, GripperSpec, Limb, MimicJoint, PhysicalSpec
 from ._authoring import bounded_layout
 from .sources import menagerie
@@ -96,15 +97,40 @@ PIPER_GRIPPER: Final = GripperSpec(
     mimic_joints=(MimicJoint("joint8", of="joint7", multiplier=-1.0),),
 )
 
+#: The jaw, which AgileX ships fitted on the arm: everything below ``joint6_to_gripper_base``.
+PIPER_GRIPPER_MODULE: Final = Module(
+    module_id=ModuleId("piper-gripper"),
+    label="AgileX Piper parallel gripper",
+    description=Subtree(PIPER_URDF, below="joint6_to_gripper_base"),
+    plug=InterfaceId("agilex-piper-flange"),
+    components=(
+        body_component("gripper", PIPER_GRIPPER, RootMount("joint6_to_gripper_base_mount")),
+    ),
+)
+
+#: The arm as AgileX ships it, its flange fitted with the jaw.
+PIPER_MODULE: Final = Module(
+    module_id=ModuleId("piper"),
+    label="AgileX Piper arm",
+    description=PIPER_URDF,
+    components=(body_component("arm", PIPER_ARM, RootMount("base_link"), limb=Limb.ARM),),
+    sockets=(
+        Socket(
+            "flange",
+            InterfaceId("agilex-piper-flange"),
+            "link6",
+            carrier="arm",
+            fitted=PIPER_GRIPPER_MODULE,
+        ),
+    ),
+)
+
 PIPER_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("piper"),
     label="Agilex Piper",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="piper"),
-    attachments=(
-        body_component("arm", PIPER_ARM, RootMount("base_link"), limb=Limb.ARM),
-        body_component("gripper", PIPER_GRIPPER, MountedOn("arm", "link6")),
-    ),
+    build=Build.of(PIPER_MODULE),
     extra_assets=(PIPER_URDF,),
     rates=ControlRates(policy_hz=30.0),
     # Footprint measured from the menagerie base_link collision geometry (xy AABB).

@@ -14,6 +14,7 @@ from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, EmbodimentRegistry, co
 from sx_embodiments.known.das import QUEST_EGO_SPEC
 from sx_embodiments.known.piper import PIPER_SPEC
 from sx_embodiments.known.yubi import YUBI_SPEC
+from sx_embodiments.mechanical import Build
 from sx_embodiments.parts import CameraSpec, SensorModel
 
 
@@ -46,9 +47,12 @@ def test_declared_camera_inventory_tracks_component_changes():
     left = QUEST_EGO_SPEC.attachments[0]
     assert isinstance(left.part, CameraSpec)
     updated = replace(left.part, model=SensorModel("realsense_d405"))
+    module = QUEST_EGO_SPEC.build.placed[0].module
     definition = replace(
         QUEST_EGO_SPEC,
-        attachments=(replace(left, attachment=SensorAttachment(updated)),),
+        build=Build.of(
+            replace(module, components=(replace(left, attachment=SensorAttachment(updated)),))
+        ),
     )
     cameras = definition.collection_devices
     assert len(cameras) == 1

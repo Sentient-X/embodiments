@@ -1134,7 +1134,8 @@ def _parse_lineage(document: decode.Document) -> Lineage:
     )
 
 
-def _portable_component(component: Component) -> Component:
+def portable_component(component: Component) -> Component:
+    """The component as an embodiment carries it: its part's assets travel as the body's."""
     part = component.part
     if isinstance(part, ChainSpec | GripperSpec | MobileBaseSpec):
         part = dataclasses.replace(part, assets=())
@@ -1155,7 +1156,7 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         label=definition.label,
         kind=definition.kind,
         lineage=definition.lineage,
-        components=tuple(_portable_component(component) for component in definition.attachments),
+        components=tuple(portable_component(component) for component in definition.attachments),
         assets=tuple(assets),
         rates=definition.rates,
         base_mount=definition.base_mount,

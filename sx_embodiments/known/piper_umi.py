@@ -11,6 +11,7 @@ from ..assets import packaged_asset
 from ..compose import EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
 from ._authoring import bounded_layout
 from ._piper_umi_assets import ASSET_IDENTITIES
@@ -50,14 +51,20 @@ PIPER_UMI_JAW = GripperSpec(
     ),
     assets=(PIPER_UMI_URDF,),
 )
+PIPER_UMI_MODULE = Module(
+    module_id=ModuleId("piper-umi"),
+    label="Piper-UMI handheld jaws",
+    description=PIPER_UMI_URDF,
+    components=(
+        body_component("left_jaw", PIPER_UMI_JAW, RootMount("left_hand_root")),
+        body_component("right_jaw", PIPER_UMI_JAW, RootMount("right_hand_root")),
+    ),
+)
 PIPER_UMI_SPEC = EmbodimentDefinition(
     name=EmbodimentName("piper-umi"),
     label="Piper UMI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="piper-umi", revision="supplied-cad-v6-holder-tracking"),
-    attachments=(
-        body_component("left_jaw", PIPER_UMI_JAW, RootMount("left_hand_root")),
-        body_component("right_jaw", PIPER_UMI_JAW, RootMount("right_hand_root")),
-    ),
+    build=Build.of(PIPER_UMI_MODULE),
     extra_assets=PIPER_UMI_ASSETS,
 )

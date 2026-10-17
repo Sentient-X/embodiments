@@ -26,10 +26,12 @@ bindings yet.
 
 from typing import Final, Literal
 
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint
 from ._authoring import bounded_layout
 from .sources import ai_worker
@@ -116,12 +118,43 @@ FFW_BG2_RIGHT_ARM: Final = _ffw_arm("r")
 FFW_BG2_LEFT_GRIPPER: Final = _ffw_gripper("l")
 FFW_BG2_RIGHT_GRIPPER: Final = _ffw_gripper("r")
 
-FFW_BG2_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("ffw-bg2"),
+
+def _gripper_module(side: Literal["l", "r"], gripper: GripperSpec) -> Module:
+    """An RH-P12-RN(A) as the description fits it: everything below ``gripper_<side>_joint``."""
+    name = "left" if side == "l" else "right"
+    return Module(
+        module_id=ModuleId(f"ffw-bg2-{side}-gripper"),
+        label=f"ROBOTIS RH-P12-RN(A), {name} wrist",
+        description=Subtree(FFW_BG2_URDF, below=f"gripper_{side}_joint"),
+        plug=InterfaceId("robotis-rh-p12-rn"),
+        components=(
+            body_component(f"{name}_gripper", gripper, RootMount(f"gripper_{side}_joint_mount")),
+        ),
+    )
+
+
+def _wrist_camera(side: Literal["left", "right"]) -> Module:
+    """A wrist D405 as the description fits it, by its 1/4-20 thread; no optics are pinned."""
+    return Module(
+        module_id=ModuleId(f"ffw-bg2-{side}-wrist-camera"),
+        label=f"RealSense D405, {side} wrist",
+        description=Subtree(FFW_BG2_URDF, below=f"camera_{side}_joint"),
+        plug=InterfaceId("unc-1-4-20"),
+    )
+
+
+_SIDES: Final[tuple[tuple[Literal["l", "r"], Literal["left", "right"]], ...]] = (
+    ("l", "left"),
+    ("r", "right"),
+)
+_CAMERA_SEAT: Final = Pose((0.108236, -0.021, -0.062552), (-1.57079632679, 1.66678943569, 0.0))
+
+#: The robot as ROBOTIS ships it: each seventh arm link fitted with a gripper and a wrist camera.
+FFW_BG2_MODULE: Final = Module(
+    module_id=ModuleId("ffw-bg2"),
     label="ROBOTIS AI Worker FFW-BG2 (rev4)",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="ffw", variant="bg2-rev4"),
-    attachments=(
+    description=FFW_BG2_URDF,
+    components=(
         body_component("torso", FFW_BG2_TORSO, RootMount("base_link"), limb=Limb.TORSO),
         body_component("head", FFW_BG2_HEAD, MountedOn("torso", "arm_base_link"), limb=Limb.HEAD),
         body_component(
@@ -130,9 +163,39 @@ FFW_BG2_SPEC: Final = EmbodimentDefinition(
         body_component(
             "right_arm", FFW_BG2_RIGHT_ARM, MountedOn("torso", "arm_base_link"), limb=Limb.ARM
         ),
-        body_component("left_gripper", FFW_BG2_LEFT_GRIPPER, MountedOn("left_arm", "arm_l_link7")),
-        body_component(
-            "right_gripper", FFW_BG2_RIGHT_GRIPPER, MountedOn("right_arm", "arm_r_link7")
+    ),
+    sockets=(
+        *(
+            Socket(
+                f"{name}_flange",
+                InterfaceId("robotis-rh-p12-rn"),
+                f"arm_{side}_link7",
+                Pose((0.0, 0.0, -0.078), (0.0, 3.14159265359, 3.14159265359)),
+                carrier=f"{name}_arm",
+                fitted=_gripper_module(side, gripper),
+            )
+            for (side, name), gripper in zip(
+                _SIDES, (FFW_BG2_LEFT_GRIPPER, FFW_BG2_RIGHT_GRIPPER), strict=True
+            )
+        ),
+        *(
+            Socket(
+                f"{name}_camera",
+                InterfaceId("unc-1-4-20"),
+                f"arm_{side}_link7",
+                _CAMERA_SEAT,
+                carrier=f"{name}_arm",
+                fitted=_wrist_camera(name),
+            )
+            for side, name in _SIDES
         ),
     ),
+)
+
+FFW_BG2_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("ffw-bg2"),
+    label="ROBOTIS AI Worker FFW-BG2 (rev4)",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="ffw", variant="bg2-rev4"),
+    build=Build.of(FFW_BG2_MODULE),
 )

@@ -8,8 +8,12 @@ drift: :class:`~sx_embodiments.assembly.Subtree` cuts the upper body (the vendor
 the legs and the head), the head (below ``neck_joint``) and each leg (below its
 ``hip_pitch_joint``), and the assembly that rejoins them is the vendor's robot again, every
 link where the source put it (``tests/test_humanoid.py`` holds that by forward kinematics).
-An SO-101 neck is a composition, not a registered body, while neck motors are undecided:
-``compose_embodiments`` mounts ``so101`` on the upper body's ``head_link``.
+Each part is a :class:`~sx_embodiments.mechanical.Module`: the upper body offers a neck seat, two
+hip seats and two wrists, and the head and legs mate back onto their seats. An SO-101 neck is a
+composition, not a registered body, while neck motors are undecided: it mates on the neck seat
+in the head's place, or ``compose_embodiments`` sets it on the upper body's ``head_link``. The
+parallel grippers are modules whose servo and jaw no source describes, so the upper body with
+them is a development body (``sentient-humanoid-upper-body-grippers``).
 
 Drives, from Sentient-X sources at pinned commits:
 
@@ -31,11 +35,13 @@ upstream marks provisional, so they stay undocumented drives, outside any driver
 enters the body state. The legs carry no binding: the robot in service has none.
 
 The head carries an Intel RealSense D435 (``urdf/humanoid_pkg.csv``, ``camera_link`` on
-``head_link``). Its colour stream is declared at 1280x720 with the datasheet's nominal optics: a
-pinhole whose focal lengths are the OV2740's published field of view (69.4 x 42.5 degrees) and
-whose principal point is the raster centre. The optical frame sits at the CAD ``camera_link``
-origin, which the mesh shows faces +x; a unit's intrinsics and the camera's true placement on
-``head_link`` are its calibrations, measured by :mod:`sx_embodiments.calibrate`.
+``head_link``), the head module's fitted camera module. Its colour stream is declared at 1280x720
+with the datasheet's nominal optics: a pinhole whose focal lengths are the OV2740's published
+field of view (69.4 x 42.5 degrees) and whose principal point is the raster centre. The optical
+frame sits at the CAD ``camera_link`` origin, which the mesh shows faces +x; a unit's intrinsics
+and the camera's true placement on ``head_link`` are its calibrations, measured by
+:mod:`sx_embodiments.calibrate`. The head sits on the chest the torso turns, so the camera rides
+on the torso.
 
 The hardware URDF's limits win at the execution boundary; the attached 28-joint MJCF is a
 simulation description whose limits differ.
@@ -45,7 +51,7 @@ import math
 from dataclasses import replace
 from typing import Final, Literal
 
-from ..assembly import Assembly, Frame, Member, Pose, Subtree
+from ..assembly import Frame, Pose, Subtree
 from ..assets import (
     AssetFormat,
     AssetProvenance,
@@ -73,12 +79,14 @@ from ..layout import (
     UndocumentedDrive,
     Unobserved,
 )
+from ..mechanical import Build, InterfaceId, Mate, Module, ModuleId, Placed, Socket
 from ..parts import (
     CameraModality,
     CameraOptics,
     CameraOpticsAuthority,
     CameraSpec,
     ChainSpec,
+    DeviceSpec,
     FactSource,
     Limb,
     SensorModel,
@@ -252,7 +260,6 @@ SENTIENT_HUMANOID_RIGHT_LEG: Final = _humanoid_leg("right")
 SENTIENT_HUMANOID_LEFT_LEG: Final = _humanoid_leg("left")
 
 
-#: The vendor tree without its legs and head; it keeps the vendor's names.
 REALSENSE_D435_COLOR: Final = CameraSpec(
     part_id=PartId("realsense-d435-color"),
     model=SensorModel("realsense_d435"),
@@ -284,6 +291,7 @@ HEAD_CAMERA: Final = Frame(
     camera_optical=True,
 )
 
+#: The vendor tree without its legs and head; it keeps the vendor's names.
 UPPER_BODY: Final = Subtree(
     SENTIENT_HUMANOID_URDF,
     without=("right_hip_pitch_joint", "left_hip_pitch_joint", "neck_joint"),
@@ -295,28 +303,10 @@ LEGS: Final = tuple(
 )
 
 
-def _part(name: str, part: Subtree) -> Member:
-    """A cut part rejoining the vendor's tree where it was cut, under the vendor's names."""
-    return Member(name, part, seat=part, namespaced=False)
+NECK: Final = InterfaceId("sentient-humanoid-neck")
+HIP: Final = InterfaceId("sentient-humanoid-hip")
+WRIST: Final = InterfaceId("sentient-humanoid-wrist")
 
-
-_UPPER_MEMBERS: Final = (Member("upper_body", UPPER_BODY, namespaced=False), _part("head", HEAD))
-
-SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY: Final = Assembly(
-    robot="sentient_humanoid_upper_body",
-    root="humanoid_origin",
-    members=_UPPER_MEMBERS,
-    frames=(HEAD_CAMERA,),
-)
-SENTIENT_HUMANOID_ASSEMBLY: Final = Assembly(
-    robot="sentient_humanoid",
-    root="humanoid_origin",
-    members=(
-        *_UPPER_MEMBERS,
-        *(_part(f"{side}_leg", leg) for side, leg in zip(("right", "left"), LEGS, strict=True)),
-    ),
-    frames=(HEAD_CAMERA,),
-)
 UPPER_BODY_COMPONENTS: Final = (
     body_component("torso", SENTIENT_HUMANOID_TORSO, RootMount("base_link"), limb=Limb.TORSO),
     body_component(
@@ -325,11 +315,141 @@ UPPER_BODY_COMPONENTS: Final = (
     body_component(
         "left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link"), limb=Limb.ARM
     ),
-    sensor_component("head", REALSENSE_D435_COLOR, RootMount(HEAD_CAMERA.name)),
 )
-LEG_COMPONENTS: Final = (
-    body_component("right_leg", SENTIENT_HUMANOID_RIGHT_LEG, RootMount("base_link"), limb=Limb.LEG),
-    body_component("left_leg", SENTIENT_HUMANOID_LEFT_LEG, RootMount("base_link"), limb=Limb.LEG),
+
+#: The torso and arms. The neck and hip seats are the cut joints' parents and origins in the
+#: vendor URDF; a gripper meets a wrist at the wrist-yaw link's frame, the last link the CAD
+#: models (the flange face's offset from it is not captured).
+UPPER_BODY_MODULE: Final = Module(
+    module_id=ModuleId("sentient-humanoid-upper-body"),
+    label="Sentient humanoid torso and arms",
+    description=UPPER_BODY,
+    components=UPPER_BODY_COMPONENTS,
+    sockets=(
+        Socket(
+            "neck",
+            NECK,
+            "chest_link",
+            Pose((-0.0589999999999757, 0.0, 0.172550670854567)),
+            carrier="torso",
+        ),
+        Socket(
+            "right_hip",
+            HIP,
+            "base_link",
+            Pose(
+                (4.16270248897038e-05, -0.127999993231209, 0.0),
+                (0.0, 3.14159265359, 0.000325211137678403),
+            ),
+        ),
+        Socket("left_hip", HIP, "base_link"),
+        Socket("right_wrist", WRIST, "right_wrist_yaw_link", carrier="right_arm"),
+        Socket("left_wrist", WRIST, "left_wrist_yaw_link", carrier="left_arm"),
+    ),
+)
+
+CAMERA_HOLDER: Final = InterfaceId("sentient-humanoid-camera-holder")
+
+#: The D435 as the head fits it: ``camera_link``, below ``camera_joint``, with its colour stream on
+#: the optical frame the module adds.
+HEAD_CAMERA_MODULE: Final = Module(
+    module_id=ModuleId("sentient-humanoid-head-camera"),
+    label="Intel RealSense D435 in the humanoid's head",
+    description=Subtree(SENTIENT_HUMANOID_URDF, below="camera_joint"),
+    plug=CAMERA_HOLDER,
+    frames=(HEAD_CAMERA,),
+    components=(sensor_component("head", REALSENSE_D435_COLOR, RootMount(HEAD_CAMERA.name)),),
+)
+
+#: The vendor's head: a two-servo pan-tilt neck carrying the head, its holder fitted with the D435.
+HEAD_MODULE: Final = Module(
+    module_id=ModuleId("sentient-humanoid-head"),
+    label="Sentient humanoid head on its two-servo neck",
+    description=HEAD,
+    plug=NECK,
+    sockets=(
+        Socket(
+            "camera",
+            CAMERA_HOLDER,
+            "head_link",
+            Pose((0.0453850000000015, -0.00450000000000009, 0.0774061362008152)),
+            fitted=HEAD_CAMERA_MODULE,
+        ),
+    ),
+)
+
+
+def _leg_module(side: Literal["left", "right"], leg: ChainSpec, part: Subtree) -> Module:
+    return Module(
+        module_id=ModuleId(f"sentient-humanoid-{side}-leg"),
+        label=f"Sentient humanoid {side} leg",
+        description=part,
+        plug=HIP,
+        components=(
+            body_component(
+                f"{side}_leg", leg, RootMount(f"{side}_hip_pitch_joint_mount"), limb=Limb.LEG
+            ),
+        ),
+    )
+
+
+LEG_MODULES: Final = (
+    _leg_module("right", SENTIENT_HUMANOID_RIGHT_LEG, LEGS[0]),
+    _leg_module("left", SENTIENT_HUMANOID_LEFT_LEG, LEGS[1]),
+)
+
+#: A parallel gripper on small Dynamixel servos. Its servo model, bus ids and jaw geometry are
+#: in no source, so it is a device with no drive the drivers take and a description of one link.
+SENTIENT_HUMANOID_GRIPPER_MODULE: Final = Module(
+    module_id=ModuleId("sentient-humanoid-parallel-gripper"),
+    label="Sentient humanoid parallel gripper",
+    description=b'<?xml version="1.0"?>\n<robot name="sentient_humanoid_gripper">\n'
+    b'  <link name="mount"/>\n</robot>\n',
+    plug=WRIST,
+    components=(
+        body_component(
+            "gripper",
+            DeviceSpec(
+                PartId("sentient-humanoid-parallel-gripper"),
+                "Parallel gripper on small Dynamixel servos; the servo model, its bus ids and "
+                "the jaw's geometry are not captured",
+            ),
+            RootMount("mount"),
+        ),
+    ),
+)
+
+
+def _rejoin(name: str, module: Module, socket: str) -> Mate:
+    """A cut part mated back on the upper body's seat under the vendor's names."""
+    return Mate(name, module, host="upper_body", socket=socket, namespaced=False)
+
+
+_UPPER: Final = Placed("upper_body", UPPER_BODY_MODULE, namespaced=False)
+_HEAD: Final = _rejoin("head", HEAD_MODULE, "neck")
+
+SENTIENT_HUMANOID_UPPER_BODY_BUILD: Final = Build(
+    robot="sentient_humanoid_upper_body", root="humanoid_origin", placed=(_UPPER,), mates=(_HEAD,)
+)
+SENTIENT_HUMANOID_BUILD: Final = Build(
+    robot="sentient_humanoid",
+    root="humanoid_origin",
+    placed=(_UPPER,),
+    mates=(
+        _HEAD,
+        _rejoin("right_leg", LEG_MODULES[0], "right_hip"),
+        _rejoin("left_leg", LEG_MODULES[1], "left_hip"),
+    ),
+)
+SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_BUILD: Final = Build(
+    robot="sentient_humanoid_upper_body_grippers",
+    root="humanoid_origin",
+    placed=(_UPPER,),
+    mates=(
+        _HEAD,
+        Mate("right", SENTIENT_HUMANOID_GRIPPER_MODULE, host="upper_body", socket="right_wrist"),
+        Mate("left", SENTIENT_HUMANOID_GRIPPER_MODULE, host="upper_body", socket="left_wrist"),
+    ),
 )
 
 
@@ -338,7 +458,7 @@ SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     label="Sentient humanoid upper body",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid", variant="upper-body"),
-    attachments=UPPER_BODY_COMPONENTS,
+    build=SENTIENT_HUMANOID_UPPER_BODY_BUILD,
     extra_assets=(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
@@ -347,7 +467,22 @@ SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
             23708,
         ),
     ),
-    assembly=SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY,
+)
+
+SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("sentient-humanoid-upper-body-grippers"),
+    label="Sentient humanoid upper body with its grippers",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="sentient-humanoid", variant="upper-body-grippers"),
+    build=SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_BUILD,
+    extra_assets=(
+        SENTIENT_HUMANOID_SOURCE_URDF,
+        _generated(
+            "humanoid_pkg/urdf/sentient_humanoid_upper_body_grippers.urdf",
+            "54d7d9a1f657aa5cf4633498c06687319af4192f1957eca09663f5379ea3342e",
+            24144,
+        ),
+    ),
 )
 
 SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
@@ -355,7 +490,7 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     label="Sentient humanoid",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),
-    attachments=(*UPPER_BODY_COMPONENTS, *LEG_COMPONENTS),
+    build=SENTIENT_HUMANOID_BUILD,
     extra_assets=(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
@@ -365,5 +500,4 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         ),
         SENTIENT_HUMANOID_MJCF,
     ),
-    assembly=SENTIENT_HUMANOID_ASSEMBLY,
 )

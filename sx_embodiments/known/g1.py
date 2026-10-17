@@ -6,6 +6,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb
 from ._authoring import bounded_layout
 from .sources import menagerie
@@ -117,12 +118,11 @@ UNITREE_G1_TORSO: Final = ChainSpec(
 UNITREE_G1_LEFT_ARM: Final = _g1_arm("left")
 UNITREE_G1_RIGHT_ARM: Final = _g1_arm("right")
 
-UNITREE_G1_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("unitree-g1"),
-    label="Unitree G1 (29 DOF)",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="unitree-g1", variant="29dof"),
-    attachments=(
+UNITREE_G1_MODULE: Final = Module(
+    module_id=ModuleId("unitree-g1"),
+    label="Unitree G1",
+    description=UNITREE_G1_URDF,
+    components=(
         body_component("left_leg", UNITREE_G1_LEFT_LEG, RootMount("pelvis"), limb=Limb.LEG),
         body_component("right_leg", UNITREE_G1_RIGHT_LEG, RootMount("pelvis"), limb=Limb.LEG),
         body_component("torso", UNITREE_G1_TORSO, RootMount("pelvis"), limb=Limb.TORSO),
@@ -133,4 +133,12 @@ UNITREE_G1_SPEC: Final = EmbodimentDefinition(
             "right_arm", UNITREE_G1_RIGHT_ARM, MountedOn("torso", "torso_link"), limb=Limb.ARM
         ),
     ),
+)
+
+UNITREE_G1_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("unitree-g1"),
+    label="Unitree G1 (29 DOF)",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="unitree-g1", variant="29dof"),
+    build=Build.of(UNITREE_G1_MODULE),
 )

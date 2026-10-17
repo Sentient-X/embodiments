@@ -10,11 +10,12 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 import dataclasses
 from typing import Final
 
-from ..assembly import INSPECTION_NOTE, Assembly, Member, Pose
+from ..assembly import INSPECTION_NOTE, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed
 from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
 
@@ -91,27 +92,37 @@ SO101_JAW: Final = GripperSpec(
 )
 
 
+#: The arm with its jaw: the static jaw is the wrist-roll link itself, so the jaw is the arm's
+#: own, not a module of its own.
+SO101_MODULE: Final = Module(
+    module_id=ModuleId("so101"),
+    label="SO-101 arm with its jaw",
+    description=SO101_URDF,
+    plug=InterfaceId("so101-base"),
+    components=(
+        body_component("arm", SO101_ARM, RootMount("base_link"), limb=Limb.ARM),
+        body_component("jaw", SO101_JAW, MountedOn("arm", "gripper_link")),
+    ),
+)
+
 SO101_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("so101"),
     label="SO-101 (single arm)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101"),
-    attachments=(
-        body_component("arm", SO101_ARM, RootMount("base_link"), limb=Limb.ARM),
-        body_component("jaw", SO101_JAW, MountedOn("arm", "gripper_link")),
-    ),
+    build=Build.of(SO101_MODULE),
     extra_assets=(SO101_URDF,),
     # rates unbound: sim benchmarks and hobby rigs run at their own configured rates
 )
 
-#: Two single-arm descriptions side by side; composing two sides IS the bimanual body.
-BIMANUAL_SO101_ASSEMBLY: Final = Assembly(
+#: Two single arms side by side at a nominal inspection layout; two sides ARE the bimanual body.
+BIMANUAL_SO101_BUILD: Final = Build(
     robot="bimanual_so101",
     root="bimanual_origin",
     note=INSPECTION_NOTE,
-    members=(
-        Member("left", SO101_URDF, Pose((0.0, 0.25, 0.0))),
-        Member("right", SO101_URDF, Pose((0.0, -0.25, 0.0))),
+    placed=(
+        Placed("left", SO101_MODULE, Pose((0.0, 0.25, 0.0))),
+        Placed("right", SO101_MODULE, Pose((0.0, -0.25, 0.0))),
     ),
 )
 
@@ -120,12 +131,7 @@ BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
     label="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="so101", variant="bimanual"),
-    attachments=tuple(
-        component
-        for side in ("left", "right")
-        for component in BIMANUAL_SO101_ASSEMBLY.components_of(side, SO101_SPEC.attachments)
-    ),
+    build=BIMANUAL_SO101_BUILD,
     extra_assets=(SO101_SOURCE_URDF, BIMANUAL_SO101_URDF),
-    assembly=BIMANUAL_SO101_ASSEMBLY,
     # rates unbound: per-episode control_hz travels with the recordings
 )

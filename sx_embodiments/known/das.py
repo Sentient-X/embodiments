@@ -28,6 +28,7 @@ from ..compose import (
 from ..curves import Curve1D, Knot
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, Module, ModuleId
 from ..parts import (
     CameraModality,
     CameraOptics,
@@ -180,6 +181,22 @@ QUEST3_HEAD: Final = CameraSpec(
     optics=QUEST3_REFERENCE_OPTICS,
 )
 
+DAS_UMI_V4_MODULE: Final = Module(
+    module_id=ModuleId("das-umi-v4"),
+    label="DAS UMI v4 jaws with a Quest 3S headset",
+    description=DAS_UMI_V4_URDF,
+    components=(
+        body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
+        body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
+        sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_left_camera_optical")),
+        sensor_component(
+            "head_right",
+            QUEST3_HEAD,
+            RootMount("quest3s_right_camera_optical"),
+        ),
+    ),
+)
+
 DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     collection=CollectionSetup(
         method=CollectionMethod.UMI,
@@ -220,21 +237,30 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     label="DAS/UMI handheld gripper pair V4 (Quest-tracked)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
-    attachments=(
-        body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
-        body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
-        sensor_component("head_left", QUEST3_HEAD, RootMount("quest3s_left_camera_optical")),
-        sensor_component(
-            "head_right",
-            QUEST3_HEAD,
-            RootMount("quest3s_right_camera_optical"),
-        ),
-    ),
+    build=Build.of(DAS_UMI_V4_MODULE),
     extra_assets=(DAS_UMI_V4_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
     operator_mounts=(
         OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),
         OperatorMount(OperatorSite.LEFT_HAND, "left_base_link", "left_handle"),
         OperatorMount(OperatorSite.RIGHT_HAND, "right_base_link", "right_handle"),
+    ),
+)
+
+QUEST_EGO_MODULE: Final = Module(
+    module_id=ModuleId("quest-ego"),
+    label="Quest 3S headset",
+    description=QUEST_EGO_URDF,
+    components=(
+        sensor_component(
+            "head_left",
+            QUEST3_HEAD,
+            RootMount("quest3s_left_camera_optical"),
+        ),
+        sensor_component(
+            "head_right",
+            QUEST3_HEAD,
+            RootMount("quest3s_right_camera_optical"),
+        ),
     ),
 )
 
@@ -251,18 +277,7 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
     label="Quest 3 egocentric headset (stereo passthrough, no controllers)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
-    attachments=(
-        sensor_component(
-            "head_left",
-            QUEST3_HEAD,
-            RootMount("quest3s_left_camera_optical"),
-        ),
-        sensor_component(
-            "head_right",
-            QUEST3_HEAD,
-            RootMount("quest3s_right_camera_optical"),
-        ),
-    ),
+    build=Build.of(QUEST_EGO_MODULE),
     extra_assets=(QUEST_EGO_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
     operator_mounts=(OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),),
 )

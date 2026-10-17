@@ -58,6 +58,7 @@ from ..compose import (
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
+from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb, MobileBaseSpec
 from ._authoring import unbounded_layout
 
@@ -118,12 +119,11 @@ SENTIENT_RWH_LEFT_ARM: Final = ChainSpec(
     home=(0.0,) * 8,
 )
 
-SENTIENT_RWH_SPEC: Final = EmbodimentDefinition(
-    name=EmbodimentName("sentient-rwh"),
-    label="Sentient RWH (rugged wheeled humanoid)",
-    kind=EmbodimentKind.ROBOT,
-    lineage=Lineage(family="sentient-rwh"),
-    attachments=(
+SENTIENT_RWH_MODULE: Final = Module(
+    module_id=ModuleId("sentient-rwh"),
+    label="Sentient RWH",
+    description=SENTIENT_RWH_URDF,
+    components=(
         body_component("base", SENTIENT_RWH_BASE, RootMount("base_link")),
         body_component(
             "torso", SENTIENT_RWH_TORSO, MountedOn("base", "base_link"), limb=Limb.TORSO
@@ -138,6 +138,14 @@ SENTIENT_RWH_SPEC: Final = EmbodimentDefinition(
             "left_arm", SENTIENT_RWH_LEFT_ARM, MountedOn("torso", "Arm_link5_torso"), limb=Limb.ARM
         ),
     ),
+)
+
+SENTIENT_RWH_SPEC: Final = EmbodimentDefinition(
+    name=EmbodimentName("sentient-rwh"),
+    label="Sentient RWH (rugged wheeled humanoid)",
+    kind=EmbodimentKind.ROBOT,
+    lineage=Lineage(family="sentient-rwh"),
+    build=Build.of(SENTIENT_RWH_MODULE),
     # Footprint measured as the xy AABB of the chassis AND the four wheels' collision
     # geometry, posed into `base_link`. The wheels are the part that protrudes: the chassis
     # alone spans x +/-0.215, but the tyres reach x +/-0.312, so a chassis-only footprint

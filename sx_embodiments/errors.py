@@ -86,6 +86,22 @@ class LayoutError(EmbodimentError):
         self.name = name
 
 
+class InterfaceMismatchError(CompositionError):
+    """A module's plug and the socket it is mated onto are different mechanical interfaces."""
+
+    def __init__(self, name: str, plug: str, socket: str, interface: str) -> None:
+        super().__init__(
+            name, f"a {plug!r} plug cannot mate on socket {socket!r}, which takes {interface!r}"
+        )
+        self.plug = plug
+        self.socket = socket
+        self.interface = interface
+
+
+class SocketError(CompositionError):
+    """A mate names a socket that does not exist, is taken, or sits on no link of its module."""
+
+
 class InvalidCameraMountError(CompositionError):
     """An embodiment camera has no explicit mount frame."""
 

@@ -7,13 +7,27 @@ import pytest
 
 from sx_embodiments import PlacedEmbodiment, compose_embodiments, embodiments
 from sx_embodiments.assembly import Assembly, Frame, Member, Pose
-from sx_embodiments.assets import AssetFormat, AssetRole
-from sx_embodiments.compose import MountedOn, RootMount
+from sx_embodiments.assets import AssetFormat, AssetRole, PackagedAsset
+from sx_embodiments.compose import EmbodimentDefinition, MountedOn, RootMount
 from sx_embodiments.errors import CompositionError
 from sx_embodiments.known import definitions
 from sx_embodiments.known.so101 import SO101_SPEC, SO101_URDF
 
-ASSEMBLED = tuple(d for d in definitions() if d.assembly is not None)
+ASSEMBLED = tuple(d for d in definitions() if d.build.root is not None)
+
+
+def _description(definition: EmbodimentDefinition) -> PackagedAsset | None:
+    found = tuple(
+        asset
+        for component in definition.attachments
+        for asset in getattr(component.part, "assets", ())
+        if asset.role is AssetRole.DESCRIPTION and asset.format is AssetFormat.URDF
+    ) + tuple(
+        a
+        for a in definition.extra_assets
+        if a.role is AssetRole.DESCRIPTION and a.format is AssetFormat.URDF
+    )
+    return found[0] if found else None
 
 
 def test_every_multi_device_description_is_rendered_from_its_declaration() -> None:
@@ -24,35 +38,32 @@ def test_every_multi_device_description_is_rendered_from_its_declaration() -> No
         "piperx-station",
         "sentient-humanoid",
         "sentient-humanoid-upper-body",
+        "sentient-humanoid-upper-body-grippers",
     }
-    for definition in ASSEMBLED:
-        assert definition.assembly is not None
-        (description,) = (
-            a
-            for a in definition.extra_assets
-            if a.role is AssetRole.DESCRIPTION and a.format is AssetFormat.URDF
-        )
-        assert definition.assembly.urdf() == description.path().read_bytes(), (
+
+
+def test_every_body_is_its_build_rendered() -> None:
+    """Adoption is total: each body's description is its build's rendering, byte for byte; a
+    one-module build is its module's own file, a rooted one the committed composition."""
+    for definition in definitions():
+        description = _description(definition)
+        if description is None:
+            assert definition.build.placed[0].module.description is None, definition.name
+            continue
+        assert definition.build.urdf() == description.path().read_bytes(), (
             f"{definition.name}: run tools/compose_registered_urdfs.py and repin the digest"
         )
-
-
-def test_no_body_is_built_from_other_descriptions_without_its_assembly() -> None:
-    """Adoption is total: a description made by composing others has a declaration."""
-    for definition in definitions():
-        description = next(
-            (a for a in definition.extra_assets if a.role is AssetRole.DESCRIPTION), None
-        )
-        composed = description is not None and description.provenance.generator == (
+        composed = description.provenance.generator == (
             "sx-embodiments/tools/compose_registered_urdfs.py"
         )
-        assert composed == (definition.assembly is not None), definition.name
+        assert composed == (definition.build.root is not None), definition.name
 
 
 def test_every_component_frame_is_a_link_of_the_rendered_description() -> None:
-    for definition in ASSEMBLED:
-        assert definition.assembly is not None
-        root = ET.fromstring(definition.assembly.urdf())
+    for definition in definitions():
+        if _description(definition) is None:
+            continue
+        root = ET.fromstring(definition.build.urdf())
         links = {link.attrib["name"] for link in root.findall("link")}
         for component in definition.attachments:
             assert component.mount.frame in links, (definition.name, component.instance)
