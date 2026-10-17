@@ -60,10 +60,10 @@ pub enum ClockError {
 /// Returns [`ClockError`] for a timestamp that is not a finite non-negative time, one more than
 /// [`MAX_GLOBAL_TIME_LEAD`] after the sample, or one older than the monotonic clock itself.
 pub fn captured_at(timestamp_ms: f64, host: HostSample) -> Result<CapturedAt, ClockError> {
-    if !timestamp_ms.is_finite() || timestamp_ms < 0.0 {
-        return Err(ClockError::NotATime { timestamp_ms });
-    }
-    let exposed = UNIX_EPOCH + Duration::from_secs_f64(timestamp_ms / 1_000.0);
+    let exposed = Duration::try_from_secs_f64(timestamp_ms / 1_000.0)
+        .ok()
+        .and_then(|since_epoch| UNIX_EPOCH.checked_add(since_epoch))
+        .ok_or(ClockError::NotATime { timestamp_ms })?;
     let age = match host.wall.duration_since(exposed) {
         Ok(age) => age,
         Err(ahead) if ahead.duration() <= MAX_GLOBAL_TIME_LEAD => Duration::ZERO,
@@ -77,10 +77,11 @@ pub fn captured_at(timestamp_ms: f64, host: HostSample) -> Result<CapturedAt, Cl
         .monotonic
         .checked_sub(age)
         .ok_or(ClockError::TooOld { age })?;
-    Ok(CapturedAt {
-        monotonic,
-        wall: host.wall - age,
-    })
+    let wall = host
+        .wall
+        .checked_sub(age)
+        .ok_or(ClockError::TooOld { age })?;
+    Ok(CapturedAt { monotonic, wall })
 }
 
 #[cfg(test)]
@@ -118,7 +119,7 @@ mod tests {
             captured_at(1_760_000_000_011.0, host),
             Err(ClockError::Leads { .. })
         ));
-        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+        for bad in [f64::NAN, f64::INFINITY, -1.0, f64::MAX] {
             assert!(matches!(
                 captured_at(bad, host),
                 Err(ClockError::NotATime { .. })

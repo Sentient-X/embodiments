@@ -250,9 +250,15 @@ impl<D: Device> RealSenseSource<D> {
             ));
         }
         if self.request.emitter == Emitter::Interleaved {
-            match first.emitter_lit {
-                Some(true) => return Ok(None),
-                Some(false) => {}
+            let lit: Option<Vec<bool>> = taken.iter().map(|frame| frame.emitter_lit).collect();
+            match lit.as_deref() {
+                Some(lit) if lit.iter().all(|&on| on) => return Ok(None),
+                Some(lit) if lit.iter().all(|&on| !on) => {}
+                Some(_) => {
+                    return Err(device(
+                        "the pair's frames disagree on whether the projector was lit".to_owned(),
+                    ));
+                }
                 None => {
                     return Err(device(
                         "an interleaved projector needs each frame's emitter metadata".to_owned(),
@@ -261,10 +267,10 @@ impl<D: Device> RealSenseSource<D> {
             }
         }
         if let Some((number, timestamp_ms)) = self.last {
-            if first.number == number {
+            if first.number == number && first.timestamp_ms.to_bits() == timestamp_ms.to_bits() {
                 return Ok(None);
             }
-            if first.timestamp_ms <= timestamp_ms {
+            if first.number <= number || first.timestamp_ms <= timestamp_ms {
                 return Err(device(format!(
                     "frame {} at {} ms is not after frame {number} at {timestamp_ms} ms",
                     first.number, first.timestamp_ms

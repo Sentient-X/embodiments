@@ -143,14 +143,31 @@ fn the_infrared_pair_is_one_exposure_and_interleaving_publishes_the_dark_frames(
     );
     assert!(matches!(source.next(), Err(CaptureError::Device(_))));
 
+    // Imagers that disagree on the projector are not one dark exposure.
+    let mut mixed = pair(7, EPOCH_MS + 40.0, false);
+    mixed[1].emitter_lit = Some(true);
+    let mut source = RealSenseSource::with_clock(
+        RecordedDevice::new([mixed]),
+        request.clone(),
+        clock(Instant::now()),
+    );
+    assert!(matches!(source.next(), Err(CaptureError::Device(_))));
+
     // Interleaving without the emitter metadata cannot tell lit from dark.
     let mut blind = pair(6, EPOCH_MS + 40.0, false);
     for frame in &mut blind {
         frame.emitter_lit = None;
     }
-    let mut source =
-        RealSenseSource::with_clock(RecordedDevice::new([blind]), request, clock(Instant::now()));
-    assert!(matches!(source.next(), Err(CaptureError::Device(_))));
+    let mut half_blind = pair(8, EPOCH_MS + 40.0, false);
+    half_blind[1].emitter_lit = None;
+    for frameset in [blind, half_blind] {
+        let mut source = RealSenseSource::with_clock(
+            RecordedDevice::new([frameset]),
+            request.clone(),
+            clock(Instant::now()),
+        );
+        assert!(matches!(source.next(), Err(CaptureError::Device(_))));
+    }
 }
 
 #[test]
@@ -158,6 +175,17 @@ fn a_frame_not_in_global_time_or_at_another_raster_is_refused() {
     let request =
         CaptureRequest::for_track(&track(&document(PLANS, "humanoid-head-color")), Emitter::On)
             .expect("request");
+    // A frame number seen before, at another time, is not the same frame again.
+    let mut source = RealSenseSource::with_clock(
+        RecordedDevice::new([
+            vec![frame(Stream::Color, 7, EPOCH_MS + 40.0, (1280, 720))],
+            vec![frame(Stream::Color, 7, EPOCH_MS + 40.0005, (1280, 720))],
+        ]),
+        request.clone(),
+        clock(Instant::now()),
+    );
+    source.next().expect("first");
+    assert!(matches!(source.next(), Err(CaptureError::Device(_))));
     for bad in [
         RawFrame {
             domain: TimestampDomain::SystemTime,
