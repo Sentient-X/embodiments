@@ -145,12 +145,17 @@ instance the caller is configured as, so another unit's zeros are refused;
 `BodyBindings::calibrated` then refuses a drive of another body. Every Damiao opener takes one.
 
 What a built robot streams comes from the same resolution: `sx_embodiments.media.media_document`
-renders `sx.media-plan/v1`, one track per declared camera with its resolved optics and mount
-(its pose in the description's root, or the moving joints it rides on), a `MediaRig`'s declared
+renders `sx.media-plan/v2`, one track per declared camera with its resolved optics and mount
+(the description's joints from root to mount link, and its pose in the root when they are all
+fixed, or the independent joints it rides on), a `MediaRig`'s declared
 stereo pair as one track left then right, and its fitted microphones.
 `sx_embodiment_drivers::MediaPlan::parse(document, instance)` reads it for one robot instance,
 and a camera or microphone adapter implements `FrameSource` or `AudioSource` for one planned
-track. `tools/render_driver_bindings.py` renders the crate's `media-plans.json` fixture.
+track. `sx_embodiment_drivers::kinematics::Chain::pose` evaluates a view's rendered chain at
+joint positions exactly as `Kinematics.pose` does, so a station places a camera on moving joints
+without reading the description. `tools/render_driver_bindings.py` renders the crate's
+`media-plans.json` fixture and `media-poses.json`, seeded mount poses from the description that
+the chain evaluation is held equal to.
 
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,

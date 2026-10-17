@@ -1,0 +1,180 @@
+{
+  "sentient-humanoid-upper-body": [
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": -0.526818,
+        "waist_roll_joint": -0.149155,
+        "waist_pitch_joint": 0.392345,
+        "neck_yaw_joint": -0.037184,
+        "head_joint": 0.703545
+      },
+      "translation_m": [
+        0.26874992340471754,
+        -0.15499661406793835,
+        0.5745831312992115
+      ],
+      "rotation_xyzw": [
+        -0.48511615729469876,
+        0.8379659785335327,
+        -0.24580959243464964,
+        0.04530978943976056
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": 1.054429,
+        "waist_roll_joint": 0.051759,
+        "waist_pitch_joint": 0.132236,
+        "neck_yaw_joint": 0.128157,
+        "head_joint": -0.408467
+      },
+      "translation_m": [
+        0.06969809220800156,
+        0.010504520114729844,
+        0.7045210876661965
+      ],
+      "rotation_xyzw": [
+        -0.5830625835058292,
+        0.14256683037893775,
+        -0.13435491232818084,
+        0.7884551224543462
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": -0.776852,
+        "waist_roll_joint": 1.020578,
+        "waist_pitch_joint": 0.031177,
+        "neck_yaw_joint": 0.119889,
+        "head_joint": -0.992659
+      },
+      "translation_m": [
+        -0.3223849574575595,
+        -0.3840563877113642,
+        0.44939789286874976
+      ],
+      "rotation_xyzw": [
+        0.32572192196616834,
+        0.38939507284159747,
+        -0.6975103804224148,
+        0.5057232207446387
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": 0.501703,
+        "waist_roll_joint": -0.80739,
+        "waist_pitch_joint": -0.444129,
+        "neck_yaw_joint": -0.121328,
+        "head_joint": 0.155426
+      },
+      "translation_m": [
+        -0.30861456918103775,
+        0.1726094257331582,
+        0.5269809333206252
+      ],
+      "rotation_xyzw": [
+        -0.5977909293087155,
+        0.045917025597736576,
+        -0.6096123980059313,
+        0.5185656716308332
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": 0.502144,
+        "waist_roll_joint": -1.189589,
+        "waist_pitch_joint": 1.144879,
+        "neck_yaw_joint": 0.717214,
+        "head_joint": 0.132174
+      },
+      "translation_m": [
+        0.35340207530049356,
+        0.3256800086463394,
+        0.19101722456965153
+      ],
+      "rotation_xyzw": [
+        0.9029232144507697,
+        -0.3518585245403832,
+        0.23642409006432444,
+        0.07091471745279679
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": 0.676333,
+        "waist_roll_joint": -0.424007,
+        "waist_pitch_joint": 0.020917,
+        "neck_yaw_joint": -0.011843,
+        "head_joint": 1.128617
+      },
+      "translation_m": [
+        -0.02206823097563737,
+        0.14910736437555488,
+        0.5757209512205503
+      ],
+      "rotation_xyzw": [
+        -0.878357667185657,
+        0.378584974694856,
+        -0.27562807755075824,
+        0.0958665129079962
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": 0.64223,
+        "waist_roll_joint": -0.62249,
+        "waist_pitch_joint": -0.425718,
+        "neck_yaw_joint": -0.237857,
+        "head_joint": -0.429643
+      },
+      "translation_m": [
+        -0.33201860307049164,
+        0.04692323260763737,
+        0.5856450838441967
+      ],
+      "rotation_xyzw": [
+        -0.3647498417668945,
+        -0.046798020310811574,
+        -0.5745780228387467,
+        0.7311823260286938
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head",
+      "positions": {
+        "torso_joint": -0.47436,
+        "waist_roll_joint": -1.030942,
+        "waist_pitch_joint": 0.658762,
+        "neck_yaw_joint": 0.173322,
+        "head_joint": 0.81892
+      },
+      "translation_m": [
+        0.45403066669891545,
+        0.010907565981569785,
+        0.3168869487975395
+      ],
+      "rotation_xyzw": [
+        0.5342302379313021,
+        -0.7206934066113464,
+        0.23698696235152,
+        0.37287564444757715
+      ]
+    }
+  ]
+}
