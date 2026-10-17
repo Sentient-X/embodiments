@@ -52,6 +52,15 @@ declares its `Assembly` beside its components, takes those components from
 `tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
 Assembly poses are nominal; a measured mount is calibration and never edits the assembly.
 
+A member can also be a part of a description rather than the whole of it. `Subtree` cuts the
+part below one joint (or the description without some joints), keeping the cut joint under a
+`<joint>_mount` root so a revolute hip still moves; a member `seat`ed on that part sits where
+the part hung from its source, and `namespaced=False` keeps the source's names. The Sentient
+humanoid is built this way from its one vendor URDF: the upper body (the robot in service) and
+the full humanoid (upper body plus two legs), and `tests/test_humanoid.py` holds the rejoined
+parts to the vendor's robot by forward kinematics. An SO-101 neck is a composition on the upper
+body's `head_link`, not a registered body, while neck motors are undecided.
+
 Observation and controller semantics are owned by `sx-actions`, which depends on this
 package and derives spaces from the complete object:
 
@@ -108,6 +117,11 @@ document and carrying its method, time, residual and evidence:
   unit's zero and direction entering at the one Rust seam `BoundAxis::calibrated`; unmeasured
   they are `UNCALIBRATED_ZERO` and 1.
 
+A driver opens a built robot from its instance: `drive_document(body, resolve(...))` renders
+`sx.instance-drive/v1`, each driven joint's zero and direction in state order, and
+`sx_embodiment_drivers::InstanceDrive` reads it into `BodyBindings::calibrated`, which refuses a
+drive of another body. Every Damiao opener takes one.
+
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,
 each directly driven joint, each encoder-read joint, each declared camera) and the
@@ -161,12 +175,14 @@ departure listed in the ported module's header. A crate that composes a known bo
 bindings `tools/render_driver_bindings.py` renders from the registry (`drivers/<crate>/bindings/`)
 and parses them with `BodyBindings`, so no joint bound, address, model, sign or reduction is
 spelled in Rust; it adds only its vendor's controller configuration, keyed by joint name. A
-joint's zero is the unit's calibration, applied at one seam (`BoundAxis::calibrated`); until one
-is supplied every axis carries `UNCALIBRATED_ZERO`.
+joint's zero is the unit's calibration, applied at one seam (`BoundAxis::calibrated`) from the
+robot instance's `InstanceDrive`; a nominal instance carries `UNCALIBRATED_ZERO`. Only directly
+driven joints are rendered: a joint driven any other way (the humanoid's waist linkage) is in no
+driver's chain.
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
-| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` |
+| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` and `humanoid::open_humanoid_upper_body` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
 ```bash
@@ -274,7 +290,8 @@ it locally, or fetches the revision from the store by its digest, when the file 
 declared path no longer matches. `tests/test_recorded.py` fails when a historical document's
 asset stops resolving.
 
-The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, Sentient Humanoid,
+The registry covers Piper, ALOHA, RBY1, Unitree G1, UR10e, UR5e, YOR, the Sentient humanoid
+(upper body and full),
 Franka/Panda variants, SO-101 variants, DAS/YUBI capture rigs, and supported teleop stations.
 Declaration order is the native physical coordinate order and is pinned against each URDF.
 

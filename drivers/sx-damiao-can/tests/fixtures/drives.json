@@ -1,0 +1,250 @@
+{
+  "b601-dm": {
+    "nominal": {
+      "schema": "sx.instance-drive/v1",
+      "embodiment": "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa",
+      "instance": "c36342c46c438a721a77467a51e0f8420896573dd09d80728fd9a58e3be51440",
+      "joints": [
+        {
+          "joint": "joint1",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint2",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint3",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint4",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint5",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint6",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "gripper_joint1",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        }
+      ]
+    },
+    "measured": {
+      "schema": "sx.instance-drive/v1",
+      "embodiment": "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa",
+      "instance": "8cb7f9afacd5306711cab154385252d24538705947cb5afb8d5fcd0e2ea47258",
+      "joints": [
+        {
+          "joint": "joint1",
+          "zero": 0.1,
+          "direction": -1,
+          "calibration": "f7122e04294d87819ff94991dc154a69ea12cb88c33d9b0f4dbe8862665acb96"
+        },
+        {
+          "joint": "joint2",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint3",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint4",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint5",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "joint6",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "gripper_joint1",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        }
+      ]
+    }
+  },
+  "sentient-humanoid-upper-body": {
+    "nominal": {
+      "schema": "sx.instance-drive/v1",
+      "embodiment": "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206",
+      "instance": "37fccfa42793b5849e310e150d9a0afd77a3525e98ad9faeec0e9fe6df89c841",
+      "joints": [
+        {
+          "joint": "torso_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_shoulder_pitch_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_shoulder_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_elbow_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_elbow_forearm_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_wrist_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_shoulder_pitch_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_shoulder_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_elbow_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_elbow_forearm_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_wrist_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        }
+      ]
+    },
+    "measured": {
+      "schema": "sx.instance-drive/v1",
+      "embodiment": "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206",
+      "instance": "10e165a1daff1d10b7377fe9549e36d70758f193da3f1bd342726dc0e68383bf",
+      "joints": [
+        {
+          "joint": "torso_joint",
+          "zero": 0.1,
+          "direction": -1,
+          "calibration": "1b992b53156acf438174c657bdfc1714d84715da92a7f93cda01f8b31d03923f"
+        },
+        {
+          "joint": "right_shoulder_pitch_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_shoulder_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_elbow_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_elbow_forearm_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "right_wrist_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_shoulder_pitch_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_shoulder_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_elbow_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_elbow_forearm_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_wrist_yaw_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        }
+      ]
+    }
+  }
+}

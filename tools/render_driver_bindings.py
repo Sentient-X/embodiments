@@ -4,12 +4,17 @@
     python tools/render_driver_bindings.py           # rewrite every bindings file
     python tools/render_driver_bindings.py --check   # exit 1 when one disagrees
 
-A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601-DM,
-``sx-feetech-serial``'s SO-101) embeds that body's document, rendered here from ``robot.state``
-in native state order, and parses it with ``sx_embodiment_drivers::BodyBindings``: no bound,
+A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601-DM and
+humanoid upper body, ``sx-feetech-serial``'s SO-101) embeds that body's document, rendered here
+from the direct-driven coordinates of ``robot.state`` in native state order (a joint driven any
+other way, such as the humanoid's waist linkage, is outside every driver's chain), and parses it
+with ``sx_embodiment_drivers::BodyBindings``: no bound,
 address, model, sign or reduction is spelled in Rust. ``vocabulary.json`` is the registry's
 ``ActuatorModel`` and ``ActuatorBus``, which the driver crate's own lists are held equal to.
-``tests/test_driver_bindings.py`` runs the same check.
+``tests/fixtures/drives.json`` in ``sx-damiao-can`` holds, for each Damiao body, the
+``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
+its nominal instance and for one with a measured, reversed first joint, which the crate's
+openers are tested against. ``tests/test_driver_bindings.py`` runs the same check.
 """
 
 import argparse
@@ -18,15 +23,35 @@ import sys
 from pathlib import Path
 
 from sx_embodiments import embodiments
+from sx_embodiments.calibration import (
+    CalibrationMethod,
+    JointUnitCalibration,
+    Measurement,
+    UnitSerial,
+)
+from sx_embodiments.instance import (
+    RobotInstance,
+    Slot,
+    SlotKind,
+    drive_document,
+    nominal_instance,
+    resolve,
+)
 from sx_embodiments.layout import ActuatorBus, ActuatorModel
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
 BINDINGS: dict[Path, str] = {
     ROOT / "drivers/sx-damiao-can/bindings/b601-dm.json": "b601-dm",
+    ROOT / "drivers/sx-damiao-can/bindings/sentient-humanoid-upper-body.json": (
+        "sentient-humanoid-upper-body"
+    ),
     ROOT / "drivers/sx-feetech-serial/bindings/so101.json": "so101",
 }
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
+DRIVES = ROOT / "drivers/sx-damiao-can/tests/fixtures/drives.json"
+#: The Damiao bodies whose openers take an instance's drive.
+DAMIAO_BODIES = ("b601-dm", "sentient-humanoid-upper-body")
 
 
 def vocabulary() -> str:
@@ -37,9 +62,29 @@ def vocabulary() -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def drives() -> str:
+    """Each Damiao body's nominal drive, and one with its first driven joint measured."""
+    document: dict[str, object] = {}
+    for name in DAMIAO_BODIES:
+        body = embodiments[name]
+        first = next(c for c in body.state.coordinates if c.axis.actuator is not None)
+        slot = Slot(SlotKind.ACTUATOR, f"{first.instance}/{first.axis.name}")
+        unit = UnitSerial(f"{name}-unit-1")
+        measured = JointUnitCalibration(
+            unit, 0.1, -1, None, Measurement(CalibrationMethod.HOMING, None)
+        )
+        instance = RobotInstance.of(body.id, {slot: unit}, (measured,))
+        document[name] = {
+            "nominal": drive_document(body, resolve(body, nominal_instance(body), ())),
+            "measured": drive_document(body, resolve(body, instance, (measured,))),
+        }
+    return json.dumps(document, indent=2) + "\n"
+
+
 def rendered() -> dict[Path, str]:
     files = {path: render(name) for path, name in BINDINGS.items()}
     files[VOCABULARY] = vocabulary()
+    files[DRIVES] = drives()
     return files
 
 
@@ -48,8 +93,10 @@ def render(name: str) -> str:
     axes: list[dict[str, object]] = []
     for coordinate in robot.state.coordinates:
         binding = coordinate.axis.actuator
-        if binding is None or coordinate.lower is None or coordinate.upper is None:
-            raise ValueError(f"{name}/{coordinate.joint_name} has no bounded direct drive")
+        if binding is None:
+            continue
+        if coordinate.lower is None or coordinate.upper is None:
+            raise ValueError(f"{name}/{coordinate.joint_name} is driven without bounds")
         axes.append(
             {
                 "joint": coordinate.joint_name,

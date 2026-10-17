@@ -19,7 +19,7 @@ from .b601 import B601_DM_SPEC, B601_DM_STATION_SPEC, BIMANUAL_B601_DM_SPEC
 from .das import DAS_UMI_V4_SPEC, QUEST_EGO_SPEC
 from .ffw import FFW_BG2_SPEC
 from .g1 import UNITREE_G1_SPEC
-from .humanoid import SENTIENT_HUMANOID_SPEC
+from .humanoid import SENTIENT_HUMANOID_SPEC, SENTIENT_HUMANOID_UPPER_BODY_SPEC
 from .insta360 import INSTA360_UMI_SPEC
 from .panda import FRANKA_SPEC, PANDA_OMRON_SPEC
 from .piper import PIPER_SPEC
@@ -42,6 +42,7 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     UR5E_SPEC,
     YOR_SPEC,
     SENTIENT_HUMANOID_SPEC,
+    SENTIENT_HUMANOID_UPPER_BODY_SPEC,
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
     SO101_SPEC,

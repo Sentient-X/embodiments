@@ -70,6 +70,7 @@ class ActuatorModel(StrEnum):
     FEETECH_STS3215 = "feetech_sts3215"
     DAMIAO_DM4310 = "damiao_dm4310"
     DAMIAO_DM4340 = "damiao_dm4340"
+    DAMIAO_DM8009 = "damiao_dm8009"
 
 
 class ActuatorBus(StrEnum):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from sx_embodiments.assets import AssetRole
+from sx_embodiments.assets import AssetFormat, AssetRole
 from sx_embodiments.known import definitions
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +48,9 @@ def render() -> None:
         if definition.assembly is None:
             continue
         (description,) = (
-            asset for asset in definition.extra_assets if asset.role is AssetRole.DESCRIPTION
+            asset
+            for asset in definition.extra_assets
+            if asset.role is AssetRole.DESCRIPTION and asset.format is AssetFormat.URDF
         )
         (ROOT / "assets" / description.relpath).write_bytes(definition.assembly.urdf())
 

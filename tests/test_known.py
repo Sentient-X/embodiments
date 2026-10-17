@@ -45,6 +45,7 @@ def test_registry_ids_are_byte_stable() -> None:
         "ur5e",
         "yor",
         "sentient-humanoid",
+        "sentient-humanoid-upper-body",
         "panda_omron",
         "franka",
         "so101",

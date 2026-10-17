@@ -1,0 +1,116 @@
+{
+  "embodiment": "sentient-humanoid-upper-body",
+  "id": "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206",
+  "axes": [
+    {
+      "joint": "torso_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 15,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_shoulder_pitch_joint",
+      "lower": -3.14159265359,
+      "upper": 3.14159265359,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 16,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_shoulder_roll_joint",
+      "lower": -3.14159265359,
+      "upper": 0.356919832033,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 17,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_elbow_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 18,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_elbow_forearm_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 19,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_wrist_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 20,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_shoulder_pitch_joint",
+      "lower": -3.14159265359,
+      "upper": 3.14159265359,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 24,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_shoulder_roll_joint",
+      "lower": -0.356919832033,
+      "upper": 3.14159265359,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 25,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_elbow_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 26,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_elbow_forearm_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 27,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_wrist_yaw_joint",
+      "lower": -1.570796326795,
+      "upper": 1.570796326795,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 28,
+      "sign": 1,
+      "reduction": 1.0
+    }
+  ]
+}

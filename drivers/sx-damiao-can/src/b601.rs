@@ -32,10 +32,11 @@
 //!
 //! [`open_b601`] opens the follower as one [`Composite`]: the arm's chain, then the gripper's,
 //! each on its own `CanPort` (on the stock B601-DM, clones of one
-//! `sx_embodiment_drivers::can::SharedCanPort` behind its one USB2CAN bridge).
+//! `sx_embodiment_drivers::can::SharedCanPort` behind its one USB2CAN bridge), calibrated from
+//! one built robot's [`InstanceDrive`].
 
 use sx_embodiment_drivers::can::CanPort;
-use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, Composite};
+use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, Composite, InstanceDrive};
 
 use crate::chain::{DamiaoAxis, DamiaoChain, DamiaoChainError};
 
@@ -87,21 +88,27 @@ fn joint(axis: BoundAxis, &(_, (soft_lower, soft_upper), kp, kd): &Joint) -> Dam
     }
 }
 
-fn body() -> Result<BodyBindings, BodyError> {
+/// The rendered body, refused unless its joints are the B601-DM's, then calibrated by `drive`.
+///
+/// # Errors
+///
+/// Refuses other joints and a drive of another body.
+pub fn body(drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
     let body = BodyBindings::parse(BINDINGS)?;
     let mut joints: Vec<&str> = ARM.iter().map(|(name, ..)| *name).collect();
     joints.push(GRIPPER_JOINT);
     body.require_joints(&joints)?;
-    Ok(body)
+    body.calibrated(drive)
 }
 
-/// `joint1`..`joint6`, in native state order, with the registry's bounds.
+/// `joint1`..`joint6`, in native state order, with the registry's bounds, as `drive`'s robot
+/// drives them.
 ///
 /// # Errors
 ///
-/// Refuses rendered bindings whose joints are not the B601-DM's.
-pub fn b601_arm() -> Result<Vec<DamiaoAxis>, BodyError> {
-    let body = body()?;
+/// Refuses rendered bindings whose joints are not the B601-DM's, and a drive of another body.
+pub fn b601_arm(drive: &InstanceDrive) -> Result<Vec<DamiaoAxis>, BodyError> {
+    let body = body(drive)?;
     Ok(body
         .axes
         .into_iter()
@@ -115,9 +122,9 @@ pub fn b601_arm() -> Result<Vec<DamiaoAxis>, BodyError> {
 ///
 /// # Errors
 ///
-/// Refuses rendered bindings whose joints are not the B601-DM's.
-pub fn b601_gripper() -> Result<DamiaoAxis, BodyError> {
-    let axis = body()?.axis(GRIPPER_JOINT)?.clone();
+/// Refuses rendered bindings whose joints are not the B601-DM's, and a drive of another body.
+pub fn b601_gripper(drive: &InstanceDrive) -> Result<DamiaoAxis, BodyError> {
+    let axis = body(drive)?.axis(GRIPPER_JOINT)?.clone();
     Ok(DamiaoAxis {
         master_id: master_id(&axis),
         axis,
@@ -132,10 +139,10 @@ pub fn b601_gripper() -> Result<DamiaoAxis, BodyError> {
 ///
 /// # Errors
 ///
-/// Refuses rendered bindings whose joints are not the B601-DM's.
-pub fn b601() -> Result<Vec<DamiaoAxis>, BodyError> {
-    let mut chain = b601_arm()?;
-    chain.push(b601_gripper()?);
+/// Refuses rendered bindings whose joints are not the B601-DM's, and a drive of another body.
+pub fn b601(drive: &InstanceDrive) -> Result<Vec<DamiaoAxis>, BodyError> {
+    let mut chain = b601_arm(drive)?;
+    chain.push(b601_gripper(drive)?);
     Ok(chain)
 }
 
@@ -151,9 +158,10 @@ pub type B601<P, Q> = Composite<DamiaoChain<P>, DamiaoChain<Q>>;
 pub fn open_b601<P: CanPort, Q: CanPort>(
     arm_port: P,
     gripper_port: Q,
+    drive: &InstanceDrive,
 ) -> Result<B601<P, Q>, DamiaoChainError> {
-    let arm = DamiaoChain::open(arm_port, b601_arm()?)?;
-    let gripper = DamiaoChain::open(gripper_port, vec![b601_gripper()?])?;
+    let arm = DamiaoChain::open(arm_port, b601_arm(drive)?)?;
+    let gripper = DamiaoChain::open(gripper_port, vec![b601_gripper(drive)?])?;
     Ok(Composite::new(arm, gripper))
 }
 
@@ -161,9 +169,16 @@ pub fn open_b601<P: CanPort, Q: CanPort>(
 mod tests {
     use super::*;
 
+    const DRIVES: &str = include_str!("../tests/fixtures/drives.json");
+
+    fn drive(which: &str) -> InstanceDrive {
+        let drives: serde_json::Value = serde_json::from_str(DRIVES).expect("drives");
+        InstanceDrive::parse(&drives["b601-dm"][which].to_string()).expect("a drive")
+    }
+
     #[test]
     fn a_calibrated_arm_joint_keeps_its_soft_box_in_joint_coordinates() {
-        let body = body().expect("the rendered body");
+        let body = body(&drive("nominal")).expect("the rendered body");
         for (axis, configuration) in body.axes.into_iter().zip(&ARM) {
             let nominal = joint(axis.clone(), configuration).commandable();
             for direction in [1, -1] {
@@ -181,5 +196,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn an_instances_measured_joint_reaches_its_motor() {
+        let chain = b601(&drive("measured")).expect("composes");
+        assert!((chain[0].axis.zero - 0.1).abs() < f64::EPSILON);
+        assert_eq!(chain[0].axis.direction, -1);
+        assert!(chain[1..].iter().all(|motor| motor.axis.direction == 1));
     }
 }

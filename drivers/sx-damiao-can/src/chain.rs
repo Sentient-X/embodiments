@@ -47,6 +47,8 @@ use crate::dm_can::{
 pub const DAMIAO_DM4310: ActuatorModel = ActuatorModel::new("damiao_dm4310");
 /// `ActuatorModel.DAMIAO_DM4340` in the registry.
 pub const DAMIAO_DM4340: ActuatorModel = ActuatorModel::new("damiao_dm4340");
+/// `ActuatorModel.DAMIAO_DM8009` in the registry.
+pub const DAMIAO_DM8009: ActuatorModel = ActuatorModel::new("damiao_dm8009");
 /// `ActuatorBus.DAMIAO_CAN` in the registry.
 pub const DAMIAO_CAN: ActuatorBus = ActuatorBus::new("damiao_can");
 
@@ -70,6 +72,8 @@ pub fn motor_type(model: ActuatorModel) -> Option<DmMotorType> {
         Some(DmMotorType::DM4310)
     } else if model == DAMIAO_DM4340 {
         Some(DmMotorType::DM4340)
+    } else if model == DAMIAO_DM8009 {
+        Some(DmMotorType::DM8009)
     } else {
         None
     }

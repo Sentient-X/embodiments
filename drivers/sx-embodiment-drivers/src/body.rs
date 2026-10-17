@@ -55,6 +55,8 @@ pub enum BodyError {
     Bus { joint: String, bus: String },
     #[error(transparent)]
     Binding(#[from] BindingError),
+    #[error("a drive of body {found} cannot calibrate {embodiment}")]
+    Instance { embodiment: String, found: String },
     #[error("{embodiment} has no joint {joint}")]
     MissingJoint { embodiment: String, joint: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]

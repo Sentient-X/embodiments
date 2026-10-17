@@ -24,10 +24,11 @@ pub struct ActuatorModel(&'static str);
 
 impl ActuatorModel {
     /// Every member of the registry's `ActuatorModel`, by wire value.
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self("feetech_sts3215"),
         Self("damiao_dm4310"),
         Self("damiao_dm4340"),
+        Self("damiao_dm8009"),
     ];
 
     #[must_use]
