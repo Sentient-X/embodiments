@@ -90,8 +90,33 @@ camera is a record, not a schema change. State order, camera bindings, capabilit
 gripper convenience views, and the ID are derived from those facts.
 
 Controller semantics stay in `sx-actions`; one embodiment can expose several action interfaces
-without changing hardware identity. Per-unit calibration and runtime status belong to episodes
-or sessions, not the nominal embodiment.
+without changing hardware identity. Runtime status belongs to episodes or sessions, not the
+nominal embodiment.
+
+## Calibration and robot instances
+
+What was measured about one physical unit is kept apart from the design, in three kinds
+(`sx_embodiments.calibration`), each identified by the digest of its `sx.calibration/v1`
+document and carrying its method, time, residual and evidence:
+
+- `CameraUnitCalibration`: one camera unit's intrinsics at one raster.
+- `RigidCalibration`: one transform between two links of a body, absolute or a correction of
+  one exact description's own transform (mount corrections, hand-eye, stereo pairs, depth to
+  colour).
+- `JointUnitCalibration`: one actuator or encoder unit's zero, direction and measured range.
+  `zero_offset` is the joint value at the unit's zero, the `zero_offset` of the drive map every
+  driver applies; unmeasured it is `UNCALIBRATED_ZERO`.
+
+A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
+a content-addressed body, the serial unit in each of its slots (each non-camera component,
+each directly driven joint, each encoder-read joint, each declared camera) and the
+calibrations selected for those units. `resolve(body, instance, calibrations)` binds them,
+refusing a unit in a slot the body lacks, a calibration of a unit the instance does not place,
+two calibrations of one slot, a frame that is not a link of the description, or a correction
+of another description; every slot left unmeasured resolves to the design, labelled nominal.
+Neither object moves the embodiment's id. Calibrations recorded before these kinds keep their
+sealed bytes, and their readers parse them into the kinds with the sealed document as
+evidence; `tests/test_calibration.py` resolves every registered body through an instance.
 
 A stored document of any earlier schema is read with `migrate(document)`, which runs the chain
 of pure converters (13 → 14 → 15) and returns one verified identity edge: the id the bytes
