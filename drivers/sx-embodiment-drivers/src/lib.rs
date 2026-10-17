@@ -17,6 +17,10 @@
 //! its port, translating its vendor's own driver. A body spanning two chains (two devices, or
 //! two buses) is one [`Composite`].
 //!
+//! [`MediaPlan`] is the same rule for what a robot streams: its declared cameras and
+//! microphones as the registry resolves them for one instance, captured through
+//! [`FrameSource`] and [`AudioSource`].
+//!
 //! Synchronous and allocation-light on purpose: the station wraps a chain in its own async
 //! actuator, and nothing here owns a thread or a runtime.
 
@@ -26,6 +30,7 @@ pub mod can;
 pub mod chain;
 pub mod composite;
 pub mod drive;
+pub mod media;
 pub mod serial;
 
 pub use binding::{
@@ -39,3 +44,7 @@ pub use chain::{
 };
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
+pub use media::{
+    AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
+    MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View,
+};

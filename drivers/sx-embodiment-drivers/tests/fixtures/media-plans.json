@@ -1,0 +1,207 @@
+{
+  "quest-ego-stereo": {
+    "schema": "sx.media-plan/v1",
+    "embodiment": "12f4b3f04e3a5328fc03fa6888a6b040408beb09f720907f19c4b26a7f7ebe5a",
+    "instance": "dd164bf38b51f75a1e2ec1cd5d8de850ed8a48b254976621a838877dd6bc08a4",
+    "tracks": [
+      {
+        "track": "head",
+        "fps": 30.0,
+        "views": [
+          {
+            "camera": "head_left",
+            "model": "quest3_rgb",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 960,
+            "fps": 30.0,
+            "image_from_camera": [
+              868.31,
+              0.0,
+              640.18,
+              0.0,
+              868.31,
+              482.07,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": null,
+            "calibration": null,
+            "mount_frame": "quest3s_left_camera_optical",
+            "root_frame": "quest3s_head",
+            "root_from_mount": {
+              "translation_m": [
+                -0.032,
+                0.075,
+                -0.011
+              ],
+              "rotation_xyzw": [
+                -0.7071067811865475,
+                0.0,
+                0.0,
+                0.7071067811865476
+              ]
+            },
+            "moves_with": []
+          },
+          {
+            "camera": "head_right",
+            "model": "quest3_rgb",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 960,
+            "fps": 30.0,
+            "image_from_camera": [
+              868.31,
+              0.0,
+              640.18,
+              0.0,
+              868.31,
+              482.07,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": null,
+            "calibration": null,
+            "mount_frame": "quest3s_right_camera_optical",
+            "root_frame": "quest3s_head",
+            "root_from_mount": {
+              "translation_m": [
+                0.032,
+                0.075,
+                -0.011
+              ],
+              "rotation_xyzw": [
+                -0.7071067811865475,
+                0.0,
+                0.0,
+                0.7071067811865476
+              ]
+            },
+            "moves_with": []
+          }
+        ]
+      }
+    ],
+    "microphones": [
+      {
+        "microphone": "head_mic",
+        "model": "quest3_microphone",
+        "sample_rate_hz": 48000,
+        "channels": 1,
+        "mount_frame": "quest3s_head"
+      }
+    ]
+  },
+  "quest-ego-mono": {
+    "schema": "sx.media-plan/v1",
+    "embodiment": "12f4b3f04e3a5328fc03fa6888a6b040408beb09f720907f19c4b26a7f7ebe5a",
+    "instance": "dd164bf38b51f75a1e2ec1cd5d8de850ed8a48b254976621a838877dd6bc08a4",
+    "tracks": [
+      {
+        "track": "head_left",
+        "fps": 30.0,
+        "views": [
+          {
+            "camera": "head_left",
+            "model": "quest3_rgb",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 960,
+            "fps": 30.0,
+            "image_from_camera": [
+              868.31,
+              0.0,
+              640.18,
+              0.0,
+              868.31,
+              482.07,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": null,
+            "calibration": null,
+            "mount_frame": "quest3s_left_camera_optical",
+            "root_frame": "quest3s_head",
+            "root_from_mount": {
+              "translation_m": [
+                -0.032,
+                0.075,
+                -0.011
+              ],
+              "rotation_xyzw": [
+                -0.7071067811865475,
+                0.0,
+                0.0,
+                0.7071067811865476
+              ]
+            },
+            "moves_with": []
+          }
+        ]
+      },
+      {
+        "track": "head_right",
+        "fps": 30.0,
+        "views": [
+          {
+            "camera": "head_right",
+            "model": "quest3_rgb",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 960,
+            "fps": 30.0,
+            "image_from_camera": [
+              868.31,
+              0.0,
+              640.18,
+              0.0,
+              868.31,
+              482.07,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": null,
+            "calibration": null,
+            "mount_frame": "quest3s_right_camera_optical",
+            "root_frame": "quest3s_head",
+            "root_from_mount": {
+              "translation_m": [
+                0.032,
+                0.075,
+                -0.011
+              ],
+              "rotation_xyzw": [
+                -0.7071067811865475,
+                0.0,
+                0.0,
+                0.7071067811865476
+              ]
+            },
+            "moves_with": []
+          }
+        ]
+      }
+    ],
+    "microphones": []
+  },
+  "sentient-humanoid-upper-body": {
+    "schema": "sx.media-plan/v1",
+    "embodiment": "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206",
+    "instance": "37fccfa42793b5849e310e150d9a0afd77a3525e98ad9faeec0e9fe6df89c841",
+    "tracks": [],
+    "microphones": []
+  }
+}
