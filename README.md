@@ -76,8 +76,10 @@ at runtime. A registered rooted build's committed description is its rendering b
 part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
 way from its one vendor URDF: the upper body (the robot in service) offers a neck seat, two hip
 seats and two wrists; the full humanoid mates the legs back on, and `tests/test_humanoid.py`
-holds the rejoined parts to the vendor's robot by forward kinematics. Its parallel grippers are
-modules whose servo and jaw no source describes, so the body with them,
+holds the rejoined parts to the vendor's robot by forward kinematics. The head's camera holder is
+a socket fitted with the CAD's D435, a camera module that adds its own optical frame (a module's
+`frames`) and carries the colour stream, riding on the torso that turns the chest. Its parallel
+grippers are modules whose servo and jaw no source describes, so the body with them,
 `sentient-humanoid-upper-body-grippers`, is a development body.
 
 Observation and controller semantics are owned by `sx-actions`, which depends on this
