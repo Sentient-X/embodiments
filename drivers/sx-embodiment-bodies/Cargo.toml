@@ -1,0 +1,27 @@
+[package]
+name = "sx-embodiment-bodies"
+description = "Open any registered body's actuator chain from its robot instance's drive and the station's commissioned ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Open commissioned USB serial bridges (Damiao's USB2CAN) on Linux, found by their USB serial
+# number in sysfs. Without it the crate builds anywhere and a port source is the caller's.
+usb-serial = ["dep:serialport"]
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+sx-damiao-can = { path = "../sx-damiao-can" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+serialport = { version = "4.7", default-features = false, optional = true }
+
+[dev-dependencies]
+sx-damiao-can = { path = "../sx-damiao-can", features = ["sim"] }
+
+[lints]
+workspace = true

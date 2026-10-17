@@ -192,6 +192,13 @@ pub enum DamiaoChainError {
     #[error("bus_id {0} did not confirm MIT control mode")]
     ModeNotConfirmed(u16),
     #[error(
+        "{refused}; and the disable of bus_ids {unsent:?} could not be sent, so they may hold torque"
+    )]
+    DisableUnsent {
+        refused: Box<DamiaoChainError>,
+        unsent: Vec<u16>,
+    },
+    #[error(
         "bus_id {bus_id} reports {register:?} = {motor:?}, which no Damiao table carries for its model"
     )]
     LimitMismatch {
@@ -224,6 +231,85 @@ pub struct DamiaoChain<P> {
     stop_pending: bool,
 }
 
+/// Bring each motor up as the vendor does and read its limit registers; see
+/// [`DamiaoChain::open`].
+// A register holds the exact float32 of a table literal; equality is the comparison meant.
+#[allow(clippy::float_cmp)]
+fn bring_up<P: CanPort>(
+    control: &mut MotorControl<P>,
+    motors: &[DamiaoAxis],
+) -> Result<Vec<MotorLimits>, DamiaoChainError> {
+    let mut limits = Vec::with_capacity(motors.len());
+    for motor in motors {
+        let bus_id = motor.axis.binding.bus_id;
+        if !control.switch_control_mode(bus_id, ControlType::MIT)? {
+            return Err(DamiaoChainError::ModeNotConfirmed(bus_id));
+        }
+        let model = control.motor(bus_id)?.motor_type;
+        let row = model.limit_param();
+        let mut found = [0.0_f32; 3];
+        for (index, register) in [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX]
+            .into_iter()
+            .enumerate()
+        {
+            let accepted = if register == DmVariable::VMAX {
+                accepted_vmax(model)
+            } else {
+                vec![row[index]]
+            };
+            let value = control.read_motor_param(bus_id, register)?;
+            match value {
+                Some(ParamValue::Float(reported))
+                    if accepted.iter().any(|table| reported == narrow(*table)) =>
+                {
+                    found[index] = reported;
+                }
+                _ => {
+                    return Err(DamiaoChainError::LimitMismatch {
+                        bus_id,
+                        register,
+                        motor: value,
+                    });
+                }
+            }
+        }
+        let reported = found.map(f64::from);
+        if reported != row.map(|table| f64::from(narrow(table))) {
+            control.change_limit_param(bus_id, reported[0], reported[1], reported[2])?;
+        }
+        limits.push(MotorLimits {
+            bus_id,
+            p_max: found[0],
+            v_max: found[1],
+            t_max: found[2],
+        });
+    }
+    Ok(limits)
+}
+
+/// Send every named motor its disable frame, whatever any answered: the last word of an open
+/// that failed, returned as `refused` unless a disable could not be sent, which is then named
+/// beside it, since that motor may still hold torque.
+fn disable_all<P: CanPort>(
+    control: &mut MotorControl<P>,
+    motors: &[DamiaoAxis],
+    refused: DamiaoChainError,
+) -> DamiaoChainError {
+    let unsent: Vec<u16> = motors
+        .iter()
+        .map(|motor| motor.axis.binding.bus_id)
+        .filter(|bus_id| control.disable(*bus_id).is_err())
+        .collect();
+    if unsent.is_empty() {
+        refused
+    } else {
+        DamiaoChainError::DisableUnsent {
+            refused: Box::new(refused),
+            unsent,
+        }
+    }
+}
+
 impl<P: CanPort> DamiaoChain<P> {
     /// Validate every axis, bring each motor up as the vendor does, scale each by its own limit
     /// registers, and leave the chain disabled with every motor's disabled answer in hand.
@@ -248,51 +334,13 @@ impl<P: CanPort> DamiaoChain<P> {
                 motor_type(binding.model).ok_or(DamiaoChainError::Unqualified(binding.bus_id))?;
             control.add_motor(Motor::new(model, binding.bus_id, motor.master_id));
         }
-        let mut limits = Vec::with_capacity(motors.len());
-        for motor in &motors {
-            let bus_id = motor.axis.binding.bus_id;
-            if !control.switch_control_mode(bus_id, ControlType::MIT)? {
-                return Err(DamiaoChainError::ModeNotConfirmed(bus_id));
-            }
-            let model = control.motor(bus_id)?.motor_type;
-            let row = model.limit_param();
-            let mut found = [0.0_f32; 3];
-            for (index, register) in [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX]
-                .into_iter()
-                .enumerate()
-            {
-                let accepted = if register == DmVariable::VMAX {
-                    accepted_vmax(model)
-                } else {
-                    vec![row[index]]
-                };
-                let value = control.read_motor_param(bus_id, register)?;
-                match value {
-                    Some(ParamValue::Float(reported))
-                        if accepted.iter().any(|table| reported == narrow(*table)) =>
-                    {
-                        found[index] = reported;
-                    }
-                    _ => {
-                        return Err(DamiaoChainError::LimitMismatch {
-                            bus_id,
-                            register,
-                            motor: value,
-                        });
-                    }
-                }
-            }
-            let reported = found.map(f64::from);
-            if reported != row.map(|table| f64::from(narrow(table))) {
-                control.change_limit_param(bus_id, reported[0], reported[1], reported[2])?;
-            }
-            limits.push(MotorLimits {
-                bus_id,
-                p_max: found[0],
-                v_max: found[1],
-                t_max: found[2],
-            });
-        }
+        // A motor brought up before a later one failed may hold MIT mode with torque enabled
+        // (a motor left enabled by a crashed run answers its mode switch as it is): every motor
+        // the chain names is disabled before the failure is returned.
+        let limits = match bring_up(&mut control, &motors) {
+            Ok(limits) => limits,
+            Err(error) => return Err(disable_all(&mut control, &motors, error)),
+        };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
         let mut chain = Self {
             control,
@@ -303,13 +351,20 @@ impl<P: CanPort> DamiaoChain<P> {
             enabled: false,
             stop_pending: false,
         };
-        let before = chain.feedback_counts()?;
-        for index in 0..chain.motors.len() {
-            chain.control.disable(chain.bus_id(index))?;
+        if let Err(error) = chain.settle_disabled() {
+            return Err(disable_all(&mut chain.control, &chain.motors, error));
         }
-        chain.await_answers(&before)?;
-        chain.expect_all(&before, MotorState::Disabled)?;
         Ok(chain)
+    }
+
+    /// Disable every motor and hold each one's disabled answer.
+    fn settle_disabled(&mut self) -> Result<(), DamiaoChainError> {
+        let before = self.feedback_counts()?;
+        for index in 0..self.motors.len() {
+            self.control.disable(self.bus_id(index))?;
+        }
+        self.await_answers(&before)?;
+        self.expect_all(&before, MotorState::Disabled)
     }
 
     /// The limit row each motor reported at open, in native state order.

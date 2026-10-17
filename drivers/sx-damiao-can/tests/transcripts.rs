@@ -222,6 +222,9 @@ fn feedback_on_another_id_or_naming_another_motor_is_dropped() {
 struct Replay {
     events: VecDeque<Value>,
     pending: Vec<u8>,
+    /// Once the vendor's recording is exhausted, what this crate wrote beyond it: the disables
+    /// a refused open ends with, which the vendor's driver does not send. `None` refuses any.
+    epilogue: Option<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -232,7 +235,19 @@ impl ReplayStream {
         Self(Arc::new(Mutex::new(Replay {
             events: events.iter().cloned().collect(),
             pending: Vec::new(),
+            epilogue: None,
         })))
+    }
+
+    /// The recording, then whatever this crate writes after it, kept for the test to read.
+    fn with_epilogue(events: &[Value]) -> Self {
+        let stream = Self::new(events);
+        stream.0.lock().unwrap().epilogue = Some(Vec::new());
+        stream
+    }
+
+    fn epilogue(&self) -> Vec<String> {
+        self.0.lock().unwrap().epilogue.clone().unwrap_or_default()
     }
 
     fn port(&self) -> Usb2CanPort<Self> {
@@ -240,7 +255,12 @@ impl ReplayStream {
         Usb2CanPort::with_pause(
             self.clone(),
             Box::new(move |duration: Duration| {
-                let next = waits.0.lock().unwrap().events.pop_front();
+                let mut replay = waits.0.lock().unwrap();
+                if replay.events.is_empty() && replay.epilogue.is_some() {
+                    return;
+                }
+                let next = replay.events.pop_front();
+                drop(replay);
                 let seconds = next
                     .as_ref()
                     .and_then(|event| event.get("sleep"))
@@ -272,6 +292,12 @@ impl Read for ReplayStream {
 impl Write for ReplayStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut replay = self.0.lock().unwrap();
+        if replay.events.is_empty()
+            && let Some(epilogue) = replay.epilogue.as_mut()
+        {
+            epilogue.push(hex(buf));
+            return Ok(buf.len());
+        }
         let next = replay.events.pop_front();
         let expected = next
             .as_ref()
@@ -433,11 +459,13 @@ fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
 #[test]
 fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     let session = session("limit_mismatch");
-    let stream = ReplayStream::new(session["events"].as_array().unwrap());
-    match DamiaoChain::open(
-        stream.port(),
-        b601(&nominal()).expect("the B601-DM composes"),
-    ) {
+    let stream = ReplayStream::with_epilogue(session["events"].as_array().unwrap());
+    let motors = b601(&nominal()).expect("the B601-DM composes");
+    let ids: Vec<u16> = motors
+        .iter()
+        .map(|motor| motor.axis.binding.bus_id)
+        .collect();
+    match DamiaoChain::open(stream.port(), motors) {
         Err(DamiaoChainError::LimitMismatch {
             bus_id,
             register,
@@ -454,6 +482,18 @@ fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
         Ok(_) => panic!("opened a motor with a VMAX no table carries"),
     }
     assert_eq!(stream.remaining(), 0);
+    // Beyond the vendor: every motor the chain names is sent its disable, since one brought up
+    // before the refusal may hold torque.
+    let disable = |id: u16| {
+        sx_damiao_can::usb2can::send_data_frame(&CanFrame {
+            id: u32::from(id),
+            data: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD],
+        })
+    };
+    assert_eq!(
+        stream.epilogue(),
+        ids.iter().map(|id| hex(&disable(*id))).collect::<Vec<_>>()
+    );
 }
 
 #[test]

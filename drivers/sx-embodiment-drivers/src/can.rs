@@ -38,6 +38,21 @@ pub trait CanPort: Send {
     }
 }
 
+/// A port chosen at run time, as a station opens whichever bridge its commissioning names.
+impl<P: CanPort + ?Sized> CanPort for Box<P> {
+    fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
+        (**self).send(frame)
+    }
+
+    fn receive(&mut self) -> io::Result<Option<CanFrame>> {
+        (**self).receive()
+    }
+
+    fn sleep(&mut self, duration: Duration) {
+        (**self).sleep(duration);
+    }
+}
+
 /// One CAN link shared by chains that take turns on it, as a body's devices behind one bridge
 /// do (the B601-DM's arm and gripper). A chain's reads drop frames from motors it does not
 /// drive. `sleep` holds the link while it waits, so a chain's sequencing is never interleaved.
