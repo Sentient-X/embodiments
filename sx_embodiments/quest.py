@@ -285,8 +285,8 @@ QUEST_APK_BUILD_1_4_5 = QuestApkBuildId(
 # 1.4.3, OpenQuestCapture#9): refuses to start with frozen head tracking, reports stop,
 # pause and controller state to the pod, flushes CSVs every second, writes
 # stream_manifest.json, and starts body tracking at launch. body_tracking.csv gains four
-# columns after the joints. Pose producers and conventions are unchanged. Registered so
-# its recordings resolve; the active build moves to it with the pod's APK pin (sx#1307).
+# columns after the joints. Pose producers and conventions are unchanged. Active since the
+# pod's APK pin moved to it (sx#1307).
 QUEST_APK_BUILD_1_4_6 = QuestApkBuildId(
     "sha256:71ee51b9367b5152e830348c2f859c0e481f5b59c66f522cfaa544594fd9b222"
 )
@@ -347,7 +347,7 @@ REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFa
 
 # New capture is additionally pinned to one registered build. Historical
 # registry entries remain resolvable after this active identity advances.
-ACTIVE_REAL_QUEST_APK_BUILD_ID: QuestApkBuildId | None = QUEST_APK_BUILD_1_4_5
+ACTIVE_REAL_QUEST_APK_BUILD_ID: QuestApkBuildId | None = QUEST_APK_BUILD_1_4_6
 
 
 def resolve_real_quest_pose_convention(
