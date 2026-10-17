@@ -21,7 +21,7 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`.
 | The USB2CAN bridge | `sx_damiao_can::usb2can::Usb2CanPort::new(serial)` over any `Read + Write` serial stream |
 | Per-motor answers | `sx_damiao_can::MotorFeedback`: state (`MotorState` from the first-byte nibble), position, velocity, torque, MOS and rotor temperatures |
 | Limits found at open | `DamiaoChain::limits()`: the `PMAX`, `VMAX`, `TMAX` each motor reported and is scaled by |
-| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (136 ms for the B601's seven motors) |
+| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms) |
 
 - **One bridge, two chains.** Seeed ships one USB2CAN bridge for all seven motors
   (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud); open both
