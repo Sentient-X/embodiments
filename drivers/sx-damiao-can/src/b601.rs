@@ -69,11 +69,14 @@ fn master_id(axis: &BoundAxis) -> u16 {
 }
 
 fn joint(axis: BoundAxis, &(_, (soft_lower, soft_upper), kp, kd): &Joint) -> DamiaoAxis {
-    // The arm's drive map is identity, so the motor's range is the joint's.
-    let (motor_lower, motor_upper) = (
-        axis.lower.max(soft_lower.to_radians()),
-        axis.upper.min(soft_upper.to_radians()),
-    );
+    // The soft box is the vendor's, in joint coordinates. It becomes the motor's range through
+    // this unit's drive map, so a calibrated zero or direction carries it along with the joint;
+    // uncalibrated, the arm's map is identity and the motor's range is the joint's.
+    let ends = [
+        axis.actuator_from_joint(axis.lower.max(soft_lower.to_radians())),
+        axis.actuator_from_joint(axis.upper.min(soft_upper.to_radians())),
+    ];
+    let (motor_lower, motor_upper) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
     DamiaoAxis {
         master_id: master_id(&axis),
         axis,
@@ -152,4 +155,31 @@ pub fn open_b601<P: CanPort, Q: CanPort>(
     let arm = DamiaoChain::open(arm_port, b601_arm()?)?;
     let gripper = DamiaoChain::open(gripper_port, vec![b601_gripper()?])?;
     Ok(Composite::new(arm, gripper))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_calibrated_arm_joint_keeps_its_soft_box_in_joint_coordinates() {
+        let body = body().expect("the rendered body");
+        for (axis, configuration) in body.axes.into_iter().zip(&ARM) {
+            let nominal = joint(axis.clone(), configuration).commandable();
+            for direction in [1, -1] {
+                let unit = axis.clone().calibrated(0.1, direction).expect("a unit");
+                let calibrated = joint(unit, configuration).commandable();
+                assert!(
+                    (calibrated.lower - nominal.lower).abs() < 1e-12,
+                    "{}",
+                    configuration.0
+                );
+                assert!(
+                    (calibrated.upper - nominal.upper).abs() < 1e-12,
+                    "{}",
+                    configuration.0
+                );
+            }
+        }
+    }
 }
