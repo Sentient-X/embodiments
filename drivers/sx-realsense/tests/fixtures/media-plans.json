@@ -386,8 +386,8 @@
   },
   "humanoid-head-infrared": {
     "schema": "sx.media-plan/v2",
-    "embodiment": "4d5a2c7d9e0de23bac98ee7fc6b3fcf1235d66d58cb7d14934ce7dde05a47bc5",
-    "instance": "bfa0fd9e55de6c810b3baddd34e5ddf9aebaa8c93297edc9c4d3b6de66938452",
+    "embodiment": "9ea3203b68bb76f452b217e665a3348cb4b1593a10263c108ed212b8ae8a256b",
+    "instance": "4577fbd92927187e22d5d0d8c878f2470fbb786df056f15a3d0481224f2caa61",
     "tracks": [
       {
         "track": "head",
@@ -401,11 +401,11 @@
             "height": 480,
             "fps": 60.0,
             "image_from_camera": [
-              446.8027731191281,
+              446.802773,
               0.0,
               424.0,
               0.0,
-              432.97146126514167,
+              432.971461,
               240.0,
               0.0,
               0.0,
@@ -800,11 +800,11 @@
             "height": 480,
             "fps": 60.0,
             "image_from_camera": [
-              446.8027731191281,
+              446.802773,
               0.0,
               424.0,
               0.0,
-              432.97146126514167,
+              432.971461,
               240.0,
               0.0,
               0.0,
