@@ -199,9 +199,49 @@
   },
   "sentient-humanoid-upper-body": {
     "schema": "sx.media-plan/v1",
-    "embodiment": "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206",
-    "instance": "37fccfa42793b5849e310e150d9a0afd77a3525e98ad9faeec0e9fe6df89c841",
-    "tracks": [],
+    "embodiment": "c580a71bff3d0c4fe3975de765de35020aa0e6ca5883a3878f3c18541b24eb7d",
+    "instance": "bcbbce461eabe1fbf4f56e6dde4e7e97d3964f1b552381286d4bba916a9ac4aa",
+    "tracks": [
+      {
+        "track": "head",
+        "fps": 30.0,
+        "views": [
+          {
+            "camera": "head",
+            "model": "realsense_d435",
+            "modality": "rgb",
+            "width": 1280,
+            "height": 720,
+            "fps": 30.0,
+            "image_from_camera": [
+              924.3,
+              0.0,
+              640.0,
+              0.0,
+              925.7,
+              360.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "distortion_model": "none",
+            "distortion_coefficients": [],
+            "unit": null,
+            "calibration": null,
+            "mount_frame": "head_camera_color_optical",
+            "root_frame": "humanoid_origin",
+            "root_from_mount": null,
+            "moves_with": [
+              "torso_joint",
+              "waist_roll_joint",
+              "waist_pitch_joint",
+              "neck_yaw_joint",
+              "head_joint"
+            ]
+          }
+        ]
+      }
+    ],
     "microphones": []
   }
 }

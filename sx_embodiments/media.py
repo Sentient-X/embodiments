@@ -30,6 +30,7 @@ from sx_contracts.identity import JsonValue
 from .embodiment import Embodiment
 from .errors import EmbodimentSchemaError
 from .instance import InstanceError, ResolvedCamera, ResolvedInstance
+from .kinematics import JointType, Kinematics, KinematicsError, Transform
 
 MEDIA_SCHEMA: Final = "sx.media-plan/v1"
 #: A track or microphone name: it names a published track and the journal file beside it.
@@ -105,110 +106,64 @@ class MountPose:
 
 def mount_pose(urdf: bytes, link: str) -> MountPose:
     """The pose of ``link`` in the description's root frame, or the joints it rides on."""
-    robot = ET.fromstring(urdf)
-    joint_into: dict[str, ET.Element] = {}
-    for joint in robot.findall("joint"):
-        child = joint.find("child")
-        if child is not None:
-            joint_into[child.attrib["link"]] = joint
-    links = {element.attrib["name"] for element in robot.findall("link")}
-    if link not in links:
-        raise MediaRigError(f"{link!r} is not a link of the body's description")
-    path: list[ET.Element] = []
-    current = link
-    while current in joint_into:
-        joint = joint_into[current]
-        path.append(joint)
-        parent = joint.find("parent")
-        if parent is None:
-            raise MediaRigError(f"joint {joint.get('name')!r} names no parent link")
-        current = parent.attrib["link"]
-    path.reverse()
-    moving = tuple(joint.attrib["name"] for joint in path if joint.get("type", "fixed") != "fixed")
+    try:
+        kinematics = Kinematics.of(urdf)
+        root = link
+        while (joint := kinematics.parent_joint.get(root)) is not None:
+            root = kinematics.joints[joint].parent
+        _, down = kinematics.path(root, link)
+    except KinematicsError as error:
+        raise MediaRigError(str(error)) from error
+    moving = tuple(joint.name for joint in down if joint.type is not JointType.FIXED)
     if moving:
-        return MountPose(current, None, moving)
-    pose = _IDENTITY
-    for joint in path:
-        origin = joint.find("origin")
-        pose = _compose(pose, _origin(origin))
-    return MountPose(current, _translation_rotation(pose), ())
-
-
-Matrix = tuple[tuple[float, float, float, float], ...]
-_IDENTITY: Final[Matrix] = (
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 1.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, 0.0),
-    (0.0, 0.0, 0.0, 1.0),
-)
-
-
-def _numbers(element: ET.Element | None, key: str) -> tuple[float, float, float]:
-    text = "0 0 0" if element is None else element.get(key, "0 0 0")
-    x, y, z = (float(value) for value in text.split())
-    return x, y, z
-
-
-def _origin(origin: ET.Element | None) -> Matrix:
-    x, y, z = _numbers(origin, "xyz")
-    roll, pitch, yaw = _numbers(origin, "rpy")
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    return (
-        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, x),
-        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, y),
-        (-sp, cp * sr, cp * cr, z),
-        (0.0, 0.0, 0.0, 1.0),
-    )
-
-
-def _compose(a: Matrix, b: Matrix) -> Matrix:
-    rows = [tuple(sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)) for i in range(4)]
-    return tuple((row[0], row[1], row[2], row[3]) for row in rows)
+        return MountPose(root, None, moving)
+    return MountPose(root, _translation_rotation(kinematics.pose(root, link)), ())
 
 
 def _translation_rotation(
-    pose: Matrix,
+    pose: Transform,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
-    """The translation and the unit quaternion (x, y, z, w) of a rigid transform."""
-    m = pose
-    trace = m[0][0] + m[1][1] + m[2][2]
+    """The translation and the unit quaternion (x, y, z, w) of a row-major rigid transform."""
+
+    def m(row: int, column: int) -> float:
+        return pose[row * 4 + column]
+
+    trace = m(0, 0) + m(1, 1) + m(2, 2)
     if trace > 0.0:
         s = math.sqrt(trace + 1.0) * 2.0
         w, x, y, z = (
             0.25 * s,
-            (m[2][1] - m[1][2]) / s,
-            (m[0][2] - m[2][0]) / s,
-            (m[1][0] - m[0][1]) / s,
+            (m(2, 1) - m(1, 2)) / s,
+            (m(0, 2) - m(2, 0)) / s,
+            (m(1, 0) - m(0, 1)) / s,
         )
-    elif m[0][0] > m[1][1] and m[0][0] > m[2][2]:
-        s = math.sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0
+    elif m(0, 0) > m(1, 1) and m(0, 0) > m(2, 2):
+        s = math.sqrt(1.0 + m(0, 0) - m(1, 1) - m(2, 2)) * 2.0
         w, x, y, z = (
-            (m[2][1] - m[1][2]) / s,
+            (m(2, 1) - m(1, 2)) / s,
             0.25 * s,
-            (m[0][1] + m[1][0]) / s,
-            (m[0][2] + m[2][0]) / s,
+            (m(0, 1) + m(1, 0)) / s,
+            (m(0, 2) + m(2, 0)) / s,
         )
-    elif m[1][1] > m[2][2]:
-        s = math.sqrt(1.0 + m[1][1] - m[0][0] - m[2][2]) * 2.0
+    elif m(1, 1) > m(2, 2):
+        s = math.sqrt(1.0 + m(1, 1) - m(0, 0) - m(2, 2)) * 2.0
         w, x, y, z = (
-            (m[0][2] - m[2][0]) / s,
-            (m[0][1] + m[1][0]) / s,
+            (m(0, 2) - m(2, 0)) / s,
+            (m(0, 1) + m(1, 0)) / s,
             0.25 * s,
-            (m[1][2] + m[2][1]) / s,
+            (m(1, 2) + m(2, 1)) / s,
         )
     else:
-        s = math.sqrt(1.0 + m[2][2] - m[0][0] - m[1][1]) * 2.0
+        s = math.sqrt(1.0 + m(2, 2) - m(0, 0) - m(1, 1)) * 2.0
         w, x, y, z = (
-            (m[1][0] - m[0][1]) / s,
-            (m[0][2] + m[2][0]) / s,
-            (m[1][2] + m[2][1]) / s,
+            (m(1, 0) - m(0, 1)) / s,
+            (m(0, 2) + m(2, 0)) / s,
+            (m(1, 2) + m(2, 1)) / s,
             0.25 * s,
         )
     if w < 0.0:
         w, x, y, z = -w, -x, -y, -z
-    return (m[0][3], m[1][3], m[2][3]), (x, y, z, w)
+    return (m(0, 3), m(1, 3), m(2, 3)), (x, y, z, w)
 
 
 def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue]:

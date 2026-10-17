@@ -354,10 +354,16 @@ mod tests {
     }
 
     #[test]
-    fn a_body_declaring_no_camera_plans_no_track() {
+    fn a_camera_riding_moving_joints_names_them_and_carries_no_fixed_pose() {
         let document = plan("sentient-humanoid-upper-body");
         let parsed = MediaPlan::parse(&document, &instance(&document)).expect("plan");
-        assert!(parsed.tracks.is_empty());
+        let view = &parsed.tracks[0].views[0];
+        assert!(view.root_from_mount.is_none());
+        assert!(
+            view.moves_with
+                .iter()
+                .any(|joint| joint == "neck_yaw_joint")
+        );
     }
 
     #[test]
