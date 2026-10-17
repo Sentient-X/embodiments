@@ -9,6 +9,11 @@ dependencies = ["sx-contracts>=0.1.0"]
 
 [project.optional-dependencies]
 capture = ["pyserial>=3.5,<4"]
+calibrate = [
+    "numpy>=2.1",
+    "opencv-python-headless>=4.13,<4.14",
+    "scipy>=1.13",
+]
 
 [tool.uv.sources]
 # `sx-contracts` is resolved only by the private `sx` superproject's one lock and trusted
