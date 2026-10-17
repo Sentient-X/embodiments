@@ -12,10 +12,11 @@
 //!
 //! Every mismatch between the drive, the commissioning and the opener is refused before any
 //! bridge is opened: commissioning for another instance, a drive for a body no opener
-//! composes, a port the opener does not declare, a declared port commissioning does not name.
-//! A bridge that is not attached is refused as it is opened. A motor that does not answer as
-//! the body binds it is found only by talking to it; the vendor crate then disables every motor
-//! of that chain before returning the refusal.
+//! composes or whose joints are not the ones it composes, a port the opener does not declare,
+//! a declared port commissioning does not name. A bridge that is not attached is refused as it
+//! is opened. A motor that does not answer as the body binds it is found only by talking to
+//! it; the vendor crate then sends every motor of that chain its disable before refusing, and
+//! names any whose disable could not be sent, which may still hold torque.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -142,6 +143,16 @@ impl Opener {
         }
     }
 
+    /// Compose `drive`'s chains without a bus, refusing a drive whose joints are not the ones
+    /// this opener composes.
+    fn check(self, drive: &InstanceDrive) -> Result<(), OpenError> {
+        match self {
+            Self::B601 => b601::b601(drive).map(|_| ()),
+            Self::HumanoidUpperBody => humanoid::humanoid_upper_body(drive).map(|_| ()),
+        }
+        .map_err(OpenError::from)
+    }
+
     fn of(drive: &InstanceDrive) -> Result<Self, OpenError> {
         for opener in Self::ALL {
             if BodyBindings::parse(opener.bindings())?.id == drive.embodiment {
@@ -188,6 +199,7 @@ pub fn open(
         });
     }
     let opener = Opener::of(drive)?;
+    opener.check(drive)?;
     let declared = opener.ports();
     if let Some(extra) = commissioning
         .ports

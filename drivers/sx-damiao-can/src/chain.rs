@@ -192,6 +192,13 @@ pub enum DamiaoChainError {
     #[error("bus_id {0} did not confirm MIT control mode")]
     ModeNotConfirmed(u16),
     #[error(
+        "{refused}; and the disable of bus_ids {unsent:?} could not be sent, so they may hold torque"
+    )]
+    DisableUnsent {
+        refused: Box<DamiaoChainError>,
+        unsent: Vec<u16>,
+    },
+    #[error(
         "bus_id {bus_id} reports {register:?} = {motor:?}, which no Damiao table carries for its model"
     )]
     LimitMismatch {
@@ -281,10 +288,25 @@ fn bring_up<P: CanPort>(
 }
 
 /// Send every named motor its disable frame, whatever any answered: the last word of an open
-/// that failed. A send that fails is the bus's own failure, already being returned.
-fn disable_all<P: CanPort>(control: &mut MotorControl<P>, motors: &[DamiaoAxis]) {
-    for motor in motors {
-        let _ = control.disable(motor.axis.binding.bus_id);
+/// that failed, returned as `refused` unless a disable could not be sent, which is then named
+/// beside it, since that motor may still hold torque.
+fn disable_all<P: CanPort>(
+    control: &mut MotorControl<P>,
+    motors: &[DamiaoAxis],
+    refused: DamiaoChainError,
+) -> DamiaoChainError {
+    let unsent: Vec<u16> = motors
+        .iter()
+        .map(|motor| motor.axis.binding.bus_id)
+        .filter(|bus_id| control.disable(*bus_id).is_err())
+        .collect();
+    if unsent.is_empty() {
+        refused
+    } else {
+        DamiaoChainError::DisableUnsent {
+            refused: Box::new(refused),
+            unsent,
+        }
     }
 }
 
@@ -317,10 +339,7 @@ impl<P: CanPort> DamiaoChain<P> {
         // the chain names is disabled before the failure is returned.
         let limits = match bring_up(&mut control, &motors) {
             Ok(limits) => limits,
-            Err(error) => {
-                disable_all(&mut control, &motors);
-                return Err(error);
-            }
+            Err(error) => return Err(disable_all(&mut control, &motors, error)),
         };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
         let mut chain = Self {
@@ -333,8 +352,7 @@ impl<P: CanPort> DamiaoChain<P> {
             stop_pending: false,
         };
         if let Err(error) = chain.settle_disabled() {
-            disable_all(&mut chain.control, &chain.motors);
-            return Err(error);
+            return Err(disable_all(&mut chain.control, &chain.motors, error));
         }
         Ok(chain)
     }

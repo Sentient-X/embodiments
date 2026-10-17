@@ -156,6 +156,22 @@ fn every_mismatch_is_refused_before_a_bus_is_opened() {
         ),
         Err(OpenError::NotAttached(serial)) if serial == "A"
     ));
+    // A drive of this body whose joints are not the ones its opener composes.
+    let mut missing = drive.clone();
+    missing.joints.pop();
+    assert!(matches!(
+        open(
+            &missing,
+            &commissioning(&drive, &[("arm", "A"), ("gripper", "G")]),
+            &mut bridges
+        ),
+        Err(OpenError::Bindings(_))
+    ));
+    assert_eq!(
+        bridges.opened,
+        ["A"],
+        "only the absent bridge above was asked for"
+    );
     // A drive for a body no opener composes.
     let mut unknown = drive.clone();
     unknown.embodiment = "0".repeat(64);
