@@ -1,0 +1,11 @@
+{
+  "models": [
+    "feetech_sts3215",
+    "damiao_dm4310",
+    "damiao_dm4340"
+  ],
+  "buses": [
+    "feetech_serial",
+    "damiao_can"
+  ]
+}

@@ -18,108 +18,138 @@
 //!   `src/lerobot/robots/rebot_b601_follower/motor_family.py`, `DM_PROFILE.joint_limits`: the
 //!   deployed driver's soft box, in degrees.
 //!
-//! The axes and their bindings are the registry's (`sx_embodiments/known/b601.py`), held equal
-//! to `tests/fixtures/b601_bindings.json`, which the registry renders. What is added here is
-//! controller configuration, not hardware identity: master ids, gains and each motor's
-//! commandable range. The DM4340 joints' kd of 8 is outside the MIT range; `DM_CAN.py`'s
+//! The axes and their bindings are the registry's (`sx_embodiments/known/b601.py`), read from
+//! `bindings/b601-dm.json`, which `tools/render_driver_bindings.py` renders; no bound, address,
+//! model, sign or reduction is spelled here, the gripper's transmission included. What is added
+//! here is controller configuration, not hardware identity: master ids, gains and each motor's
+//! commandable range, keyed by joint name. The DM4340 joints' kd of 8 is outside the MIT range; `DM_CAN.py`'s
 //! `controlMIT` clamps it to 5 on the wire (`float_to_uint(kd, 0, 5, 12)`), so 5 is declared.
 //!
 //! Each arm motor's range is the conservative intersection `known/b601.py` asks a live
 //! consumer to take, taken here once: the URDF's limits intersected with the soft box. The
 //! gripper motor's is its open angle, which the transmission maps to 0..0.045 m of the URDF's
 //! 0.0715 m finger stroke. [`DamiaoAxis::commandable`] gives both as joint ranges.
+//!
+//! [`open_b601`] opens the follower as one [`Composite`]: the arm's chain, then the gripper's,
+//! each on its own `CanPort` (on the stock B601-DM, clones of one
+//! `sx_embodiment_drivers::can::SharedCanPort` behind its one USB2CAN bridge).
 
-use sx_embodiment_drivers::{ActuatorBinding, ActuatorModel, BoundAxis};
+use sx_embodiment_drivers::can::CanPort;
+use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, Composite};
 
-use crate::chain::{DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DamiaoAxis};
+use crate::chain::{DamiaoAxis, DamiaoChain, DamiaoChainError};
+
+/// The registry's B601-DM axes, rendered.
+pub const BINDINGS: &str = include_str!("../bindings/b601-dm.json");
 
 /// The vendor's answer-id convention: `feedback_id = motor_id + 0x10`.
 pub const MASTER_ID_OFFSET: u16 = 0x10;
 /// The gripper motor's fully open angle, radians (`position_limits.open`).
 pub const GRIPPER_MOTOR_OPEN_RAD: f64 = -5.0;
-/// One finger's travel at the motor's open angle: half of `_GRIPPER_MAX_WIDTH`.
+/// One finger's travel at the motor's open angle: half of `_GRIPPER_MAX_WIDTH`. The registry's
+/// gripper reduction is this transmission; the bindings test holds the two equal.
 pub const GRIPPER_FINGER_OPEN_M: f64 = 0.09 / 2.0;
+/// The finger joint the gripper motor drives.
+pub const GRIPPER_JOINT: &str = "gripper_joint1";
 
-fn direct(model: ActuatorModel, bus_id: u16) -> ActuatorBinding {
-    ActuatorBinding {
-        model,
-        bus: DAMIAO_CAN,
-        bus_id,
-        sign: 1,
-        zero_offset: 0.0,
-        reduction: 1.0,
-    }
-}
+/// One arm joint's controller configuration: name, soft box (deg), kp, kd.
+type Joint = (&'static str, (f64, f64), f64, f64);
 
-/// One arm joint: name, motor id, URDF limits (rad), soft box (deg), kp, kd.
-type Joint = (&'static str, u16, (f64, f64), (f64, f64), f64, f64);
-
-// 3.14 is the URDF's own limit, not an approximation of pi.
-#[allow(clippy::approx_constant)]
 const ARM: [Joint; 6] = [
-    ("joint1", 1, (-2.8, 2.8), (-150.0, 150.0), 120.0, 5.0),
-    ("joint2", 2, (-3.14, 0.0), (-200.0, 1.0), 120.0, 5.0),
-    ("joint3", 3, (-3.14, 0.0), (-200.0, 1.0), 120.0, 5.0),
-    ("joint4", 4, (-1.87, 1.57), (-80.0, 90.0), 18.0, 2.0),
-    ("joint5", 5, (-1.57, 1.57), (-90.0, 90.0), 18.0, 2.0),
-    ("joint6", 6, (-3.14, 3.14), (-90.0, 90.0), 18.0, 2.0),
+    ("joint1", (-150.0, 150.0), 120.0, 5.0),
+    ("joint2", (-200.0, 1.0), 120.0, 5.0),
+    ("joint3", (-200.0, 1.0), 120.0, 5.0),
+    ("joint4", (-80.0, 90.0), 18.0, 2.0),
+    ("joint5", (-90.0, 90.0), 18.0, 2.0),
+    ("joint6", (-90.0, 90.0), 18.0, 2.0),
 ];
 
-fn joint(&(name, bus_id, (lower, upper), (soft_lower, soft_upper), kp, kd): &Joint) -> DamiaoAxis {
-    let model = if bus_id <= 3 {
-        DAMIAO_DM4340
-    } else {
-        DAMIAO_DM4310
-    };
+fn master_id(axis: &BoundAxis) -> u16 {
+    axis.binding.bus_id + MASTER_ID_OFFSET
+}
+
+fn joint(axis: BoundAxis, &(_, (soft_lower, soft_upper), kp, kd): &Joint) -> DamiaoAxis {
+    // The arm's drive map is identity, so the motor's range is the joint's.
+    let (motor_lower, motor_upper) = (
+        axis.lower.max(soft_lower.to_radians()),
+        axis.upper.min(soft_upper.to_radians()),
+    );
     DamiaoAxis {
-        axis: BoundAxis {
-            joint: name.to_owned(),
-            lower,
-            upper,
-            binding: direct(model, bus_id),
-        },
-        master_id: bus_id + MASTER_ID_OFFSET,
+        master_id: master_id(&axis),
+        axis,
         kp,
         kd,
-        // The arm's drive map is identity, so the motor's range is the joint's.
-        motor_lower: lower.max(soft_lower.to_radians()),
-        motor_upper: upper.min(soft_upper.to_radians()),
+        motor_lower,
+        motor_upper,
     }
 }
 
-/// `joint1`..`joint6`, in native state order, with the URDF's limits.
-#[must_use]
-pub fn b601_arm() -> Vec<DamiaoAxis> {
-    ARM.iter().map(joint).collect()
+fn body() -> Result<BodyBindings, BodyError> {
+    let body = BodyBindings::parse(BINDINGS)?;
+    let mut joints: Vec<&str> = ARM.iter().map(|(name, ..)| *name).collect();
+    joints.push(GRIPPER_JOINT);
+    body.require_joints(&joints)?;
+    Ok(body)
 }
 
-/// `gripper_joint1`, one finger's travel in metres, driven by the 0x07 motor through the
-/// vendor's linear transmission: open angle over finger travel at that angle.
-#[must_use]
-pub fn b601_gripper() -> DamiaoAxis {
-    DamiaoAxis {
-        axis: BoundAxis {
-            joint: "gripper_joint1".to_owned(),
-            lower: 0.0,
-            upper: 0.0715,
-            binding: ActuatorBinding {
-                sign: -1,
-                reduction: -GRIPPER_MOTOR_OPEN_RAD / GRIPPER_FINGER_OPEN_M,
-                ..direct(DAMIAO_DM4310, 7)
-            },
-        },
-        master_id: 7 + MASTER_ID_OFFSET,
+/// `joint1`..`joint6`, in native state order, with the registry's bounds.
+///
+/// # Errors
+///
+/// Refuses rendered bindings whose joints are not the B601-DM's.
+pub fn b601_arm() -> Result<Vec<DamiaoAxis>, BodyError> {
+    let body = body()?;
+    Ok(body
+        .axes
+        .into_iter()
+        .zip(&ARM)
+        .map(|(axis, configuration)| joint(axis, configuration))
+        .collect())
+}
+
+/// `gripper_joint1`, one finger's travel in metres, driven by its motor through the
+/// registry's transmission: open angle over finger travel at that angle.
+///
+/// # Errors
+///
+/// Refuses rendered bindings whose joints are not the B601-DM's.
+pub fn b601_gripper() -> Result<DamiaoAxis, BodyError> {
+    let axis = body()?.axis(GRIPPER_JOINT)?.clone();
+    Ok(DamiaoAxis {
+        master_id: master_id(&axis),
+        axis,
         kp: 8.0,
         kd: 1.0,
         motor_lower: GRIPPER_MOTOR_OPEN_RAD,
         motor_upper: 0.0,
-    }
+    })
 }
 
 /// The single follower's whole chain: the arm, then the gripper, as `b601-dm`'s state order.
-#[must_use]
-pub fn b601() -> Vec<DamiaoAxis> {
-    let mut chain = b601_arm();
-    chain.push(b601_gripper());
-    chain
+///
+/// # Errors
+///
+/// Refuses rendered bindings whose joints are not the B601-DM's.
+pub fn b601() -> Result<Vec<DamiaoAxis>, BodyError> {
+    let mut chain = b601_arm()?;
+    chain.push(b601_gripper()?);
+    Ok(chain)
+}
+
+/// The B601-DM follower: the arm's chain on `arm_port`, then the gripper's on `gripper_port`,
+/// each brought up as the vendor does and left disabled.
+pub type B601<P, Q> = Composite<DamiaoChain<P>, DamiaoChain<Q>>;
+
+/// Open the B601-DM follower as one chain.
+///
+/// # Errors
+///
+/// Returns the chain that did not open and why.
+pub fn open_b601<P: CanPort, Q: CanPort>(
+    arm_port: P,
+    gripper_port: Q,
+) -> Result<B601<P, Q>, DamiaoChainError> {
+    let arm = DamiaoChain::open(arm_port, b601_arm()?)?;
+    let gripper = DamiaoChain::open(gripper_port, vec![b601_gripper()?])?;
+    Ok(Composite::new(arm, gripper))
 }

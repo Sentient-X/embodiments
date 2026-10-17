@@ -1,5 +1,7 @@
 //! The bound actuator chain: command in joint coordinates, stop with proof.
 
+use std::time::Duration;
+
 use thiserror::Error;
 
 use crate::binding::BoundAxis;
@@ -120,9 +122,27 @@ pub fn check_targets(axes: &[BoundAxis], joints: &[f64]) -> Result<(), TargetErr
     }
 }
 
-/// A chain of bound actuators on one bus, in the embodiment's native state order.
+/// What a refused or failed chain operation means to the one driving it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChainFailure {
+    /// Refused before any frame changed what an actuator holds.
+    Refused,
+    /// An actuator did not answer in time.
+    Timeout,
+    /// The link itself could not carry the exchange.
+    Unavailable,
+    /// The bus answered something that contradicts the command, or failed mid-command.
+    Fault,
+}
+
+/// A chain's error, classified once by the crate that knows its vendor's failure modes.
+pub trait ChainError: std::error::Error + Send + Sync + 'static {
+    fn failure(&self) -> ChainFailure;
+}
+
+/// A chain of bound actuators, in the embodiment's native state order.
 pub trait ActuatorChain {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: ChainError;
     /// One actuator's answer as the bus reports it.
     type Feedback: Clone + std::fmt::Debug + PartialEq;
 
@@ -145,6 +165,13 @@ pub trait ActuatorChain {
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
     /// prove. The chain stays disabled until the next command.
     fn stop(&mut self) -> StopReport;
+
+    /// The longest [`ActuatorChain::stop`] can take, whatever the actuators answer.
+    fn stop_budget(&self) -> Duration;
+
+    /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
+    /// chain that latches nothing has nothing to release.
+    fn clear_faults(&mut self) {}
 }
 
 #[cfg(test)]
@@ -178,9 +205,9 @@ mod tests {
                 bus: ActuatorBus::new("bus"),
                 bus_id: 1,
                 sign: 1,
-                zero_offset: 0.0,
                 reduction: 1.0,
             },
+            zero: crate::binding::UNCALIBRATED_ZERO,
         }];
         assert_eq!(check_targets(&axes, &[0.5]), Ok(()));
         assert_eq!(

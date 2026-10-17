@@ -161,6 +161,8 @@ dependencies = [
 name = "sx-embodiment-drivers"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

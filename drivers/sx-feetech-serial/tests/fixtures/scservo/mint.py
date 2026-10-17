@@ -18,12 +18,12 @@ The references, run here unmodified:
   (``so_follower.py:159-173``) with ``configure_motors`` (``feetech.py:209-226``), whose
   register values are checked against the pinned files below.
 
-Wire values come from the registry's bindings (``../so101_bindings.json``, rendered by
-``tools/render_driver_bindings.py``) through the drive map ``sign * (joint - zero_offset) *
-reduction``: degrees for the arm, percent of the declared range for the gripper. Targets are
-float32 and bounds-checked at float32, as the station's earlier Python follower did
-(``sx_drivers.feetech.radians_to_wire``, the source the station's golden was first minted
-from).
+Wire values come from the registry's bindings (``bindings/so101.json`` in this crate, rendered
+by ``tools/render_driver_bindings.py``) through the drive map ``sign * (joint - zero) *
+reduction`` with the zero uncalibrated: degrees for the arm, percent of the declared range for
+the gripper. Targets are float32 and bounds-checked at float32, as the station's earlier Python
+follower did (``sx_drivers.feetech.radians_to_wire``, the source the station's golden was first
+minted from).
 
 ``sts3215_so101.json`` holds:
 
@@ -70,7 +70,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "sts3215_so101.json"
-BINDINGS = HERE.parent / "so101_bindings.json"
+BINDINGS = HERE.parents[2] / "bindings/so101.json"
 
 FTSERVO_COMMIT = "cbcfa64674d592f7e5028ae72af42580f60500b4"
 LEROBOT_COMMIT = "30da8e687a6dfc617fcd94afc367ac7071c376ce"
@@ -304,7 +304,7 @@ ACTIONS = [
 
 
 def actuator(axis: dict[str, Any], joint: float) -> float:
-    """The registry's drive map: ``sign * (joint - zero_offset) * reduction``."""
+    """The registry's drive map: ``sign * (joint - zero) * reduction``."""
     return axis["sign"] * (joint - UNCALIBRATED_ZERO) * axis["reduction"]
 
 
