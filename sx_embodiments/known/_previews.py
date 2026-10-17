@@ -126,9 +126,9 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "4d7ee4df1a00ec14ae164727c196255335a859ad9fb7ad36acc2786c0f7e70cd"
+        "a1b639b452e2cf28936dbdaf48ed4eed73472aee21f213304201941ac07fdd44"
     ): packaged_asset(
-        relpath="humanoid_pkg/previews/4d7ee4df1a00ec14ae164727c196255335a859ad9fb7ad36acc2786c0f7e70cd.webp",
+        relpath="humanoid_pkg/previews/a1b639b452e2cf28936dbdaf48ed4eed73472aee21f213304201941ac07fdd44.webp",
         sha256="83611778a1e1f078653610cd9bd1fff44fbffc015ed7c43228a64769fb37425e",
         size_bytes=4548,
         format=AssetFormat.OTHER,
@@ -143,9 +143,9 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206"
+        "c580a71bff3d0c4fe3975de765de35020aa0e6ca5883a3878f3c18541b24eb7d"
     ): packaged_asset(
-        relpath="humanoid_pkg/previews/e5b791a5d4abaa98d412b4429139e3f49e8960db70cd77d6079b11a68bc91206.webp",
+        relpath="humanoid_pkg/previews/c580a71bff3d0c4fe3975de765de35020aa0e6ca5883a3878f3c18541b24eb7d.webp",
         sha256="8c8742c91ec2f76eb16691a11c4e7735b393d9ef47bc9699365664599fd92879",
         size_bytes=4722,
         format=AssetFormat.OTHER,

@@ -243,7 +243,11 @@ class Member:
 
 @dataclass(frozen=True, slots=True)
 class Frame:
-    """A named link at a nominal pose on ``parent``: a camera mount or a leader site."""
+    """A named link at a nominal pose on ``parent``: a camera mount or a leader site.
+
+    ``camera_optical`` declares the link a camera's optical frame (z along the view, x right,
+    y down), the convention every declared camera's frame must carry.
+    """
 
     name: str
     parent: str
@@ -251,6 +255,7 @@ class Frame:
     joint: MountJoint = MountJoint.FIXED
     preview_kind: str | None = None
     preview_label: str | None = None
+    camera_optical: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +347,8 @@ class Assembly:
                 attributes["data-preview-kind"] = frame.preview_kind
             if frame.preview_label is not None:
                 attributes["data-preview-label"] = frame.preview_label
+            if frame.camera_optical:
+                attributes["data-frame-convention"] = "camera_optical"
             ET.SubElement(robot, "link", attributes)
             links.add(frame.name)
             _mount(

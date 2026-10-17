@@ -623,4 +623,10 @@
     <parent link="chest_link" />
     <child link="neck_joint_mount" />
   </joint>
+  <link name="head_camera_color_optical" data-preview-kind="camera" data-preview-label="Head camera" data-frame-convention="camera_optical" />
+  <joint name="camera_link_to_head_camera_color_optical" type="fixed">
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 -1.5707963267948966" />
+    <parent link="camera_link" />
+    <child link="head_camera_color_optical" />
+  </joint>
 </robot>

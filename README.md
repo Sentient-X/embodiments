@@ -134,6 +134,23 @@ Neither object moves the embodiment's id. Calibrations recorded before these kin
 sealed bytes, and their readers parse them into the kinds with the sealed document as
 evidence; `tests/test_calibration.py` resolves every registered body through an instance.
 
+The solvers that measure those kinds are `sx_embodiments.calibrate`, behind the `calibrate`
+extra (NumPy, SciPy, OpenCV); nothing else in the package imports them. `solve_intrinsics`
+fits a camera unit's lens from checkerboard or ChArUco views, dropping a view only when the
+fit names it ill-conditioned or it is the worst and over the limit. `solve_mounts` places
+cameras on the links that carry them from views of a target another link holds, with every
+view's carrier-from-holder transform known: one model covers eye-in-hand, eye-to-base, a head
+camera watching a target in the hand and a tracked rig watching a static board, cameras that
+saw the same target are solved together, and a checkerboard's half-turn ambiguity is resolved
+per view. `measure_intrinsics` and `measure_mount` bind both to a robot instance: the unit is
+the one the instance places in the camera's slot, the raster is the body's, and each view's
+transform comes from forward kinematics over the body's own description at the joint
+positions recorded with it (`sx_embodiments.kinematics`, the one URDF chain reader). A
+measured mount is a correction of the description's transform from the camera's carrier link,
+which `resolve` then accepts; `tests/test_calibrate.py` recovers known lenses and mounts,
+including the humanoid's head camera through its instance, and holds every declared camera
+calibratable.
+
 A stored document of any earlier schema is read with `migrate(document)`, which runs the chain
 of pure converters (13 → 14 → 15) and returns one verified identity edge: the id the bytes
 carry and the body they read as today. A converter changes only what its schema changed and

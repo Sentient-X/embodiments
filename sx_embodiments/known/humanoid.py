@@ -30,14 +30,22 @@ upstream marks provisional, so they stay undocumented drives, outside any driver
 ``waist_rod_joint`` is feedback-only and the neck and head joints have no motor, so neither
 enters the body state. The legs carry no binding: the robot in service has none.
 
+The head carries an Intel RealSense D435 (``urdf/humanoid_pkg.csv``, ``camera_link`` on
+``head_link``). Its colour stream is declared at 1280x720 with the datasheet's nominal optics: a
+pinhole whose focal lengths are the OV2740's published field of view (69.4 x 42.5 degrees) and
+whose principal point is the raster centre. The optical frame sits at the CAD ``camera_link``
+origin, which the mesh shows faces +x; a unit's intrinsics and the camera's true placement on
+``head_link`` are its calibrations, measured by :mod:`sx_embodiments.calibrate`.
+
 The hardware URDF's limits win at the execution boundary; the attached 28-joint MJCF is a
 simulation description whose limits differ.
 """
 
+import math
 from dataclasses import replace
 from typing import Final, Literal
 
-from ..assembly import Assembly, Member, Subtree
+from ..assembly import Assembly, Frame, Member, Pose, Subtree
 from ..assets import (
     AssetFormat,
     AssetProvenance,
@@ -50,6 +58,7 @@ from ..compose import (
     MountedOn,
     RootMount,
     body_component,
+    sensor_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import (
@@ -64,7 +73,16 @@ from ..layout import (
     UndocumentedDrive,
     Unobserved,
 )
-from ..parts import ChainSpec, Limb
+from ..parts import (
+    CameraModality,
+    CameraOptics,
+    CameraOpticsAuthority,
+    CameraSpec,
+    ChainSpec,
+    FactSource,
+    Limb,
+    SensorModel,
+)
 from ._authoring import bounded_layout
 
 SENTIENT_HUMANOID_URDF: Final = packaged_asset(
@@ -235,6 +253,37 @@ SENTIENT_HUMANOID_LEFT_LEG: Final = _humanoid_leg("left")
 
 
 #: The vendor tree without its legs and head; it keeps the vendor's names.
+REALSENSE_D435_COLOR: Final = CameraSpec(
+    part_id=PartId("realsense-d435-color"),
+    model=SensorModel("realsense_d435"),
+    modality=CameraModality.RGB,
+    fps=30.0,
+    optics=CameraOptics(
+        width=1280,
+        height=720,
+        image_from_camera=(924.3, 0.0, 640.0, 0.0, 925.7, 360.0, 0.0, 0.0, 1.0),
+        distortion_model="none",
+        distortion_coefficients=(),
+        authority=CameraOpticsAuthority.MODEL_NOMINAL,
+        source=FactSource(
+            repository="https://www.realsenseai.com/wp-content/uploads/2020/06/"
+            "Intel-RealSense-D400-Series-Datasheet-June-2020.pdf",
+            revision="337029-009",
+            path="OV2740 RGB sensor properties: horizontal and vertical field of view",
+        ),
+    ),
+)
+
+#: The colour imager's optical frame (z along the view) at the CAD camera origin.
+HEAD_CAMERA: Final = Frame(
+    "head_camera_color_optical",
+    "camera_link",
+    Pose(rpy=(-math.pi / 2, 0.0, -math.pi / 2)),
+    preview_kind="camera",
+    preview_label="Head camera",
+    camera_optical=True,
+)
+
 UPPER_BODY: Final = Subtree(
     SENTIENT_HUMANOID_URDF,
     without=("right_hip_pitch_joint", "left_hip_pitch_joint", "neck_joint"),
@@ -254,7 +303,10 @@ def _part(name: str, part: Subtree) -> Member:
 _UPPER_MEMBERS: Final = (Member("upper_body", UPPER_BODY, namespaced=False), _part("head", HEAD))
 
 SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY: Final = Assembly(
-    robot="sentient_humanoid_upper_body", root="humanoid_origin", members=_UPPER_MEMBERS
+    robot="sentient_humanoid_upper_body",
+    root="humanoid_origin",
+    members=_UPPER_MEMBERS,
+    frames=(HEAD_CAMERA,),
 )
 SENTIENT_HUMANOID_ASSEMBLY: Final = Assembly(
     robot="sentient_humanoid",
@@ -263,6 +315,7 @@ SENTIENT_HUMANOID_ASSEMBLY: Final = Assembly(
         *_UPPER_MEMBERS,
         *(_part(f"{side}_leg", leg) for side, leg in zip(("right", "left"), LEGS, strict=True)),
     ),
+    frames=(HEAD_CAMERA,),
 )
 UPPER_BODY_COMPONENTS: Final = (
     body_component("torso", SENTIENT_HUMANOID_TORSO, RootMount("base_link"), limb=Limb.TORSO),
@@ -272,6 +325,7 @@ UPPER_BODY_COMPONENTS: Final = (
     body_component(
         "left_arm", SENTIENT_HUMANOID_LEFT_ARM, MountedOn("torso", "chest_link"), limb=Limb.ARM
     ),
+    sensor_component("head", REALSENSE_D435_COLOR, RootMount(HEAD_CAMERA.name)),
 )
 LEG_COMPONENTS: Final = (
     body_component("right_leg", SENTIENT_HUMANOID_RIGHT_LEG, RootMount("base_link"), limb=Limb.LEG),
@@ -289,8 +343,8 @@ SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
             "humanoid_pkg/urdf/sentient_humanoid_upper_body.urdf",
-            "dd4e8833e516d8a49c117089614bf1fdab218ef259fa9e319984e96b747da0e5",
-            23327,
+            "9c2901aa4251525cccc082cf8abcc00492f1ceed7cf4a9248d263f66b36d4442",
+            23708,
         ),
     ),
     assembly=SENTIENT_HUMANOID_UPPER_BODY_ASSEMBLY,
@@ -306,8 +360,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
             "humanoid_pkg/urdf/sentient_humanoid.urdf",
-            "d39263713f1e85e835ccbe4bbf13c3d0cbf41cf38f3f980817b51fe7c3387c52",
-            40822,
+            "add9520df125459c92e7480ead66e8a4a56d98107379458ae5d7d8742402b3d4",
+            41203,
         ),
         SENTIENT_HUMANOID_MJCF,
     ),
