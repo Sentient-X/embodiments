@@ -45,5 +45,5 @@ robot's media plan.
 cargo test -p sx-realsense
 # against librealsense2 2.x (on a Mac with Homebrew: RUSTFLAGS="-L /opt/homebrew/lib")
 cargo test -p sx-realsense --features sdk
-SX_REALSENSE_SERIAL=<serial> cargo test -p sx-realsense --features sdk --test hardware -- --ignored
+SX_REALSENSE_SERIAL="$SERIAL" cargo test -p sx-realsense --features sdk --test hardware -- --ignored
 ```
