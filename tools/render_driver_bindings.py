@@ -14,7 +14,10 @@ address, model, sign or reduction is spelled in Rust. ``vocabulary.json`` is the
 ``tests/fixtures/drives.json`` in ``sx-damiao-can`` holds, for each Damiao body, the
 ``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
 its nominal instance and for one with a measured, reversed first joint, which the crate's
-openers are tested against. ``tests/test_driver_bindings.py`` runs the same check.
+openers are tested against. ``tests/fixtures/media-plans.json`` in ``sx-embodiment-drivers``
+holds the ``sx.media-plan/v1`` documents :func:`sx_embodiments.media.media_document`
+renders, which the crate's ``MediaPlan`` is tested against. ``tests/test_driver_bindings.py``
+runs the same check.
 """
 
 import argparse
@@ -29,6 +32,7 @@ from sx_embodiments.calibration import (
     Measurement,
     UnitSerial,
 )
+from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.instance import (
     RobotInstance,
     Slot,
@@ -38,6 +42,7 @@ from sx_embodiments.instance import (
     resolve,
 )
 from sx_embodiments.layout import ActuatorBus, ActuatorModel
+from sx_embodiments.media import NO_RIG, MediaRig, MicrophoneSpec, StereoPair, media_document
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -50,6 +55,12 @@ BINDINGS: dict[Path, str] = {
 }
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
 DRIVES = ROOT / "drivers/sx-damiao-can/tests/fixtures/drives.json"
+MEDIA = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-plans.json"
+#: The Quest head's two cameras as one stereo track, with a microphone on the headset.
+QUEST_RIG = MediaRig(
+    stereo=(StereoPair("head", "head_left", "head_right"),),
+    microphones=(MicrophoneSpec("head_mic", "quest3_microphone", 48_000, 1, "quest3s_head"),),
+)
 #: The Damiao bodies whose openers take an instance's drive.
 DAMIAO_BODIES = ("b601-dm", "sentient-humanoid-upper-body")
 
@@ -81,10 +92,27 @@ def drives() -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def media() -> str:
+    """The Quest head as one stereo track and as two, and the humanoid, which declares none."""
+    quest = embodiments["quest-ego"]
+    humanoid = embodiments["sentient-humanoid-upper-body"]
+
+    def plan(body: Embodiment, rig: MediaRig = NO_RIG) -> object:
+        return media_document(body, resolve(body, nominal_instance(body), ()), rig)
+
+    document = {
+        "quest-ego-stereo": plan(quest, QUEST_RIG),
+        "quest-ego-mono": plan(quest),
+        "sentient-humanoid-upper-body": plan(humanoid),
+    }
+    return json.dumps(document, indent=2) + "\n"
+
+
 def rendered() -> dict[Path, str]:
     files = {path: render(name) for path, name in BINDINGS.items()}
     files[VOCABULARY] = vocabulary()
     files[DRIVES] = drives()
+    files[MEDIA] = media()
     return files
 
 
