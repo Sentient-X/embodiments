@@ -116,6 +116,13 @@ def test_the_registry_declares_its_detachable_parts() -> None:
             assert module.plug in MECHANICAL_INTERFACES, module.module_id
 
 
+def test_every_socket_sits_on_a_link_of_its_module() -> None:
+    for module in modules():
+        links = module.links()
+        for socket in module.sockets:
+            assert socket.link in links, (module.module_id, socket.name)
+
+
 def test_a_fitted_socket_is_where_its_cut_hangs() -> None:
     for module, socket in _fitted_sockets():
         assert socket.fitted is not None
@@ -317,7 +324,7 @@ def test_a_wrong_pairing_is_a_typed_refusal() -> None:
         )
     with pytest.raises(InterfaceMismatchError):
         Socket("flange", ISO, "link6", fitted=PIPER_GRIPPER_MODULE)
-    with pytest.raises(CompositionError):
+    with pytest.raises(SocketError, match="does not have"):
         Build(
             robot="x",
             root="o",
@@ -329,6 +336,8 @@ def test_a_wrong_pairing_is_a_typed_refusal() -> None:
             ),
             mates=(Mate("p", replace(PIPER_GRIPPER_MODULE, plug=ISO), "ur5e", "flange"),),
         ).urdf()
+    with pytest.raises(SocketError, match="not one of its components"):
+        replace(UR5E_MODULE, sockets=(Socket("flange", ISO, "tool0", carrier="wrist"),))
 
 
 def test_a_camera_module_composes_on_a_wrist_through_a_bracket() -> None:

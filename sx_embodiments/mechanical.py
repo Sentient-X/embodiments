@@ -203,7 +203,13 @@ class Module:
         fitted = {socket.name for socket in self.sockets if socket.fitted is not None}
         if len(set(slotted)) != len(slotted) or not set(slotted) <= fitted:
             raise SocketError(str(self.module_id), "a slot names each fitted socket at most once")
+        instances = {entry.instance for entry in self.components if not isinstance(entry, Slot)}
         for socket in self.sockets:
+            if socket.carrier is not None and socket.carrier not in instances:
+                raise SocketError(
+                    str(self.module_id),
+                    f"{socket.name!r} rides on {socket.carrier!r}, not one of its components",
+                )
             if socket.fitted is None:
                 continue
             cut = socket.fitted.description
@@ -220,6 +226,13 @@ class Module:
             offered = ", ".join(socket.name for socket in self.sockets) or "none"
             raise SocketError(str(self.module_id), f"has no socket {name!r}; it offers {offered}")
         return found
+
+    def links(self) -> frozenset[str]:
+        """Every link of the module's description; reading it reads the file."""
+        if self.description is None:
+            return frozenset()
+        robot = ET.fromstring(_bytes(self.description))
+        return frozenset(link.attrib["name"] for link in robot.findall("link"))
 
     def without(self, sockets: frozenset[str]) -> Description:
         """The description with the modules fitted on ``sockets`` cut out."""
@@ -409,15 +422,30 @@ class Build:
         )
 
     def urdf(self) -> bytes:
+        """The rendered description; a mate on a socket whose link its module's description
+        lacks is refused here, where the descriptions are read."""
         if self.root is None:
             (only,) = self.placed
             if only.module.description is None:
                 raise CompositionError(str(only.module.module_id), "has no captured description")
             return _bytes(only.module.description)
+        modules = {entry.name: entry.module for entry in (*self.placed, *self.mates)}
+        for mate in self.mates:
+            host = modules[mate.host]
+            socket = host.socket(mate.socket)
+            if socket.link not in host.links():
+                raise SocketError(
+                    str(self.robot),
+                    f"{host.module_id}.{socket.name} sits on {socket.link!r}, "
+                    "which its description does not have",
+                )
         return self.assembly().urdf()
 
     def components(self) -> tuple[Component, ...]:
         """Every module's components in build order, namespaced, each riding on its carrier.
+
+        Read from the declarations alone, without the descriptions; :meth:`urdf` is what proves
+        each socket's link exists.
 
         A mated module's own root-mounted components ride on its socket's carrier, and a fitted
         module's on its socket's carrier in the host; a fitted module's root link is named by
