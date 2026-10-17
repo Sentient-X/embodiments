@@ -32,6 +32,7 @@ pub mod chain;
 pub mod composite;
 pub mod drive;
 pub mod kinematics;
+pub mod layout;
 pub mod media;
 pub mod serial;
 
@@ -47,6 +48,7 @@ pub use chain::{
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
 pub use kinematics::{Chain, ChainStep, PlacementError};
+pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
     MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,
