@@ -109,6 +109,7 @@ impl RobotLayout {
         if layout.period_ns == 0 || layout.controls.is_empty() {
             return refuse("a layout has a period and at least one coordinate");
         }
+        layout.check_documents().map_err(LayoutError::Document)?;
         let blank = |value: &str| value.is_empty() || value.chars().any(char::is_whitespace);
         if layout.controls.iter().any(|control| {
             blank(&control.joint)
@@ -121,6 +122,57 @@ impl RobotLayout {
             return refuse("every coordinate names its joint and has finite, ordered bounds");
         }
         Ok(layout)
+    }
+
+    /// The coordinates, bounds, rate and body the controls and ids state are the ones the
+    /// carried interface documents state, in order. Their content ids are `sx_actions`'
+    /// (golden-held in `packages/sx-actions/tests/test_robot_layout.py`); this check refuses a
+    /// rendering whose summary disagrees with the documents it was rendered from.
+    fn check_documents(&self) -> Result<(), String> {
+        let action = &self.action_interface;
+        let state = &self.state_interface;
+        if action["embodiment_id"] != self.embodiment.as_str()
+            || state["embodiment_id"] != self.embodiment.as_str()
+        {
+            return Err("an interface document is of another body".to_owned());
+        }
+        let hz = action["control_hz"]
+            .as_f64()
+            .ok_or("the action interface has no rate")?;
+        #[allow(clippy::cast_precision_loss)]
+        let period = 1e9 / self.period_ns as f64;
+        if (hz - period).abs() > 1e-9 * hz.max(1.0) {
+            return Err("the period is not the action interface's rate".to_owned());
+        }
+        let commands: Vec<&serde_json::Value> = action["groups"]
+            .as_array()
+            .ok_or("the action interface has no groups")?
+            .iter()
+            .flat_map(|group| group["coordinates"].as_array().into_iter().flatten())
+            .collect();
+        let fields = state["fields"]
+            .as_array()
+            .ok_or("the state interface has no fields")?;
+        if commands.len() != self.controls.len() || fields.len() != self.controls.len() {
+            return Err("the controls are not the interfaces' coordinates".to_owned());
+        }
+        for ((control, command), field) in self.controls.iter().zip(commands).zip(fields) {
+            let same = |value: &serde_json::Value| {
+                value["component_id"] == control.component_id.as_str()
+                    && value["coordinate_id"] == control.coordinate_id.as_str()
+            };
+            if !same(command)
+                || !same(field)
+                || command["bounds"]["lower"].as_f64() != Some(control.lower)
+                || command["bounds"]["upper"].as_f64() != Some(control.upper)
+            {
+                return Err(format!(
+                    "control {} is not its interfaces' coordinate, in order",
+                    control.joint
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Refuse a layout of another body than `drive`'s, or of other joints than it drives.
@@ -168,8 +220,11 @@ mod tests {
             "period_ns": 20_000_000_u64,
             "controls": [{"joint": "j1", "component_id": "arm", "coordinate_id": "j1",
                           "lower": -1.0, "upper": 1.0}],
-            "action_interface": {"id": id},
-            "state_interface": {},
+            "action_interface": {"id": id, "embodiment_id": "b".repeat(64), "control_hz": 50.0,
+                "groups": [{"coordinates": [{"component_id": "arm", "coordinate_id": "j1",
+                    "bounds": {"lower": -1.0, "upper": 1.0}}]}]},
+            "state_interface": {"embodiment_id": "b".repeat(64),
+                "fields": [{"component_id": "arm", "coordinate_id": "j1"}]},
         })
     }
 
@@ -191,6 +246,13 @@ mod tests {
         let mut bounds = document("unit");
         bounds["controls"][0]["lower"] = serde_json::json!(2.0);
         assert!(RobotLayout::parse(&bounds.to_string(), "unit").is_err());
+        let mut divergent = document("unit");
+        divergent["action_interface"]["groups"][0]["coordinates"][0]["bounds"]["upper"] =
+            serde_json::json!(0.5);
+        assert!(RobotLayout::parse(&divergent.to_string(), "unit").is_err());
+        let mut rate = document("unit");
+        rate["action_interface"]["control_hz"] = serde_json::json!(30.0);
+        assert!(RobotLayout::parse(&rate.to_string(), "unit").is_err());
         let mut unknown = document("unit");
         unknown["extra"] = serde_json::json!(1);
         assert!(RobotLayout::parse(&unknown.to_string(), "unit").is_err());
