@@ -8,6 +8,11 @@ rust-version.workspace = true
 license = "Apache-2.0 AND MIT"
 publish.workspace = true
 
+[features]
+# A simulated Damiao bus answering as the vendor's firmware does, for the suites of every
+# crate that drives a Damiao body (`sim`).
+sim = []
+
 [dependencies]
 sx-embodiment-drivers.workspace = true
 thiserror.workspace = true

@@ -14,6 +14,8 @@ pub mod b601;
 pub mod chain;
 pub mod dm_can;
 pub mod humanoid;
+#[cfg(any(test, feature = "sim"))]
+pub mod sim;
 pub mod usb2can;
 
 pub use chain::{

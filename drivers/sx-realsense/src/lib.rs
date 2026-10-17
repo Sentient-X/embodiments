@@ -8,7 +8,7 @@
 //! per imager, each with its own intrinsics, and a robot instance places each unit once.
 //!
 //! [`RealSenseSource`] turns one device's framesets into [`Exposure`]s for that track, over
-//! any [`Device`]: [`sdk::open`] (feature `sdk`) is librealsense2 through `realsense-rust`, and
+//! any [`Device`]: `sdk::open` (feature `sdk`) is librealsense2 through `realsense-rust`, and
 //! [`recorded::RecordedDevice`] replays framesets, which is how everything here is tested with
 //! no hardware.
 //!

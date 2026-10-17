@@ -235,6 +235,7 @@ driver's chain.
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
 | `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` and `humanoid::open_humanoid_upper_body` |
+| `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to USB bridge serial), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0) | the `sx` station's `StationRobot::open_actuator` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
 Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's
