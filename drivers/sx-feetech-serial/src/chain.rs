@@ -46,7 +46,7 @@
 //! A goal position is computed from a joint target in three steps:
 //!
 //! 1. The registry's drive map gives the actuator coordinate
-//!    (`BoundAxis::actuator_from_joint`: `sign * (joint - zero) * reduction`).
+//!    (`BoundAxis::actuator_from_joint`: `sign * direction * (joint - zero) * reduction`).
 //! 2. That coordinate becomes `LeRobot`'s wire value. For a [`MotorNormMode::Degrees`] servo it
 //!    is in degrees. For a [`MotorNormMode::Range0100`] servo (the gripper) it is the percent
 //!    of the axis's declared range, mapped through the binding.
