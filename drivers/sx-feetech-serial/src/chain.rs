@@ -46,7 +46,7 @@
 //! A goal position is computed from a joint target in three steps:
 //!
 //! 1. The registry's drive map gives the actuator coordinate
-//!    (`ActuatorBinding::actuator_from_joint`: `sign * (joint - zero_offset) * reduction`).
+//!    (`BoundAxis::actuator_from_joint`: `sign * (joint - zero) * reduction`).
 //! 2. That coordinate becomes `LeRobot`'s wire value. For a [`MotorNormMode::Degrees`] servo it
 //!    is in degrees. For a [`MotorNormMode::Range0100`] servo (the gripper) it is the percent
 //!    of the axis's declared range, mapped through the binding.
@@ -89,8 +89,8 @@ use std::time::Duration;
 
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BoundAxis, CommandRange, Evidence,
-    Receipt, StopReport, TargetError, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
+    ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, validate_chain,
 };
 use thiserror::Error;
 
@@ -219,7 +219,7 @@ impl FeetechServo {
         }
         let single = float32(joint);
         let binding = axis.binding;
-        let actuator = binding.actuator_from_joint(single);
+        let actuator = axis.actuator_from_joint(single);
         let min = f64::from(self.calibration.range_min);
         let max = f64::from(self.calibration.range_max);
         let raw = match self.norm_mode {
@@ -233,8 +233,8 @@ impl FeetechServo {
             }
             MotorNormMode::Range0100 => {
                 let ends = [
-                    binding.actuator_from_joint(axis.lower),
-                    binding.actuator_from_joint(axis.upper),
+                    axis.actuator_from_joint(axis.lower),
+                    axis.actuator_from_joint(axis.upper),
                 ];
                 let (low, high) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
                 let val = (actuator - low) * 100.0 / (high - low);
@@ -271,6 +271,8 @@ fn float32(value: f64) -> f64 {
 pub enum FeetechChainError {
     #[error(transparent)]
     Binding(#[from] BindingError),
+    #[error(transparent)]
+    Body(#[from] BodyError),
     #[error(transparent)]
     Target(#[from] TargetError),
     #[error(
@@ -484,29 +486,11 @@ impl<P: SerialPort> FeetechChain<P> {
         Ok(())
     }
 
-    /// The status flags every stop since the last [`FeetechChain::clear_faults`] reported,
+    /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
     /// proven or not, as (bus id, flags).
     #[must_use]
     pub fn faults(&self) -> &[(u16, u8)] {
         &self.faults
-    }
-
-    /// Release the latched stop faults, letting motion resume. Whoever calls this has decided
-    /// the servos that reported them are fit to move.
-    pub fn clear_faults(&mut self) {
-        self.faults.clear();
-    }
-
-    /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo,
-    /// each bounded by the link's [`SerialPort::timeout`].
-    #[must_use]
-    pub fn stop_budget(&self) -> Duration {
-        let servos = u32::try_from(self.servos.len()).unwrap_or(u32::MAX);
-        self.sms
-            .ph
-            .port()
-            .timeout()
-            .saturating_mul(STOP_EXCHANGES_PER_SERVO.saturating_mul(servos))
     }
 
     /// The servos, in native state order.
@@ -647,5 +631,44 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             }
         }
         report
+    }
+
+    /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo,
+    /// each bounded by the link's [`SerialPort::timeout`].
+    fn stop_budget(&self) -> Duration {
+        let servos = u32::try_from(self.servos.len()).unwrap_or(u32::MAX);
+        self.sms
+            .ph
+            .port()
+            .timeout()
+            .saturating_mul(STOP_EXCHANGES_PER_SERVO.saturating_mul(servos))
+    }
+
+    /// Release the latched stop faults, letting motion resume. Whoever calls this has decided
+    /// the servos that reported them are fit to move.
+    fn clear_faults(&mut self) {
+        self.faults.clear();
+    }
+}
+
+impl ChainError for FeetechChainError {
+    fn failure(&self) -> ChainFailure {
+        match self {
+            Self::Body(_)
+            | Self::Target(_)
+            | Self::Unencodable(_)
+            | Self::StopPending
+            | Self::FaultedAtStop { .. } => ChainFailure::Refused,
+            Self::Comm {
+                result: CommResult::RxTimeout,
+                ..
+            } => ChainFailure::Timeout,
+            Self::Comm {
+                result: CommResult::TxFail | CommResult::RxFail,
+                ..
+            }
+            | Self::SyncWrite(CommResult::TxFail) => ChainFailure::Unavailable,
+            _ => ChainFailure::Fault,
+        }
     }
 }

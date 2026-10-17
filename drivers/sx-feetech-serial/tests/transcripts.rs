@@ -170,7 +170,7 @@ fn servos(golden: &Golden, calibration: &str) -> Vec<FeetechServo> {
         .collect::<Vec<_>>()
         .try_into()
         .expect("six servos");
-    so101(calibration)
+    so101(calibration).expect("the SO-101 composes")
 }
 
 fn open(exchanges: &[Exchange], calibration: &str) -> FeetechChain<FakePort> {
@@ -236,9 +236,7 @@ fn the_transcript_is_the_bytes_its_sources_record_names() {
             .unwrap()
     );
     assert_eq!(
-        hex(&Sha256::digest(include_bytes!(
-            "fixtures/so101_bindings.json"
-        ))),
+        hex(&Sha256::digest(include_bytes!("../bindings/so101.json"))),
         sources_record["sources"]["so101_bindings.json"]["sha256"]
             .as_str()
             .unwrap()

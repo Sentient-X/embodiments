@@ -123,18 +123,25 @@ boundaries hash bytes before producing an `AssetRef`.
 This repository holds actuator drivers as Rust crates under `drivers/`, one per bus, in one
 Cargo workspace pinned to the station's toolchain (`rust-toolchain.toml`).
 `drivers/sx-embodiment-drivers` is the surface each implements: `ActuatorChain` drives the
-actuators an axis's `ActuatorBinding` names, indexed in the body's native state order, and a
-stop becomes a `ProvenStop` only when every actuator answered stopped.
+actuators an axis's `ActuatorBinding` names, indexed in the body's native state order, each
+failure classified as a `ChainFailure`, and a stop becomes a `ProvenStop` only when every
+actuator answered stopped. A body spanning two devices or buses is one `Composite` chain, and
+`can::SharedCanPort` lets chains take turns on one bridge. The station drives every body through
+this trait and names no vendor.
 
 A bus crate is a translation of its vendor's own driver — the same structure, names, frames,
 clamps and command order — pinned to transcripts recorded by running that driver, with each
-departure listed in the ported module's header. A crate that composes a known body holds its
-axes equal to the bindings `tools/render_driver_bindings.py` renders from the registry.
+departure listed in the ported module's header. A crate that composes a known body embeds the
+bindings `tools/render_driver_bindings.py` renders from the registry (`drivers/<crate>/bindings/`)
+and parses them with `BodyBindings`, so no joint bound, address, model, sign or reduction is
+spelled in Rust; it adds only its vendor's controller configuration, keyed by joint name. A
+joint's zero is the unit's calibration, applied at one seam (`BoundAxis::calibrated`); until one
+is supplied every axis carries `UNCALIBRATED_ZERO`.
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
-| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | intended: the `sx` station's B601 actuator, switched to this crate in the lane that lands right after this crate and the `sx` pin advance to it; nothing consumes it before then |
-| `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | intended: the `sx` station's `FeetechActuator`, a thin wrapper over this crate's chain in the lane that lands right after this crate and the `sx` pin advance to it; nothing consumes it before then |
+| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` |
+| `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check

@@ -21,8 +21,8 @@ The reference, run here unmodified:
   motor, and an open whose motor reports a VMAX register its limit row does not carry. The
   chain's own sequencing (``src/chain.rs``) is mirrored below by calling DM_CAN.py's functions
   in the same order; the waits the chain adds between polls are recorded beside the vendor's.
-  Axes and bindings are the registry's (``../b601_bindings.json``); master ids, gains and the
-  gripper motor's range are Seeed's (``src/b601.rs`` cites them).
+  Axes and bindings are the registry's (``bindings/b601-dm.json`` in this crate); master ids,
+  gains and the gripper motor's range are Seeed's (``src/b601.rs`` cites them).
 - ``cross_checks``: the same MIT vectors and decodes through two other implementations, and
   every place they diverge from DM_CAN.py, stated rather than averaged away:
   ``Sentient-X/sentient_can`` at 3837d224327d89ed30b6fdee3577769d8dae5f94 through its own
@@ -57,7 +57,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "transcripts.json"
-BINDINGS = HERE.parent / "b601_bindings.json"
+BINDINGS = HERE.parents[2] / "bindings/b601-dm.json"
 
 MOTOR_SDK_COMMIT = "fb0e9fc5455ecb02ed13cc1f43de58078be61b07"
 LEROBOT_COMMIT = "ff71cae1ae2d09fd035553c35da65888ed6c8304"

@@ -33,8 +33,9 @@ use std::time::Duration;
 
 use sx_embodiment_drivers::can::CanPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BoundAxis, CommandRange, Evidence,
-    Receipt, StopReport, TargetError, check_targets, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
+    ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, check_targets,
+    validate_chain,
 };
 use thiserror::Error;
 
@@ -101,10 +102,9 @@ impl DamiaoAxis {
     /// motor range mapped back through the binding.
     #[must_use]
     pub fn commandable(&self) -> CommandRange {
-        let binding = self.axis.binding;
         let ends = [
-            binding.joint_from_actuator(self.motor_lower),
-            binding.joint_from_actuator(self.motor_upper),
+            self.axis.joint_from_actuator(self.motor_lower),
+            self.axis.joint_from_actuator(self.motor_upper),
         ];
         CommandRange {
             lower: self.axis.lower.max(ends[0].min(ends[1])),
@@ -169,6 +169,8 @@ pub struct MotorLimits {
 pub enum DamiaoChainError {
     #[error(transparent)]
     Binding(#[from] BindingError),
+    #[error(transparent)]
+    Body(#[from] BodyError),
     #[error(transparent)]
     Target(#[from] TargetError),
     #[error(
@@ -304,17 +306,6 @@ impl<P: CanPort> DamiaoChain<P> {
         chain.await_answers(&before)?;
         chain.expect_all(&before, MotorState::Disabled)?;
         Ok(chain)
-    }
-
-    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: every
-    /// motor's `disable` and its 0.01 s wait, an answer poll, a `refresh_motor_status` for
-    /// every motor that stayed silent, a second poll, and the link's allowance for each of those
-    /// frames.
-    #[must_use]
-    pub fn stop_budget(&self) -> Duration {
-        let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
-        let polls = u32::try_from(ANSWER_POLLS - 1).unwrap_or(u32::MAX);
-        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + LINK_ALLOWANCE * motors * 2
     }
 
     /// The limit row each motor reported at open, in native state order.
@@ -478,7 +469,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
             .motors
             .iter()
             .zip(joints)
-            .map(|(motor, joint)| motor.axis.binding.actuator_from_joint(*joint))
+            .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
             .collect();
         if !self.enabled {
             let before = self.feedback_counts()?;
@@ -502,12 +493,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
             .motors
             .iter()
             .zip(&feedback)
-            .map(|(motor, answer)| {
-                motor
-                    .axis
-                    .binding
-                    .joint_from_actuator(f64::from(answer.position))
-            })
+            .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
             .collect();
         Ok(Receipt {
             evidence: Evidence::BusObservedComplete,
@@ -562,5 +548,27 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         }
         self.stop_pending = !report.is_proven();
         report
+    }
+
+    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: every
+    /// motor's `disable` and its 0.01 s wait, an answer poll, a `refresh_motor_status` for
+    /// every motor that stayed silent, a second poll, and the link's allowance for each of those
+    /// frames.
+    fn stop_budget(&self) -> Duration {
+        let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
+        let polls = u32::try_from(ANSWER_POLLS - 1).unwrap_or(u32::MAX);
+        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + LINK_ALLOWANCE * motors * 2
+    }
+}
+
+impl ChainError for DamiaoChainError {
+    fn failure(&self) -> ChainFailure {
+        match self {
+            Self::Body(_) | Self::Target(_) | Self::Uncommandable { .. } | Self::StopPending => {
+                ChainFailure::Refused
+            }
+            Self::Silent(_) => ChainFailure::Timeout,
+            _ => ChainFailure::Fault,
+        }
     }
 }

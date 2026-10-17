@@ -7,27 +7,26 @@ copy of cmjang's `DM_Control_Python`, MIT, Copyright (c) 2024 cmjang — see
 Seeed reBot B601-DM's chain of seven of them. Every departure from `DM_CAN.py` is listed in the
 header of the module that makes it.
 
-Intended consumer: the `sx` station's B601 actuator. It switches to this crate in the lane that
-lands right after this crate and the `sx` pin advance to it; until then nothing consumes it.
+Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`.
 
 ## The surface the station builds against
 
 | Item | Path |
 |---|---|
-| The chain trait | `sx_embodiment_drivers::ActuatorChain` (`axes`, `commandable`, `command`, `stop`) |
+| The chain trait | `sx_embodiment_drivers::ActuatorChain` (`axes`, `commandable`, `command`, `stop`, `stop_budget`); `DamiaoChainError` implements `ChainError` |
 | A command's evidence | `sx_embodiment_drivers::Receipt<MotorFeedback>`: `evidence`, `observed` (joint coordinates), `feedback` (one `MotorFeedback` per motor) |
 | A stop's proof | `sx_embodiment_drivers::StopReport`, and `StopReport::prove()` for a `ProvenStop` |
 | The port | `sx_embodiment_drivers::can::{CanFrame, CanPort}` |
-| The B601 chain | `sx_damiao_can::b601::{b601, b601_arm, b601_gripper}` into `sx_damiao_can::DamiaoChain::open(port, axes)` |
+| The B601 chain | `sx_damiao_can::b601::open_b601(arm_port, gripper_port)`: a `Composite` of the arm's and gripper's `DamiaoChain`s, composed from `bindings/b601-dm.json` (`b601_arm`, `b601_gripper`) |
 | The USB2CAN bridge | `sx_damiao_can::usb2can::Usb2CanPort::new(serial)` over any `Read + Write` serial stream |
 | Per-motor answers | `sx_damiao_can::MotorFeedback`: state (`MotorState` from the first-byte nibble), position, velocity, torque, MOS and rotor temperatures |
 | Limits found at open | `DamiaoChain::limits()`: the `PMAX`, `VMAX`, `TMAX` each motor reported and is scaled by |
-| Stop budget | `DamiaoChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (136 ms for the B601's seven motors) |
+| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (136 ms for the B601's seven motors) |
 
-- **One chain on one port.** Seeed ships one USB2CAN bridge for all seven motors
-  (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud), so the
-  station's arm-and-gripper composite becomes one `DamiaoChain` over `b601()` on one
-  `Usb2CanPort`. The jaw's tactile stream is a separate source and stays outside the chain.
+- **One bridge, two chains.** Seeed ships one USB2CAN bridge for all seven motors
+  (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud); open both
+  chains on clones of one `sx_embodiment_drivers::can::SharedCanPort` over a `Usb2CanPort`. The
+  jaw's tactile stream is a separate source and stays outside the chain.
 - **No frame-level API.** Pure frame builders and a per-frame `exchange` are not exposed:
   every bus operation is a `dm_can::MotorControl` call that sends and reads as `DM_CAN.py`
   does, and the chain judges the answers.

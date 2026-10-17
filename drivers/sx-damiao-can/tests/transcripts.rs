@@ -349,7 +349,8 @@ fn replay(name: &str) {
     let session = session(name);
     let stream = ReplayStream::new(session["events"].as_array().unwrap());
     let steps = session["steps"].as_array().unwrap();
-    let mut chain = DamiaoChain::open(stream.port(), b601()).expect("open");
+    let mut chain =
+        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")).expect("open");
     assert_eq!(steps[0]["step"], "open");
     assert_eq!(chain.limits(), limits(&steps[0]).as_slice());
     for step in &steps[1..] {
@@ -397,7 +398,7 @@ fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
 fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     let session = session("limit_mismatch");
     let stream = ReplayStream::new(session["events"].as_array().unwrap());
-    match DamiaoChain::open(stream.port(), b601()) {
+    match DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")) {
         Err(DamiaoChainError::LimitMismatch {
             bus_id,
             register,
@@ -422,7 +423,8 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
     let events = session["events"].as_array().unwrap();
     let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
     let stream = ReplayStream::new(&events[..opened]);
-    let mut chain = DamiaoChain::open(stream.port(), b601()).expect("open");
+    let mut chain =
+        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes")).expect("open");
     let mut targets = vec![0.0; 7];
     targets[1] = 0.1; // joint2 stops at 0
     assert!(matches!(
@@ -453,6 +455,7 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
 #[allow(clippy::approx_constant)]
 fn the_commandable_ranges_are_the_urdf_inside_the_soft_box_and_the_reachable_gripper() {
     let ranges: Vec<(f64, f64)> = b601()
+        .expect("the B601-DM composes")
         .iter()
         .map(|motor| {
             let range = motor.commandable();
@@ -492,7 +495,7 @@ fn every_recorded_stop_waits_inside_the_chains_stop_budget() {
         let events = session["events"].as_array().unwrap();
         let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
         let stream = ReplayStream::new(&events[..opened]);
-        DamiaoChain::open(stream.port(), b601())
+        DamiaoChain::open(stream.port(), b601().expect("the B601-DM composes"))
             .expect("open")
             .stop_budget()
     };

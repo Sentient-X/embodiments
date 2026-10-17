@@ -4,6 +4,7 @@
 //! interface, or a vendor's USB-to-CAN bridge. The driver never names the transport.
 
 use std::io;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// One classic CAN data frame.
@@ -34,5 +35,46 @@ pub trait CanPort: Send {
     /// records the wait instead of sleeping.
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
+    }
+}
+
+/// One CAN link shared by chains that take turns on it, as a body's devices behind one bridge
+/// do (the B601-DM's arm and gripper). A chain's reads drop frames from motors it does not
+/// drive. `sleep` holds the link while it waits, so a chain's sequencing is never interleaved.
+pub struct SharedCanPort<P>(Arc<Mutex<P>>);
+
+impl<P> SharedCanPort<P> {
+    #[must_use]
+    pub fn new(port: P) -> Self {
+        Self(Arc::new(Mutex::new(port)))
+    }
+}
+
+impl<P> Clone for SharedCanPort<P> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<P: CanPort> CanPort for SharedCanPort<P> {
+    fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
+            .send(frame)
+    }
+
+    fn receive(&mut self) -> io::Result<Option<CanFrame>> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
+            .receive()
+    }
+
+    fn sleep(&mut self, duration: Duration) {
+        match self.0.lock() {
+            Ok(mut port) => port.sleep(duration),
+            Err(_) => std::thread::sleep(duration),
+        }
     }
 }

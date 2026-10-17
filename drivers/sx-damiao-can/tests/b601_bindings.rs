@@ -1,36 +1,35 @@
-//! The B601 chain binds exactly the registry's facts, rendered by
-//! `tools/render_driver_bindings.py` into `fixtures/b601_bindings.json`.
+//! The B601 chain is composed from exactly the registry's rendered bindings, and the vendor's
+//! gripper transmission is the registry's reduction.
 
-// Equal means bit-for-bit equal: both sides are the same f64 literals.
+// Equal means bit-for-bit equal: both sides are the same f64 values.
 #![allow(clippy::float_cmp)]
 
-use serde_json::Value;
-use sx_damiao_can::b601::b601;
+use sx_damiao_can::b601::{
+    BINDINGS, GRIPPER_FINGER_OPEN_M, GRIPPER_JOINT, GRIPPER_MOTOR_OPEN_RAD, b601,
+};
+use sx_embodiment_drivers::BodyBindings;
 
 #[test]
 fn the_b601_chain_is_the_registrys_bindings_in_native_state_order() {
-    let rendered: Value =
-        serde_json::from_str(include_str!("fixtures/b601_bindings.json")).expect("bindings");
-    assert_eq!(rendered["embodiment"], "b601-dm");
-    let axes = rendered["axes"].as_array().unwrap();
-    let chain = b601();
-    assert_eq!(chain.len(), axes.len());
-    for (motor, fact) in chain.iter().zip(axes) {
-        let bound = &motor.axis;
-        let binding = bound.binding;
-        assert_eq!(bound.joint, fact["joint"].as_str().unwrap());
-        assert_eq!(bound.lower, fact["lower"].as_f64().unwrap(), "{fact}");
-        assert_eq!(bound.upper, fact["upper"].as_f64().unwrap(), "{fact}");
-        assert_eq!(binding.model.wire(), fact["model"].as_str().unwrap());
-        assert_eq!(binding.bus.wire(), fact["bus"].as_str().unwrap());
-        assert_eq!(u64::from(binding.bus_id), fact["bus_id"].as_u64().unwrap());
-        assert_eq!(i64::from(binding.sign), fact["sign"].as_i64().unwrap());
-        // A unit's zero is its joint calibration; the registry design carries none.
-        assert_eq!(binding.zero_offset, 0.0);
-        assert_eq!(
-            binding.reduction,
-            fact["reduction"].as_f64().unwrap(),
-            "{fact}"
-        );
+    let body = BodyBindings::parse(BINDINGS).expect("bindings");
+    assert_eq!(body.embodiment, "b601-dm");
+    let chain = b601().expect("the B601-DM composes");
+    let axes: Vec<_> = chain.iter().map(|motor| motor.axis.clone()).collect();
+    assert_eq!(axes, body.axes);
+    for motor in &chain {
+        assert_eq!(motor.master_id, motor.axis.binding.bus_id + 0x10);
+        let range = motor.commandable();
+        assert!(motor.axis.lower <= range.lower && range.upper <= motor.axis.upper);
     }
+}
+
+#[test]
+fn the_registrys_gripper_reduction_is_the_vendors_transmission() {
+    let body = BodyBindings::parse(BINDINGS).expect("bindings");
+    let gripper = body.axis(GRIPPER_JOINT).expect("gripper");
+    assert_eq!(gripper.binding.sign, -1);
+    assert_eq!(
+        gripper.binding.reduction,
+        -GRIPPER_MOTOR_OPEN_RAD / GRIPPER_FINGER_OPEN_M
+    );
 }
