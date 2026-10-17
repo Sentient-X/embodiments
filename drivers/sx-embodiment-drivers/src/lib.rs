@@ -19,7 +19,8 @@
 //!
 //! [`MediaPlan`] is the same rule for what a robot streams: its declared cameras and
 //! microphones as the registry resolves them for one instance, captured through
-//! [`FrameSource`] and [`AudioSource`].
+//! [`FrameSource`] and [`AudioSource`]. A camera riding moving joints is placed at capture by
+//! its view's [`kinematics::Chain`], the description's own joints from root to mount.
 //!
 //! Synchronous and allocation-light on purpose: the station wraps a chain in its own async
 //! actuator, and nothing here owns a thread or a runtime.
@@ -30,6 +31,7 @@ pub mod can;
 pub mod chain;
 pub mod composite;
 pub mod drive;
+pub mod kinematics;
 pub mod media;
 pub mod serial;
 
@@ -44,6 +46,7 @@ pub use chain::{
 };
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
+pub use kinematics::{Chain, ChainStep, PlacementError};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
     MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,

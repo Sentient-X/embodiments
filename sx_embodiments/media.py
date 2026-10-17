@@ -2,7 +2,7 @@
 
 A station publishes exactly the cameras its body declares, through the optics its instance
 resolved (:func:`sx_embodiments.instance.resolve`), so no track, raster or lens is spelled in
-the station. :func:`media_document` renders that as ``sx.media-plan/v1``, which
+the station. :func:`media_document` renders that as ``sx.media-plan/v2``, which
 ``sx_embodiment_drivers::MediaPlan`` parses for one instance and refuses for any other.
 
 A :class:`MediaRig` is the body's media wiring that the design itself does not carry: which
@@ -10,11 +10,12 @@ two declared cameras are one stereo pair (published as one side-by-side track so
 can never desynchronise) and which microphones are fitted. A pair is two cameras of one
 exposure: the same raster, rate and modality. Every other camera is its own track.
 
-Each view carries where its camera sits: the description link it is mounted on and, when no
-moving joint lies between that link and the description's root, the link's pose in the root
-frame. A camera that rides on a moving joint names those joints instead, because its pose at
-capture is the robot's forward kinematics at that instant, which the station does not yet
-compute.
+Each view carries where its camera sits: the description link it is mounted on, the joint
+chain from the description's root down to it, and, when only fixed joints lie on that chain, the
+link's pose in the root frame. A camera that rides on a moving joint names the joints whose
+positions place it instead, and its pose at capture is the chain evaluated at the joint state of
+that instant: ``sx_embodiment_drivers::kinematics`` composes the rendered chain exactly as
+:meth:`~sx_embodiments.kinematics.Kinematics.pose` does, so the station never reads a URDF.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -30,9 +32,9 @@ from sx_contracts.identity import JsonValue
 from .embodiment import Embodiment
 from .errors import EmbodimentSchemaError
 from .instance import InstanceError, ResolvedCamera, ResolvedInstance
-from .kinematics import JointType, Kinematics, KinematicsError, Transform
+from .kinematics import Joint, JointType, Kinematics, KinematicsError, Transform
 
-MEDIA_SCHEMA: Final = "sx.media-plan/v1"
+MEDIA_SCHEMA: Final = "sx.media-plan/v2"
 #: A track or microphone name: it names a published track and the journal file beside it.
 TRACK_NAME: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 #: The rates a published microphone track may run at: what WebRTC's audio path accepts.
@@ -93,6 +95,20 @@ NO_RIG: Final = MediaRig()
 
 
 @dataclass(frozen=True, slots=True)
+class ChainStep:
+    """One joint on the chain from the description's root down to a mount link."""
+
+    joint: str
+    type: JointType
+    #: ``parent_from_child`` at zero, row-major 4x4 in metres.
+    origin: Transform
+    axis: tuple[float, float, float]
+    #: For a mimic joint: the independent joint it follows, and its multiplier and offset
+    #: (a mimic of a mimic is folded into one).
+    follows: tuple[str, float, float] | None
+
+
+@dataclass(frozen=True, slots=True)
 class MountPose:
     """Where a link sits relative to the description's root."""
 
@@ -100,12 +116,26 @@ class MountPose:
     #: The link's pose in ``root_frame`` as (translation m, rotation quaternion xyzw), when
     #: only fixed joints lie between them.
     pose: tuple[tuple[float, float, float], tuple[float, float, float, float]] | None
-    #: The moving joints between the root and the link, root first.
+    #: The independent joints whose positions place the link, in chain order, root first.
     moves_with: tuple[str, ...]
+    #: Every joint from the root down to the link, root first.
+    chain: tuple[ChainStep, ...]
+
+
+def _follows(kinematics: Kinematics, joint: Joint) -> tuple[str, float, float] | None:
+    if joint.mimic is None:
+        return None
+    multiplier, offset, leader = 1.0, 0.0, joint
+    while leader.mimic is not None:
+        # position = m * leader + o, folded outward: m1 * (m2 * x + o2) + o1.
+        offset += multiplier * leader.mimic.offset
+        multiplier *= leader.mimic.multiplier
+        leader = kinematics.joints[leader.mimic.leader]
+    return leader.name, multiplier, offset
 
 
 def mount_pose(urdf: bytes, link: str) -> MountPose:
-    """The pose of ``link`` in the description's root frame, or the joints it rides on."""
+    """The chain from the description's root to ``link``, and its fixed pose when rigid."""
     try:
         kinematics = Kinematics.of(urdf)
         root = link
@@ -114,10 +144,38 @@ def mount_pose(urdf: bytes, link: str) -> MountPose:
         _, down = kinematics.path(root, link)
     except KinematicsError as error:
         raise MediaRigError(str(error)) from error
-    moving = tuple(joint.name for joint in down if joint.type is not JointType.FIXED)
-    if moving:
-        return MountPose(root, None, moving)
-    return MountPose(root, _translation_rotation(kinematics.pose(root, link)), ())
+    chain: list[ChainStep] = []
+    moves_with: list[str] = []
+    for joint in down:
+        if joint.type in (JointType.FLOATING, JointType.PLANAR):
+            raise MediaRigError(f"{link!r} rides a {joint.type} joint; no position places it")
+        follows = _follows(kinematics, joint)
+        chain.append(ChainStep(joint.name, joint.type, joint.origin, joint.axis, follows))
+        if joint.type is JointType.FIXED:
+            continue
+        needed = joint.name if follows is None else follows[0]
+        if needed not in moves_with:
+            moves_with.append(needed)
+    if moves_with:
+        return MountPose(root, None, tuple(moves_with), tuple(chain))
+    return MountPose(
+        root, _translation_rotation(kinematics.pose(root, link)), (), tuple(chain)
+    )
+
+
+def mount_pose_at(
+    urdf: bytes, link: str, positions: Mapping[str, float]
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
+    """Where ``link`` sits in the description's root frame at ``positions``: the pose a
+    station's evaluation of the rendered chain must reproduce."""
+    try:
+        kinematics = Kinematics.of(urdf)
+        root = link
+        while (joint := kinematics.parent_joint.get(root)) is not None:
+            root = kinematics.joints[joint].parent
+        return _translation_rotation(kinematics.pose(root, link, positions))
+    except KinematicsError as error:
+        raise MediaRigError(str(error)) from error
 
 
 def _translation_rotation(
@@ -199,6 +257,21 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
         "root_frame": mount.root_frame,
         "root_from_mount": pose,
         "moves_with": list(mount.moves_with),
+        "chain": [_step(step) for step in mount.chain],
+    }
+
+
+def _step(step: ChainStep) -> dict[str, JsonValue]:
+    return {
+        "joint": step.joint,
+        "type": step.type.value,
+        "origin": list(step.origin),
+        "axis": list(step.axis),
+        "follows": (
+            None
+            if step.follows is None
+            else {"joint": step.follows[0], "multiplier": step.follows[1], "offset": step.follows[2]}
+        ),
     }
 
 

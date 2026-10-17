@@ -17,6 +17,7 @@ from sx_embodiments.media import (
     StereoPair,
     media_document,
     mount_pose,
+    mount_pose_at,
 )
 
 QUEST_RIG = MediaRig(
@@ -98,3 +99,37 @@ def test_a_fixed_mount_carries_its_pose_and_a_moving_one_names_its_joints() -> N
     so101 = embodiments["so101"]
     moving = mount_pose(so101.urdf_bytes, "gripper_link")
     assert moving.pose is None and moving.moves_with
+
+
+_MIMIC_URDF = b"""<robot name="mimic">
+  <link name="base"/><link name="a"/><link name="b"/><link name="c"/>
+  <joint name="lead" type="revolute"><parent link="base"/><child link="a"/>
+    <origin xyz="0 0 0.1"/><axis xyz="0 0 1"/></joint>
+  <joint name="first" type="prismatic"><parent link="a"/><child link="b"/>
+    <origin xyz="0.2 0 0"/><axis xyz="1 0 0"/><mimic joint="lead" multiplier="2" offset="0.1"/></joint>
+  <joint name="second" type="prismatic"><parent link="b"/><child link="c"/>
+    <axis xyz="0 1 0"/><mimic joint="first" multiplier="-0.5" offset="0.3"/></joint>
+</robot>"""
+
+
+def test_a_chain_names_every_joint_root_first_and_folds_a_mimic_of_a_mimic() -> None:
+    mount = mount_pose(_MIMIC_URDF, "c")
+    assert mount.pose is None
+    assert [step.joint for step in mount.chain] == ["lead", "first", "second"]
+    assert mount.moves_with == ("lead",)
+    # second = -0.5 * (2 * lead + 0.1) + 0.3 = -1 * lead + 0.25
+    follows = mount.chain[2].follows
+    assert follows is not None and follows[0] == "lead"
+    assert math.isclose(follows[1], -1.0) and math.isclose(follows[2], 0.25)
+    translation, _ = mount_pose_at(_MIMIC_URDF, "c", {"lead": 0.0})
+    assert math.isclose(translation[0], 0.2 + 0.1) and math.isclose(translation[1], 0.25)
+
+
+def test_every_registered_camera_view_renders_its_chain() -> None:
+    for body in _bodies():
+        plan = media_document(body, resolve(body, nominal_instance(body), ()))
+        for track in plan["tracks"]:  # type: ignore[union-attr]
+            for view in track["views"]:  # type: ignore[index]
+                chain = view["chain"]  # type: ignore[index]
+                moving = [step for step in chain if step["type"] != "fixed"]  # type: ignore[index]
+                assert bool(moving) == bool(view["moves_with"])  # type: ignore[index]

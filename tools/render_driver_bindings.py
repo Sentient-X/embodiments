@@ -15,11 +15,13 @@ address, model, sign or reduction is spelled in Rust. ``vocabulary.json`` is the
 ``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
 its nominal instance and for one with a measured, reversed first joint, which the crate's
 openers are tested against. ``tests/fixtures/media-plans.json`` in ``sx-embodiment-drivers``
-holds the ``sx.media-plan/v1`` documents :func:`sx_embodiments.media.media_document`
-renders, which the crate's ``MediaPlan`` is tested against, and
-``tests/fixtures/media-plans.json`` in ``sx-realsense`` the humanoid's head D435 planned with
-its imagers placed by unit, as colour and as the infrared-pair body option.
-``tests/test_driver_bindings.py`` runs the same check.
+holds the ``sx.media-plan/v2`` documents :func:`sx_embodiments.media.media_document`
+renders, which the crate's ``MediaPlan`` is tested against, and ``media-poses.json`` beside it
+holds, for each view of those plans that rides moving joints, its mount pose at seeded joint
+positions as :func:`sx_embodiments.media.mount_pose_at` answers, which the crate's evaluation of
+the rendered chain is held equal to. ``tests/fixtures/media-plans.json`` in ``sx-realsense``
+holds the humanoid's head D435 planned with its imagers placed by unit, as colour and as the
+infrared-pair body option. ``tests/test_driver_bindings.py`` runs the same check.
 """
 
 import argparse
@@ -49,7 +51,14 @@ from sx_embodiments.known.humanoid import (
     SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
 )
 from sx_embodiments.layout import ActuatorBus, ActuatorModel
-from sx_embodiments.media import NO_RIG, MediaRig, MicrophoneSpec, StereoPair, media_document
+from sx_embodiments.media import (
+    NO_RIG,
+    MediaRig,
+    MicrophoneSpec,
+    StereoPair,
+    media_document,
+    mount_pose_at,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -66,6 +75,9 @@ MEDIA = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-plans.json"
 REALSENSE_MEDIA = ROOT / "drivers/sx-realsense/tests/fixtures/media-plans.json"
 #: A placeholder device serial for the humanoid's head D435.
 HEAD_D435 = "923322071108"
+POSES = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-poses.json"
+#: Joint positions per moving view the chain evaluation is checked at.
+POSE_SAMPLES = 8
 #: The Quest head's two cameras as one stereo track, with a microphone on the headset.
 QUEST_RIG = MediaRig(
     stereo=(StereoPair("head", "head_left", "head_right"),),
@@ -146,12 +158,51 @@ def realsense_media() -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def poses() -> str:
+    """Each moving view's mount pose at seeded positions, from the description itself."""
+    import random
+
+    generator = random.Random(20261017)
+    document: dict[str, object] = {}
+    for key, body in (
+        ("sentient-humanoid-upper-body", embodiments["sentient-humanoid-upper-body"]),
+    ):
+        plan = media_document(body, resolve(body, nominal_instance(body), ()))
+        samples: list[object] = []
+        for track in plan["tracks"]:  # type: ignore[union-attr]
+            for view in track["views"]:  # type: ignore[index]
+                if not view["moves_with"]:  # type: ignore[index]
+                    continue
+                for _ in range(POSE_SAMPLES):
+                    positions = {
+                        joint: round(generator.uniform(-1.2, 1.2), 6)
+                        for joint in view["moves_with"]  # type: ignore[index]
+                    }
+                    translation, rotation = mount_pose_at(
+                        body.urdf_bytes,
+                        view["mount_frame"],  # type: ignore[index]
+                        positions,
+                    )
+                    samples.append(
+                        {
+                            "track": track["track"],  # type: ignore[index]
+                            "camera": view["camera"],  # type: ignore[index]
+                            "positions": positions,
+                            "translation_m": list(translation),
+                            "rotation_xyzw": list(rotation),
+                        }
+                    )
+        document[key] = samples
+    return json.dumps(document, indent=2) + "\n"
+
+
 def rendered() -> dict[Path, str]:
     files = {path: render(name) for path, name in BINDINGS.items()}
     files[VOCABULARY] = vocabulary()
     files[DRIVES] = drives()
     files[MEDIA] = media()
     files[REALSENSE_MEDIA] = realsense_media()
+    files[POSES] = poses()
     return files
 
 

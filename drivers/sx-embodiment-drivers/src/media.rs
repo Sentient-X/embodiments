@@ -17,8 +17,10 @@ use std::time::{Instant, SystemTime};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::kinematics::Chain;
+
 /// The schema `media_document` renders.
-pub const MEDIA_SCHEMA: &str = "sx.media-plan/v1";
+pub const MEDIA_SCHEMA: &str = "sx.media-plan/v2";
 /// The fastest track a plan may declare; a rate outside 1..=this is not a camera.
 pub const MAX_FPS: f64 = 1_000.0;
 
@@ -99,8 +101,11 @@ pub struct View {
     pub root_frame: String,
     /// The mount link in the root frame, when only fixed joints lie between them.
     pub root_from_mount: Option<Pose>,
-    /// The moving joints between the root and the mount, root first; empty for a fixed mount.
+    /// The independent joints whose positions place the mount, root first; empty for a fixed
+    /// mount.
     pub moves_with: Vec<String>,
+    /// Every joint from the root down to the mount, which [`Chain::pose`] places it by.
+    pub chain: Chain,
 }
 
 /// A rigid pose: translation in metres and a unit quaternion (x, y, z, w).
@@ -133,7 +138,7 @@ struct Document {
 }
 
 impl MediaPlan {
-    /// Parse a rendered `sx.media-plan/v1` document resolved for `expected`, the content id of
+    /// Parse a rendered `sx.media-plan/v2` document resolved for `expected`, the content id of
     /// the robot instance the caller is configured as.
     ///
     /// # Errors
@@ -178,6 +183,8 @@ impl MediaPlan {
                         || (view.fps - track.fps).abs() > f64::EPSILON
                         || view.image_from_camera.len() != 9
                         || view.root_from_mount.is_none() == view.moves_with.is_empty()
+                        || !view.chain.is_well_formed()
+                        || view.chain.joints() != view.moves_with
                         || view.root_from_mount.is_some_and(|pose| {
                             let norm: f64 =
                                 pose.rotation_xyzw.iter().map(|value| value * value).sum();
