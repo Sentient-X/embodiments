@@ -79,6 +79,7 @@ impl Chain {
             step.origin.len() == 16
                 && step.origin.iter().all(|v| v.is_finite())
                 && step.origin[12..] == [0.0, 0.0, 0.0, 1.0]
+                && is_rotation(&step.origin)
                 && (step.kind == JointType::Fixed || (norm - 1.0).abs() < 1e-9)
                 && step
                     .follows
@@ -141,6 +142,21 @@ impl Chain {
         }
         joints
     }
+}
+
+/// Whether the upper 3x3 of a row-major transform is a rotation: orthonormal, determinant one.
+fn is_rotation(m: &[f64]) -> bool {
+    let r = |row: usize, column: usize| m[row * 4 + column];
+    let orthonormal = (0..3).all(|a| {
+        (0..3).all(|b| {
+            let dot: f64 = (0..3).map(|k| r(k, a) * r(k, b)).sum();
+            (dot - if a == b { 1.0 } else { 0.0 }).abs() < 1e-9
+        })
+    });
+    let determinant = r(0, 0) * r(1, 1).mul_add(r(2, 2), -(r(1, 2) * r(2, 1)))
+        - r(0, 1) * r(1, 0).mul_add(r(2, 2), -(r(1, 2) * r(2, 0)))
+        + r(0, 2) * r(1, 0).mul_add(r(2, 1), -(r(1, 1) * r(2, 0)));
+    orthonormal && (determinant - 1.0).abs() < 1e-9
 }
 
 fn value(step: &ChainStep, position: &impl Fn(&str) -> Option<f64>) -> Result<f64, PlacementError> {
@@ -340,6 +356,29 @@ mod tests {
             Err(PlacementError::NonFinite(first))
         );
         assert_eq!(view.chain.joints(), view.moves_with);
+    }
+
+    #[test]
+    fn a_scaled_sheared_or_mirrored_origin_is_not_a_chain() {
+        let step = |origin: Vec<f64>| {
+            Chain(vec![ChainStep {
+                joint: "j".into(),
+                kind: JointType::Fixed,
+                origin,
+                axis: [1.0, 0.0, 0.0],
+                follows: None,
+            }])
+        };
+        assert!(step(IDENTITY.to_vec()).is_well_formed());
+        let mut scaled = IDENTITY.to_vec();
+        scaled[0] = 2.0;
+        assert!(!step(scaled).is_well_formed());
+        let mut sheared = IDENTITY.to_vec();
+        sheared[1] = 0.3;
+        assert!(!step(sheared).is_well_formed());
+        let mut mirrored = IDENTITY.to_vec();
+        mirrored[10] = -1.0;
+        assert!(!step(mirrored).is_well_formed(), "determinant -1");
     }
 
     #[test]
