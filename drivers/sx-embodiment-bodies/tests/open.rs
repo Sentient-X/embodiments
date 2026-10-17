@@ -174,3 +174,31 @@ fn every_mismatch_is_refused_before_a_bus_is_opened() {
         ));
     }
 }
+
+#[test]
+fn an_open_that_fails_part_way_leaves_every_motor_it_reached_disabled() {
+    let drive = drive("sentient-humanoid-upper-body");
+    let axes = humanoid_upper_body(&drive).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    // The first motor was left enabled by a crashed run; the second does not answer.
+    let first = axes[0].axis.binding.bus_id;
+    bus.state().motors.get_mut(&first).expect("first").state = 1;
+    bus.kill(axes[1].axis.binding.bus_id);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), bus.clone())]),
+        opened: Vec::new(),
+    };
+    assert!(matches!(
+        open(
+            &drive,
+            &commissioning(&drive, &[("can", "CAN")]),
+            &mut bridges
+        ),
+        Err(OpenError::Chain(_))
+    ));
+    assert_eq!(
+        bus.state().motors[&first].state,
+        0,
+        "the motor it reached is disabled"
+    );
+}

@@ -10,9 +10,12 @@
 //! arm and gripper can), and returns one [`Body`], an [`ActuatorChain`] the station drives
 //! without naming a vendor, a joint or a limit.
 //!
-//! Every mismatch is refused before a byte reaches a bus: commissioning for another instance,
-//! a drive for a body no opener composes, a port the opener does not declare, a declared port
-//! commissioning does not name, and a bridge that is not attached.
+//! Every mismatch between the drive, the commissioning and the opener is refused before any
+//! bridge is opened: commissioning for another instance, a drive for a body no opener
+//! composes, a port the opener does not declare, a declared port commissioning does not name.
+//! A bridge that is not attached is refused as it is opened. A motor that does not answer as
+//! the body binds it is found only by talking to it; the vendor crate then disables every motor
+//! of that chain before returning the refusal.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
