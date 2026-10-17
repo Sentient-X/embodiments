@@ -162,6 +162,10 @@ def measure_mount(
         ),
     )
     solve = solve_mounts(target, (camera_views,), initial={camera: nominal})
+    if not solve.status.success:
+        raise CalibrationSolveError(
+            f"{camera}: the mount solve did not converge ({solve.status.message})"
+        )
     solved = solve.carrier_from_camera[camera]
     per_view = solve.per_view_rms_px(target)[camera]
     deltas = np.concatenate(

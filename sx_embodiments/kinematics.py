@@ -206,8 +206,22 @@ class Kinematics:
                 mimic=mimic,
             )
         for joint in joints.values():
-            if joint.mimic is not None and joint.mimic.leader not in joints:
-                raise KinematicsError(f"joint {joint.name!r} mimics an absent joint")
+            seen = {joint.name}
+            follower = joint
+            while follower.mimic is not None:
+                if follower.mimic.leader not in joints:
+                    raise KinematicsError(f"joint {follower.name!r} mimics an absent joint")
+                follower = joints[follower.mimic.leader]
+                if follower.name in seen:
+                    raise KinematicsError(f"joint {joint.name!r} mimics itself through a cycle")
+                seen.add(follower.name)
+        for link in links:
+            climbed = {link}
+            while (name := parent_of.get(link)) is not None:
+                link = joints[name].parent
+                if link in climbed:
+                    raise KinematicsError(f"the description's links form a cycle through {link!r}")
+                climbed.add(link)
         return cls(links, joints, parent_of)
 
     @property

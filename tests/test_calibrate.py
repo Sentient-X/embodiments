@@ -107,6 +107,11 @@ PINHOLE = Lens(
     "plumb_bob",
     np.array((0.11, -0.24, 0.0008, -0.0005, 0.09)),
 )
+#: A wide pinhole, so a board spun on the wrist stays in view.
+CHARUCO_LENS = Lens(
+    1280, 720, np.array(((500.0, 0.0, 640.0), (0.0, 500.0, 360.0), (0.0, 0.0, 1.0))), "none",
+    np.zeros(0),
+)  # fmt: skip
 FISHEYE = Lens(
     1280,
     800,
@@ -413,3 +418,18 @@ def test_every_declared_camera_can_be_calibrated(name: str) -> None:
         assert centre == pytest.approx(lens.k[:2, 2])
         carrier = carrier_of(kinematics, camera.frame)
         assert kinematics.is_rigid(carrier, camera.frame), (name, camera.name)
+
+
+def test_views_turning_about_one_axis_only_are_refused() -> None:
+    """A turn about one axis commutes with a shift along it: the mount cannot be seen."""
+    flange_from_camera = _pose((0.05, -0.08, 1.6), (0.03, -0.01, 0.06))
+    base_from_board = _pose((0.0, 0.0, 0.3), (0.32, -0.12, 0.0))
+    start = _flange_poses(5, 1)[0]
+    spun = [
+        _rigid.inverse(start @ _pose((0.0, 0.0, angle), (0.0, 0.0, 0.0)))
+        for angle in (0.0, 0.2, 0.4, 0.6)
+    ]
+    views = _mount_views(CHARUCO_LENS, CHARUCO, flange_from_camera, base_from_board, spun)
+    assert len(views) == 4
+    with pytest.raises(CalibrationSolveError, match="about one axis"):
+        solve_mounts(CHARUCO, (CameraViews("wrist", CHARUCO_LENS, views),))

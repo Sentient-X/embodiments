@@ -36,6 +36,8 @@ SOFT_L1_SCALE_PX = 1.5
 MAX_ORIENTATION_PASSES = 5
 #: Below this spread of carrier-from-holder rotations a mount and the target trade off freely.
 MIN_ROTATION_SPREAD_RAD = math.radians(10.0)
+#: Relative motions must turn about axes at least this far apart for the mount to be seen.
+MIN_AXIS_SPREAD_RAD = math.radians(10.0)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -343,17 +345,32 @@ def hand_eye(camera: CameraViews, target: Target) -> _rigid.Matrix:
 
 
 def require_motion(camera: CameraViews) -> None:
-    """Refuse views whose carrier-from-holder rotations barely differ: the mount is unseen."""
-    poses = [view.carrier_from_holder for view in camera.views]
-    spread = max(
-        (_rigid.rotation_angle(first, second) for first in poses for second in poses),
-        default=0.0,
-    )
-    if spread < MIN_ROTATION_SPREAD_RAD:
+    """Refuse views that leave the mount unobservable.
+
+    A rotation about one axis commutes with any transform along that axis, so a mount can only
+    be seen through relative motions about at least two non-parallel axes (Tsai and Lenz);
+    each counts only when it turns at least :data:`MIN_ROTATION_SPREAD_RAD`.
+    """
+    rotations = [view.carrier_from_holder[:3, :3] for view in camera.views]
+    axes: list[NDArray[np.float64]] = []
+    for index, first in enumerate(rotations):
+        for second in rotations[index + 1 :]:
+            vector = _rigid.vector_from_rotation(first.T @ second)
+            angle = float(np.linalg.norm(vector))
+            if angle >= MIN_ROTATION_SPREAD_RAD:
+                axes.append(vector / angle)
+    if not axes:
         raise CalibrationSolveError(
-            f"{camera.camera}: the views turn the target {math.degrees(spread):.1f} degrees "
-            f"relative to the camera's carrier; a mount needs at least "
-            f"{math.degrees(MIN_ROTATION_SPREAD_RAD):.0f}"
+            f"{camera.camera}: the views never turn the target "
+            f"{math.degrees(MIN_ROTATION_SPREAD_RAD):.0f} degrees relative to the camera's "
+            "carrier; the mount is unobservable"
+        )
+    stacked = np.stack(axes)
+    if float(np.min(np.abs(stacked @ stacked.T))) > math.cos(MIN_AXIS_SPREAD_RAD):
+        raise CalibrationSolveError(
+            f"{camera.camera}: every motion relative to the camera's carrier turns about one "
+            f"axis; a mount needs turns about two axes at least "
+            f"{math.degrees(MIN_AXIS_SPREAD_RAD):.0f} degrees apart"
         )
 
 
