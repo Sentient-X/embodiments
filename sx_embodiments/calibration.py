@@ -32,7 +32,8 @@ from .errors import EmbodimentError
 CALIBRATION_SCHEMA: Final = "sx.calibration/v1"
 
 #: The joint value at an actuator's or encoder's zero when no unit was measured. The drive
-#: map every driver applies is ``actuator = sign * (joint - zero_offset) * reduction``.
+#: map every driver applies is ``actuator = sign * (joint - zero_offset) * reduction``; a
+#: measured unit supplies ``zero_offset`` and multiplies the design ``sign`` by its direction.
 UNCALIBRATED_ZERO: Final = 0.0
 
 UnitSerial = NewType("UnitSerial", str)
