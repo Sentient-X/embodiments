@@ -290,6 +290,37 @@ QUEST_APK_BUILD_1_4_5 = QuestApkBuildId(
 QUEST_APK_BUILD_1_4_6 = QuestApkBuildId(
     "sha256:71ee51b9367b5152e830348c2f859c0e481f5b59c66f522cfaa544594fd9b222"
 )
+# Headset-pod builds: OpenQuestCapture with the wrist rig in the one app (quest-only pod,
+# sx docs/plans/quest-only-pod-2026-10.md), each recorded on the headset's one clock. They are
+# registered so a headset seal resolves them (a headset seal needs a registered build, not the
+# active one); none is the active laptop-pod build. Pose producers are those of 1.4.6, so each
+# takes its convention. Adding a build is one line here, then re-rendering sx-seal's contract
+# (`uv run python packages/sx-seal/tools/render_contract.py`).
+HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
+    {
+        # 2026-10-17, OpenQuestCapture 1.5.0 build 20 with the test libsx_rig e5c36ce5 swapped
+        # in and debug-re-signed (capture contract 1.4.3); recorded the yubi-06 rig's
+        # 20261017_132259 and 20261017_132435.
+        "1.5.0-20-rig-e5c36ce5": QuestApkBuildId(
+            "sha256:975ca9a810bb3c8b1038a605ad8881e563afcdc5e72292a3f8a85cba00ce9430"
+        ),
+        # 2026-10-17, OpenQuestCapture 1.5.0 build 23 (quest-pod/rig 5e6f61b, capture contract
+        # 1.4.3); recorded 20261017_153607, 20261017_153640 and 20261017_153708.
+        "1.5.0-23": QuestApkBuildId(
+            "sha256:7e81d67a7a5491201d84b65d61e3ec1825f7883280b0d92778bac72d52aabcac"
+        ),
+        # 2026-10-17, OpenQuestCapture 1.5.0 build 24 (quest-pod/rig d85e322), installed on
+        # the bench Quest 3S; no episode recorded with it yet.
+        "1.5.0-24": QuestApkBuildId(
+            "sha256:d5b51230bc6d502ce1f0361e0bb27807681b67a9e9e9e083221faa37e1bbac44"
+        ),
+        # 2026-10-17, OpenQuestCapture 1.5.0 build 26 (OQC 5d34fcd, QuestCameraLib 51a4868),
+        # the final headset build.
+        "1.5.0-26": QuestApkBuildId(
+            "sha256:6aab166a88c48ea68f525b3598e762fe18ae2c2519aa0dd11af606a6d9d5787a"
+        ),
+    }
+)
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
     MappingProxyType(
         {
@@ -341,6 +372,13 @@ REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFa
                 controller_hmd_source=QuestRawPoseSource.UNITY_LH,
                 body_source=QuestRawPoseSource.OVR_NATIVE_RH,
             ),
+            **{
+                build: QuestPoseConventionFacts(
+                    controller_hmd_source=QuestRawPoseSource.UNITY_LH,
+                    body_source=QuestRawPoseSource.OVR_NATIVE_RH,
+                )
+                for build in HEADSET_QUEST_APK_BUILDS.values()
+            },
         }
     )
 )
@@ -381,6 +419,7 @@ def require_active_real_quest_build(
 
 __all__ = [
     "ACTIVE_REAL_QUEST_APK_BUILD_ID",
+    "HEADSET_QUEST_APK_BUILDS",
     "QUEST_APK_BUILD_1_2_0",
     "QUEST_APK_BUILD_1_2_0_STEREO",
     "QUEST_APK_BUILD_1_3_0",
