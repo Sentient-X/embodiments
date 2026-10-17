@@ -232,8 +232,19 @@ driver's chain.
 | `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` and `humanoid::open_humanoid_upper_body` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
+Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's
+`MediaPlan` names each track's views and the camera unit placed in each, and a camera crate
+captures exactly that.
+
+| Crate | Devices | Vendor SDK it drives | Consumer |
+|---|---|---|---|
+| `sx-realsense` | Intel RealSense D405, D435, D435i (colour, and the infrared pair as one stereo track) | librealsense2 2.x through [`realsense-rust`](https://gitlab.com/tangram-vision/oss/realsense-rust) 1.3.0 (Apache-2.0), behind the `sdk` feature | the `sx` station's media publisher, over `sdk::open`, once the station opens sources from its media plan |
+
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
+# with librealsense2 installed (Homebrew's pkg-config file names a Linux libdir: add
+# RUSTFLAGS="-L /opt/homebrew/lib" on a Mac)
+cargo test -p sx-realsense --features sdk
 ```
 
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's

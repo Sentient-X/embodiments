@@ -76,6 +76,7 @@ class CameraModality(StrEnum):
     RGB = "rgb"
     DEPTH = "depth"
     RGBD = "rgbd"
+    INFRARED = "infrared"  # one 8-bit intensity channel, as a stereo depth camera's imagers see
 
 
 class CameraOpticsAuthority(StrEnum):

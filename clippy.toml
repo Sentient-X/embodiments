@@ -1,0 +1,2 @@
+# Product and dataset names that are words, not code.
+doc-valid-idents = ["RealSense", "LuViRA", ".."]

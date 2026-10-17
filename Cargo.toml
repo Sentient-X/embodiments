@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["drivers/sx-embodiment-drivers", "drivers/sx-damiao-can", "drivers/sx-feetech-serial"]
+members = [
+    "drivers/sx-embodiment-drivers",
+    "drivers/sx-damiao-can",
+    "drivers/sx-feetech-serial",
+    "drivers/sx-realsense",
+]
 
 [workspace.package]
 version = "0.1.0"
