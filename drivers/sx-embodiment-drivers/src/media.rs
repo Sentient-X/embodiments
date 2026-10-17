@@ -19,6 +19,8 @@ use thiserror::Error;
 
 /// The schema `media_document` renders.
 pub const MEDIA_SCHEMA: &str = "sx.media-plan/v1";
+/// The fastest track a plan may declare; a rate outside 1..=this is not a camera.
+pub const MAX_FPS: f64 = 1_000.0;
 
 /// Whether `name` is a track or microphone name (`sx_embodiments.media.TRACK_NAME`): it names
 /// a published track and the journal file beside it, so it is never a path.
@@ -168,8 +170,7 @@ impl MediaPlan {
                 )));
             };
             if track.views.len() > 2
-                || !track.fps.is_finite()
-                || track.fps <= 0.0
+                || !(1.0..=MAX_FPS).contains(&track.fps)
                 || track.views.iter().any(|view| {
                     view.height != first.height
                         || view.width == 0
@@ -375,6 +376,12 @@ mod tests {
         ));
         let mut value: serde_json::Value = serde_json::from_str(&document).expect("plan");
         value["tracks"][0]["views"][1]["height"] = serde_json::json!(480);
+        assert!(matches!(
+            MediaPlan::parse(&value.to_string(), &instance(&document)),
+            Err(MediaPlanError::Document(_))
+        ));
+        let mut value: serde_json::Value = serde_json::from_str(&document).expect("plan");
+        value["tracks"][0]["fps"] = serde_json::json!(1e-20);
         assert!(matches!(
             MediaPlan::parse(&value.to_string(), &instance(&document)),
             Err(MediaPlanError::Document(_))
