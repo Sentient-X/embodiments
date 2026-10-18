@@ -29,12 +29,15 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Final, NewType
+from typing import TYPE_CHECKING, Final, NewType
 
 from .assembly import Assembly, Frame, Member, MountJoint, Pose, Subtree, namespaced
 from .assets import PackagedAsset
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError, InterfaceMismatchError, SocketError
+
+if TYPE_CHECKING:
+    from .mobile_base import MobileBase
 
 InterfaceId = NewType("InterfaceId", str)
 """A mechanical interface's id in the open interface registry (:data:`MECHANICAL_INTERFACES`)."""
@@ -45,12 +48,40 @@ _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True, slots=True)
+class BoltPattern:
+    """How an interface is fastened, in millimetres about its axis: ``count`` holes of ``thread``
+    (nominal diameter ``thread_diameter_mm``) evenly on a pitch circle, one hole on the axis
+    when the circle is zero, and the centring pilot's diameter when the standard sets one."""
+
+    count: int
+    thread: str
+    thread_diameter_mm: float
+    pitch_circle_diameter_mm: float
+    pilot_diameter_mm: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.count < 1
+            or not self.thread.strip()
+            or not 0 < self.thread_diameter_mm < 100
+            or (self.count == 1) != (self.pitch_circle_diameter_mm == 0)
+            or (self.pilot_diameter_mm is not None and self.pilot_diameter_mm <= 0)
+        ):
+            raise CompositionError(self.thread, "a bolt pattern is a thread on one pitch circle")
+
+
+@dataclass(frozen=True, slots=True)
 class MechanicalInterface:
-    """One joining pattern and what defines it (a standard, or the vendor drawing it comes from)."""
+    """One joining pattern and what defines it (a standard, or the vendor drawing it comes from).
+
+    ``pattern`` is its bolt pattern when the standard or drawing that defines it is captured;
+    an authored part's plug is checked against it, and ``None`` says it is not captured yet.
+    """
 
     interface: InterfaceId
     label: str
     standard: str
+    pattern: BoltPattern | None = None
 
 
 MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
@@ -60,11 +91,13 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             InterfaceId("iso-9409-1-50-4-m6"),
             "ISO 9409-1 tool flange, 50 mm pitch circle, four M6",
             "ISO 9409-1:2004, form A, d1 = 50 mm",
+            BoltPattern(4, "M6", 6.0, 50.0, pilot_diameter_mm=31.5),
         ),
         MechanicalInterface(
             InterfaceId("unc-1-4-20"),
             "1/4-20 UNC camera thread",
             "ISO 1222:2010 tripod connection, 1/4-20 UNC",
+            BoltPattern(1, "1/4-20 UNC", 6.35, 0.0),
         ),
         MechanicalInterface(
             InterfaceId("agilex-piper-flange"),
@@ -90,6 +123,24 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             InterfaceId("robotis-rh-p12-rn"),
             "ROBOTIS RH-P12-RN gripper mount",
             "ROBOTIS-GIT/ai_worker ffw_bg2_rev4_follower, gripper_l_joint and gripper_r_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("seeed-b601-base"),
+            "Seeed reBot B601-DM base plate",
+            "Seeed-Projects/reBotArmController_ROS2 reBot_B601_DM_with_gripper, base_link",
+        ),
+        MechanicalInterface(
+            InterfaceId("so101-wrist"),
+            "SO-101 wrist camera seat, two M3 through the wrist-roll element into its hex-nut "
+            "recesses",
+            "TheRobotStudio/SO-ARM100 a758567c, Optional/SO101_Wrist_Cam_Hex-Nut_Mount_32x32_UVC_"
+            "Module; holes measured on STEP/SO101/Follower_Specific/Wrist_Roll_Follower_SO101.step",
+            BoltPattern(2, "M3", 3.0, 8.1),
+        ),
+        MechanicalInterface(
+            InterfaceId("robosuite-omron-support"),
+            "Omron LD base support column top, where a robot sits",
+            "ARISE-Initiative/robosuite omron_mobile_base.xml, the support body",
         ),
         MechanicalInterface(
             InterfaceId("so101-base"),
@@ -183,6 +234,8 @@ class Module:
     whose geometry is not captured yet: it is a body on its own, never placed or mated.
     ``frames`` are named sites the module adds on its own links (a camera's optical frame); they
     render in a rooted build, after every member, named like the module's links.
+    ``base`` is the mobile base a drivable module is made from (:attr:`MobileBase.module`),
+    whose ratings and support the composition checks read.
     """
 
     module_id: ModuleId
@@ -192,6 +245,7 @@ class Module:
     sockets: tuple[Socket, ...] = ()
     components: tuple[Component | Slot, ...] = ()
     frames: tuple[Frame, ...] = ()
+    base: MobileBase | None = None
 
     def __post_init__(self) -> None:
         if not self.module_id.strip() or not self.label.strip():

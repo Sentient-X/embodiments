@@ -59,6 +59,17 @@ pairing, a taken socket or an unknown one is a typed refusal (`InterfaceMismatch
 `SocketError`). Interfaces are an open registry, `MECHANICAL_INTERFACES`, like the camera models.
 A passive element is a module with no components (`rigid_module`, a solid with its mass and
 inertia), and `known/realsense.py` makes Intel's D405 and D435 descriptions camera modules.
+A module authored outside the registry (a plate drawn from photos and measurements) is admitted
+by `admit_module`: its plug and sockets name registered interfaces, each socket sits on a link of
+its description, and one carrying no part moves nothing and has a positive mass on every link
+that declares one (`tests/test_authored_module.py`). `module_to_dict` is its document, the one an
+authoring keeps beside the module's files. An interface records its `BoltPattern` (holes, thread,
+pitch circle, centring pilot) when the standard or drawing defining it is captured; ISO 9409-1-50
+and the 1/4-20 camera thread are, and the SO-101's wrist camera seat (`so101-wrist`, two M3 8.1 mm
+apart, measured on TheRobotStudio's wrist-roll STEP), offered as the arm's `wrist` socket. An authored
+mobile base is admitted from its specs by `admit_base`: its description is their rendering, and its
+wheels keep the undocumented drive that marks them not qualified for hardware; a chain is never an
+authored module.
 
 A vendor that ships an arm with its gripper in one file has its flange **fitted**: the socket
 carries the gripper module, cut from that file by `Subtree` below the joint it hangs from. A
@@ -71,6 +82,20 @@ a B601 gripper on a Piper through an adapter, a D435 on a wrist through a bracke
 the humanoid's head's place. `composition.compose_build` makes any build a normal `Embodiment`
 at runtime. A registered rooted build's committed description is its rendering by
 `tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
+
+A drivable base is designed from its specs (`mobile_base.MobileBase`: footprint, deck height,
+mass, payload rating, typed deck sockets, and a `Drive` that is differential or mecanum with its
+wheel radius, track, wheelbase and limits). `MobileBase.module` is an ordinary module whose
+description has a continuous joint per driven wheel and an inertia on every link, so arms mate
+onto its deck plug to socket: `tests/test_mobile_base.py` composes four B601 arms on one, the
+arm's plug being its base plate (`seeed-b601-base`). `Drive.wheel_velocities` and `Drive.twist`
+are what a base driver consumes, twist in and wheel speeds out, inverse of each other. No base
+motor is qualified, so the wheel axes declare `UndocumentedDrive` and no driver binds them.
+`checks.check_build` then checks a build physically: collision between members at rest (a
+refusal) and over sampled joint configurations (a warning), shared workspace between arms and
+reach of a work surface (warnings), payload against a base's rating (a refusal), and the centre
+of mass over the support polygon at rest (a refusal) and with the arms reaching together (a
+warning). `tests/test_checks.py` holds it to an interactive budget.
 
 `Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves, and a
 part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
