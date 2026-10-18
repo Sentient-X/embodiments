@@ -11,6 +11,7 @@ import pytest
 import sx_embodiments
 from sx_embodiments import admit_module, part_to_dict
 from sx_embodiments.assemble import admit_base, module_from_dict, module_to_dict
+from sx_embodiments.checks import CollisionGeometryError
 from sx_embodiments.compose import Component
 from sx_embodiments.composition import compose_build
 from sx_embodiments.errors import (
@@ -204,3 +205,22 @@ def _stl_vertices(path: Path) -> list[tuple[float, float, float]]:
             x, y, z = struct.unpack_from("<3f", data, offset + corner * 12)
             points.append((x, y, z))
     return points
+
+
+@pytest.mark.parametrize(
+    "shape",
+    (
+        '<box size="0.1 0.1"/>',
+        '<box size="0.1 -0.1 0.1"/>',
+        '<cylinder radius="nan" length="0.1"/>',
+        '<sphere radius="wide"/>',
+        "<mesh/>",
+    ),
+)
+def test_a_collision_shape_the_checks_cannot_read_is_refused(shape: str) -> None:
+    broken = PLATE.replace(
+        b"</visual>",
+        b"</visual><collision><geometry>" + shape.encode() + b"</geometry></collision>",
+    )
+    with pytest.raises(CollisionGeometryError, match="collision"):
+        _plate(urdf=broken)

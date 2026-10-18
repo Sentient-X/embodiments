@@ -49,6 +49,7 @@ from typing import Final
 from .assembly import Assembly
 from .assets import PACKAGE_URI_PREFIX, asset_manifest, cached_blob, local_asset_root
 from .compose import Component
+from .errors import CompositionError
 from .mechanical import Build, Module, Socket
 from .mobile_base import CHASSIS, MobileBase
 from .parts import ChainSpec, Limb
@@ -61,6 +62,45 @@ VOXEL_M: Final = 0.1
 DIRECTIONS: Final = 16
 #: What one check of a four-arm base may take, CPU seconds, with its meshes' bounds cached.
 BUDGET_S: Final = 0.5
+#: The most members (placements and mates) a build may have and still be checked. The
+#: collision pairs grow with the square of the members, so past this a check would hold a
+#: door's thread for seconds; a larger composition is refused rather than left unchecked.
+MEMBER_CAP: Final = 16
+#: Members at which the full :data:`SAMPLES` still fit the budget; above it the samples fall
+#: with the square of the members, so the pairs times the samples stay level.
+FULL_SAMPLE_MEMBERS: Final = 8
+MIN_SAMPLES: Final = 48
+#: The most findings a check returns, refusals first.
+MAX_FINDINGS: Final = 64
+
+
+class ChecksTooLargeError(CompositionError):
+    """A build with more members than :data:`MEMBER_CAP`: refused, never left unchecked."""
+
+
+class CollisionGeometryError(CompositionError):
+    """A collision shape whose size the checks cannot read: a box without three positive
+    sizes, a cylinder or sphere without a positive radius, a mesh without a file."""
+
+
+def require_checkable(build: Build) -> None:
+    """Refuse a build too large to check within the budget, before anything renders it."""
+    members = len(build.placed) + len(build.mates)
+    if members > MEMBER_CAP:
+        raise ChecksTooLargeError(
+            str(build.robot),
+            f"physical checks cover at most {MEMBER_CAP} members (placements and mates); "
+            f"this composition has {members}: split it, or compose its repeated part once",
+        )
+
+
+def validate_collision_geometry(subject: str, robot: ET.Element) -> None:
+    """Every collision shape of a description is one the checks can read, or the typed
+    refusal says which is not."""
+    for link in robot.iter("link"):
+        for collision in link.findall("collision"):
+            _boxes(collision, subject=f"{subject}: link {link.get('name')!r}", resolve=False)
+
 
 Affine = tuple[float, ...]
 """A rigid transform as twelve floats, a 3x3 rotation's rows each followed by a translation."""
@@ -191,7 +231,14 @@ def check_build(
     seed: int = 0,
 ) -> tuple[Finding, ...]:
     """Every physical check of ``build``, whose rendered description is ``urdf`` (the
-    composed body's, meshes named by package URI), refusals first."""
+    composed body's, meshes named by package URI), refusals first, at most
+    :data:`MAX_FINDINGS` of them. A build over :data:`MEMBER_CAP` members is refused
+    (:class:`ChecksTooLargeError`) and a collision shape that cannot be read is too
+    (:class:`CollisionGeometryError`)."""
+    require_checkable(build)
+    members = len(build.placed) + len(build.mates)
+    if members > FULL_SAMPLE_MEMBERS:
+        samples = max(MIN_SAMPLES, samples * FULL_SAMPLE_MEMBERS**2 // members**2)
     body = _Body.of(build, urdf)
     rest = body.forward(body.rest)
     configurations = [body.rest, *body.sample(samples, seed)]
@@ -202,7 +249,7 @@ def check_build(
         *_bases(body, poses),
     ]
     order = {Severity.REFUSAL: 0, Severity.WARNING: 1}
-    return tuple(sorted(findings, key=lambda finding: order[finding.severity]))
+    return tuple(sorted(findings, key=lambda finding: order[finding.severity]))[:MAX_FINDINGS]
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,7 +311,9 @@ class _Body:
         for link in robot.findall("link"):
             name = link.attrib["name"]
             boxes[name] = tuple(
-                box for element in link.findall("collision") for box in _boxes(element)
+                box
+                for element in link.findall("collision")
+                for box in _boxes(element, subject=f"{build.robot}: link {name!r}")
             )
             inertial = link.find("inertial")
             mass = inertial.find("mass") if inertial is not None else None
@@ -540,29 +589,62 @@ def _point(transform: Affine, xyz: tuple[float, float, float]) -> tuple[float, f
     )
 
 
-def _boxes(collision: ET.Element) -> list[_Box]:
-    """The oriented boxes bounding one collision element, in its link's frame."""
+def _positive(subject: str, shape: ET.Element, key: str, count: int) -> tuple[float, ...]:
+    """``count`` finite positive numbers from one attribute, or the typed refusal."""
+    text = shape.get(key)
+    try:
+        values = tuple(float(value) for value in (text or "").split())
+    except ValueError:
+        values = ()
+    if len(values) != count or not all(math.isfinite(value) and value > 0 for value in values):
+        raise CollisionGeometryError(
+            subject, f"a collision {shape.tag} needs {count} positive {key} value(s), not {text!r}"
+        )
+    return values
+
+
+def _boxes(
+    collision: ET.Element, *, subject: str = "collision", resolve: bool = True
+) -> list[_Box]:
+    """The oriented boxes bounding one collision element, in its link's frame; a shape whose
+    size cannot be read is a :class:`CollisionGeometryError`. Without ``resolve`` a mesh is
+    only checked for its file, not read."""
     origin = collision.find("origin")
-    frame = _affine(_triple(origin, "xyz"), _triple(origin, "rpy"))
+    try:
+        frame = _affine(_triple(origin, "xyz"), _triple(origin, "rpy"))
+    except ValueError as error:
+        raise CollisionGeometryError(
+            subject, f"a collision origin is unreadable: {error}"
+        ) from None
     geometry = collision.find("geometry")
     if geometry is None or len(geometry) == 0:
         return []
     shape = geometry[0]
     match shape.tag:
         case "box":
-            x, y, z = _triple(shape, "size")
+            x, y, z = _positive(subject, shape, "size", 3)
             return [_Box(frame, (x / 2, y / 2, z / 2))]
         case "cylinder":
-            radius, length = float(shape.attrib["radius"]), float(shape.attrib["length"])
+            (radius,) = _positive(subject, shape, "radius", 1)
+            (length,) = _positive(subject, shape, "length", 1)
             return [_Box(frame, (radius, radius, length / 2))]
         case "sphere":
-            radius = float(shape.attrib["radius"])
+            (radius,) = _positive(subject, shape, "radius", 1)
             return [_Box(frame, (radius, radius, radius))]
         case "mesh":
-            path = _mesh(shape.attrib["filename"])
+            filename = shape.get("filename")
+            if not filename:
+                raise CollisionGeometryError(subject, "a collision mesh names no file")
+            scale = (
+                _positive(subject, shape, "scale", 3)
+                if shape.get("scale") is not None
+                else (1.0,) * 3
+            )
+            if not resolve:
+                return []
+            path = _mesh(filename)
             if path is None:
                 return []
-            scale = _triple(shape, "scale", "1 1 1")
             low, high = _stl_bounds(path)
             centre = tuple((lo + hi) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
             half = tuple(abs(hi - lo) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
