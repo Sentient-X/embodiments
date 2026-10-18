@@ -8,6 +8,7 @@ supervisors ``ChannelLayout(arms=2, block=6, gripper_index=5)`` falls out of
 """
 
 import dataclasses
+import math
 from typing import Final
 
 from ..assembly import INSPECTION_NOTE, Pose
@@ -15,7 +16,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
-from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed, Socket
 from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
 
@@ -92,8 +93,16 @@ SO101_JAW: Final = GripperSpec(
 )
 
 
+#: The wrist camera seat on the wrist-roll element, in ``gripper_link``'s frame: centred
+#: between its two M3 holes (8.1 mm apart along x) on the outer face, z out of the face. The
+#: holes are TheRobotStudio's Wrist_Roll_Follower_SO101.step at (-5.0, -24.22, 24.35) and
+#: (3.1, -24.22, 24.35) mm with axes along -y; that file is the description's
+#: wrist_roll_follower_so101_v1 mesh, placed by its visual origin (0, -0.000218, 0.00095),
+#: rotated pi about x.
+SO101_WRIST: Final = Pose((-0.00095, 0.024002, -0.0234), (-math.pi / 2, 0.0, 0.0))
+
 #: The arm with its jaw: the static jaw is the wrist-roll link itself, so the jaw is the arm's
-#: own, not a module of its own.
+#: own, not a module of its own. Its wrist offers the camera seat, riding on the arm.
 SO101_MODULE: Final = Module(
     module_id=ModuleId("so101"),
     label="SO-101 arm with its jaw",
@@ -102,6 +111,9 @@ SO101_MODULE: Final = Module(
     components=(
         body_component("arm", SO101_ARM, RootMount("base_link"), limb=Limb.ARM),
         body_component("jaw", SO101_JAW, MountedOn("arm", "gripper_link")),
+    ),
+    sockets=(
+        Socket("wrist", InterfaceId("so101-wrist"), "gripper_link", SO101_WRIST, carrier="arm"),
     ),
 )
 

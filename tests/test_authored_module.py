@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import struct
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from sx_embodiments import admit_module
-from sx_embodiments.assemble import module_from_dict, module_to_dict
+import sx_embodiments
+from sx_embodiments import admit_module, part_to_dict
+from sx_embodiments.assemble import admit_base, module_from_dict, module_to_dict
+from sx_embodiments.compose import Component
 from sx_embodiments.composition import compose_build
 from sx_embodiments.errors import (
     AssemblyError,
@@ -15,15 +19,20 @@ from sx_embodiments.errors import (
     InterfaceMismatchError,
     SocketError,
 )
+from sx_embodiments.known.so101 import SO101_MODULE
 from sx_embodiments.known.universal_robots import UR5E_MODULE
+from sx_embodiments.layout import UndocumentedDrive
 from sx_embodiments.mechanical import (
     MECHANICAL_INTERFACES,
+    Box,
     Build,
     InterfaceId,
     Mate,
     Placed,
     Socket,
+    rigid_module,
 )
+from sx_embodiments.parts import MobileBaseSpec
 
 ISO = InterfaceId("iso-9409-1-50-4-m6")
 CAMERA = InterfaceId("unc-1-4-20")
@@ -123,3 +132,75 @@ def test_the_iso_flange_pattern_is_the_one_its_id_names() -> None:
         assert record.pattern.count == int(count)
         assert record.pattern.thread.lower() == thread
         assert record.pattern.thread_diameter_mm == float(thread.removeprefix("m"))
+
+
+def test_an_authored_base_is_admitted_from_its_specs_and_never_qualified() -> None:
+    from test_mobile_base import four_arm_base
+
+    base = four_arm_base()
+    module = admit_base(base, urdf=cast(bytes, base.module.description))
+
+    assert module == base.module
+    (drive,) = [entry for entry in module.components if isinstance(entry, Component)]
+    assert all(
+        isinstance(axis.actuation, UndocumentedDrive)
+        for axis in cast(MobileBaseSpec, drive.part).layout.axes
+    )
+    document = module_to_dict(module)
+    assert document["base"] is not None and document["part"] is None
+    assert module_from_dict(document, urdf=cast(bytes, module.description)) == module
+    with pytest.raises(EmbodimentSchemaError, match="rendering of its specs"):
+        admit_base(base, urdf=PLATE)
+
+
+def test_a_chain_or_a_base_part_is_not_an_authored_module() -> None:
+    from sx_embodiments.known.so101 import SO101_ARM
+    from test_mobile_base import four_arm_base
+
+    for part in (SO101_ARM, four_arm_base().spec):
+        with pytest.raises(AssemblyError):
+            _plate(part=part_to_dict(part))
+
+
+def test_the_so101_wrist_seat_sits_between_its_holes_on_the_wrist_roll_face() -> None:
+    """The socket frame is on the outer face of the mesh the description draws, and a holder
+    plugged by so101-wrist mates there riding on the arm."""
+    socket = SO101_MODULE.socket("wrist")
+    assert (socket.interface, socket.link, socket.carrier) == ("so101-wrist", "gripper_link", "arm")
+    vertices = _stl_vertices(
+        Path(sx_embodiments.__file__).parent.parent
+        / "assets/so101/meshes/wrist_roll_follower_so101_v1.stl"
+    )
+    # The description places the mesh at (0, -0.000218, 0.00095), rotated pi about x.
+    placed = [(x, -y - 0.000218214, -z + 0.000949706) for x, y, z in vertices]
+    x0, y0, z0 = socket.pose.xyz
+    face = [y for x, y, z in placed if abs(x - x0) < 0.004 and abs(z - z0) < 0.004]
+    assert face and abs(max(face) - y0) < 0.0002
+    holder = rigid_module(
+        "wrist-holder",
+        "Wrist holder",
+        shape=Box((0.03, 0.02, 0.004)),
+        mass_kg=0.01,
+        plug=InterfaceId("so101-wrist"),
+    )
+    build = Build(
+        placed=(Placed("arm", SO101_MODULE),),
+        mates=(Mate("holder", holder, "arm", "wrist"),),
+        robot="so101-holder",
+        root="world",
+    )
+    assert b'<parent link="arm_gripper_link"' in build.assembly().urdf()
+    pattern = MECHANICAL_INTERFACES[InterfaceId("so101-wrist")].pattern
+    assert pattern is not None and (pattern.count, pattern.pitch_circle_diameter_mm) == (2, 8.1)
+
+
+def _stl_vertices(path: Path) -> list[tuple[float, float, float]]:
+    data = path.read_bytes()
+    (count,) = struct.unpack_from("<I", data, 80)
+    points: list[tuple[float, float, float]] = []
+    for index in range(count):
+        offset = 84 + index * 50 + 12
+        for corner in range(3):
+            x, y, z = struct.unpack_from("<3f", data, offset + corner * 12)
+            points.append((x, y, z))
+    return points

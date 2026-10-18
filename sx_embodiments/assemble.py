@@ -36,6 +36,7 @@ from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
 from .layout import Bounds, UndocumentedDrive
 from .mechanical import MECHANICAL_INTERFACES, InterfaceId, Module, ModuleId, Socket, carrier
+from .mobile_base import DeckSocket, Drive, DriveKind, MobileBase
 from .parts import CameraSpec, ChainSpec, ForceTorqueSpec, GripperSpec, Limb, MobileBaseSpec
 
 ComposablePart = ChainSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
@@ -247,6 +248,15 @@ def admit_module(
             )
         _require_mesh_closure(module_id, root, mesh_paths)
     else:
+        if isinstance(part_from_dict(part), ChainSpec):
+            raise AssemblyError(
+                module_id,
+                "a chain is composed through embodiment.assemble, not mated as one module",
+            )
+        if isinstance(part_from_dict(part), MobileBaseSpec):
+            raise AssemblyError(
+                module_id, "a mobile base is admitted from its specs (admit_base), not a part"
+            )
         admitted = admit_part(part, urdf=urdf, mesh_paths=mesh_paths)
         frame = _root_link(module_id, root)
         match admitted:
@@ -254,12 +264,8 @@ def admit_module(
                 components = (body_component("gripper", admitted, RootMount(frame)),)
             case CameraSpec() | ForceTorqueSpec():
                 components = (sensor_component("sensor", admitted, RootMount(frame)),)
-            case _:
-                raise AssemblyError(
-                    module_id,
-                    "a chain or mobile base is composed through embodiment.assemble,"
-                    " not mated as one module",
-                )
+            case _:  # a chain or base was refused above
+                raise AssemblyError(module_id, "an authored module carries a gripper or sensor")
     parents = {
         child.get("link", ""): (parent.get("link", ""), joint.get("name", ""))
         for joint in root.iter("joint")
@@ -279,6 +285,28 @@ def admit_module(
     )
 
 
+def admit_base(base: MobileBase, *, urdf: bytes) -> Module:
+    """Admit an authored mobile base: its module is the one its specs make.
+
+    The description is derived, never authored, so the bytes offered must be exactly the
+    rendering of the specs; every deck socket names a registered interface; the wheels keep
+    their undocumented drive, so the base drives in simulation and is not qualified for
+    hardware until a base motor is.
+    """
+    module = base.module
+    subject = str(base.module_id)
+    for socket in module.sockets:
+        if socket.interface not in MECHANICAL_INTERFACES:
+            raise AssemblyError(
+                subject, f"{socket.interface!r} is not a registered mechanical interface"
+            )
+    if module.description != urdf:
+        raise EmbodimentSchemaError(
+            f"{subject}: a base's description is the rendering of its specs; these bytes differ"
+        )
+    return module
+
+
 MODULE_SCHEMA = "sx.authored-module/v1"
 
 
@@ -288,6 +316,16 @@ def module_to_dict(module: Module) -> dict[str, object]:
     Its description and files travel beside it as their own bytes; ``module_from_dict``
     admits the document against exactly those, so one document names one lawful module.
     """
+    if module.base is not None:
+        return {
+            "schema": MODULE_SCHEMA,
+            "module_id": str(module.module_id),
+            "label": module.label,
+            "plug": None,
+            "sockets": [],
+            "part": None,
+            "base": _base_to_dict(module.base),
+        }
     components = [entry for entry in module.components if isinstance(entry, Component)]
     part = components[0].part if components else None
     if len(components) > 1 or (part is not None and not isinstance(part, ComposablePart)):
@@ -308,7 +346,96 @@ def module_to_dict(module: Module) -> dict[str, object]:
             for socket in module.sockets
         ],
         "part": None if part is None else part_to_dict(part),
+        "base": None,
     }
+
+
+def _base_to_dict(base: MobileBase) -> dict[str, object]:
+    drive = base.drive
+    return {
+        "drive": {
+            "kind": drive.kind.value,
+            "wheel_radius_m": drive.wheel_radius_m,
+            "wheel_width_m": drive.wheel_width_m,
+            "track_m": drive.track_m,
+            "wheelbase_m": drive.wheelbase_m,
+            "max_speed_m_s": drive.max_speed_m_s,
+            "max_acceleration_m_s2": drive.max_acceleration_m_s2,
+        },
+        "length_m": base.length_m,
+        "width_m": base.width_m,
+        "deck_height_m": base.deck_height_m,
+        "mass_kg": base.mass_kg,
+        "payload_kg": base.payload_kg,
+        "deck": [
+            {
+                "name": socket.name,
+                "interface": str(socket.interface),
+                "xy": list(socket.xy),
+                "yaw": socket.yaw,
+            }
+            for socket in base.deck
+        ],
+    }
+
+
+def _base_from_dict(module_id: str, label: str, document: Mapping[str, object]) -> MobileBase:
+    entry = decode.exactly(
+        document,
+        {"drive", "length_m", "width_m", "deck_height_m", "mass_kg", "payload_kg", "deck"},
+        where="base",
+        error=EmbodimentSchemaError,
+    )
+    drive = decode.exactly(
+        decode.mapping(entry, "drive"),
+        {
+            "kind",
+            "wheel_radius_m",
+            "wheel_width_m",
+            "track_m",
+            "wheelbase_m",
+            "max_speed_m_s",
+            "max_acceleration_m_s2",
+        },
+        error=EmbodimentSchemaError,
+    )
+    try:
+        kind = DriveKind(decode.text(drive, "kind"))
+    except ValueError as error:
+        raise EmbodimentSchemaError(f"{module_id}: the drive kind is unknown") from error
+    deck: list[DeckSocket] = []
+    for raw in decode.documents(entry, "deck"):
+        seat = decode.exactly(raw, {"name", "interface", "xy", "yaw"}, error=EmbodimentSchemaError)
+        xy = decode.numbers(seat, "xy")
+        if len(xy) != 2:
+            raise EmbodimentSchemaError(f"{module_id}: a deck socket sits at two coordinates")
+        deck.append(
+            DeckSocket(
+                decode.text(seat, "name"),
+                InterfaceId(decode.text(seat, "interface")),
+                (xy[0], xy[1]),
+                decode.number(seat, "yaw"),
+            )
+        )
+    return MobileBase(
+        module_id=ModuleId(module_id),
+        label=label,
+        drive=Drive(
+            kind=kind,
+            wheel_radius_m=decode.number(drive, "wheel_radius_m"),
+            wheel_width_m=decode.number(drive, "wheel_width_m"),
+            track_m=decode.number(drive, "track_m"),
+            wheelbase_m=decode.number(drive, "wheelbase_m"),
+            max_speed_m_s=decode.number(drive, "max_speed_m_s"),
+            max_acceleration_m_s2=decode.number(drive, "max_acceleration_m_s2"),
+        ),
+        length_m=decode.number(entry, "length_m"),
+        width_m=decode.number(entry, "width_m"),
+        deck_height_m=decode.number(entry, "deck_height_m"),
+        mass_kg=decode.number(entry, "mass_kg"),
+        payload_kg=decode.number(entry, "payload_kg"),
+        deck=tuple(deck),
+    )
 
 
 def module_from_dict(
@@ -317,13 +444,20 @@ def module_from_dict(
     """Parse and admit an authored module's document against its exact description."""
     entry = decode.exactly(
         document,
-        {"schema", "module_id", "label", "plug", "sockets", "part"},
+        {"schema", "module_id", "label", "plug", "sockets", "part", "base"},
         where="module",
         error=EmbodimentSchemaError,
     )
     if decode.text(entry, "schema") != MODULE_SCHEMA:
         raise EmbodimentSchemaError(f"module: schema must be {MODULE_SCHEMA!r}")
     module_id = decode.text(entry, "module_id")
+    if entry.get("base") is not None:
+        if entry.get("plug") is not None or entry.get("part") is not None:
+            raise EmbodimentSchemaError(f"{module_id}: a base stands on the floor and has no part")
+        base = _base_from_dict(
+            module_id, decode.text(entry, "label"), decode.mapping(entry, "base")
+        )
+        return admit_base(base, urdf=urdf)
     plug = decode.optional_text(entry, "plug")
     sockets: list[Socket] = []
     for raw in decode.documents(entry, "sockets"):

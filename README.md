@@ -65,7 +65,11 @@ its description, and one carrying no part moves nothing and has a positive mass 
 that declares one (`tests/test_authored_module.py`). `module_to_dict` is its document, the one an
 authoring keeps beside the module's files. An interface records its `BoltPattern` (holes, thread,
 pitch circle, centring pilot) when the standard or drawing defining it is captured; ISO 9409-1-50
-and the 1/4-20 camera thread are.
+and the 1/4-20 camera thread are, and the SO-101's wrist camera seat (`so101-wrist`, two M3 8.1 mm
+apart, measured on TheRobotStudio's wrist-roll STEP), offered as the arm's `wrist` socket. An authored
+mobile base is admitted from its specs by `admit_base`: its description is their rendering, and its
+wheels keep the undocumented drive that marks them not qualified for hardware; a chain is never an
+authored module.
 
 A vendor that ships an arm with its gripper in one file has its flange **fitted**: the socket
 carries the gripper module, cut from that file by `Subtree` below the joint it hangs from. A

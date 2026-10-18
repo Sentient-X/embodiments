@@ -130,6 +130,14 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             "Seeed-Projects/reBotArmController_ROS2 reBot_B601_DM_with_gripper, base_link",
         ),
         MechanicalInterface(
+            InterfaceId("so101-wrist"),
+            "SO-101 wrist camera seat, two M3 through the wrist-roll element into its hex-nut "
+            "recesses",
+            "TheRobotStudio/SO-ARM100 a758567c, Optional/SO101_Wrist_Cam_Hex-Nut_Mount_32x32_UVC_"
+            "Module; holes measured on STEP/SO101/Follower_Specific/Wrist_Roll_Follower_SO101.step",
+            BoltPattern(2, "M3", 3.0, 8.1),
+        ),
+        MechanicalInterface(
             InterfaceId("so101-base"),
             "SO-101 base plate",
             "TheRobotStudio/SO-ARM100 SO-101 base, the plate the arm is clamped or screwed by",
