@@ -25,11 +25,13 @@ from sx_embodiments.checks import (
     Stability,
     WorkspaceOverlap,
     WorkSurface,
+    _often,
     check_build,
     refusals,
     require_checkable,
 )
 from sx_embodiments.composition import compose_build
+from sx_embodiments.known import definitions, embodiments
 from sx_embodiments.known.b601 import B601_DM_MODULE
 from sx_embodiments.mechanical import Box, Build, Mate, Placed, rigid_module
 from sx_embodiments.mobile_base import DeckSocket, DriveKind, MobileBase
@@ -197,9 +199,24 @@ def test_an_unreadable_collision_shape_is_a_typed_refusal() -> None:
     broken = rigid_module("block", "Block", shape=Box((0.1, 0.1, 0.1)), mass_kg=1.0, plug=None)
     description = broken.description
     assert isinstance(description, bytes)
-    bad = replace(
-        broken, description=description.replace(b'size="0.1 0.1 0.1"', b'size="0.1 0.1"')
-    )
+    bad = replace(broken, description=description.replace(b'size="0.1 0.1 0.1"', b'size="0.1 0.1"'))
     build = Build(placed=(Placed("block", bad),), robot="block", root="world")
     with pytest.raises(CollisionGeometryError, match="3 positive size"):
         check_build(build, build.urdf())
+
+
+def test_every_platform_body_checks_with_no_refusal() -> None:
+    """The registry's own compositions are physically sound: a host and the member mated on
+    it touch where they join, and that is never a collision."""
+    registered = frozenset(embodiments)
+    for definition in definitions():
+        build = definition.build
+        if build.root is None or str(definition.name) not in registered:
+            continue  # one module as its maker shipped it has no members to check apart
+        body = compose_build(build, name=str(definition.name), label=definition.label)
+        assert refusals(check_build(build, body.urdf_bytes)) == (), definition.name
+
+
+def test_a_rare_overlap_never_reads_as_none() -> None:
+    assert "rarely" in _often(0.004) and "0%" not in _often(0.004)
+    assert _often(0.25) == "in 25% of sampled poses"

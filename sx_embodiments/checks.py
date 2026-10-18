@@ -758,13 +758,21 @@ _Pair = tuple[str, str, float]
 def _pairs(body: _Body) -> dict[tuple[str, str], list[_Pair]]:
     """The link pairs checked, by the two members they belong to: links of two members,
     neither hanging from the other, except a base's chassis against the links of other
-    members two or more moving joints above it."""
+    members two or more moving joints above it. Links that meet at a mate are adjacent, as
+    URDF neighbours are, and never checked: two links of a host and the member mated on it
+    each at most one moving joint from where they join (a humanoid's torso and its hips,
+    both turning on the pelvis the legs are mated to)."""
     shaped = [link for link, boxes in body.boxes.items() if boxes and link in body.owner]
-    above = {link: dict(body.ancestors(link)) for link in shaped}
+    lineage = {link: body.ancestors(link) for link in shaped}
+    above = {link: dict(ancestry) for link, ancestry in lineage.items()}
     out: dict[tuple[str, str], list[_Pair]] = {}
     for index, link in enumerate(shaped):
         for other in shaped[index + 1 :]:
-            if body.owner[link] == body.owner[other]:
+            mine, theirs = body.owner[link], body.owner[other]
+            if mine == theirs:
+                continue
+            mated = body.hosts.get(mine) == theirs or body.hosts.get(theirs) == mine
+            if mated and _at_the_mate(link, other, lineage, above):
                 continue
             if other in above[link] or link in above[other]:
                 low, high = (link, other) if other in above[link] else (other, link)
@@ -774,6 +782,19 @@ def _pairs(body: _Body) -> dict[tuple[str, str], list[_Pair]]:
             reach = body.spheres[link][1] + body.spheres[other][1]
             out.setdefault(_members(body, link, other), []).append((link, other, reach * reach))
     return out
+
+
+def _at_the_mate(
+    link: str,
+    other: str,
+    lineage: Mapping[str, list[tuple[str, int]]],
+    above: Mapping[str, Mapping[str, int]],
+) -> bool:
+    """Whether two links each sit at most one moving joint below the link they first share."""
+    common = next((ancestor for ancestor, _ in lineage[link] if ancestor in above[other]), None)
+    if common is None:
+        return False
+    return above[link][common] <= 1 and above[other][common] <= 1
 
 
 def _colliding(
@@ -862,8 +883,8 @@ def _collisions(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Find
                 check=Check.COLLISION_IN_MOTION,
                 severity=Severity.WARNING,
                 message=(
-                    f"{entry} and {other_entry} can collide: they overlap in "
-                    f"{fraction:.0%} of sampled poses; coordinate their motion"
+                    f"{entry} and {other_entry} can collide: they overlap {_often(fraction)}; "
+                    "coordinate their motion"
                     + "".join(f", or {_words(remedy)}" for remedy in remedies)
                 ),
                 detail=Collision(link, other, fraction),
@@ -985,6 +1006,13 @@ def _words(remedy: Remedy) -> str:
         case ChangeBase():
             unit = "kg" if remedy.field is BaseField.PAYLOAD_KG else "m"
             return f"set {remedy.entry}'s {remedy.field.value} to {remedy.to:g} {unit}"
+
+
+def _often(fraction: float) -> str:
+    """How often a sampled overlap happens, in words that never round a real one to 0%."""
+    if fraction < 0.01:
+        return "rarely (in under 1% of sampled poses)"
+    return f"in {fraction:.0%} of sampled poses"
 
 
 def _members(body: _Body, link: str, other: str) -> tuple[str, str]:
