@@ -28,8 +28,8 @@ support holds the centre of mass), so a designer agent reads a preview and fixes
 itself. ``tests/test_checks.py`` holds that applying a remedy clears its finding.
 
 Every check is sampled, deterministic for a seed, and bounded so a preview stays interactive:
-``tests/test_checks.py`` holds the four-arm base under :data:`BUDGET_S` (0.14 s measured on an
-idle Apple M-series laptop; the first check in a process also reads its meshes' bounds once,
+``tests/test_checks.py`` holds the four-arm base under :data:`BUDGET_S` of CPU time (0.2 s
+measured on an idle Apple M-series laptop, remedies included; the first check in a process also reads its meshes' bounds once,
 0.4 s for the B601's).
 """
 
@@ -59,7 +59,7 @@ SAMPLES: Final = 256
 VOXEL_M: Final = 0.1
 #: Horizontal directions the arms reach together in when stability is checked.
 DIRECTIONS: Final = 16
-#: What one check of a four-arm base may take, seconds, with its meshes' bounds cached.
+#: What one check of a four-arm base may take, CPU seconds, with its meshes' bounds cached.
 BUDGET_S: Final = 0.5
 
 Affine = tuple[float, ...]
