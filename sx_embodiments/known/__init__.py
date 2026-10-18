@@ -133,6 +133,10 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
             for candidate in self.values():
                 if candidate.id == key:
                     return candidate
+            # An earlier revision's identity reads as the revision that superseded it.
+            for earlier in self._definitions.values():
+                if str(key) in earlier.earlier_revisions:
+                    return self[earlier.name]
             raise UnknownEmbodimentError(str(key))
         cached = self._cache.get(name)
         if cached is None:

@@ -17,7 +17,7 @@ from .assets import PackagedAsset
 from .cameras import camera_label
 from .collection import CollectionDevice, CollectionDeviceKind, CollectionSetup
 from .errors import ComponentGraphError, CompositionError, LayoutError
-from .identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from .layout import ActuatorBus, ChannelKind, StateCoordinate, StateSpace
 from .parts import (
     CameraBinding,
@@ -281,6 +281,10 @@ class EmbodimentDefinition:
     # Catalog intent can exist before a complete, executable revision. It does
     # not participate in that revision's physical identity or qualify its sensors.
     collection: CollectionSetup | None = None
+    #: The identities this body's earlier revisions carried under the current schema. A
+    #: recording that names one reads as this revision: the registry answers it with this
+    #: body, and Catalog keeps it as an earlier identity of the revision it publishes.
+    earlier_revisions: tuple[EmbodimentId, ...] = ()
     attachments: tuple[Component, ...] = field(init=False)
 
     def __post_init__(self) -> None:
