@@ -49,6 +49,7 @@ from typing import Final
 from .assembly import Assembly
 from .assets import PACKAGE_URI_PREFIX, asset_manifest, cached_blob, local_asset_root
 from .compose import Component
+from .errors import CompositionError
 from .mechanical import Build, Module, Socket
 from .mobile_base import CHASSIS, MobileBase
 from .parts import ChainSpec, Limb
@@ -61,6 +62,45 @@ VOXEL_M: Final = 0.1
 DIRECTIONS: Final = 16
 #: What one check of a four-arm base may take, CPU seconds, with its meshes' bounds cached.
 BUDGET_S: Final = 0.5
+#: The most members (placements and mates) a build may have and still be checked. The
+#: collision pairs grow with the square of the members, so past this a check would hold a
+#: door's thread for seconds; a larger composition is refused rather than left unchecked.
+MEMBER_CAP: Final = 16
+#: Members at which the full :data:`SAMPLES` still fit the budget; above it the samples fall
+#: with the square of the members, so the pairs times the samples stay level.
+FULL_SAMPLE_MEMBERS: Final = 8
+MIN_SAMPLES: Final = 48
+#: The most findings a check returns, refusals first.
+MAX_FINDINGS: Final = 64
+
+
+class ChecksTooLargeError(CompositionError):
+    """A build with more members than :data:`MEMBER_CAP`: refused, never left unchecked."""
+
+
+class CollisionGeometryError(CompositionError):
+    """A collision shape whose size the checks cannot read: a box without three positive
+    sizes, a cylinder or sphere without a positive radius, a mesh without a file."""
+
+
+def require_checkable(build: Build) -> None:
+    """Refuse a build too large to check within the budget, before anything renders it."""
+    members = len(build.placed) + len(build.mates)
+    if members > MEMBER_CAP:
+        raise ChecksTooLargeError(
+            str(build.robot),
+            f"physical checks cover at most {MEMBER_CAP} members (placements and mates); "
+            f"this composition has {members}: split it, or compose its repeated part once",
+        )
+
+
+def validate_collision_geometry(subject: str, robot: ET.Element) -> None:
+    """Every collision shape of a description is one the checks can read, or the typed
+    refusal says which is not."""
+    for link in robot.iter("link"):
+        for collision in link.findall("collision"):
+            _boxes(collision, subject=f"{subject}: link {link.get('name')!r}", resolve=False)
+
 
 Affine = tuple[float, ...]
 """A rigid transform as twelve floats, a 3x3 rotation's rows each followed by a translation."""
@@ -191,7 +231,14 @@ def check_build(
     seed: int = 0,
 ) -> tuple[Finding, ...]:
     """Every physical check of ``build``, whose rendered description is ``urdf`` (the
-    composed body's, meshes named by package URI), refusals first."""
+    composed body's, meshes named by package URI), refusals first, at most
+    :data:`MAX_FINDINGS` of them. A build over :data:`MEMBER_CAP` members is refused
+    (:class:`ChecksTooLargeError`) and a collision shape that cannot be read is too
+    (:class:`CollisionGeometryError`)."""
+    require_checkable(build)
+    members = len(build.placed) + len(build.mates)
+    if members > FULL_SAMPLE_MEMBERS:
+        samples = max(MIN_SAMPLES, samples * FULL_SAMPLE_MEMBERS**2 // members**2)
     body = _Body.of(build, urdf)
     rest = body.forward(body.rest)
     configurations = [body.rest, *body.sample(samples, seed)]
@@ -202,7 +249,7 @@ def check_build(
         *_bases(body, poses),
     ]
     order = {Severity.REFUSAL: 0, Severity.WARNING: 1}
-    return tuple(sorted(findings, key=lambda finding: order[finding.severity]))
+    return tuple(sorted(findings, key=lambda finding: order[finding.severity]))[:MAX_FINDINGS]
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,7 +311,9 @@ class _Body:
         for link in robot.findall("link"):
             name = link.attrib["name"]
             boxes[name] = tuple(
-                box for element in link.findall("collision") for box in _boxes(element)
+                box
+                for element in link.findall("collision")
+                for box in _boxes(element, subject=f"{build.robot}: link {name!r}")
             )
             inertial = link.find("inertial")
             mass = inertial.find("mass") if inertial is not None else None
@@ -540,29 +589,62 @@ def _point(transform: Affine, xyz: tuple[float, float, float]) -> tuple[float, f
     )
 
 
-def _boxes(collision: ET.Element) -> list[_Box]:
-    """The oriented boxes bounding one collision element, in its link's frame."""
+def _positive(subject: str, shape: ET.Element, key: str, count: int) -> tuple[float, ...]:
+    """``count`` finite positive numbers from one attribute, or the typed refusal."""
+    text = shape.get(key)
+    try:
+        values = tuple(float(value) for value in (text or "").split())
+    except ValueError:
+        values = ()
+    if len(values) != count or not all(math.isfinite(value) and value > 0 for value in values):
+        raise CollisionGeometryError(
+            subject, f"a collision {shape.tag} needs {count} positive {key} value(s), not {text!r}"
+        )
+    return values
+
+
+def _boxes(
+    collision: ET.Element, *, subject: str = "collision", resolve: bool = True
+) -> list[_Box]:
+    """The oriented boxes bounding one collision element, in its link's frame; a shape whose
+    size cannot be read is a :class:`CollisionGeometryError`. Without ``resolve`` a mesh is
+    only checked for its file, not read."""
     origin = collision.find("origin")
-    frame = _affine(_triple(origin, "xyz"), _triple(origin, "rpy"))
+    try:
+        frame = _affine(_triple(origin, "xyz"), _triple(origin, "rpy"))
+    except ValueError as error:
+        raise CollisionGeometryError(
+            subject, f"a collision origin is unreadable: {error}"
+        ) from None
     geometry = collision.find("geometry")
     if geometry is None or len(geometry) == 0:
         return []
     shape = geometry[0]
     match shape.tag:
         case "box":
-            x, y, z = _triple(shape, "size")
+            x, y, z = _positive(subject, shape, "size", 3)
             return [_Box(frame, (x / 2, y / 2, z / 2))]
         case "cylinder":
-            radius, length = float(shape.attrib["radius"]), float(shape.attrib["length"])
+            (radius,) = _positive(subject, shape, "radius", 1)
+            (length,) = _positive(subject, shape, "length", 1)
             return [_Box(frame, (radius, radius, length / 2))]
         case "sphere":
-            radius = float(shape.attrib["radius"])
+            (radius,) = _positive(subject, shape, "radius", 1)
             return [_Box(frame, (radius, radius, radius))]
         case "mesh":
-            path = _mesh(shape.attrib["filename"])
+            filename = shape.get("filename")
+            if not filename:
+                raise CollisionGeometryError(subject, "a collision mesh names no file")
+            scale = (
+                _positive(subject, shape, "scale", 3)
+                if shape.get("scale") is not None
+                else (1.0,) * 3
+            )
+            if not resolve:
+                return []
+            path = _mesh(filename)
             if path is None:
                 return []
-            scale = _triple(shape, "scale", "1 1 1")
             low, high = _stl_bounds(path)
             centre = tuple((lo + hi) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
             half = tuple(abs(hi - lo) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
@@ -676,13 +758,21 @@ _Pair = tuple[str, str, float]
 def _pairs(body: _Body) -> dict[tuple[str, str], list[_Pair]]:
     """The link pairs checked, by the two members they belong to: links of two members,
     neither hanging from the other, except a base's chassis against the links of other
-    members two or more moving joints above it."""
+    members two or more moving joints above it. Links that meet at a mate are adjacent, as
+    URDF neighbours are, and never checked: two links of a host and the member mated on it
+    each at most one moving joint from where they join (a humanoid's torso and its hips,
+    both turning on the pelvis the legs are mated to)."""
     shaped = [link for link, boxes in body.boxes.items() if boxes and link in body.owner]
-    above = {link: dict(body.ancestors(link)) for link in shaped}
+    lineage = {link: body.ancestors(link) for link in shaped}
+    above = {link: dict(ancestry) for link, ancestry in lineage.items()}
     out: dict[tuple[str, str], list[_Pair]] = {}
     for index, link in enumerate(shaped):
         for other in shaped[index + 1 :]:
-            if body.owner[link] == body.owner[other]:
+            mine, theirs = body.owner[link], body.owner[other]
+            if mine == theirs:
+                continue
+            mated = body.hosts.get(mine) == theirs or body.hosts.get(theirs) == mine
+            if mated and _at_the_mate(link, other, lineage, above):
                 continue
             if other in above[link] or link in above[other]:
                 low, high = (link, other) if other in above[link] else (other, link)
@@ -692,6 +782,19 @@ def _pairs(body: _Body) -> dict[tuple[str, str], list[_Pair]]:
             reach = body.spheres[link][1] + body.spheres[other][1]
             out.setdefault(_members(body, link, other), []).append((link, other, reach * reach))
     return out
+
+
+def _at_the_mate(
+    link: str,
+    other: str,
+    lineage: Mapping[str, list[tuple[str, int]]],
+    above: Mapping[str, Mapping[str, int]],
+) -> bool:
+    """Whether two links each sit at most one moving joint below the link they first share."""
+    common = next((ancestor for ancestor, _ in lineage[link] if ancestor in above[other]), None)
+    if common is None:
+        return False
+    return above[link][common] <= 1 and above[other][common] <= 1
 
 
 def _colliding(
@@ -780,8 +883,8 @@ def _collisions(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Find
                 check=Check.COLLISION_IN_MOTION,
                 severity=Severity.WARNING,
                 message=(
-                    f"{entry} and {other_entry} can collide: they overlap in "
-                    f"{fraction:.0%} of sampled poses; coordinate their motion"
+                    f"{entry} and {other_entry} can collide: they overlap {_often(fraction)}; "
+                    "coordinate their motion"
                     + "".join(f", or {_words(remedy)}" for remedy in remedies)
                 ),
                 detail=Collision(link, other, fraction),
@@ -903,6 +1006,13 @@ def _words(remedy: Remedy) -> str:
         case ChangeBase():
             unit = "kg" if remedy.field is BaseField.PAYLOAD_KG else "m"
             return f"set {remedy.entry}'s {remedy.field.value} to {remedy.to:g} {unit}"
+
+
+def _often(fraction: float) -> str:
+    """How often a sampled overlap happens, in words that never round a real one to 0%."""
+    if fraction < 0.01:
+        return "rarely (in under 1% of sampled poses)"
+    return f"in {fraction:.0%} of sampled poses"
 
 
 def _members(body: _Body, link: str, other: str) -> tuple[str, str]:
