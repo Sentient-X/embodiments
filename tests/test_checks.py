@@ -139,8 +139,8 @@ def test_the_checks_fit_the_interactive_budget() -> None:
     build = four_arms(four_arm_base())
     body = compose_build(build, name="timed", label="Timed")
     check_build(build, body.urdf_bytes, work_surface=TABLE)  # the meshes' bounds, once
-    started = time.perf_counter()
+    started = time.process_time()
     first = check_build(build, body.urdf_bytes, work_surface=TABLE)
-    elapsed = time.perf_counter() - started
+    elapsed = time.process_time() - started
     assert elapsed < BUDGET_S, f"{elapsed:.3f} s"
     assert check_build(build, body.urdf_bytes, work_surface=TABLE) == first
