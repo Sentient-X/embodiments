@@ -29,12 +29,15 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Final, NewType
+from typing import TYPE_CHECKING, Final, NewType
 
 from .assembly import Assembly, Frame, Member, MountJoint, Pose, Subtree, namespaced
 from .assets import PackagedAsset
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError, InterfaceMismatchError, SocketError
+
+if TYPE_CHECKING:
+    from .mobile_base import MobileBase
 
 InterfaceId = NewType("InterfaceId", str)
 """A mechanical interface's id in the open interface registry (:data:`MECHANICAL_INTERFACES`)."""
@@ -120,6 +123,11 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             InterfaceId("robotis-rh-p12-rn"),
             "ROBOTIS RH-P12-RN gripper mount",
             "ROBOTIS-GIT/ai_worker ffw_bg2_rev4_follower, gripper_l_joint and gripper_r_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("seeed-b601-base"),
+            "Seeed reBot B601-DM base plate",
+            "Seeed-Projects/reBotArmController_ROS2 reBot_B601_DM_with_gripper, base_link",
         ),
         MechanicalInterface(
             InterfaceId("so101-base"),
@@ -213,6 +221,8 @@ class Module:
     whose geometry is not captured yet: it is a body on its own, never placed or mated.
     ``frames`` are named sites the module adds on its own links (a camera's optical frame); they
     render in a rooted build, after every member, named like the module's links.
+    ``base`` is the mobile base a drivable module is made from (:attr:`MobileBase.module`),
+    whose ratings and support the composition checks read.
     """
 
     module_id: ModuleId
@@ -222,6 +232,7 @@ class Module:
     sockets: tuple[Socket, ...] = ()
     components: tuple[Component | Slot, ...] = ()
     frames: tuple[Frame, ...] = ()
+    base: MobileBase | None = None
 
     def __post_init__(self) -> None:
         if not self.module_id.strip() or not self.label.strip():
