@@ -62,7 +62,10 @@ inertia), and `known/realsense.py` makes Intel's D405 and D435 descriptions came
 A module authored outside the registry (a plate drawn from photos and measurements) is admitted
 by `admit_module`: its plug and sockets name registered interfaces, each socket sits on a link of
 its description, and one carrying no part moves nothing and has a positive mass on every link
-that declares one (`tests/test_authored_module.py`).
+that declares one (`tests/test_authored_module.py`). `module_to_dict` is its document, the one an
+authoring keeps beside the module's files. An interface records its `BoltPattern` (holes, thread,
+pitch circle, centring pilot) when the standard or drawing defining it is captured; ISO 9409-1-50
+and the 1/4-20 camera thread are.
 
 A vendor that ships an arm with its gripper in one file has its flange **fitted**: the socket
 carries the gripper module, cut from that file by `Subtree` below the joint it hangs from. A

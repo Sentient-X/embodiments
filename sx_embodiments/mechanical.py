@@ -45,12 +45,40 @@ _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True, slots=True)
+class BoltPattern:
+    """How an interface is fastened, in millimetres about its axis: ``count`` holes of ``thread``
+    (nominal diameter ``thread_diameter_mm``) evenly on a pitch circle, one hole on the axis
+    when the circle is zero, and the centring pilot's diameter when the standard sets one."""
+
+    count: int
+    thread: str
+    thread_diameter_mm: float
+    pitch_circle_diameter_mm: float
+    pilot_diameter_mm: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.count < 1
+            or not self.thread.strip()
+            or not 0 < self.thread_diameter_mm < 100
+            or (self.count == 1) != (self.pitch_circle_diameter_mm == 0)
+            or (self.pilot_diameter_mm is not None and self.pilot_diameter_mm <= 0)
+        ):
+            raise CompositionError(self.thread, "a bolt pattern is a thread on one pitch circle")
+
+
+@dataclass(frozen=True, slots=True)
 class MechanicalInterface:
-    """One joining pattern and what defines it (a standard, or the vendor drawing it comes from)."""
+    """One joining pattern and what defines it (a standard, or the vendor drawing it comes from).
+
+    ``pattern`` is its bolt pattern when the standard or drawing that defines it is captured;
+    an authored part's plug is checked against it, and ``None`` says it is not captured yet.
+    """
 
     interface: InterfaceId
     label: str
     standard: str
+    pattern: BoltPattern | None = None
 
 
 MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
@@ -60,11 +88,13 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             InterfaceId("iso-9409-1-50-4-m6"),
             "ISO 9409-1 tool flange, 50 mm pitch circle, four M6",
             "ISO 9409-1:2004, form A, d1 = 50 mm",
+            BoltPattern(4, "M6", 6.0, 50.0, pilot_diameter_mm=31.5),
         ),
         MechanicalInterface(
             InterfaceId("unc-1-4-20"),
             "1/4-20 UNC camera thread",
             "ISO 1222:2010 tripod connection, 1/4-20 UNC",
+            BoltPattern(1, "1/4-20 UNC", 6.35, 0.0),
         ),
         MechanicalInterface(
             InterfaceId("agilex-piper-flange"),

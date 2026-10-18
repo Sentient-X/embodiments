@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from sx_embodiments import admit_module
+from sx_embodiments.assemble import module_from_dict, module_to_dict
 from sx_embodiments.composition import compose_build
 from sx_embodiments.errors import (
     AssemblyError,
@@ -15,7 +16,14 @@ from sx_embodiments.errors import (
     SocketError,
 )
 from sx_embodiments.known.universal_robots import UR5E_MODULE
-from sx_embodiments.mechanical import Build, InterfaceId, Mate, Placed, Socket
+from sx_embodiments.mechanical import (
+    MECHANICAL_INTERFACES,
+    Build,
+    InterfaceId,
+    Mate,
+    Placed,
+    Socket,
+)
 
 ISO = InterfaceId("iso-9409-1-50-4-m6")
 CAMERA = InterfaceId("unc-1-4-20")
@@ -91,3 +99,27 @@ def test_an_authored_module_is_refused_by_type(
 ) -> None:
     with pytest.raises(error):
         _plate(**changes)
+
+
+def test_an_authored_module_round_trips_through_its_document() -> None:
+    plate = _plate()
+    document = module_to_dict(plate)
+
+    assert document["plug"] == ISO and document["part"] is None
+    again = module_from_dict(document, urdf=PLATE, mesh_paths=MESHES)
+    assert again == plate
+    with pytest.raises(EmbodimentSchemaError):
+        module_from_dict({**document, "schema": "sx.authored-module/v0"}, urdf=PLATE)
+
+
+def test_the_iso_flange_pattern_is_the_one_its_id_names() -> None:
+    """iso-9409-1-<pitch>-<count>-m<thread>: the id and the recorded pattern agree."""
+    for interface, record in MECHANICAL_INTERFACES.items():
+        if not interface.startswith("iso-9409-1-"):
+            continue
+        pitch, count, thread = interface.removeprefix("iso-9409-1-").split("-")
+        assert record.pattern is not None
+        assert record.pattern.pitch_circle_diameter_mm == float(pitch)
+        assert record.pattern.count == int(count)
+        assert record.pattern.thread.lower() == thread
+        assert record.pattern.thread_diameter_mm == float(thread.removeprefix("m"))

@@ -18,6 +18,7 @@ from math import isfinite
 
 from sx_contracts import decode
 
+from .assembly import Pose
 from .compose import Component, RootMount, body_component, sensor_component
 from .embodiment import (
     Embodiment,
@@ -239,10 +240,7 @@ def admit_module(
                 "a passive module moves nothing; its description has movable joints "
                 + ", ".join(sorted(movable)),
             )
-        masses = [
-            _finite(mass.get("value"), module_id, "link mass")
-            for mass in root.iter("mass")
-        ]
+        masses = [_finite(mass.get("value"), module_id, "link mass") for mass in root.iter("mass")]
         if not masses or any(mass <= 0.0 for mass in masses):
             raise EmbodimentSchemaError(
                 f"{module_id}: a passive module needs a finite positive-mass inertial"
@@ -268,7 +266,7 @@ def admit_module(
         if (parent := joint.find("parent")) is not None
         and (child := joint.find("child")) is not None
     }
-    owners = {name: components[0].instance for name in movable} if components else {}
+    owners = dict.fromkeys(movable, components[0].instance) if components else {}
     return Module(
         module_id=ModuleId(module_id),
         label=label,
@@ -278,6 +276,81 @@ def admit_module(
             replace(socket, carrier=carrier(socket.link, parents, owners)) for socket in sockets
         ),
         components=components,
+    )
+
+
+MODULE_SCHEMA = "sx.authored-module/v1"
+
+
+def module_to_dict(module: Module) -> dict[str, object]:
+    """The canonical document of an authored module: what it joins by and the part it carries.
+
+    Its description and files travel beside it as their own bytes; ``module_from_dict``
+    admits the document against exactly those, so one document names one lawful module.
+    """
+    components = [entry for entry in module.components if isinstance(entry, Component)]
+    part = components[0].part if components else None
+    if len(components) > 1 or (part is not None and not isinstance(part, ComposablePart)):
+        raise AssemblyError(str(module.module_id), "an authored module carries at most one part")
+    return {
+        "schema": MODULE_SCHEMA,
+        "module_id": str(module.module_id),
+        "label": module.label,
+        "plug": module.plug,
+        "sockets": [
+            {
+                "name": socket.name,
+                "interface": str(socket.interface),
+                "link": socket.link,
+                "xyz": list(socket.pose.xyz),
+                "rpy": list(socket.pose.rpy),
+            }
+            for socket in module.sockets
+        ],
+        "part": None if part is None else part_to_dict(part),
+    }
+
+
+def module_from_dict(
+    document: Mapping[str, object], *, urdf: bytes, mesh_paths: frozenset[str] = frozenset()
+) -> Module:
+    """Parse and admit an authored module's document against its exact description."""
+    entry = decode.exactly(
+        document,
+        {"schema", "module_id", "label", "plug", "sockets", "part"},
+        where="module",
+        error=EmbodimentSchemaError,
+    )
+    if decode.text(entry, "schema") != MODULE_SCHEMA:
+        raise EmbodimentSchemaError(f"module: schema must be {MODULE_SCHEMA!r}")
+    module_id = decode.text(entry, "module_id")
+    plug = decode.optional_text(entry, "plug")
+    sockets: list[Socket] = []
+    for raw in decode.documents(entry, "sockets"):
+        site = decode.exactly(
+            raw, {"name", "interface", "link", "xyz", "rpy"}, error=EmbodimentSchemaError
+        )
+        xyz = decode.numbers(site, "xyz")
+        rpy = decode.numbers(site, "rpy")
+        if len(xyz) != 3 or len(rpy) != 3:
+            raise EmbodimentSchemaError(f"{module_id}: a socket pose is three xyz and three rpy")
+        sockets.append(
+            Socket(
+                decode.text(site, "name"),
+                InterfaceId(decode.text(site, "interface")),
+                decode.text(site, "link"),
+                Pose((xyz[0], xyz[1], xyz[2]), (rpy[0], rpy[1], rpy[2])),
+            )
+        )
+    part = entry.get("part")
+    return admit_module(
+        module_id,
+        decode.text(entry, "label"),
+        urdf=urdf,
+        plug=None if plug is None else InterfaceId(plug),
+        sockets=tuple(sockets),
+        part=None if part is None else decode.mapping(entry, "part"),
+        mesh_paths=mesh_paths,
     )
 
 
