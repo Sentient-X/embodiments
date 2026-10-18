@@ -9,7 +9,6 @@ support column, the arm's ``panda_link0`` on the column's top at the torso's low
 """
 
 import dataclasses
-import xml.etree.ElementTree as ET
 from typing import Final
 
 from ..assembly import Pose, Subtree
@@ -22,9 +21,9 @@ from ..compose import (
     RootMount,
     body_component,
 )
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
-from ..mechanical import Box, Build, Cylinder, InterfaceId, Mate, Module, ModuleId, Placed, Socket
+from ..mechanical import Build, InterfaceId, Mate, Module, ModuleId, Placed, Socket
 from ..parts import (
     ChainSpec,
     ControlRates,
@@ -145,38 +144,30 @@ OMRON_BASE: Final = MobileBaseSpec(part_id=PartId("omron-ld"))  # commanded outs
 OMRON_SUPPORT: Final = InterfaceId("robosuite-omron-support")
 
 
-def _omron_ld_description() -> bytes:
-    """The Omron LD base as robosuite models it, in metres from the floor under its origin:
-    the chassis box (``pedestal_feet_col``, 0.70 x 0.50 x 0.38 m, its centre at
-    (-0.20, 0, 0.192)) and the support column (radius 0.12 m, 0.40 m long, centred at
-    (-0.05, 0, 0.50)); robosuite's box density, 10 kg/m3, gives the chassis its mass."""
-    robot = ET.Element("robot", {"name": "omron_ld"})
-    link = ET.SubElement(robot, "link", {"name": "omron_ld"})
-    chassis, column = Box((0.70, 0.50, 0.38)), Cylinder(0.12, 0.40)
-    mass = 10.0 * 0.70 * 0.50 * 0.38
-    inertial = ET.SubElement(link, "inertial")
-    ET.SubElement(inertial, "origin", {"xyz": "-0.2 0 0.192", "rpy": "0 0 0"})
-    ET.SubElement(inertial, "mass", {"value": repr(mass)})
-    ixx, iyy, izz = chassis.inertia(mass)
-    ET.SubElement(
-        inertial,
-        "inertia",
-        {"ixx": repr(ixx), "ixy": "0", "ixz": "0", "iyy": repr(iyy), "iyz": "0", "izz": repr(izz)},
-    )
-    for shape, xyz in ((chassis, "-0.2 0 0.192"), (column, "-0.05 0 0.5")):
-        for tag in ("visual", "collision"):
-            element = ET.SubElement(link, tag)
-            ET.SubElement(element, "origin", {"xyz": xyz, "rpy": "0 0 0"})
-            ET.SubElement(element, "geometry").append(shape.element())
-    ET.indent(robot, space="  ")
-    return ET.tostring(robot, encoding="utf-8", xml_declaration=True) + b"\n"
+#: The Omron LD base as robosuite models it: its eight meshes and collision box, and its
+#: support column, projected to one link from ``omron_mobile_base.xml`` beside it.
+OMRON_LD_URDF: Final = packaged_asset(
+    relpath="robosuite/omron_mobile_base/omron_ld.urdf",
+    sha256="08347010b49d5a87cceb1b453bed9f99193a47ce11c1140e3d3e6ddff55f4533",
+    size_bytes=4016,
+    format=AssetFormat.URDF,
+    role=AssetRole.OTHER,
+    provenance=AssetProvenance(
+        repository="https://github.com/ARISE-Initiative/robosuite",
+        revision="5ce6643f3092639d08f7b0f90ed1c6a84f50552c",
+        path="robosuite/models/assets/bases/omron_mobile_base.xml",
+        license_id="MIT",
+        generator="sx-embodiments: the wheeled_base and fixed_support bodies as one URDF link",
+    ),
+    media_type="application/xml",
+)
 
 
 #: The Omron LD base: its chassis and column, and the drive commanded outside joint space.
 OMRON_LD_MODULE: Final = Module(
     module_id=ModuleId("omron-ld"),
     label="Omron LD mobile base",
-    description=_omron_ld_description(),
+    description=OMRON_LD_URDF,
     components=(body_component("base", OMRON_BASE, RootMount("omron_ld")),),
     sockets=(
         # No joint of the base moves its column, so nothing in it carries the arm.
@@ -186,8 +177,8 @@ OMRON_LD_MODULE: Final = Module(
 
 PANDA_OMRON_URDF: Final = packaged_asset(
     relpath="official/franka_panda/panda_omron.urdf",
-    sha256="2a58617bb77711f382a78cad463805b71868de94d615192d122b9ae981feb010",
-    size_bytes=17963,
+    sha256="a6083f958c833ad83ccfac25b2409cc3f0129dac4f86a91305e7e8e16d3c8dcd",
+    size_bytes=20760,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -195,9 +186,6 @@ PANDA_OMRON_URDF: Final = packaged_asset(
         revision=PANDA_URDF.provenance.revision,
         path=PANDA_URDF.provenance.path,
         license_id="Apache-2.0",
-        # The Omron LD's geometry is robosuite's (MIT), read from
-        # ARISE-Initiative/robosuite@5ce6643f3092639d08f7b0f90ed1c6a84f50552c
-        # robosuite/models/assets/bases/omron_mobile_base.xml.
         generator="sx-embodiments/tools/compose_registered_urdfs.py",
     ),
     media_type="application/xml",
@@ -239,7 +227,11 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
             ),
         ),
     ),
-    extra_assets=(PANDA_OMRON_URDF,),
+    extra_assets=(PANDA_OMRON_URDF, OMRON_LD_URDF),
+    # The Panda alone, before the Omron LD was drawn: RoboCasa episodes name it.
+    earlier_revisions=(
+        EmbodimentId("05db30ab443a7bd5fb9ecef055fbca2a12fcd3f244adfca6f7712c1f8a847140"),
+    ),
     rates=ControlRates(policy_hz=20.0),
     # Omron LD-60 chassis footprint (datasheet 699 x 500 mm); it drives on the floor
     # and placement adds the facing constraint toward the work support.
