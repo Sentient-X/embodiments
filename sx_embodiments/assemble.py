@@ -207,7 +207,7 @@ def admit_module(
     part: Mapping[str, object] | None = None,
     mesh_paths: frozenset[str] = frozenset(),
 ) -> Module:
-    """Admit one authored module (an adapter plate, a bracket, a gripper), or refuse.
+    """Admit one authored or imported module (a plate, a bracket, a gripper, an arm), or refuse.
 
     The module joins by registered mechanical interfaces only: its plug and every socket
     name an interface in :data:`~sx_embodiments.mechanical.MECHANICAL_INTERFACES`, and each
@@ -215,7 +215,8 @@ def admit_module(
     the module carries that one component on its root link, admitted by :func:`admit_part`;
     without one it is a passive element, so its description moves nothing and every link
     with mass has a finite positive one. A socket below a movable joint rides on the
-    component, whatever the caller said about carriers.
+    component, whatever the caller said about carriers. An arm (a chain part) is a module of
+    its own, placed on a composition's root or plugged into a socket by its plug.
     """
 
     for interface in (plug, *(socket.interface for socket in sockets)):
@@ -251,11 +252,6 @@ def admit_module(
             )
         _require_mesh_closure(module_id, root, mesh_paths)
     else:
-        if isinstance(part_from_dict(part), ChainSpec):
-            raise AssemblyError(
-                module_id,
-                "a chain is composed through embodiment.assemble, not mated as one module",
-            )
         if isinstance(part_from_dict(part), MobileBaseSpec):
             raise AssemblyError(
                 module_id, "a mobile base is admitted from its specs (admit_base), not a part"
@@ -263,12 +259,19 @@ def admit_module(
         admitted = admit_part(part, urdf=urdf, mesh_paths=mesh_paths)
         frame = _root_link(module_id, root)
         match admitted:
+            case ChainSpec():
+                # An imported arm: one chain on its root link, the module placed on the
+                # composition's root or plugged into a socket by its declared plug. It is
+                # composed as a module, never mounted on another part as a component.
+                components = (body_component("arm", admitted, RootMount(frame), limb=Limb.ARM),)
             case GripperSpec():
                 components = (body_component("gripper", admitted, RootMount(frame)),)
             case CameraSpec() | ForceTorqueSpec():
                 components = (sensor_component("sensor", admitted, RootMount(frame)),)
             case _:  # a chain or base was refused above
-                raise AssemblyError(module_id, "an authored module carries a gripper or sensor")
+                raise AssemblyError(
+                    module_id, "an authored module carries an arm, a gripper or a sensor"
+                )
     parents = {
         child.get("link", ""): (parent.get("link", ""), joint.get("name", ""))
         for joint in root.iter("joint")

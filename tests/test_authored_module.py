@@ -154,13 +154,105 @@ def test_an_authored_base_is_admitted_from_its_specs_and_never_qualified() -> No
         admit_base(base, urdf=PLATE)
 
 
-def test_a_chain_or_a_base_part_is_not_an_authored_module() -> None:
-    from sx_embodiments.known.so101 import SO101_ARM
+ARM = b"""<?xml version="1.0"?>
+<robot name="two_axis_arm">
+  <link name="base_link">
+    <inertial><mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/></inertial>
+    <visual><geometry><mesh filename="arm/meshes/base.stl"/></geometry></visual>
+  </link>
+  <link name="upper">
+    <inertial><mass value="0.5"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/></inertial>
+  </link>
+  <link name="fore">
+    <inertial><mass value="0.3"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/></inertial>
+  </link>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/><child link="upper"/><origin xyz="0 0 0.1"/><axis xyz="0 0 1"/>
+    <limit lower="-3.0" upper="3.0" effort="10" velocity="2"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <parent link="upper"/><child link="fore"/><origin xyz="0 0 0.2"/><axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="2.0" effort="10" velocity="2"/>
+  </joint>
+</robot>
+"""
+
+
+def _arm_part(part_id: str) -> dict[str, object]:
+    from sx_embodiments.identity import PartId
+    from sx_embodiments.known._authoring import bounded_layout
+    from sx_embodiments.layout import CoordinateUnit, IntegratedDrive
+    from sx_embodiments.parts import ChainSpec
+
+    drive = IntegratedDrive(controller="the vendor's arm controller", group="arm")
+    return part_to_dict(
+        ChainSpec(
+            part_id=PartId(part_id),
+            layout=bounded_layout(
+                names=("shoulder", "elbow"),
+                units=(CoordinateUnit.RADIAN,) * 2,
+                lower=(-3.0, -2.0),
+                upper=(3.0, 2.0),
+                actuations=(drive, drive),
+            ),
+            home=(0.0, 0.0),
+        )
+    )
+
+
+def test_an_imported_arm_is_a_module_placed_on_the_root() -> None:
+    arm = admit_module(
+        "two-axis-arm",
+        "Two-axis arm",
+        urdf=ARM,
+        plug=None,
+        sockets=(Socket("flange", ISO, "fore"),),
+        part=_arm_part("two-axis-arm"),
+        mesh_paths=frozenset({"arm/meshes/base.stl"}),
+    )
+    component = arm.components[0]
+    assert isinstance(component, Component) and component.instance == "arm"
+    assert arm.socket("flange").carrier == "arm"
+    plate = _plate()
+    build = Build(
+        placed=(Placed("left", arm),),
+        mates=(Mate("plate", plate, "left", "flange"),),
+        robot="imported",
+        root="table",
+    )
+    urdf = build.assembly().urdf().decode()
+    assert '<joint name="left_shoulder"' in urdf and '<child link="plate_mount"' in urdf
+    assert [component.instance for component in build.components()] == ["left_arm"]
+    again = module_from_dict(
+        module_to_dict(arm), urdf=ARM, mesh_paths=frozenset({"arm/meshes/base.stl"})
+    )
+    assert again == arm
+
+
+def test_an_imported_arm_states_how_its_joints_are_driven() -> None:
+    document = _arm_part("two-axis-arm")
+    for axis in cast("list[dict[str, Any]]", document["layout"]):
+        axis["actuation"] = {"kind": "undocumented", "reason": "not stated"}
+    with pytest.raises(AssemblyError, match="undocumented drive facts"):
+        admit_module(
+            "two-axis-arm",
+            "Two-axis arm",
+            urdf=ARM,
+            plug=None,
+            sockets=(),
+            part=document,
+            mesh_paths=frozenset({"arm/meshes/base.stl"}),
+        )
+
+
+def test_a_base_part_is_not_an_authored_module() -> None:
     from test_mobile_base import four_arm_base
 
-    for part in (SO101_ARM, four_arm_base().spec):
-        with pytest.raises(AssemblyError):
-            _plate(part=part_to_dict(part))
+    with pytest.raises(AssemblyError):
+        _plate(part=part_to_dict(four_arm_base().spec))
 
 
 def test_the_so101_wrist_seat_sits_between_its_holes_on_the_wrist_roll_face() -> None:
