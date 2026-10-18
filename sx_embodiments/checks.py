@@ -29,8 +29,8 @@ itself. ``tests/test_checks.py`` holds that applying a remedy clears its finding
 
 Every check is sampled, deterministic for a seed, and bounded so a preview stays interactive:
 ``tests/test_checks.py`` holds the four-arm base under :data:`BUDGET_S` of CPU time (0.2 s
-measured on an idle Apple M-series laptop, remedies included; the first check in a process also reads its meshes' bounds once,
-0.4 s for the B601's).
+measured on an idle Apple M-series laptop, remedies included; the first check in a process
+also reads its meshes' bounds once, 0.4 s for the B601's).
 """
 
 from __future__ import annotations
