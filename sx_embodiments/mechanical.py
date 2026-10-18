@@ -100,6 +100,11 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             "Seeed-Projects/reBotArmController_ROS2 reBot_B601_DM_with_gripper, base_link",
         ),
         MechanicalInterface(
+            InterfaceId("robosuite-omron-support"),
+            "Omron LD base support column top, where a robot sits",
+            "ARISE-Initiative/robosuite omron_mobile_base.xml, the support body",
+        ),
+        MechanicalInterface(
             InterfaceId("so101-base"),
             "SO-101 base plate",
             "TheRobotStudio/SO-ARM100 SO-101 base, the plate the arm is clamped or screwed by",

@@ -585,6 +585,7 @@
 {"path": "official/franka_panda/franka_description/meshes/visual/link6.dae", "sha256": "4475cb620e2e7293eb0f317b5f968f6520f703a4e5d4f7b95f75249e4302fd21", "size": 1728753, "license_id": "Apache-2.0"},
 {"path": "official/franka_panda/franka_description/meshes/visual/link7.dae", "sha256": "463227bda9eb9901637107068f59e861fcb81ac89880706d41c26d18c4b46abe", "size": 936416, "license_id": "Apache-2.0"},
 {"path": "official/franka_panda/panda.urdf", "sha256": "668d8398e32164587fc2e9886b37d1a17a20d889cafe192f28ba245a3e82c24a", "size": 19046, "license_id": "Apache-2.0"},
+{"path": "official/franka_panda/panda_omron.urdf", "sha256": "2a58617bb77711f382a78cad463805b71868de94d615192d122b9ae981feb010", "size": 17963, "license_id": "Apache-2.0"},
 {"path": "official/previews/05db30ab443a7bd5fb9ecef055fbca2a12fcd3f244adfca6f7712c1f8a847140.webp", "sha256": "8b5655ab2d4f256ce9c994d684778ac8aa9c0343497b8f50e1b7c50a18c0f9c6", "size": 2096, "license_id": "Apache-2.0"},
 {"path": "official/previews/314c66aa581e454a5c21535b024baeb25b603e75ebb2234f329fb7404397d172.webp", "sha256": "99941baeda5fe12a3242dbf08d2e1ccf3b68e1ce642d6fe743c3fb360e337d15", "size": 1816, "license_id": "BSD-3-Clause"},
 {"path": "official/previews/55c4e1899b6a0e3aba4ac0a7f8d1da39529d1dcf267846f43df92f98c3dc4399.webp", "sha256": "7377a2a907d92ea5be9dc7326e8c2b804dcbcc91f02cee450c2be034bed6f135", "size": 1784, "license_id": "BSD-3-Clause"},
