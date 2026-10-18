@@ -168,3 +168,12 @@ def test_an_impossible_base_is_refused(change: dict[str, object], reason: str) -
     }
     with pytest.raises(CompositionError, match=reason):
         MobileBase(**(facts | change))  # type: ignore[arg-type]
+
+
+def test_a_base_alone_composes_as_a_first_party_body() -> None:
+    """A base made from its specs has no packaged source: its description is first-party."""
+    build = Build(placed=(Placed("base", four_arm_base().module),), robot="cart", root="world")
+    body = compose_build(build, name="cart", label="Cart")
+    (description,) = (asset for asset in body.assets if asset.uri.endswith("body.urdf"))
+    assert description.provenance.license_id == "Apache-2.0"
+    assert body.state.width == 4

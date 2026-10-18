@@ -1,14 +1,22 @@
 """The physical checks of a composition, on the owner's example: four Seeed arms on a base."""
 
+import math
 import time
 from dataclasses import replace
 
+import pytest
+
+from sx_embodiments.assembly import Pose
 from sx_embodiments.checks import (
     BUDGET_S,
+    MAX_FINDINGS,
+    MEMBER_CAP,
     BaseField,
     ChangeBase,
     Check,
+    ChecksTooLargeError,
     Collision,
+    CollisionGeometryError,
     Finding,
     Move,
     Payload,
@@ -17,12 +25,15 @@ from sx_embodiments.checks import (
     Stability,
     WorkspaceOverlap,
     WorkSurface,
+    _often,
     check_build,
     refusals,
+    require_checkable,
 )
 from sx_embodiments.composition import compose_build
+from sx_embodiments.known import definitions, embodiments
 from sx_embodiments.known.b601 import B601_DM_MODULE
-from sx_embodiments.mechanical import Build, Mate, Placed
+from sx_embodiments.mechanical import Box, Build, Mate, Placed, rigid_module
 from sx_embodiments.mobile_base import DeckSocket, DriveKind, MobileBase
 from test_mobile_base import B601_BASE, four_arm_base, four_arms
 
@@ -144,3 +155,68 @@ def test_the_checks_fit_the_interactive_budget() -> None:
     elapsed = time.process_time() - started
     assert elapsed < BUDGET_S, f"{elapsed:.3f} s"
     assert check_build(build, body.urdf_bytes, work_surface=TABLE) == first
+
+
+def _arms(count: int) -> Build:
+    """``count`` B601 arms set down 0.8 m apart on a square grid."""
+    side = math.ceil(math.sqrt(count))
+    return Build(
+        placed=tuple(
+            Placed(
+                f"arm_{index}",
+                B601_DM_MODULE,
+                Pose((0.8 * (index % side), 0.8 * (index // side), 0.0)),
+            )
+            for index in range(count)
+        ),
+        robot="arms",
+        root="world",
+    )
+
+
+def test_a_composition_past_the_member_cap_is_refused_before_it_is_checked() -> None:
+    build = _arms(64)  # the proto's most placements
+    started = time.process_time()
+    with pytest.raises(ChecksTooLargeError, match=f"at most {MEMBER_CAP} members"):
+        require_checkable(build)
+    with pytest.raises(ChecksTooLargeError):
+        check_build(build, b"<robot/>")
+    assert time.process_time() - started < BUDGET_S
+
+
+def test_the_largest_checkable_composition_fits_the_budget() -> None:
+    build = _arms(MEMBER_CAP)
+    body = compose_build(build, name="arms", label="Arms")
+    check_build(build, body.urdf_bytes)  # the meshes' bounds, once
+    started = time.process_time()
+    findings = check_build(build, body.urdf_bytes)
+    elapsed = time.process_time() - started
+    assert elapsed < BUDGET_S, f"{elapsed:.3f} s"
+    assert len(findings) <= MAX_FINDINGS
+
+
+def test_an_unreadable_collision_shape_is_a_typed_refusal() -> None:
+    broken = rigid_module("block", "Block", shape=Box((0.1, 0.1, 0.1)), mass_kg=1.0, plug=None)
+    description = broken.description
+    assert isinstance(description, bytes)
+    bad = replace(broken, description=description.replace(b'size="0.1 0.1 0.1"', b'size="0.1 0.1"'))
+    build = Build(placed=(Placed("block", bad),), robot="block", root="world")
+    with pytest.raises(CollisionGeometryError, match="3 positive size"):
+        check_build(build, build.urdf())
+
+
+def test_every_platform_body_checks_with_no_refusal() -> None:
+    """The registry's own compositions are physically sound: a host and the member mated on
+    it touch where they join, and that is never a collision."""
+    registered = frozenset(embodiments)
+    for definition in definitions():
+        build = definition.build
+        if build.root is None or str(definition.name) not in registered:
+            continue  # one module as its maker shipped it has no members to check apart
+        body = compose_build(build, name=str(definition.name), label=definition.label)
+        assert refusals(check_build(build, body.urdf_bytes)) == (), definition.name
+
+
+def test_a_rare_overlap_never_reads_as_none() -> None:
+    assert "rarely" in _often(0.004) and "0%" not in _often(0.004)
+    assert _often(0.25) == "in 25% of sampled poses"

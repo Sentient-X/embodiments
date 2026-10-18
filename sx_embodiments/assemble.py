@@ -19,6 +19,7 @@ from math import isfinite
 from sx_contracts import decode
 
 from .assembly import Pose
+from .checks import validate_collision_geometry
 from .compose import Component, RootMount, body_component, sensor_component
 from .embodiment import (
     Embodiment,
@@ -232,6 +233,8 @@ def admit_module(
             raise SocketError(
                 module_id, f"{socket.name!r} sits on {socket.link!r}, which the description lacks"
             )
+    # The composition checks read every collision shape; one they cannot is refused here.
+    validate_collision_geometry(module_id, root)
     movable = _movable_joints(root)
     components: tuple[Component, ...] = ()
     if part is None:
