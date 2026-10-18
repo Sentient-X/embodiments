@@ -59,6 +59,10 @@ pairing, a taken socket or an unknown one is a typed refusal (`InterfaceMismatch
 `SocketError`). Interfaces are an open registry, `MECHANICAL_INTERFACES`, like the camera models.
 A passive element is a module with no components (`rigid_module`, a solid with its mass and
 inertia), and `known/realsense.py` makes Intel's D405 and D435 descriptions camera modules.
+A module authored outside the registry (a plate drawn from photos and measurements) is admitted
+by `admit_module`: its plug and sockets name registered interfaces, each socket sits on a link of
+its description, and one carrying no part moves nothing and has a positive mass on every link
+that declares one (`tests/test_authored_module.py`).
 
 A vendor that ships an arm with its gripper in one file has its flange **fitted**: the socket
 carries the gripper module, cut from that file by `Subtree` below the joint it hangs from. A

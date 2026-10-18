@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
+from dataclasses import replace
 from functools import cache
 from math import isfinite
 
 from sx_contracts import decode
 
-from .compose import Component, body_component, sensor_component
+from .compose import Component, RootMount, body_component, sensor_component
 from .embodiment import (
     Embodiment,
     _parse_assets,  # pyright: ignore[reportPrivateUsage]
@@ -29,10 +30,11 @@ from .embodiment import (
     _part_to_dict,  # pyright: ignore[reportPrivateUsage]
     _validate_urdf,  # pyright: ignore[reportPrivateUsage]
 )
-from .errors import AssemblyError, EmbodimentSchemaError
+from .errors import AssemblyError, EmbodimentSchemaError, SocketError
 from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
 from .layout import Bounds, UndocumentedDrive
+from .mechanical import MECHANICAL_INTERFACES, InterfaceId, Module, ModuleId, Socket, carrier
 from .parts import CameraSpec, ChainSpec, ForceTorqueSpec, GripperSpec, Limb, MobileBaseSpec
 
 ComposablePart = ChainSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
@@ -172,6 +174,11 @@ def admit_part(
                 f"{subject}: link {child_link!r} needs a positive-mass inertial —"
                 " simulation refuses massless moving bodies"
             )
+    _require_mesh_closure(subject, root, mesh_paths)
+    return part
+
+
+def _require_mesh_closure(subject: str, root: ET.Element, mesh_paths: frozenset[str]) -> None:
     for mesh in root.iter("mesh"):
         filename = mesh.get("filename")
         if filename is None:
@@ -185,7 +192,105 @@ def admit_part(
                 f"{subject}: mesh reference {filename!r} does not match a staged asset"
                 " path exactly (the closure law)"
             )
-    return part
+
+
+def admit_module(
+    module_id: str,
+    label: str,
+    *,
+    urdf: bytes,
+    plug: InterfaceId | None,
+    sockets: tuple[Socket, ...],
+    part: Mapping[str, object] | None = None,
+    mesh_paths: frozenset[str] = frozenset(),
+) -> Module:
+    """Admit one authored module (an adapter plate, a bracket, a gripper), or refuse.
+
+    The module joins by registered mechanical interfaces only: its plug and every socket
+    name an interface in :data:`~sx_embodiments.mechanical.MECHANICAL_INTERFACES`, and each
+    socket sits on a link of the description. Its root link is the plug face. With ``part``
+    the module carries that one component on its root link, admitted by :func:`admit_part`;
+    without one it is a passive element, so its description moves nothing and every link
+    with mass has a finite positive one. A socket below a movable joint rides on the
+    component, whatever the caller said about carriers.
+    """
+
+    for interface in (plug, *(socket.interface for socket in sockets)):
+        if interface is not None and interface not in MECHANICAL_INTERFACES:
+            raise AssemblyError(
+                module_id, f"{interface!r} is not a registered mechanical interface"
+            )
+    try:
+        root = ET.fromstring(urdf)
+    except ET.ParseError as exc:
+        raise EmbodimentSchemaError(f"{module_id}: module description is invalid XML") from exc
+    links = {link.get("name") for link in root.iter("link")}
+    for socket in sockets:
+        if socket.link not in links:
+            raise SocketError(
+                module_id, f"{socket.name!r} sits on {socket.link!r}, which the description lacks"
+            )
+    movable = _movable_joints(root)
+    components: tuple[Component, ...] = ()
+    if part is None:
+        if movable:
+            raise AssemblyError(
+                module_id,
+                "a passive module moves nothing; its description has movable joints "
+                + ", ".join(sorted(movable)),
+            )
+        masses = [
+            _finite(mass.get("value"), module_id, "link mass")
+            for mass in root.iter("mass")
+        ]
+        if not masses or any(mass <= 0.0 for mass in masses):
+            raise EmbodimentSchemaError(
+                f"{module_id}: a passive module needs a finite positive-mass inertial"
+            )
+        _require_mesh_closure(module_id, root, mesh_paths)
+    else:
+        admitted = admit_part(part, urdf=urdf, mesh_paths=mesh_paths)
+        frame = _root_link(module_id, root)
+        match admitted:
+            case GripperSpec():
+                components = (body_component("gripper", admitted, RootMount(frame)),)
+            case CameraSpec() | ForceTorqueSpec():
+                components = (sensor_component("sensor", admitted, RootMount(frame)),)
+            case _:
+                raise AssemblyError(
+                    module_id,
+                    "a chain or mobile base is composed through embodiment.assemble,"
+                    " not mated as one module",
+                )
+    parents = {
+        child.get("link", ""): (parent.get("link", ""), joint.get("name", ""))
+        for joint in root.iter("joint")
+        if (parent := joint.find("parent")) is not None
+        and (child := joint.find("child")) is not None
+    }
+    owners = {name: components[0].instance for name in movable} if components else {}
+    return Module(
+        module_id=ModuleId(module_id),
+        label=label,
+        description=urdf,
+        plug=plug,
+        sockets=tuple(
+            replace(socket, carrier=carrier(socket.link, parents, owners)) for socket in sockets
+        ),
+        components=components,
+    )
+
+
+def _root_link(subject: str, root: ET.Element) -> str:
+    children = {child.get("link") for child in root.iter("child")}
+    roots = [
+        name
+        for link in root.iter("link")
+        if (name := link.get("name")) is not None and name not in children
+    ]
+    if len(roots) != 1:
+        raise EmbodimentSchemaError(f"{subject}: a module description has exactly one root link")
+    return roots[0]
 
 
 def _finite(value: str | None, subject: str, what: str, default: float | None = None) -> float:
