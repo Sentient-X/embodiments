@@ -5,10 +5,14 @@ from dataclasses import replace
 
 from sx_embodiments.checks import (
     BUDGET_S,
+    BaseField,
+    ChangeBase,
     Check,
     Collision,
     Finding,
+    Move,
     Payload,
+    Remedy,
     Severity,
     Stability,
     WorkspaceOverlap,
@@ -19,7 +23,7 @@ from sx_embodiments.checks import (
 from sx_embodiments.composition import compose_build
 from sx_embodiments.known.b601 import B601_DM_MODULE
 from sx_embodiments.mechanical import Build, Mate, Placed
-from sx_embodiments.mobile_base import DeckSocket, DriveKind
+from sx_embodiments.mobile_base import DeckSocket, DriveKind, MobileBase
 from test_mobile_base import B601_BASE, four_arm_base, four_arms
 
 TABLE = WorkSurface(centre=(0.75, 0.0, 0.4), size=(0.6, 1.0))
@@ -32,6 +36,29 @@ def checked(build: Build, surface: WorkSurface | None = None) -> tuple[Finding, 
 
 def of(findings: tuple[Finding, ...], check: Check) -> list[Finding]:
     return [finding for finding in findings if finding.check is check]
+
+
+def applied(base: MobileBase, remedies: tuple[Remedy, ...]) -> MobileBase:
+    """What a designer does with remedies on an unturned base: move a deck socket by a move's
+    x and y, or set a base spec."""
+    for remedy in remedies:
+        match remedy:
+            case Move():
+                _, socket = remedy.mount.split(".")
+                base = replace(
+                    base,
+                    deck=tuple(
+                        replace(seat, xy=(seat.xy[0] + remedy.by[0], seat.xy[1] + remedy.by[1]))
+                        if seat.name == socket
+                        else seat
+                        for seat in base.deck
+                    ),
+                )
+            case ChangeBase(field=BaseField.TRACK_M | BaseField.WHEELBASE_M):
+                base = replace(base, drive=replace(base.drive, **{remedy.field.value: remedy.to}))
+            case ChangeBase():
+                base = replace(base, **{remedy.field.value: remedy.to})
+    return base
 
 
 def test_four_arms_on_a_base_compose_with_warnings_and_no_refusal() -> None:
@@ -74,6 +101,12 @@ def test_arms_placed_overlapping_are_refused_for_collision() -> None:
     assert collision.check is Check.COLLISION_AT_REST
     assert (collision.entry, collision.other) == ("left", "right")
     assert isinstance(collision.detail, Collision) and collision.detail.fraction == 1.0
+    # It says which member to move, on which mount, by how much; doing that clears it.
+    (move,) = collision.remedies
+    assert isinstance(move, Move) and (move.entry, move.mount) == ("right", "base.right")
+    assert move.by[1] < 0.0 and "base.right" in collision.message
+    fixed = replace(build, placed=(Placed("base", applied(base, (move,)).module),))
+    assert of(checked(fixed), Check.COLLISION_AT_REST) == []
 
 
 def test_an_overloaded_base_is_refused() -> None:
@@ -82,6 +115,9 @@ def test_an_overloaded_base_is_refused() -> None:
     assert payload.check is Check.PAYLOAD and payload.entry == "base"
     assert isinstance(payload.detail, Payload)
     assert payload.detail.capacity_kg == 3.0 < payload.detail.load_kg
+    (rating,) = payload.remedies
+    assert rating == ChangeBase("base", BaseField.PAYLOAD_KG, rating.to)
+    assert refusals(checked(four_arms(applied(four_arm_base(payload_kg=3.0), (rating,))))) == ()
 
 
 def test_arms_reaching_together_off_a_narrow_base_are_warned() -> None:
@@ -91,6 +127,12 @@ def test_arms_reaching_together_off_a_narrow_base_are_warned() -> None:
     (tips,) = of(findings, Check.STABILITY_EXTENDED)
     assert tips.severity is Severity.WARNING
     assert isinstance(tips.detail, Stability) and tips.detail.margin_m < 0.0
+    assert {remedy.field for remedy in tips.remedies if isinstance(remedy, ChangeBase)} >= {
+        BaseField.TRACK_M,
+        BaseField.WHEELBASE_M,
+    }
+    wider = applied(narrow, tips.remedies)
+    assert of(checked(four_arms(wider)), Check.STABILITY_EXTENDED) == []
 
 
 def test_the_checks_fit_the_interactive_budget() -> None:

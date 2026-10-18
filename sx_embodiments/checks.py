@@ -20,6 +20,13 @@ rendered description, each answer a :class:`Finding` on the member it is about:
   (outside is a refusal), and with every arm reaching the same way at once, in each of
   :data:`DIRECTIONS` directions (outside is a warning).
 
+Each problem says what to change, as typed :data:`Remedy` values and in its message: which
+member to :class:`Move`, on which mount, by how much (found by bisecting the move until the
+collision clears, or the nearest tool point reaches the table), or which base spec to set to
+what (:class:`ChangeBase`: the rating that carries the load, the track and wheelbase whose
+support holds the centre of mass), so a designer agent reads a preview and fixes the design
+itself. ``tests/test_checks.py`` holds that applying a remedy clears its finding.
+
 Every check is sampled, deterministic for a seed, and bounded so a preview stays interactive:
 ``tests/test_checks.py`` holds the four-arm base under :data:`BUDGET_S` (0.14 s measured on an
 idle Apple M-series laptop; the first check in a process also reads its meshes' bounds once,
@@ -115,9 +122,44 @@ Detail = Collision | WorkspaceOverlap | WorkSurfaceReach | Payload | Stability
 
 
 @dataclass(frozen=True, slots=True)
+class Move:
+    """Move ``entry`` by ``by`` metres in the build's root frame, at ``mount``: the deck or
+    host socket it is mated on (``host.socket``, whose position moves), or ``pose`` for a
+    placement (whose pose moves)."""
+
+    entry: str
+    mount: str
+    by: tuple[float, float, float]
+
+
+class BaseField(StrEnum):
+    """A mobile base's spec a remedy changes."""
+
+    PAYLOAD_KG = "payload_kg"
+    TRACK_M = "track_m"
+    WHEELBASE_M = "wheelbase_m"
+    LENGTH_M = "length_m"
+    WIDTH_M = "width_m"
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeBase:
+    """Set the base ``entry``'s ``field`` to ``to``."""
+
+    entry: str
+    field: BaseField
+    to: float
+
+
+Remedy = Move | ChangeBase
+"""One change to the composition that clears, or eases, a finding."""
+
+
+@dataclass(frozen=True, slots=True)
 class Finding:
     """One check's result on ``entry`` (a placement or mate; empty for the whole build) and,
-    for a pair, on ``other``."""
+    for a pair, on ``other``. ``remedies`` are the changes that clear it, any one of them
+    enough unless the message says otherwise; the message says them in words."""
 
     entry: str
     check: Check
@@ -125,6 +167,7 @@ class Finding:
     message: str
     detail: Detail | None = None
     other: str = ""
+    remedies: tuple[Remedy, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +244,7 @@ class _Body:
     arms: Mapping[str, tuple[str, Affine]]  # member -> its tool link and the tool in it
     bases: Mapping[str, MobileBase]
     hosts: Mapping[str, str]  # mated member -> the member it is mated on
+    mounts: Mapping[str, str]  # member -> "host.socket", or "pose" for a placement
     payloads: Mapping[str, float]  # member -> its arms' rated payload
     rest: Mapping[str, float]
 
@@ -254,6 +298,10 @@ class _Body:
             arms=arms,
             bases={name: module.base for name, module in modules.items() if module.base},
             hosts={mate.name: mate.host for mate in build.mates},
+            mounts={
+                **{entry.name: "pose" for entry in build.placed},
+                **{mate.name: f"{mate.host}.{mate.socket}" for mate in build.mates},
+            },
             payloads=payloads,
             rest={
                 joint.name: min(max(0.0, joint.bounds[0]), joint.bounds[1])
@@ -320,6 +368,26 @@ class _Body:
             return False
 
         return [member for member in self.hosts if on(member)]
+
+    def origin(self, member: str, pose: Mapping[str, Affine]) -> tuple[float, float, float]:
+        """Where ``member``'s root link is: the link of its own that hangs from another's."""
+        for joint in self.joints:
+            if self.owner.get(joint.child) == member and self.owner.get(joint.parent) != member:
+                transform = pose[joint.child]
+                return (transform[3], transform[7], transform[11])
+        return (0.0, 0.0, 0.0)
+
+    def reach(self, member: str, poses: Sequence[Mapping[str, Affine]]) -> float:
+        """How far any of ``member``'s geometry gets from its root link, over ``poses``."""
+        x0, y0, z0 = self.origin(member, poses[0])
+        own = [link for link in self.spheres if self.owner.get(link) == member]
+        farthest = 0.0
+        for pose in poses:
+            for link in own:
+                centre, radius = self.spheres[link]
+                x, y, z = _point(pose[link], centre)
+                farthest = max(farthest, math.dist((x, y, z), (x0, y0, z0)) + radius)
+        return farthest
 
     def mass_of(self, members: Iterable[str]) -> float:
         chosen = set(members)
@@ -666,25 +734,45 @@ def _colliding(
 def _collisions(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Finding]:
     pairs = _pairs(body)
     at_rest = _colliding(body, poses[0], pairs)
-    moving: dict[tuple[str, str], tuple[int, tuple[str, str]]] = {}
-    for pose in poses[1:]:
+    moving: dict[tuple[str, str], tuple[list[int], tuple[str, str]]] = {}
+    for index, pose in enumerate(poses[1:], start=1):
         for members, links in _colliding(body, pose, pairs, at_rest).items():
-            count, first = moving.get(members, (0, links))
-            moving[members] = (count + 1, first)
-    findings = [
-        Finding(
-            entry=entry,
-            other=other_entry,
-            check=Check.COLLISION_AT_REST,
-            severity=Severity.REFUSAL,
-            message=f"{entry} and {other_entry} overlap at rest ({link} meets {other})",
-            detail=Collision(link, other, 1.0),
+            moving.setdefault(members, ([], links))[0].append(index)
+    findings: list[Finding] = []
+    for (entry, other_entry), (link, other) in at_rest.items():
+        moved, away = _movable(body, entry, other_entry)
+        direction = _away(body, poses[0], away, moved)
+        distance = _separation(body, [poses[0]], pairs, moved, away, direction)
+        move = _move(body, moved, direction, distance)
+        findings.append(
+            Finding(
+                entry=entry,
+                other=other_entry,
+                check=Check.COLLISION_AT_REST,
+                severity=Severity.REFUSAL,
+                message=(
+                    f"{entry} and {other_entry} overlap at rest ({link} meets {other}): "
+                    f"{_words(move)}"
+                ),
+                detail=Collision(link, other, 1.0),
+                remedies=(move,),
+            )
         )
-        for (entry, other_entry), (link, other) in at_rest.items()
-    ]
     sampled = max(len(poses) - 1, 1)
-    for (entry, other_entry), (count, (link, other)) in moving.items():
-        fraction = count / sampled
+    for (entry, other_entry), (seen, (link, other)) in moving.items():
+        fraction = len(seen) / sampled
+        moved, away = _movable(body, entry, other_entry)
+        # A member reaching into what carries it rises off it; two neighbours move apart.
+        direction = (
+            (0.0, 0.0, 1.0)
+            if away in body.bases and moved in body.carried_by(away)
+            else _away(body, poses[0], away, moved)
+        )
+        colliding = [poses[index] for index in seen[:_REMEDY_SAMPLES]]
+        distance = _separation(body, colliding, pairs, moved, away, direction)
+        remedies: tuple[Remedy, ...] = (
+            (_move(body, moved, direction, distance),) if distance < _FARTHEST else ()
+        )
         findings.append(
             Finding(
                 entry=entry,
@@ -693,12 +781,128 @@ def _collisions(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Find
                 severity=Severity.WARNING,
                 message=(
                     f"{entry} and {other_entry} can collide: they overlap in "
-                    f"{fraction:.0%} of sampled poses"
+                    f"{fraction:.0%} of sampled poses; coordinate their motion"
+                    + "".join(f", or {_words(remedy)}" for remedy in remedies)
                 ),
                 detail=Collision(link, other, fraction),
+                remedies=remedies,
             )
         )
     return findings
+
+
+def _movable(body: _Body, entry: str, other: str) -> tuple[str, str]:
+    """Which of two members to move and which to move it away from: the one mated on a
+    socket rather than the one placed, else the second."""
+    if other in body.hosts or entry not in body.hosts:
+        return other, entry
+    return entry, other
+
+
+def _away(
+    body: _Body, pose: Mapping[str, Affine], fixed: str, moved: str
+) -> tuple[float, float, float]:
+    """The horizontal unit direction from ``fixed``'s root link to ``moved``'s; +y when
+    they stand on one spot."""
+    (x0, y0, _), (x1, y1, _) = body.origin(fixed, pose), body.origin(moved, pose)
+    length = math.hypot(x1 - x0, y1 - y0)
+    return (0.0, 1.0, 0.0) if length < 1e-6 else ((x1 - x0) / length, (y1 - y0) / length, 0.0)
+
+
+def _carried(body: _Body, member: str) -> set[str]:
+    return {member, *body.carried_by(member)}
+
+
+def _separation(
+    body: _Body,
+    poses: Sequence[Mapping[str, Affine]],
+    pairs: Mapping[tuple[str, str], list[_Pair]],
+    moved: str,
+    fixed: str,
+    direction: tuple[float, float, float],
+) -> float:
+    """How far ``moved`` (and what it carries) must go along ``direction`` to clear
+    ``fixed`` in every one of ``poses``, to the centimetre plus one; :data:`_FARTHEST` when
+    even that does not."""
+    shifted = _carried(body, moved)
+    relevant = {
+        members: links
+        for members, links in pairs.items()
+        if fixed in members and shifted & set(members)
+    }
+
+    def clear(distance: float) -> bool:
+        offset = tuple(value * distance for value in direction)
+        return not any(
+            _colliding(
+                body,
+                {
+                    link: _shift(transform, offset)
+                    if body.owner.get(link) in shifted
+                    else transform
+                    for link, transform in pose.items()
+                },
+                relevant,
+            )
+            for pose in poses
+        )
+
+    low, high = 0.0, _FARTHEST
+    if not clear(high):
+        return _FARTHEST
+    while high - low > 0.005:
+        middle = (low + high) / 2
+        low, high = (low, middle) if clear(middle) else (middle, high)
+    return math.ceil(high * 100) / 100 + 0.01
+
+
+#: The farthest a remedy moves a member; beyond it, moving is not the fix.
+_FARTHEST: Final = 1.0
+#: The colliding sampled poses a motion remedy is fit to.
+_REMEDY_SAMPLES: Final = 16
+
+
+def _shift(transform: Affine, offset: Sequence[float]) -> Affine:
+    t = list(transform)
+    t[3], t[7], t[11] = t[3] + offset[0], t[7] + offset[1], t[11] + offset[2]
+    return tuple(t)
+
+
+def _move(body: _Body, member: str, direction: tuple[float, float, float], distance: float) -> Move:
+    return Move(
+        member,
+        body.mounts.get(member, "pose"),
+        (
+            round(direction[0] * distance, 3),
+            round(direction[1] * distance, 3),
+            round(direction[2] * distance, 3),
+        ),
+    )
+
+
+def _words(remedy: Remedy) -> str:
+    """A remedy as the designer reads it."""
+    match remedy:
+        case Move():
+            x, y, z = remedy.by
+            where = (
+                "its pose"
+                if remedy.mount == "pose"
+                else f"the socket it is mated on ({remedy.mount})"
+            )
+            distance = math.sqrt(x * x + y * y + z * z)
+            if abs(x) < 1e-9 and abs(y) < 1e-9 and remedy.mount != "pose":
+                return (
+                    f"raise {remedy.entry} {z:.2f} m on a riser at the socket it is mated on "
+                    f"({remedy.mount})"
+                )
+            return (
+                f"move {remedy.entry} by {distance:.2f} m (x {x:+.2f}, y {y:+.2f}, z {z:+.2f} "
+                f"in the root frame) by moving {where}"
+            )
+        case ChangeBase():
+            unit = "kg" if remedy.field is BaseField.PAYLOAD_KG else "m"
+            return f"set {remedy.entry}'s {remedy.field.value} to {remedy.to:g} {unit}"
 
 
 def _members(body: _Body, link: str, other: str) -> tuple[str, str]:
@@ -760,13 +964,15 @@ def _workspaces(
             and (cell := (math.floor(x / VOXEL_M), math.floor(y / VOXEL_M))) in table
         }
         if not reached[arm]:
+            move = _toward(body, arm, points, surface, low, high)
             findings.append(
                 Finding(
                     entry=arm,
                     check=Check.WORK_SURFACE_REACH,
                     severity=Severity.WARNING,
-                    message=f"{arm} reaches none of the work surface",
+                    message=f"{arm} reaches none of the work surface: {_words(move)}",
                     detail=WorkSurfaceReach(0.0),
+                    remedies=(move,),
                 )
             )
     common = set(table)
@@ -783,6 +989,38 @@ def _workspaces(
             )
         )
     return findings
+
+
+def _toward(
+    body: _Body,
+    arm: str,
+    points: Sequence[tuple[float, float, float]],
+    surface: WorkSurface,
+    low: float,
+    high: float,
+) -> Move:
+    """The smallest move that brings one of ``arm``'s sampled tool points onto the table."""
+    (cx, cy, _), (length, width) = surface.centre, surface.size
+
+    def gap(point: tuple[float, float, float]) -> tuple[float, float, float]:
+        x, y, z = point
+        dx = max(cx - length / 2 - x, 0.0, x - cx - length / 2)
+        dy = max(cy - width / 2 - y, 0.0, y - cy - width / 2)
+        dz = max(low - z, 0.0, z - high)
+        return (
+            math.copysign(dx, cx - x),
+            math.copysign(dy, cy - y),
+            math.copysign(dz, (low + high) / 2 - z),
+        )
+
+    best = min((gap(point) for point in points), key=lambda item: math.hypot(*item))
+    distance = math.hypot(*best)
+    direction = (
+        (best[0] / distance, best[1] / distance, best[2] / distance)
+        if distance > 0
+        else (1.0, 0.0, 0.0)
+    )
+    return _move(body, arm, direction, math.ceil((distance + VOXEL_M) * 100) / 100)
 
 
 def _table(surface: WorkSurface) -> frozenset[tuple[int, int]]:
@@ -815,6 +1053,8 @@ def _bases(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Finding]:
         carried = body.carried_by(name)
         load = body.mass_of(carried) + sum(body.payloads.get(member, 0.0) for member in carried)
         if load > base.payload_kg:
+            change = ChangeBase(name, BaseField.PAYLOAD_KG, math.ceil(load * 10) / 10)
+            heaviest = max(carried, key=lambda member: body.mass_of(_carried(body, member)))
             findings.append(
                 Finding(
                     entry=name,
@@ -822,9 +1062,12 @@ def _bases(body: _Body, poses: Sequence[Mapping[str, Affine]]) -> list[Finding]:
                     severity=Severity.REFUSAL,
                     message=(
                         f"{base.label} carries {load:.1f} kg, over its {base.payload_kg:.1f} kg "
-                        "rating"
+                        f"rating: {_words(change)} (a base rated for it), or carry "
+                        f"{load - base.payload_kg:.1f} kg less ({heaviest} and what it carries "
+                        f"weigh {body.mass_of(_carried(body, heaviest)):.1f} kg)"
                     ),
                     detail=Payload(load, base.payload_kg),
+                    remedies=(change,),
                 )
             )
         findings.extend(_stability(body, name, base, [name, *carried], poses))
@@ -875,6 +1118,7 @@ def _stability(
     findings: list[Finding] = []
     margin = _margin(polygon, mx / mass, my / mass)
     if margin < 0.0:
+        widen = _widen(name, base, frame, (mx / mass, my / mass))
         findings.append(
             Finding(
                 entry=name,
@@ -882,9 +1126,11 @@ def _stability(
                 severity=Severity.REFUSAL,
                 message=(
                     f"the centre of mass lies {-margin:.3f} m outside {base.label}'s support "
-                    "at rest: it tips over"
+                    f"at rest: it tips over; {' and '.join(_words(change) for change in widen)}"
+                    ", or move the heavy members toward its middle"
                 ),
                 detail=Stability(margin, (mx / mass, my / mass, mz / mass)),
+                remedies=widen,
             )
         )
         return findings
@@ -907,6 +1153,7 @@ def _stability(
             worst = (here, centre)
     assert worst is not None
     if worst[0] < 0.0:
+        widen = _widen(name, base, frame, worst[1][:2])
         findings.append(
             Finding(
                 entry=name,
@@ -914,10 +1161,46 @@ def _stability(
                 severity=Severity.WARNING,
                 message=(
                     "with every arm reaching the same way, the centre of mass leaves "
-                    f"{base.label}'s support by {-worst[0]:.3f} m: "
-                    "limit how far they reach together"
+                    f"{base.label}'s support by {-worst[0]:.3f} m: limit how far they reach "
+                    f"together, or {' and '.join(_words(change) for change in widen)}"
                 ),
                 detail=Stability(worst[0], worst[1]),
+                remedies=widen,
             )
         )
     return findings
+
+
+def _widen(
+    name: str, base: MobileBase, frame: Affine, centre: Sequence[float]
+) -> tuple[ChangeBase, ...]:
+    """The track and wheelbase (and the chassis they need) that put ``centre`` back over
+    the support with a 2 cm margin: the support scaled by its gauge of the point."""
+    # The centre in the base's own frame, the support's: the inverse of a rigid frame.
+    dx, dy = centre[0] - frame[3], centre[1] - frame[7]
+    x, y = frame[0] * dx + frame[4] * dy, frame[1] * dx + frame[5] * dy
+    support = base.support
+    gauge = 0.0
+    for (x0, y0), (x1, y1) in zip(support, (*support[1:], support[0]), strict=True):
+        # Outward normal n and offset c of the edge, n.p <= c inside.
+        nx, ny = y1 - y0, x0 - x1
+        offset = nx * x0 + ny * y0
+        gauge = max(gauge, (nx * x + ny * y) / offset)
+    scale = gauge * 1.02 + 0.02 / max(min(base.drive.track_m, base.drive.wheelbase_m), 0.01)
+    track = math.ceil(base.drive.track_m * scale * 100) / 100
+    wheelbase = math.ceil(base.drive.wheelbase_m * scale * 100) / 100
+    changes = [
+        ChangeBase(name, BaseField.TRACK_M, track),
+        ChangeBase(name, BaseField.WHEELBASE_M, wheelbase),
+    ]
+    if track > base.width_m + 2 * base.drive.wheel_width_m:
+        changes.append(
+            ChangeBase(
+                name,
+                BaseField.WIDTH_M,
+                math.ceil((track - 2 * base.drive.wheel_width_m) * 100) / 100,
+            )
+        )
+    if wheelbase > base.length_m:
+        changes.append(ChangeBase(name, BaseField.LENGTH_M, wheelbase))
+    return tuple(changes)
