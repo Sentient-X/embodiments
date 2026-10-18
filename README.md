@@ -72,6 +72,20 @@ the humanoid's head's place. `composition.compose_build` makes any build a norma
 at runtime. A registered rooted build's committed description is its rendering by
 `tools/compose_registered_urdfs.py`; `tests/test_assembly.py` fails when the two differ.
 
+A drivable base is designed from its specs (`mobile_base.MobileBase`: footprint, deck height,
+mass, payload rating, typed deck sockets, and a `Drive` that is differential or mecanum with its
+wheel radius, track, wheelbase and limits). `MobileBase.module` is an ordinary module whose
+description has a continuous joint per driven wheel and an inertia on every link, so arms mate
+onto its deck plug to socket: `tests/test_mobile_base.py` composes four B601 arms on one, the
+arm's plug being its base plate (`seeed-b601-base`). `Drive.wheel_velocities` and `Drive.twist`
+are what a base driver consumes, twist in and wheel speeds out, inverse of each other. No base
+motor is qualified, so the wheel axes declare `UndocumentedDrive` and no driver binds them.
+`checks.check_build` then checks a build physically: collision between members at rest (a
+refusal) and over sampled joint configurations (a warning), shared workspace between arms and
+reach of a work surface (warnings), payload against a base's rating (a refusal), and the centre
+of mass over the support polygon at rest (a refusal) and with the arms reaching together (a
+warning). `tests/test_checks.py` holds it to an interactive budget.
+
 `Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves, and a
 part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
 way from its one vendor URDF: the upper body (the robot in service) offers a neck seat, two hip

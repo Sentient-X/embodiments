@@ -301,6 +301,7 @@ B601_DM_MODULE: Final = Module(
     module_id=ModuleId("rebot-b601dm"),
     label="Seeed reBot B601-DM arm",
     description=B601_DM_URDF,
+    plug=InterfaceId("seeed-b601-base"),
     components=(body_component("arm", B601_ARM, RootMount("base_link"), limb=Limb.ARM),),
     sockets=(
         Socket(
