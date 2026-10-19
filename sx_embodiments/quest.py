@@ -337,6 +337,11 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-32": QuestApkBuildId(
             "sha256:3fca797ab8b1edc4e17338ab23b672e84298bfbeb32b0c1798b864d7dc701b61"
         ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 33 (OQC 69bc756, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): a Pod status block in the recordings menu.
+        "1.5.0-33": QuestApkBuildId(
+            "sha256:40992ce4dc0f8626c90f24d38c4da8c7935d4089bf9e6e9bd427a2f866e3b093"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
