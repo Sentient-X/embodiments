@@ -331,6 +331,12 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-31": QuestApkBuildId(
             "sha256:9d523e8e4c6d09b7adb345a899fe5edbe5f55799033e5a9db2bad06ed4cb5a32"
         ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 32 (OQC f7747bf, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): a collector signs in from Pod setup, and the
+        # left menu button has one handler.
+        "1.5.0-32": QuestApkBuildId(
+            "sha256:3fca797ab8b1edc4e17338ab23b672e84298bfbeb32b0c1798b864d7dc701b61"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
