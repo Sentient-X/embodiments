@@ -325,6 +325,12 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-28": QuestApkBuildId(
             "sha256:2b5b21f03cefe7547588876375c3a32d2f9e1748114f2fe1d7f27c33b367f1a5"
         ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 31 (OQC 46de4ca, QuestCameraLib 51a4868,
+        # libsx_rig.so sha256 e7b6eef1 from sx quest-rig ac29588cb6): Pod setup knows an
+        # enrolled headset, every check on a Factory resolves the rig from it (bounded 5 s).
+        "1.5.0-31": QuestApkBuildId(
+            "sha256:9d523e8e4c6d09b7adb345a899fe5edbe5f55799033e5a9db2bad06ed4cb5a32"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
