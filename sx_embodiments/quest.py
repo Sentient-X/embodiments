@@ -285,10 +285,17 @@ QUEST_APK_BUILD_1_4_5 = QuestApkBuildId(
 # 1.4.3, OpenQuestCapture#9): refuses to start with frozen head tracking, reports stop,
 # pause and controller state to the pod, flushes CSVs every second, writes
 # stream_manifest.json, and starts body tracking at launch. body_tracking.csv gains four
-# columns after the joints. Pose producers and conventions are unchanged. Active since the
-# pod's APK pin moved to it (sx#1307).
+# columns after the joints. Pose producers and conventions are unchanged; registered
+# when the pod's APK pin moved to it (sx#1307).
 QUEST_APK_BUILD_1_4_6 = QuestApkBuildId(
     "sha256:71ee51b9367b5152e830348c2f859c0e481f5b59c66f522cfaa544594fd9b222"
+)
+# OpenQuestCapture 1.4.7 (version code 14), built from 1.4.6 plus the controller-status
+# change at 9a2132b242aaadb7b4ab83c2d5e061c1da2d25b9: reports raw head/controller poses
+# and body shoulder poses, confidence and sample age for the pod's automatic side check.
+# Recorded pose producers and the 1.4.3 capture contract are unchanged.
+QUEST_APK_BUILD_1_4_7 = QuestApkBuildId(
+    "sha256:c1964dfcc4f8634b80d4bfd0b4b64e1ac79bbd2713a50cd74e338ce7bc6f9c4b"
 )
 # Headset-pod builds: OpenQuestCapture with the wrist rig in the one app (quest-only pod,
 # sx docs/plans/quest-only-pod-2026-10.md), each recorded on the headset's one clock. They are
@@ -372,6 +379,10 @@ REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFa
                 controller_hmd_source=QuestRawPoseSource.UNITY_LH,
                 body_source=QuestRawPoseSource.OVR_NATIVE_RH,
             ),
+            QUEST_APK_BUILD_1_4_7: QuestPoseConventionFacts(
+                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
+                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
+            ),
             **{
                 build: QuestPoseConventionFacts(
                     controller_hmd_source=QuestRawPoseSource.UNITY_LH,
@@ -385,7 +396,7 @@ REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFa
 
 # New capture is additionally pinned to one registered build. Historical
 # registry entries remain resolvable after this active identity advances.
-ACTIVE_REAL_QUEST_APK_BUILD_ID: QuestApkBuildId | None = QUEST_APK_BUILD_1_4_6
+ACTIVE_REAL_QUEST_APK_BUILD_ID: QuestApkBuildId | None = QUEST_APK_BUILD_1_4_7
 
 
 def resolve_real_quest_pose_convention(
@@ -431,6 +442,7 @@ __all__ = [
     "QUEST_APK_BUILD_1_4_4",
     "QUEST_APK_BUILD_1_4_5",
     "QUEST_APK_BUILD_1_4_6",
+    "QUEST_APK_BUILD_1_4_7",
     "REAL_QUEST_POSE_CONVENTION_FACTS",
     "SIMULATED_QUEST_APK_BUILD_ID",
     "SIMULATED_QUEST_CAPTURE_APP",
