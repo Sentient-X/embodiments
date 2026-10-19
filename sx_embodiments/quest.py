@@ -319,11 +319,11 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-26": QuestApkBuildId(
             "sha256:6aab166a88c48ea68f525b3598e762fe18ae2c2519aa0dd11af606a6d9d5787a"
         ),
-        # 2026-10-19, OpenQuestCapture 1.5.0 build 27 (OQC 4698f9a, QuestCameraLib 51a4868,
-        # libsx_rig 5e7e2ed5 from sx quest-rig fdc8a7ba70): pod_config.json written by
-        # rename, the flat enrollment request, and the rig type a laptop pod takes.
-        "1.5.0-27": QuestApkBuildId(
-            "sha256:631f1b47d8f7964e5e5474fe4ce5129b978d248ab5a6e68596b2124209544cf1"
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 28 (OQC 3240834, QuestCameraLib 51a4868,
+        # libsx_rig.so sha256 b88d099c from sx quest-rig 957b728a0e): pod_config.json written
+        # by rename, the flat enrollment request, and the rig type a laptop pod takes.
+        "1.5.0-28": QuestApkBuildId(
+            "sha256:2b5b21f03cefe7547588876375c3a32d2f9e1748114f2fe1d7f27c33b367f1a5"
         ),
     }
 )
