@@ -35,6 +35,7 @@ def test_every_multi_device_description_is_rendered_from_its_declaration() -> No
         "bimanual-so101",
         "bimanual-b601-dm",
         "b601-dm-station",
+        "panda_omron",
         "piperx-station",
         "sentient-humanoid",
         "sentient-humanoid-upper-body",

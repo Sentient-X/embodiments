@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
+from dataclasses import replace
 from functools import cache
 from math import isfinite
 
 from sx_contracts import decode
 
-from .compose import Component, body_component, sensor_component
+from .assembly import Pose
+from .checks import validate_collision_geometry
+from .compose import Component, RootMount, body_component, sensor_component
 from .embodiment import (
     Embodiment,
     _parse_assets,  # pyright: ignore[reportPrivateUsage]
@@ -29,10 +32,12 @@ from .embodiment import (
     _part_to_dict,  # pyright: ignore[reportPrivateUsage]
     _validate_urdf,  # pyright: ignore[reportPrivateUsage]
 )
-from .errors import AssemblyError, EmbodimentSchemaError
+from .errors import AssemblyError, EmbodimentSchemaError, SocketError
 from .identity import EmbodimentKind, EmbodimentName, PartId
 from .known import embodiments
 from .layout import Bounds, UndocumentedDrive
+from .mechanical import MECHANICAL_INTERFACES, InterfaceId, Module, ModuleId, Socket, carrier
+from .mobile_base import DeckSocket, Drive, DriveKind, MobileBase
 from .parts import CameraSpec, ChainSpec, ForceTorqueSpec, GripperSpec, Limb, MobileBaseSpec
 
 ComposablePart = ChainSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
@@ -172,6 +177,11 @@ def admit_part(
                 f"{subject}: link {child_link!r} needs a positive-mass inertial —"
                 " simulation refuses massless moving bodies"
             )
+    _require_mesh_closure(subject, root, mesh_paths)
+    return part
+
+
+def _require_mesh_closure(subject: str, root: ET.Element, mesh_paths: frozenset[str]) -> None:
     for mesh in root.iter("mesh"):
         filename = mesh.get("filename")
         if filename is None:
@@ -185,7 +195,315 @@ def admit_part(
                 f"{subject}: mesh reference {filename!r} does not match a staged asset"
                 " path exactly (the closure law)"
             )
-    return part
+
+
+def admit_module(
+    module_id: str,
+    label: str,
+    *,
+    urdf: bytes,
+    plug: InterfaceId | None,
+    sockets: tuple[Socket, ...],
+    part: Mapping[str, object] | None = None,
+    mesh_paths: frozenset[str] = frozenset(),
+) -> Module:
+    """Admit one authored or imported module (a plate, a bracket, a gripper, an arm), or refuse.
+
+    The module joins by registered mechanical interfaces only: its plug and every socket
+    name an interface in :data:`~sx_embodiments.mechanical.MECHANICAL_INTERFACES`, and each
+    socket sits on a link of the description. Its root link is the plug face. With ``part``
+    the module carries that one component on its root link, admitted by :func:`admit_part`;
+    without one it is a passive element, so its description moves nothing and every link
+    with mass has a finite positive one. A socket below a movable joint rides on the
+    component, whatever the caller said about carriers. An arm (a chain part) is a module of
+    its own, placed on a composition's root or plugged into a socket by its plug.
+    """
+
+    for interface in (plug, *(socket.interface for socket in sockets)):
+        if interface is not None and interface not in MECHANICAL_INTERFACES:
+            raise AssemblyError(
+                module_id, f"{interface!r} is not a registered mechanical interface"
+            )
+    try:
+        root = ET.fromstring(urdf)
+    except ET.ParseError as exc:
+        raise EmbodimentSchemaError(f"{module_id}: module description is invalid XML") from exc
+    links = {link.get("name") for link in root.iter("link")}
+    for socket in sockets:
+        if socket.link not in links:
+            raise SocketError(
+                module_id, f"{socket.name!r} sits on {socket.link!r}, which the description lacks"
+            )
+    # The composition checks read every collision shape; one they cannot is refused here.
+    validate_collision_geometry(module_id, root)
+    movable = _movable_joints(root)
+    components: tuple[Component, ...] = ()
+    if part is None:
+        if movable:
+            raise AssemblyError(
+                module_id,
+                "a passive module moves nothing; its description has movable joints "
+                + ", ".join(sorted(movable)),
+            )
+        masses = [_finite(mass.get("value"), module_id, "link mass") for mass in root.iter("mass")]
+        if not masses or any(mass <= 0.0 for mass in masses):
+            raise EmbodimentSchemaError(
+                f"{module_id}: a passive module needs a finite positive-mass inertial"
+            )
+        _require_mesh_closure(module_id, root, mesh_paths)
+    else:
+        if isinstance(part_from_dict(part), MobileBaseSpec):
+            raise AssemblyError(
+                module_id, "a mobile base is admitted from its specs (admit_base), not a part"
+            )
+        admitted = admit_part(part, urdf=urdf, mesh_paths=mesh_paths)
+        frame = _root_link(module_id, root)
+        match admitted:
+            case ChainSpec():
+                # An imported arm: one chain on its root link, the module placed on the
+                # composition's root or plugged into a socket by its declared plug. It is
+                # composed as a module, never mounted on another part as a component.
+                components = (body_component("arm", admitted, RootMount(frame), limb=Limb.ARM),)
+            case GripperSpec():
+                components = (body_component("gripper", admitted, RootMount(frame)),)
+            case CameraSpec() | ForceTorqueSpec():
+                components = (sensor_component("sensor", admitted, RootMount(frame)),)
+            case _:  # a chain or base was refused above
+                raise AssemblyError(
+                    module_id, "an authored module carries an arm, a gripper or a sensor"
+                )
+    parents = {
+        child.get("link", ""): (parent.get("link", ""), joint.get("name", ""))
+        for joint in root.iter("joint")
+        if (parent := joint.find("parent")) is not None
+        and (child := joint.find("child")) is not None
+    }
+    owners = dict.fromkeys(movable, components[0].instance) if components else {}
+    return Module(
+        module_id=ModuleId(module_id),
+        label=label,
+        description=urdf,
+        plug=plug,
+        sockets=tuple(
+            replace(socket, carrier=carrier(socket.link, parents, owners)) for socket in sockets
+        ),
+        components=components,
+    )
+
+
+def admit_base(base: MobileBase, *, urdf: bytes) -> Module:
+    """Admit an authored mobile base: its module is the one its specs make.
+
+    The description is derived, never authored, so the bytes offered must be exactly the
+    rendering of the specs; every deck socket names a registered interface; the wheels keep
+    their undocumented drive, so the base drives in simulation and is not qualified for
+    hardware until a base motor is.
+    """
+    module = base.module
+    subject = str(base.module_id)
+    for socket in module.sockets:
+        if socket.interface not in MECHANICAL_INTERFACES:
+            raise AssemblyError(
+                subject, f"{socket.interface!r} is not a registered mechanical interface"
+            )
+    if module.description != urdf:
+        raise EmbodimentSchemaError(
+            f"{subject}: a base's description is the rendering of its specs; these bytes differ"
+        )
+    return module
+
+
+MODULE_SCHEMA = "sx.authored-module/v1"
+
+
+def module_to_dict(module: Module) -> dict[str, object]:
+    """The canonical document of an authored module: what it joins by and the part it carries.
+
+    Its description and files travel beside it as their own bytes; ``module_from_dict``
+    admits the document against exactly those, so one document names one lawful module.
+    """
+    if module.base is not None:
+        return {
+            "schema": MODULE_SCHEMA,
+            "module_id": str(module.module_id),
+            "label": module.label,
+            "plug": None,
+            "sockets": [],
+            "part": None,
+            "base": _base_to_dict(module.base),
+        }
+    components = [entry for entry in module.components if isinstance(entry, Component)]
+    part = components[0].part if components else None
+    if len(components) > 1 or (part is not None and not isinstance(part, ComposablePart)):
+        raise AssemblyError(str(module.module_id), "an authored module carries at most one part")
+    return {
+        "schema": MODULE_SCHEMA,
+        "module_id": str(module.module_id),
+        "label": module.label,
+        "plug": module.plug,
+        "sockets": [
+            {
+                "name": socket.name,
+                "interface": str(socket.interface),
+                "link": socket.link,
+                "xyz": list(socket.pose.xyz),
+                "rpy": list(socket.pose.rpy),
+            }
+            for socket in module.sockets
+        ],
+        "part": None if part is None else part_to_dict(part),
+        "base": None,
+    }
+
+
+def _base_to_dict(base: MobileBase) -> dict[str, object]:
+    drive = base.drive
+    return {
+        "drive": {
+            "kind": drive.kind.value,
+            "wheel_radius_m": drive.wheel_radius_m,
+            "wheel_width_m": drive.wheel_width_m,
+            "track_m": drive.track_m,
+            "wheelbase_m": drive.wheelbase_m,
+            "max_speed_m_s": drive.max_speed_m_s,
+            "max_acceleration_m_s2": drive.max_acceleration_m_s2,
+        },
+        "length_m": base.length_m,
+        "width_m": base.width_m,
+        "deck_height_m": base.deck_height_m,
+        "mass_kg": base.mass_kg,
+        "payload_kg": base.payload_kg,
+        "deck": [
+            {
+                "name": socket.name,
+                "interface": str(socket.interface),
+                "xy": list(socket.xy),
+                "yaw": socket.yaw,
+            }
+            for socket in base.deck
+        ],
+    }
+
+
+def _base_from_dict(module_id: str, label: str, document: Mapping[str, object]) -> MobileBase:
+    entry = decode.exactly(
+        document,
+        {"drive", "length_m", "width_m", "deck_height_m", "mass_kg", "payload_kg", "deck"},
+        where="base",
+        error=EmbodimentSchemaError,
+    )
+    drive = decode.exactly(
+        decode.mapping(entry, "drive"),
+        {
+            "kind",
+            "wheel_radius_m",
+            "wheel_width_m",
+            "track_m",
+            "wheelbase_m",
+            "max_speed_m_s",
+            "max_acceleration_m_s2",
+        },
+        error=EmbodimentSchemaError,
+    )
+    try:
+        kind = DriveKind(decode.text(drive, "kind"))
+    except ValueError as error:
+        raise EmbodimentSchemaError(f"{module_id}: the drive kind is unknown") from error
+    deck: list[DeckSocket] = []
+    for raw in decode.documents(entry, "deck"):
+        seat = decode.exactly(raw, {"name", "interface", "xy", "yaw"}, error=EmbodimentSchemaError)
+        xy = decode.numbers(seat, "xy")
+        if len(xy) != 2:
+            raise EmbodimentSchemaError(f"{module_id}: a deck socket sits at two coordinates")
+        deck.append(
+            DeckSocket(
+                decode.text(seat, "name"),
+                InterfaceId(decode.text(seat, "interface")),
+                (xy[0], xy[1]),
+                decode.number(seat, "yaw"),
+            )
+        )
+    return MobileBase(
+        module_id=ModuleId(module_id),
+        label=label,
+        drive=Drive(
+            kind=kind,
+            wheel_radius_m=decode.number(drive, "wheel_radius_m"),
+            wheel_width_m=decode.number(drive, "wheel_width_m"),
+            track_m=decode.number(drive, "track_m"),
+            wheelbase_m=decode.number(drive, "wheelbase_m"),
+            max_speed_m_s=decode.number(drive, "max_speed_m_s"),
+            max_acceleration_m_s2=decode.number(drive, "max_acceleration_m_s2"),
+        ),
+        length_m=decode.number(entry, "length_m"),
+        width_m=decode.number(entry, "width_m"),
+        deck_height_m=decode.number(entry, "deck_height_m"),
+        mass_kg=decode.number(entry, "mass_kg"),
+        payload_kg=decode.number(entry, "payload_kg"),
+        deck=tuple(deck),
+    )
+
+
+def module_from_dict(
+    document: Mapping[str, object], *, urdf: bytes, mesh_paths: frozenset[str] = frozenset()
+) -> Module:
+    """Parse and admit an authored module's document against its exact description."""
+    entry = decode.exactly(
+        document,
+        {"schema", "module_id", "label", "plug", "sockets", "part", "base"},
+        where="module",
+        error=EmbodimentSchemaError,
+    )
+    if decode.text(entry, "schema") != MODULE_SCHEMA:
+        raise EmbodimentSchemaError(f"module: schema must be {MODULE_SCHEMA!r}")
+    module_id = decode.text(entry, "module_id")
+    if entry.get("base") is not None:
+        if entry.get("plug") is not None or entry.get("part") is not None:
+            raise EmbodimentSchemaError(f"{module_id}: a base stands on the floor and has no part")
+        base = _base_from_dict(
+            module_id, decode.text(entry, "label"), decode.mapping(entry, "base")
+        )
+        return admit_base(base, urdf=urdf)
+    plug = decode.optional_text(entry, "plug")
+    sockets: list[Socket] = []
+    for raw in decode.documents(entry, "sockets"):
+        site = decode.exactly(
+            raw, {"name", "interface", "link", "xyz", "rpy"}, error=EmbodimentSchemaError
+        )
+        xyz = decode.numbers(site, "xyz")
+        rpy = decode.numbers(site, "rpy")
+        if len(xyz) != 3 or len(rpy) != 3:
+            raise EmbodimentSchemaError(f"{module_id}: a socket pose is three xyz and three rpy")
+        sockets.append(
+            Socket(
+                decode.text(site, "name"),
+                InterfaceId(decode.text(site, "interface")),
+                decode.text(site, "link"),
+                Pose((xyz[0], xyz[1], xyz[2]), (rpy[0], rpy[1], rpy[2])),
+            )
+        )
+    part = entry.get("part")
+    return admit_module(
+        module_id,
+        decode.text(entry, "label"),
+        urdf=urdf,
+        plug=None if plug is None else InterfaceId(plug),
+        sockets=tuple(sockets),
+        part=None if part is None else decode.mapping(entry, "part"),
+        mesh_paths=mesh_paths,
+    )
+
+
+def _root_link(subject: str, root: ET.Element) -> str:
+    children = {child.get("link") for child in root.iter("child")}
+    roots = [
+        name
+        for link in root.iter("link")
+        if (name := link.get("name")) is not None and name not in children
+    ]
+    if len(roots) != 1:
+        raise EmbodimentSchemaError(f"{subject}: a module description has exactly one root link")
+    return roots[0]
 
 
 def _finite(value: str | None, subject: str, what: str, default: float | None = None) -> float:

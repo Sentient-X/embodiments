@@ -508,7 +508,8 @@ def packaged_asset(
 
 
 def generated_description(urdf: bytes, sources: tuple[ProvenancedAsset, ...]) -> ProvenancedAsset:
-    """Retain a composed URDF under its byte identity, with all source licences."""
+    """Retain a composed URDF under its byte identity, with all source licences; one generated
+    from no packaged source (a mobile base from its specs) is first-party, Apache-2.0."""
     digest = Sha256Digest(hashlib.sha256(urdf).hexdigest())
     relpath = f"generated/{digest}/body.urdf"
     target = cache_root() / relpath
@@ -530,7 +531,9 @@ def generated_description(urdf: bytes, sources: tuple[ProvenancedAsset, ...]) ->
             repository="https://github.com/Sentient-X/embodiments",
             revision=str(digest),
             path=relpath,
-            license_id=" AND ".join(sorted({asset.provenance.license_id for asset in sources})),
+            license_id=" AND ".join(
+                sorted({asset.provenance.license_id for asset in sources}) or ["Apache-2.0"]
+            ),
             generator="sx_embodiments.compose_embodiments/v1",
         ),
     )

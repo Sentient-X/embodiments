@@ -326,6 +326,34 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-26": QuestApkBuildId(
             "sha256:6aab166a88c48ea68f525b3598e762fe18ae2c2519aa0dd11af606a6d9d5787a"
         ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 28 (OQC 3240834, QuestCameraLib 51a4868,
+        # libsx_rig.so sha256 b88d099c from sx quest-rig 957b728a0e): pod_config.json written
+        # by rename, the flat enrollment request, and the rig type a laptop pod takes.
+        "1.5.0-28": QuestApkBuildId(
+            "sha256:2b5b21f03cefe7547588876375c3a32d2f9e1748114f2fe1d7f27c33b367f1a5"
+        ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 31 (OQC 46de4ca, QuestCameraLib 51a4868,
+        # libsx_rig.so sha256 e7b6eef1 from sx quest-rig ac29588cb6): Pod setup knows an
+        # enrolled headset, every check on a Factory resolves the rig from it (bounded 5 s).
+        "1.5.0-31": QuestApkBuildId(
+            "sha256:9d523e8e4c6d09b7adb345a899fe5edbe5f55799033e5a9db2bad06ed4cb5a32"
+        ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 32 (OQC f7747bf, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): a collector signs in from Pod setup, and the
+        # left menu button has one handler.
+        "1.5.0-32": QuestApkBuildId(
+            "sha256:3fca797ab8b1edc4e17338ab23b672e84298bfbeb32b0c1798b864d7dc701b61"
+        ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 33 (OQC 69bc756, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): a Pod status block in the recordings menu.
+        "1.5.0-33": QuestApkBuildId(
+            "sha256:40992ce4dc0f8626c90f24d38c4da8c7935d4089bf9e6e9bd427a2f866e3b093"
+        ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 35 (OQC f7c07ee, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): the recordings menu's Pod card in the app's style.
+        "1.5.0-35": QuestApkBuildId(
+            "sha256:20c3c9ccd6c630b28fea440d6dda320c488ae624020101407ccc7994f5f8cc74"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (

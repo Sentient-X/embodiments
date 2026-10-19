@@ -456,7 +456,8 @@ SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_BUILD: Final = Build(
 
 def _infrared(name: str) -> CameraSpec:
     """One D435 infrared imager at 848x480 and 60 fps, its optics from Intel's stated field of
-    view (87 x 58 degrees, the depth module's, which the imagers set)."""
+    view (87 x 58 degrees, the depth module's, which the imagers set). The focal lengths are
+    rounded to a micro-pixel, so every platform's ``tan`` gives the same digits and digest."""
     return CameraSpec(
         part_id=PartId(f"realsense-d435-{name}"),
         model=SensorModel("realsense_d435"),
@@ -466,11 +467,11 @@ def _infrared(name: str) -> CameraSpec:
             width=848,
             height=480,
             image_from_camera=(
-                424.0 / math.tan(math.radians(87.0) / 2),
+                round(424.0 / math.tan(math.radians(87.0) / 2), 6),
                 0.0,
                 424.0,
                 0.0,
-                240.0 / math.tan(math.radians(58.0) / 2),
+                round(240.0 / math.tan(math.radians(58.0) / 2), 6),
                 240.0,
                 0.0,
                 0.0,

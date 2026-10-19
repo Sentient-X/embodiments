@@ -1,0 +1,104 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="omron_ld">
+  <!-- Omron LD base, projected from robosuite omron_mobile_base.xml beside this file (pinned in robosuite.commit): the wheeled_base meshes and collision box, and the fixed_support column. Robots sit at the support's top, 0.70 m up, at the torso's lowest height. -->
+  <link name="omron_ld">
+    <inertial>
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <mass value="1.33" />
+      <inertia ixx="0.04371266666666667" ixy="0" ixz="0" iyy="0.07031266666666666" iyz="0" izz="0.08201666666666667" />
+    </inertial>
+    <visual name="omron_0_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_0.obj" />
+      </geometry>
+      <material name="Steel_-_Satin">
+        <color rgba="0.627451 0.627451 0.627451 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_1_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_1.obj" />
+      </geometry>
+      <material name="Opaque(25,23,27)">
+        <color rgba="0.098039 0.090196 0.105882 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_2_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_2.obj" />
+      </geometry>
+      <material name="Opaque(185,185,185)">
+        <color rgba="0.725490 0.725490 0.725490 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_3_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_3.obj" />
+      </geometry>
+      <material name="Opaque(128,128,128)">
+        <color rgba="0.501961 0.501961 0.501961 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_4_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_4.obj" />
+      </geometry>
+      <material name="Opaque(190,190,190)">
+        <color rgba="0.745098 0.745098 0.745098 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_5_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_5.obj" />
+      </geometry>
+      <material name="Opaque(255,255,255)">
+        <color rgba="1.000000 1.000000 1.000000 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_6_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_6.obj" />
+      </geometry>
+      <material name="Opaque(202,209,236)">
+        <color rgba="0.792157 0.819608 0.925490 1.000000" />
+      </material>
+    </visual>
+    <visual name="omron_7_vis">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/robosuite/omron_mobile_base/omron_7.obj" />
+      </geometry>
+      <material name="Opaque(63,63,63)">
+        <color rgba="0.250980 0.250980 0.250980 1.000000" />
+      </material>
+    </visual>
+    <visual name="fixed_support">
+      <origin xyz="-0.05 0 0.5" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.12" length="0.4" />
+      </geometry>
+      <material name="Shell005_001_001_002_001">
+        <color rgba="1.000000 1.000000 1.000000 1.000000" />
+      </material>
+    </visual>
+    <collision name="fixed_support">
+      <origin xyz="-0.05 0 0.5" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.12" length="0.4" />
+      </geometry>
+    </collision>
+    <collision name="pedestal_feet_col">
+      <origin xyz="-0.2 0 0.192" rpy="0 0 0" />
+      <geometry>
+        <box size="0.7 0.5 0.38" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

@@ -137,7 +137,12 @@ def compose_embodiments(
 
 
 def compose_build(
-    build: Build, *, name: str, label: str, kind: EmbodimentKind = EmbodimentKind.ROBOT
+    build: Build,
+    *,
+    name: str,
+    label: str,
+    kind: EmbodimentKind = EmbodimentKind.ROBOT,
+    sources: tuple[ProvenancedAsset, ...] = (),
 ) -> Embodiment:
     """A body made of modules at runtime: a gripper on another robot's flange, a camera on a
     wrist, a neck in a head's place, as one normal Embodiment.
@@ -145,12 +150,14 @@ def compose_build(
     The build renders with each module's mesh references resolved to its packaged source, and
     the generated description is retained like :func:`compose_embodiments`' with every source's
     licence. Every interface check is the build's own; this declares geometry only.
+    ``sources`` are the files of modules authored outside the registry (their description
+    bytes name their meshes by Catalog location), retained beside the packaged ones.
     """
     if build.root is None:
         raise CompositionError(name, "a runtime composition is a rooted build")
     urdf = build.assembly(mesh_uri=_mesh_uri).urdf()
     components = build.components()
-    sources: dict[tuple[str, str], ProvenancedAsset] = {}
+    retained_sources: dict[tuple[str, str], ProvenancedAsset] = {}
     packaged = [
         asset
         for component in components
@@ -161,12 +168,11 @@ def compose_build(
         file = source(entry.module.description)
         if isinstance(file, PackagedAsset):
             packaged.append(file)
-    for asset in packaged:
-        provenanced = asset.provenanced_asset()
+    for provenanced in (*(asset.provenanced_asset() for asset in packaged), *sources):
         retained = replace(provenanced, asset=replace(provenanced.asset, role=AssetRole.OTHER))
-        sources[(retained.uri, str(retained.sha256))] = retained
-    description = generated_description(urdf, tuple(sources.values()))
-    assets = (*sources.values(), description)
+        retained_sources[(retained.uri, str(retained.sha256))] = retained
+    description = generated_description(urdf, tuple(retained_sources.values()))
+    assets = (*retained_sources.values(), description)
     composed = Embodiment(
         name=EmbodimentName(name),
         label=label,
