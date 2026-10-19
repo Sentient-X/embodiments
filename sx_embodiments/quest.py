@@ -342,6 +342,11 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-33": QuestApkBuildId(
             "sha256:40992ce4dc0f8626c90f24d38c4da8c7935d4089bf9e6e9bd427a2f866e3b093"
         ),
+        # 2026-10-19, OpenQuestCapture 1.5.0 build 35 (OQC f7c07ee, QuestCameraLib 51a4868,
+        # libsx_rig.so e7b6eef1 as build 31): the recordings menu's Pod card in the app's style.
+        "1.5.0-35": QuestApkBuildId(
+            "sha256:20c3c9ccd6c630b28fea440d6dda320c488ae624020101407ccc7994f5f8cc74"
+        ),
     }
 )
 REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
