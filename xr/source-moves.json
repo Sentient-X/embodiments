@@ -14,13 +14,17 @@
     },
     {
       "source": "experience/data-factory/capture-app/pico/Runtime/PicoTrackingCapture.cs",
-      "target": "xr/pico/Runtime/PicoTrackingCapture.cs",
-      "sha256": "3c72b0de81de501de3d3e14565e36c6879ebd0d990578a64b2754e77e49521f0"
+      "target": "xr/unity/Runtime/UnityXrTrackingSource.cs",
+      "sha256": "3c72b0de81de501de3d3e14565e36c6879ebd0d990578a64b2754e77e49521f0",
+      "adaptation": "Vendor-neutral namespace/class name; observation fields and sampling unchanged.",
+      "target_sha256": "f21bd5ea63192fd1a149bf354475c4ca1d0bb20536cec1ccc6e68d397f375ce6"
     },
     {
       "source": "experience/data-factory/capture-app/pico/Runtime/PicoTrackingCapture.cs.meta",
-      "target": "xr/pico/Runtime/PicoTrackingCapture.cs.meta",
-      "sha256": "b7179868e1e8462132b25f3597fc02ef36fd8698929c845b5403142b54698b44"
+      "target": "xr/unity/Runtime/UnityXrTrackingSource.cs.meta",
+      "sha256": "b7179868e1e8462132b25f3597fc02ef36fd8698929c845b5403142b54698b44",
+      "adaptation": "Vendor-neutral namespace/class name; observation fields and sampling unchanged.",
+      "target_sha256": "b7179868e1e8462132b25f3597fc02ef36fd8698929c845b5403142b54698b44"
     },
     {
       "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/CameraMetadata.kt",

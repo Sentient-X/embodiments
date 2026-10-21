@@ -7,9 +7,9 @@ The consuming manifest resolves the SDK locally; this package does not vendor it
 
 `PicoCameraCapture` owns the stereo camera handles, bounded initialization, capability
 and calibration checks, RGBA buffers, acquisition clock evidence and asynchronous
-cleanup. `PicoTrackingCapture` owns the tracking-origin subscription and samples
-head/controller pose validity and host sampling intervals. Their source and `.meta`
-files moved byte-for-byte from SX `77f779f6355b5ee3b22395cc0fc81e5e6b3b22be`;
+cleanup. The vendor-neutral tracking reader is now
+[`UnityXrTrackingSource`](../unity/README.md), shared by both headsets with unchanged
+observation semantics. The camera source and `.meta` files moved byte-for-byte from SX `77f779f6355b5ee3b22395cc0fc81e5e6b3b22be`;
 see [source moves](../source-moves.json). Namespaces remain `SentientCapture.Pico`.
 There is no new redistribution license grant in this move.
 
