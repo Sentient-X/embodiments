@@ -1,0 +1,11 @@
+{
+  "name": "SentientEmbodiments.Pico",
+  "references": [
+    "ByteDance.PICO.XR",
+    "Unity.XR.Management"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "ENABLE_PICO_XR_SDK"
+  ]
+}
