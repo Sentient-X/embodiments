@@ -4,10 +4,10 @@ using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.XR;
 
-namespace SentientCapture.Pico
+namespace SentientEmbodiments.XR
 {
     /// <summary>Observed Unity XR poses, never relabelled as camera-time poses.</summary>
-    public sealed class PicoTrackingCapture : IDisposable
+    public sealed class UnityXrTrackingSource : IDisposable
     {
         private bool running;
         private XRInputSubsystem originSource;
