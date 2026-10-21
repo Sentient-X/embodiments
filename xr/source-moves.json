@@ -1,0 +1,76 @@
+{
+  "repository": "https://github.com/Sentient-X/sx.git",
+  "commit": "77f779f6355b5ee3b22395cc0fc81e5e6b3b22be",
+  "files": [
+    {
+      "source": "experience/data-factory/capture-app/pico/Runtime/PicoCameraCapture.cs",
+      "target": "xr/pico/Runtime/PicoCameraCapture.cs",
+      "sha256": "85b3a04a213faf5018957d7ca01636c050b57233e7abd62368055c21e5fb77b9"
+    },
+    {
+      "source": "experience/data-factory/capture-app/pico/Runtime/PicoCameraCapture.cs.meta",
+      "target": "xr/pico/Runtime/PicoCameraCapture.cs.meta",
+      "sha256": "736d6a0491b4a117d5ae8d77b265d2829a5084c97c09161ccdf1a7ee126062fc"
+    },
+    {
+      "source": "experience/data-factory/capture-app/pico/Runtime/PicoTrackingCapture.cs",
+      "target": "xr/pico/Runtime/PicoTrackingCapture.cs",
+      "sha256": "3c72b0de81de501de3d3e14565e36c6879ebd0d990578a64b2754e77e49521f0"
+    },
+    {
+      "source": "experience/data-factory/capture-app/pico/Runtime/PicoTrackingCapture.cs.meta",
+      "target": "xr/pico/Runtime/PicoTrackingCapture.cs.meta",
+      "sha256": "b7179868e1e8462132b25f3597fc02ef36fd8698929c845b5403142b54698b44"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/CameraMetadata.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/core/CameraMetadata.kt",
+      "sha256": "c1211545a2608001a81710523c3325e54f685a7568aa5fe4b809c2271c2bda84"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/CameraPermissionManager.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/core/CameraPermissionManager.kt",
+      "sha256": "2505ab960d4efce0512dd305115ff12c29a2c78d0e8d0b88ad09b342f764b55b"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/CameraSessionManager.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/core/CameraSessionManager.kt",
+      "sha256": "52053f3d918fd3a6ff8a35d1415f841451e8ab22b0d7270d75aa4e8189d9be98"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/EventDispatcher.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/core/EventDispatcher.kt",
+      "sha256": "d041675bea4309506fb20c9b4fce8bd9f2901b74af162ec495e4f7c4b19cb812"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/core/ISurfaceProvider.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/core/ISurfaceProvider.kt",
+      "sha256": "4583d0b6fd716f8ed7b00c6f36bff9fc839fcdf56640eaee64a7a77d5275cbe9"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/helper/CameraPermissionRequestActivity.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/helper/CameraPermissionRequestActivity.kt",
+      "sha256": "e4374cc6d0aa81fdcb5ad90e13816c29ef9b0f6d18a44ef52ec242c6f3337950"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/usb/RigUsbBridge.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/usb/RigUsbBridge.kt",
+      "sha256": "86c3791c2a9afcd5ff0d58a41e08769ce8d451fb2a67471e5f2c047e110d80e3"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/usb/UsbCameraPermissionPolicy.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/usb/UsbCameraPermissionPolicy.kt",
+      "sha256": "bebb263cf08681f8efb375fbe4f23c426e8c00d285b3463283209b5f8bbd373c"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/main/java/com/samusynth/questcamera/json/JsonExtensions.kt",
+      "target": "android/capture/src/main/java/com/samusynth/questcamera/json/JsonExtensions.kt",
+      "sha256": "bb1522f63b8678957a0fe0e2222e349ecdbf46521759cd9b8e17bac9534778eb"
+    },
+    {
+      "source": "experience/data-factory/capture-app/android/capture/src/test/java/com/samusynth/questcamera/usb/UsbCameraPermissionPolicyTest.kt",
+      "target": "android/capture/src/test/java/com/samusynth/questcamera/usb/UsbCameraPermissionPolicyTest.kt",
+      "sha256": "0fb362a8d1083e8e6fe37b92530265de0f86cf41f359c2fe3fb354f5b19b4c8c"
+    }
+  ]
+}

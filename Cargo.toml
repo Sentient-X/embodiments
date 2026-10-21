@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
+    "drivers/sx-yubi",
+    "drivers/sx-capture-usb",
+    "drivers/sx-capture-linux",
     "drivers/sx-embodiment-drivers",
     "drivers/sx-damiao-can",
     "drivers/sx-feetech-serial",
@@ -18,6 +21,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+sx-yubi = { path = "drivers/sx-yubi" }
 sx-embodiment-drivers = { path = "drivers/sx-embodiment-drivers" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
