@@ -770,6 +770,13 @@ impl ActuatorChain for Body {
         }
     }
 
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        Ok(match self {
+            Self::B601(chain) => chain.read_positions()?,
+            Self::HumanoidUpperBody(chain) => chain.read_positions()?,
+        })
+    }
+
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
         Ok(match self {
             Self::B601(chain) => chain.command(joints)?,

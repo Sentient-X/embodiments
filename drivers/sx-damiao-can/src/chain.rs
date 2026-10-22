@@ -622,6 +622,32 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         &self.commandable
     }
 
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, DamiaoChainError> {
+        // Drain older answers before taking the high-water mark. A cached open/command
+        // answer cannot masquerade as a fresh read. 0xCC requests feedback only.
+        self.control.recv()?;
+        let before = self.feedback_counts()?;
+        for index in 0..self.motors.len() {
+            self.control.refresh_motor_status(self.bus_id(index))?;
+        }
+        self.await_answers(&before)?;
+        self.expect_all(
+            &before,
+            if self.enabled {
+                MotorState::Enabled
+            } else {
+                MotorState::Disabled
+            },
+        )?;
+        Ok(Some(
+            self.motors
+                .iter()
+                .zip(self.feedback()?)
+                .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
+                .collect(),
+        ))
+    }
+
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
         if self.stop_pending {
             return Err(DamiaoChainError::StopPending);

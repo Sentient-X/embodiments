@@ -69,3 +69,35 @@ fn another_bodys_drive_opens_nothing() {
         Err(BodyError::Instance { .. })
     ));
 }
+
+#[cfg(feature = "sim")]
+#[test]
+fn measured_upper_body_reads_are_fresh_complete_and_never_enable_or_move() {
+    use sx_damiao_can::{chain::DamiaoChain, sim::Sim};
+    use sx_embodiment_drivers::ActuatorChain;
+    let axes = humanoid_upper_body(&drive("sentient-humanoid-upper-body", "measured")).unwrap();
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).unwrap();
+    let first = chain.read_positions().unwrap().unwrap();
+    assert_eq!(first.len(), 11);
+    let id = axes[0].axis.binding.bus_id;
+    bus.0.lock().unwrap().motors.get_mut(&id).unwrap().q = 0.2;
+    let second = chain.read_positions().unwrap().unwrap();
+    assert!((second[0] - axes[0].axis.joint_from_actuator(0.2)).abs() < 0.001);
+    assert!((second[0] - first[0]).abs() > 0.1);
+    assert!(
+        bus.0
+            .lock()
+            .unwrap()
+            .motors
+            .values()
+            .all(|motor| motor.state == 0)
+    );
+    assert!((bus.0.lock().unwrap().motors[&id].q - 0.2).abs() < 1e-12);
+    // The successful prior cache cannot satisfy a subsequent missing motor reply.
+    bus.0.lock().unwrap().dead.insert(id);
+    assert!(chain.read_positions().is_err());
+    bus.0.lock().unwrap().dead.remove(&id);
+    bus.0.lock().unwrap().motors.get_mut(&id).unwrap().state = 8;
+    assert!(chain.read_positions().is_err());
+}
