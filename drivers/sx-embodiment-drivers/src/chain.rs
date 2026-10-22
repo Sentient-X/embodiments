@@ -162,6 +162,16 @@ pub trait ActuatorChain {
     /// link's failure or an actuator whose answer contradicts the command.
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error>;
 
+    /// Poll measured joint coordinates without enabling an actuator or changing its target.
+    /// Every returned value must come from an answer newer than the start of this poll.
+    /// `None` means this chain has no read-only observation implementation.
+    ///
+    /// # Errors
+    /// Refuses an incomplete, stale, faulted or unavailable observation.
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        Ok(None)
+    }
+
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
     /// prove. The chain stays disabled until the next command.
     fn stop(&mut self) -> StopReport;
