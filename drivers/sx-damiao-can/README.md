@@ -15,7 +15,7 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601` and
 
 | Item | Path |
 |---|---|
-| The chain trait | `sx_embodiment_drivers::ActuatorChain` (`axes`, `commandable`, `command`, `stop`, `stop_budget`); `DamiaoChainError` implements `ChainError` |
+| The chain trait | `sx_embodiment_drivers::ActuatorChain` (`axes`, `commandable`, `command`, `read_positions`, `stop`, `stop_budget`); `DamiaoChainError` implements `ChainError` |
 | A command's evidence | `sx_embodiment_drivers::Receipt<MotorFeedback>`: `evidence`, `observed` (joint coordinates), `feedback` (one `MotorFeedback` per motor) |
 | A stop's proof | `sx_embodiment_drivers::StopReport`, and `StopReport::prove()` for a `ProvenStop` |
 | The port | `sx_embodiment_drivers::can::{CanFrame, CanPort}` |
@@ -26,6 +26,10 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601` and
 | Limits found at open | `DamiaoChain::limits()`: the `PMAX`, `VMAX`, `TMAX` each motor reported and is scaled by |
 | Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms; 192 ms for the humanoid upper body's eleven) |
 
+- **Read-only positions.** `read_positions` drains older replies, snapshots feedback counters,
+  requests status with the vendor's `0xCC` operation, and requires a fresh, expected-state reply
+  from every motor. It applies the existing instance calibration to all coordinates. A missing
+  or faulted reply refuses the whole read; it never enables torque or sends a position target.
 - **One bridge, two chains.** Seeed ships one USB2CAN bridge for all seven motors
   (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud); open both
   chains on clones of one `sx_embodiment_drivers::can::SharedCanPort` over a `Usb2CanPort`. The

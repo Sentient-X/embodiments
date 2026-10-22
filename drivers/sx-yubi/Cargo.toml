@@ -1,0 +1,16 @@
+[package]
+name = "sx-yubi"
+description = "YUBI camera and encoder device identities and wire contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "allow"
