@@ -33,6 +33,7 @@ from .rby1 import RBY1_SPEC
 from .sentient_rwh import SENTIENT_RWH_SPEC
 from .so101 import BIMANUAL_SO101_SPEC, SO101_SPEC
 from .stararm102 import STARARM102_SPEC
+from .static_upper_body import STATIC_UPPER_BODY_SPEC
 from .stations import PIPERX_STATION_SPEC
 from .universal_robots import UR5E_SPEC, UR10E_SPEC
 from .yor import YOR_SPEC
@@ -114,6 +115,10 @@ DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] =
     ),
     SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC.name: DevelopmentEmbodiment(
         spec=SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC,
+        reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
+    ),
+    STATIC_UPPER_BODY_SPEC.name: DevelopmentEmbodiment(
+        spec=STATIC_UPPER_BODY_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
     ),
 }

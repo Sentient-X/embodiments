@@ -107,6 +107,14 @@ a socket fitted with the CAD's D435, a camera module that adds its own optical f
 grippers are modules whose servo and jaw no source describes, so the body with them,
 `sentient-humanoid-upper-body-grippers`, is a development body.
 
+`sentient-static-upper-body` ("Allisa") is a different robot: a yaw torso with two seven-joint
+arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge
+(`MountKind.CLAMP_EDGE`). Its description is `tools/compose_static_upper_body_urdf.py`'s
+rendering of the file as received, kept under `source/`. The rendering moves the elbow range
+onto the flexion side, cuts forearm yaw to one turn, and estimates mass and collision from
+the meshes' convex hulls; `tests/test_static_upper_body.py` re-renders it byte for byte. No
+source names its motors, so it is a development body.
+
 Observation and controller semantics are owned by `sx-actions`, which depends on this
 package and derives spaces from the complete object:
 
