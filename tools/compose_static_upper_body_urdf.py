@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the Sentient static upper body URDF from Allisa's received description.
+"""Build the Sentient static upper body URDF from its received description.
 
-The source is ``assets/sentient_static_upper_body/source/allisa_feedback.urdf``, the
-``allisa_feedback_portable`` package as received on 2026-10-24, byte for byte. Every change
+The source is ``assets/sentient_static_upper_body/source/received.urdf``, the description
+package as received on 2026-10-24, byte for byte. Every change
 below is a defect in that file for simulation or retargeting; ``known/static_upper_body.py``
 says why each one is made and what evidence would replace it.
 
@@ -25,9 +25,10 @@ from scipy.spatial import ConvexHull  # pyright: ignore[reportMissingTypeStubs] 
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "assets/sentient_static_upper_body"
-SOURCE = ASSET / "source/allisa_feedback.urdf"
+SOURCE = ASSET / "source/received.urdf"
 TARGET = ASSET / "sentient_static_upper_body.urdf"
 SOURCE_MESH_PREFIX = (
+    # The received package's folder name; incidental, not the robot's name.
     "package://allisa_feedback_portable/meshes/models/allisa_current/meshes_preview/"
 )
 

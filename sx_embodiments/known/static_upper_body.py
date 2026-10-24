@@ -1,4 +1,4 @@
-"""Sentient static upper body ("Allisa"): a torso with two seven-joint arms, clamped to a table.
+"""Sentient static upper body: a torso with two seven-joint arms, clamped to a table.
 
 The robot sits on a table edge facing out from it, where it works a coffee machine: the base
 is clamped to the table top, so the description's root ``base_link`` is the table surface
@@ -9,7 +9,7 @@ ending in a two-finger gripper with a ``*_gripper_tcp`` frame, and an SO-101 arm
 used as a six-joint neck whose last joint tilts a ZED camera (``ZED_camera`` frame).
 
 The description is ``tools/compose_static_upper_body_urdf.py``'s rendering of the
-``allisa_feedback_portable`` package as received on 2026-10-24 (maintainer ``suprajs``,
+description package as received on 2026-10-24 (maintainer ``suprajs``,
 licence ``Proprietary``), kept byte for byte under ``source/``. The rendering changes the
 received file where it cannot be right, and each change is replaced by evidence when it comes:
 
@@ -57,12 +57,12 @@ from ._authoring import bounded_layout
 _RECEIVED: Final = AssetProvenance(
     repository="https://github.com/Sentient-X/sx-embodiments",
     revision="31de0542f8ffa16020e9fbd03081a4a97b4d08cc6f6bd83213c2d2ba724915ee",
-    path="assets/sentient_static_upper_body/source/allisa_feedback.urdf",
+    path="assets/sentient_static_upper_body/source/received.urdf",
     license_id="LicenseRef-Sentient-Proprietary",
 )
 
 STATIC_UPPER_BODY_SOURCE_URDF: Final = packaged_asset(
-    relpath="sentient_static_upper_body/source/allisa_feedback.urdf",
+    relpath="sentient_static_upper_body/source/received.urdf",
     sha256="31de0542f8ffa16020e9fbd03081a4a97b4d08cc6f6bd83213c2d2ba724915ee",
     size_bytes=249047,
     format=AssetFormat.URDF,
@@ -249,7 +249,7 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
 
 STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-static-upper-body"),
-    label="Sentient static upper body (Allisa)",
+    label="Sentient static upper body",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-static-upper-body"),
     build=Build.of(STATIC_UPPER_BODY_MODULE),
