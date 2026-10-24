@@ -61,16 +61,6 @@ _RECEIVED: Final = AssetProvenance(
     license_id="LicenseRef-Sentient-Proprietary",
 )
 
-STATIC_UPPER_BODY_SOURCE_URDF: Final = packaged_asset(
-    relpath="sentient_static_upper_body/source/received.urdf",
-    sha256="31de0542f8ffa16020e9fbd03081a4a97b4d08cc6f6bd83213c2d2ba724915ee",
-    size_bytes=249047,
-    format=AssetFormat.URDF,
-    role=AssetRole.OTHER,
-    provenance=_RECEIVED,
-    media_type="application/xml",
-)
-
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
     sha256="54c53d3d3f8d13f9f4c21e6e19b18b125a6dea809ce6de320da5bc660a85aa49",
@@ -260,5 +250,7 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
         half_extents=(0.0952, 0.055),
         centre=(0.0402, 0.0),
     ),
-    extra_assets=(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_SOURCE_URDF),
+    # The received file stays in the asset tree as provenance only: its package:// mesh
+    # paths are the received folder's, so it is not a loadable asset of this body.
+    extra_assets=(STATIC_UPPER_BODY_URDF,),
 )

@@ -46,3 +46,13 @@ def test_the_body_is_a_table_clamped_development_body() -> None:
         assert isinstance(elbow.bounds, Bounds)
         ends = (elbow.bounds.lower, elbow.bounds.upper)
         assert min(abs(end - straight) for end in ends) < 1e-9
+
+
+def test_the_description_materializes_with_its_meshes() -> None:
+    """Every attached URDF's references resolve, so MuJoCo and URDF loaders can read it."""
+    from sx_embodiments.materialize import materialized
+
+    robot = embodiment_from_definition(DEVELOPMENT_EMBODIMENTS[STATIC_UPPER_BODY_SPEC.name].spec)
+    path = materialized(robot)
+    assert path.name == "sentient_static_upper_body.urdf"
+    assert (path.parent / "meshes/collision/base_link.stl").is_file()
