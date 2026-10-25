@@ -41,6 +41,10 @@ Hold the camera still. It prints the rate on both clocks, the mean specific forc
 the sensor's axes, and the up direction, roll and pitch of the mount link (`ZED_camera`): the
 camera's tilt from level. It only reads.
 
+`--stream` prints instead one JSON line per 50 ms window, until `--seconds` or until stopped:
+`{"t": <unix seconds>, "pitch_deg", "roll_deg", "g"}`, the window's mean on the mount link, `t`
+the host wall clock at the window's middle, for aligning tilt against other host-stamped logs.
+
 ## Departures from zed-open-capture
 
 `src/report.rs` lists them: REP-103 units, the device clock reported as it is (no rebasing onto

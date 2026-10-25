@@ -2,29 +2,49 @@
 //!
 //! ```text
 //! sx-imu-still --plan <sx.media-plan/v3 json> --instance <instance id> [--sensor <name>] [--seconds N]
+//! sx-imu-still --stream --plan ... --instance ... [--sensor <name>] [--seconds N]
 //! ```
+//!
+//! With `--stream` it prints instead one JSON line per 50 ms window of host time, until
+//! `--seconds` (if given) or until stopped: `{"t": <unix seconds>, "pitch_deg", "roll_deg", "g"}`,
+//! the window's mean specific force carried onto the mount link (`ZED_camera` for a ZED) as its
+//! pitch (nose down +) and roll (left side up +), and that force's magnitude in m/s². `t` is the
+//! host wall clock midway between the window's first and last sample, for aligning against other
+//! host-stamped logs.
 //!
 //! Prints the sample rate on the device's and the host's clocks, the mean specific force and the
 //! gyroscope bias on the sensor's axes, and the up direction, roll and pitch of the link the
 //! sensor is mounted on: the plan's `mount_from_sensor` carries the axes there. Read-only: it
 //! streams the sensor and moves nothing.
 
+use std::io::Write;
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use sx_embodiment_drivers::{InertialSource, MediaPlan, Stillness, Tilt};
+use sx_embodiment_drivers::{
+    InertialSample, InertialSensor, InertialSource, MediaPlan, Stillness, Tilt,
+};
+
+/// One `--stream` line's window of host time.
+const WINDOW: Duration = Duration::from_millis(50);
 
 struct Options {
     plan: String,
     instance: String,
     sensor: Option<String>,
-    seconds: f64,
+    seconds: Option<f64>,
+    stream: bool,
 }
 
 fn options() -> Result<Options, String> {
     let mut arguments = std::env::args().skip(1);
-    let (mut plan, mut instance, mut sensor, mut seconds) = (None, None, None, 5.0);
+    let (mut plan, mut instance, mut sensor, mut seconds, mut stream) =
+        (None, None, None, None, false);
     while let Some(flag) = arguments.next() {
+        if flag == "--stream" {
+            stream = true;
+            continue;
+        }
         let value = arguments
             .next()
             .ok_or_else(|| format!("{flag} takes a value"))?;
@@ -33,11 +53,13 @@ fn options() -> Result<Options, String> {
             "--instance" => instance = Some(value),
             "--sensor" => sensor = Some(value),
             "--seconds" => {
-                seconds = value
-                    .parse()
-                    .ok()
-                    .filter(|seconds: &f64| seconds.is_finite() && *seconds > 0.0)
-                    .ok_or_else(|| format!("{value} is not a positive number of seconds"))?;
+                seconds = Some(
+                    value
+                        .parse()
+                        .ok()
+                        .filter(|seconds: &f64| seconds.is_finite() && *seconds > 0.0)
+                        .ok_or_else(|| format!("{value} is not a positive number of seconds"))?,
+                );
             }
             _ => return Err(format!("unknown flag {flag}")),
         }
@@ -47,7 +69,67 @@ fn options() -> Result<Options, String> {
         instance: instance.ok_or("--instance is required")?,
         sensor,
         seconds,
+        stream,
     })
+}
+
+fn unix_seconds(at: SystemTime) -> f64 {
+    at.duration_since(UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_secs_f64())
+}
+
+/// One JSON line for a window of samples, or `None` for an empty window.
+#[allow(clippy::cast_precision_loss)] // a window holds a few dozen samples
+fn window_line(sensor: &InertialSensor, window: &[InertialSample]) -> Option<String> {
+    let (first, last) = (window.first()?, window.last()?);
+    let mut sum = [0.0; 3];
+    for sample in window {
+        for (total, value) in sum.iter_mut().zip(sample.acceleration_mps2) {
+            *total += value;
+        }
+    }
+    let mean = sum.map(|total| total / window.len() as f64);
+    let tilt = Tilt::of_specific_force(sensor.in_mount(mean))?;
+    let g = mean.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let t = f64::midpoint(
+        unix_seconds(first.captured.wall),
+        unix_seconds(last.captured.wall),
+    );
+    Some(format!(
+        "{{\"t\": {t:.4}, \"pitch_deg\": {:.3}, \"roll_deg\": {:.3}, \"g\": {g:.4}}}",
+        tilt.pitch_rad.to_degrees(),
+        tilt.roll_rad.to_degrees()
+    ))
+}
+
+/// Print a line per [`WINDOW`] until `seconds`, if given, or until stdout closes.
+fn stream(
+    sensor: &InertialSensor,
+    source: &mut impl InertialSource,
+    seconds: Option<f64>,
+) -> Result<(), String> {
+    let started = Instant::now();
+    let limit = seconds.map(Duration::from_secs_f64);
+    let mut stdout = std::io::stdout().lock();
+    let mut window = Vec::new();
+    let mut opened = Instant::now();
+    while limit.is_none_or(|limit| started.elapsed() < limit) {
+        window.push(source.next().map_err(|error| error.to_string())?);
+        if opened.elapsed() >= WINDOW {
+            if let Some(line) = window_line(sensor, &window) {
+                // A closed pipe (a reader that stopped) ends the stream, not an error.
+                if writeln!(stdout, "{line}")
+                    .and_then(|()| stdout.flush())
+                    .is_err()
+                {
+                    return Ok(());
+                }
+            }
+            window.clear();
+            opened = Instant::now();
+        }
+    }
+    Ok(())
 }
 
 fn degrees(v: [f64; 3]) -> [f64; 3] {
@@ -66,9 +148,12 @@ fn run() -> Result<(), String> {
     }
     .ok_or("the plan declares no such inertial sensor")?;
     let mut source = sx_stereolabs_sensors::hid::open(sensor).map_err(|error| error.to_string())?;
+    if options.stream {
+        return stream(sensor, &mut source, options.seconds);
+    }
     let firmware = source.firmware();
     let started = Instant::now();
-    let window = Duration::from_secs_f64(options.seconds);
+    let window = Duration::from_secs_f64(options.seconds.unwrap_or(5.0));
     let mut samples = Vec::new();
     let (mut magnetic, mut pressure, mut temperature) = (Vec::new(), Vec::new(), Vec::new());
     while started.elapsed() < window {
