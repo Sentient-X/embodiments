@@ -133,3 +133,56 @@ def test_every_registered_camera_view_renders_its_chain() -> None:
                 chain = view["chain"]  # type: ignore[index]
                 moving = [step for step in chain if step["type"] != "fixed"]  # type: ignore[index]
                 assert bool(moving) == bool(view["moves_with"])  # type: ignore[index]
+
+
+def test_an_inertial_sensor_is_listed_with_its_axes_unit_and_mount() -> None:
+    from sx_embodiments import development_embodiments
+    from sx_embodiments.calibration import UnitSerial
+    from sx_embodiments.instance import RobotInstance, Slot, SlotKind
+    from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
+
+    body = development_embodiments["sentient-static-upper-body"]
+    instance = RobotInstance.of(
+        body.id, {Slot(SlotKind.COMPONENT, "head_imu"): UnitSerial("30371653")}, ()
+    )
+    plan = media_document(body, resolve(body, instance, ()), STATIC_UPPER_BODY_RIG)
+    (sensor,) = plan["inertial"]  # type: ignore[misc]
+    assert sensor["sensor"] == "head_imu"
+    assert sensor["model"] == "zed_2i"
+    assert sensor["unit"] == "30371653"
+    assert sensor["mount_frame"] == "ZED_camera"
+    assert sensor["rate_hz"] == 400.0
+    assert {"acceleration", "angular_velocity"} <= set(sensor["measures"])
+    # Stereolabs' RAW axes: x down, y left, z forward, a quarter turn about the ZED frame's y.
+    half = math.sqrt(0.5)
+    assert sensor["mount_from_sensor"]["rotation_xyzw"] == [0.0, half, 0.0, half]
+    assert "so101_camera_tilt_joint" in sensor["moves_with"]
+    assert sensor["root_from_mount"] is None
+    assert Embodiment.from_dict(body.to_dict()) == body
+
+
+def test_an_inertial_part_measures_motion_on_a_rigid_pose() -> None:
+    from sx_embodiments.errors import PartValidationError
+    from sx_embodiments.identity import PartId
+    from sx_embodiments.known.zed import zed_2i_imu
+    from sx_embodiments.parts import InertialQuantity, InertialSpec, SensorModel
+
+    source = zed_2i_imu().source
+    with pytest.raises(PartValidationError):
+        InertialSpec(
+            PartId("x"),
+            SensorModel("x"),
+            100.0,
+            (InertialQuantity.ACCELERATION,),
+            ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+            source,
+        )
+    with pytest.raises(PartValidationError):
+        InertialSpec(
+            PartId("x"),
+            SensorModel("x"),
+            100.0,
+            (InertialQuantity.ACCELERATION, InertialQuantity.ANGULAR_VELOCITY),
+            ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 2.0)),
+            source,
+        )

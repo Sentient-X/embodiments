@@ -90,6 +90,8 @@ from .parts import (
     ForceTorqueSpec,
     GraspKind,
     GripperSpec,
+    InertialQuantity,
+    InertialSpec,
     Limb,
     MimicJoint,
     MobileBaseSpec,
@@ -639,6 +641,23 @@ def _part_to_dict(part: Part) -> dict[str, object]:
         return common | {"kind": "mobile_base", "layout": _layout_to_dict(part.layout)}
     if isinstance(part, ForceTorqueSpec):
         return common | {"kind": "force_torque", "rate_hz": part.rate_hz}
+    if isinstance(part, InertialSpec):
+        translation, rotation = part.mount_from_sensor
+        return common | {
+            "kind": "inertial",
+            "sensor_model": part.model,
+            "rate_hz": part.rate_hz,
+            "measures": [quantity.value for quantity in part.measures],
+            "mount_from_sensor": {
+                "translation_m": list(translation),
+                "rotation_xyzw": list(rotation),
+            },
+            "source": {
+                "repository": part.source.repository,
+                "revision": part.source.revision,
+                "path": part.source.path,
+            },
+        }
     return common | {"kind": "device", "description": part.description}
 
 
@@ -724,7 +743,7 @@ def _parse_component(document: decode.Document) -> Component:
     elif attachment_kind == "sensor":
         if limb is not None:
             raise EmbodimentSchemaError(f"{attachment_entry.where} sensor has a limb")
-        if not isinstance(part, CameraSpec | ForceTorqueSpec):
+        if not isinstance(part, CameraSpec | ForceTorqueSpec | InertialSpec):
             raise EmbodimentSchemaError(f"{attachment_entry.where} sensor has a non-sensor part")
         attachment = SensorAttachment(part)
     else:
@@ -769,6 +788,7 @@ def _parse_part(document: decode.Document) -> Part:
         "camera": common | {"sensor_model", "modality", "fps", "optics"},
         "mobile_base": common | {"layout"},
         "force_torque": common | {"rate_hz"},
+        "inertial": common | {"sensor_model", "rate_hz", "measures", "mount_from_sensor", "source"},
         "device": common | {"description"},
     }
     expected = expected_by_kind.get(kind)
@@ -842,6 +862,34 @@ def _parse_part(document: decode.Document) -> Part:
             return ForceTorqueSpec(
                 part_id=part_id,
                 rate_hz=decode.optional_number(entry, "rate_hz"),
+            )
+        if kind == "inertial":
+            pose = decode.exactly(
+                decode.mapping(entry, "mount_from_sensor"), {"translation_m", "rotation_xyzw"}
+            )
+            translation = decode.numbers(pose, "translation_m")
+            rotation = decode.numbers(pose, "rotation_xyzw")
+            if len(translation) != 3 or len(rotation) != 4:
+                raise EmbodimentSchemaError(f"{pose.where} is a translation and a quaternion")
+            source = decode.exactly(
+                decode.mapping(entry, "source"), {"repository", "revision", "path"}
+            )
+            return InertialSpec(
+                part_id=part_id,
+                model=SensorModel(decode.text(entry, "sensor_model")),
+                rate_hz=decode.number(entry, "rate_hz"),
+                measures=tuple(
+                    InertialQuantity(quantity) for quantity in decode.texts(entry, "measures")
+                ),
+                mount_from_sensor=(
+                    (translation[0], translation[1], translation[2]),
+                    (rotation[0], rotation[1], rotation[2], rotation[3]),
+                ),
+                source=FactSource(
+                    repository=decode.text(source, "repository"),
+                    revision=decode.text(source, "revision"),
+                    path=decode.text(source, "path"),
+                ),
             )
         return DeviceSpec(
             part_id=part_id,
@@ -1245,6 +1293,16 @@ def _validate_urdf(
         raise EmbodimentSchemaError(
             f"{name}: camera frames are not declared camera_optical: "
             f"{', '.join(sorted(non_optical))}"
+        )
+    missing_inertial = {
+        component.mount.frame
+        for component in components
+        if isinstance(component.part, InertialSpec)
+    } - links.keys()
+    if missing_inertial:
+        raise EmbodimentSchemaError(
+            f"{name}: inertial sensor mount frames are absent from the authoritative URDF: "
+            f"{', '.join(sorted(missing_inertial))}"
         )
     operator_frames = {
         frame for mount in operator_mounts for frame in (mount.root_frame, mount.attachment_frame)

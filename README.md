@@ -184,13 +184,15 @@ instance the caller is configured as, so another unit's zeros are refused;
 `BodyBindings::calibrated` then refuses a drive of another body. Every Damiao opener takes one.
 
 What a built robot streams comes from the same resolution: `sx_embodiments.media.media_document`
-renders `sx.media-plan/v2`, one track per declared camera with its resolved optics and mount
+renders `sx.media-plan/v3`, one track per declared camera with its resolved optics and mount
 (the description's joints from root to mount link, and its pose in the root when they are all
 fixed, or the independent joints it rides on), a `MediaRig`'s declared
-stereo pair as one track left then right, and its fitted microphones.
+stereo pair as one track left then right, its fitted microphones, and every declared inertial
+sensor (an `InertialSpec` part: the product, what it measures, its axes at `mount_from_sensor` in
+the link it is mounted on, placed like a view, and the unit the instance put in its slot).
 `sx_embodiment_drivers::MediaPlan::parse(document, instance)` reads it for one robot instance,
-and a camera or microphone adapter implements `FrameSource` or `AudioSource` for one planned
-track. `sx_embodiment_drivers::kinematics::Chain::pose` evaluates a view's rendered chain at
+and a camera, microphone or IMU adapter implements `FrameSource`, `AudioSource` or
+`InertialSource` for one planned track or sensor. `sx_embodiment_drivers::kinematics::Chain::pose` evaluates a view's rendered chain at
 joint positions exactly as `Kinematics.pose` does, so a station places a camera on moving joints
 without reading the description. `tools/render_driver_bindings.py` renders the crate's
 `media-plans.json` fixture and `media-poses.json`, seeded mount poses from the description that
@@ -304,14 +306,17 @@ cargo run -p sx-embodiment-commission -- commission \
 `commission` refuses a port with no answering bridge, with several, or with a unit of another
 model, naming every candidate; `--json` prints the same for a machine.
 
-Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's
-`MediaPlan` names each track's views and the camera unit placed in each, and a camera crate
-captures exactly that.
+Cameras and inertial sensors follow the same rule through `sx_embodiment_drivers::FrameSource`
+and `InertialSource`: a robot's `MediaPlan` names each track's views and each inertial sensor, and
+the unit placed in each, and a vendor crate captures exactly that. Samples are on the sensor's own
+axes in REP-103 units; `Stillness` and `Tilt` turn a still reading into a gyro bias and the mount
+link's roll and pitch, with no product named.
 
 | Crate | Devices | Vendor SDK it drives | Consumer |
 |---|---|---|---|
 | `sx-realsense` | Intel RealSense D405, D435, D435i (colour, and the infrared pair as one stereo track) | librealsense2 2.x through [`realsense-rust`](https://gitlab.com/tangram-vision/oss/realsense-rust) 1.3.0 (Apache-2.0), behind the `sdk` feature | the `sx` station's media publisher, over `sdk::open`, once the station opens sources from its media plan |
-| `sx-uvc-stereo` | Stereolabs ZED 2i (both eyes of one side-by-side UVC frame as one stereo track; the static upper body's head) | none: USB Video Class through [`nokhwa`](https://github.com/l1npengtul/nokhwa) 0.10.11 (Apache-2.0; V4L2 on Linux, AVFoundation on macOS), behind the `capture` feature; the ZED SDK (depth, IMU) is not used | the `sx` station's media publisher, over `capture::open`, once the station opens sources from its media plan |
+| `sx-uvc-stereo` | Stereolabs ZED 2i (both eyes of one side-by-side UVC frame as one stereo track; the static upper body's head) | none: USB Video Class through [`nokhwa`](https://github.com/l1npengtul/nokhwa) 0.10.11 (Apache-2.0; V4L2 on Linux, AVFoundation on macOS), behind the `capture` feature; the ZED SDK (depth) is not used | the `sx` station's media publisher, over `capture::open`, once the station opens sources from its media plan |
+| `sx-stereolabs-sensors` | Stereolabs ZED 2i sensor module (`2b03:f881`: accelerometer and gyroscope at 400 Hz, magnetometer, barometer, temperature; the static upper body's `head_imu`) | none: its HID reports ported from Stereolabs' [`zed-open-capture`](https://github.com/stereolabs/zed-open-capture) (MIT), read through [`hidapi`](https://github.com/ruabmbua/hidapi-rs) 2.6.7 (MIT; IOHIDManager on macOS, hidraw on Linux without libudev), behind the `hid` feature | `sx-imu-still` (gravity and gyro bias of a still sensor: camera roll and pitch); the station once it reads inertial sensors from its media plan |
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
@@ -320,6 +325,8 @@ cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 cargo test -p sx-realsense --features sdk
 # on an attached ZED (macOS: the app running this needs camera access)
 cargo test -p sx-uvc-stereo --features capture --test hardware -- --ignored
+# on an attached ZED 2i's sensor module (read-only)
+cargo test -p sx-stereolabs-sensors --features hid --test hardware -- --ignored
 ```
 
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's

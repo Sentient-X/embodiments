@@ -53,7 +53,8 @@ def _uppers(layout: JointLayout) -> tuple[float, ...]:
 
 
 SensorModel = NewType("SensorModel", str)
-"""A camera product's id in the open camera-model registry (``known.cameras``).
+"""A sensor product's id in the open sensor-model registry (``cameras``): a camera, or the
+inertial unit inside one.
 
 Open, not closed: a new camera is a registry record, never a schema change. The value is
 byte-equal to the factory hardware strings (``realsense_d405``).
@@ -459,6 +460,65 @@ class ForceTorqueSpec:
             raise PartValidationError(self.part_id, "rate_hz must be positive")
 
 
+class InertialQuantity(StrEnum):
+    """What an inertial sensor measures, each on the sensor's own axes in REP-103 units."""
+
+    #: Specific force, m/s^2: at rest the sensor reads gravity's reaction, +9.8 along up.
+    ACCELERATION = "acceleration"
+    #: Angular velocity, rad/s, right-handed about each axis.
+    ANGULAR_VELOCITY = "angular_velocity"
+    #: Magnetic flux density, tesla.
+    MAGNETIC_FIELD = "magnetic_field"
+    #: Static air pressure, pascal.
+    PRESSURE = "pressure"
+    #: The sensor die's temperature, degrees Celsius.
+    TEMPERATURE = "temperature"
+
+
+@dataclass(frozen=True, slots=True)
+class InertialSpec:
+    """An inertial measurement unit: an accelerometer and a gyroscope on one set of axes.
+
+    ``model`` is the product's id in the same open registry a camera names
+    (:mod:`sx_embodiments.cameras`), so a camera's built-in IMU is the camera's product.
+    ``rate_hz`` is the rate its acceleration and angular velocity arrive at. The sensing axes
+    sit at ``mount_from_sensor`` in the frame of the link the component is mounted on
+    (translation in metres, rotation a unit quaternion x, y, z, w): a product fact, sourced by
+    ``source``, so a body never adds a description link to place an IMU inside a housing.
+    """
+
+    part_id: PartId
+    model: SensorModel
+    rate_hz: float
+    measures: tuple[InertialQuantity, ...]
+    mount_from_sensor: tuple[tuple[float, float, float], tuple[float, float, float, float]]
+    source: FactSource
+
+    def __post_init__(self) -> None:
+        if not self.model.strip():
+            raise PartValidationError(self.part_id, "inertial model id must not be empty")
+        if not math.isfinite(self.rate_hz) or self.rate_hz <= 0.0:
+            raise PartValidationError(self.part_id, "rate_hz must be positive")
+        if len(set(self.measures)) != len(self.measures) or not {
+            InertialQuantity.ACCELERATION,
+            InertialQuantity.ANGULAR_VELOCITY,
+        } <= set(self.measures):
+            raise PartValidationError(
+                self.part_id,
+                "an inertial unit measures acceleration and angular velocity, once each",
+            )
+        translation, rotation = self.mount_from_sensor
+        values = (*translation, *rotation)
+        if len(translation) != 3 or len(rotation) != 4 or not all(map(math.isfinite, values)):
+            raise PartValidationError(
+                self.part_id, "mount_from_sensor is a translation and a quaternion"
+            )
+        if abs(math.sqrt(sum(value * value for value in rotation)) - 1.0) > 1e-9:
+            raise PartValidationError(
+                self.part_id, "mount_from_sensor's rotation is not a unit quaternion"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceSpec:
     """Hardware identified but not yet kinematically described (no captured URDF/limits).
@@ -512,4 +572,12 @@ class ControlRates:
             raise PartValidationError(PartId("rates"), "low_level_hz must be positive")
 
 
-Part = ChainSpec | GripperSpec | CameraSpec | MobileBaseSpec | ForceTorqueSpec | DeviceSpec
+Part = (
+    ChainSpec
+    | GripperSpec
+    | CameraSpec
+    | MobileBaseSpec
+    | ForceTorqueSpec
+    | InertialSpec
+    | DeviceSpec
+)

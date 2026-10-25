@@ -1,6 +1,6 @@
 {
   "humanoid-head-color": {
-    "schema": "sx.media-plan/v2",
+    "schema": "sx.media-plan/v3",
     "embodiment": "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc",
     "instance": "d2177cb712284bea668a69509e706136d805d1318bb75343aaf1a19b9d8289f6",
     "tracks": [
@@ -382,10 +382,11 @@
         ]
       }
     ],
-    "microphones": []
+    "microphones": [],
+    "inertial": []
   },
   "humanoid-head-infrared": {
-    "schema": "sx.media-plan/v2",
+    "schema": "sx.media-plan/v3",
     "embodiment": "9ea3203b68bb76f452b217e665a3348cb4b1593a10263c108ed212b8ae8a256b",
     "instance": "4577fbd92927187e22d5d0d8c878f2470fbb786df056f15a3d0481224f2caa61",
     "tracks": [
@@ -1194,6 +1195,7 @@
         ]
       }
     ],
-    "microphones": []
+    "microphones": [],
+    "inertial": []
   }
 }

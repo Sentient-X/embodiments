@@ -21,7 +21,7 @@ equal to.
 ``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
 its nominal instance and for one with a measured, reversed first joint, which the crate's
 openers are tested against. ``tests/fixtures/media-plans.json`` in ``sx-embodiment-drivers``
-holds the ``sx.media-plan/v2`` documents :func:`sx_embodiments.media.media_document`
+holds the ``sx.media-plan/v3`` documents :func:`sx_embodiments.media.media_document`
 renders, which the crate's ``MediaPlan`` is tested against, and ``media-poses.json`` beside it
 holds, for each view of those plans that rides moving joints, its mount pose at seeded joint
 positions as :func:`sx_embodiments.media.mount_pose_at` answers, which the crate's evaluation of
@@ -29,7 +29,8 @@ the rendered chain is held equal to. ``tests/fixtures/media-plans.json`` in ``sx
 holds the humanoid's head D435 planned with its imagers placed by unit, as colour and as the
 infrared-pair body option, and ``tests/fixtures/media-plans.json`` in ``sx-uvc-stereo`` holds the
 static upper body's ZED 2i placed by its serial with the factory calibration Stereolabs publishes
-for it (``zed-2i-30371653.conf`` beside it). ``tests/test_driver_bindings.py`` runs the same check.
+for it (``zed-2i-30371653.conf`` beside it), its inertial sensor placed by the same serial, which
+``sx-stereolabs-sensors`` opens it by. ``tests/test_driver_bindings.py`` runs the same check.
 """
 
 import argparse
@@ -193,7 +194,8 @@ def realsense_media() -> str:
 
 
 def uvc_media() -> str:
-    """The static upper body's ZED 2i placed by serial, its eyes calibrated by the factory."""
+    """The static upper body's ZED 2i placed by serial, its eyes calibrated by the factory and
+    its inertial sensor placed by the serial its sensor module reports."""
     body = registered("sentient-static-upper-body")
     factory = zed_factory_calibration(
         ZED_FACTORY.read_bytes(),
@@ -205,7 +207,8 @@ def uvc_media() -> str:
     calibrations = (factory.left, factory.right)
     instance = RobotInstance.of(
         body.id,
-        {Slot(SlotKind.CAMERA, f"head_{eye}"): UnitSerial(f"{HEAD_ZED}/{eye}") for eye in EYES},
+        {Slot(SlotKind.CAMERA, f"head_{eye}"): UnitSerial(f"{HEAD_ZED}/{eye}") for eye in EYES}
+        | {Slot(SlotKind.COMPONENT, "head_imu"): UnitSerial(HEAD_ZED)},
         calibrations,
     )
     document = {
