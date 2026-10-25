@@ -35,8 +35,12 @@ Still open with the hardware owner: every arm joint declares 54 Nm and 0.5 rad/s
 replay human motion, and the received driver configuration caps speed at 0.25 rad/s; left and
 right do not mirror one sign convention; the right arm's first id is 0x09 where the rest of
 that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that driver's, not
-a qualification. The grippers and the SO-101 neck have no motor entry, so they stay
-undocumented drives, and the ZED stays a frame, not a sensor.
+a qualification. The right forearm yaw's entry contradicts itself: it flags
+``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
+calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
+as received until the hardware owner settles which holds. The grippers and the SO-101 neck
+have no motor entry, so they stay undocumented drives, and the ZED stays a frame, not a
+sensor.
 """
 
 from typing import Final

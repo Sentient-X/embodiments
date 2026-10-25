@@ -9,14 +9,15 @@ publish.workspace = true
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
 
-# The raw socket calls: libc is already in the lock (serialport's), no new crate.
-[target.'cfg(target_os = "linux")'.dependencies]
+# The raw socket and lock calls: libc is already in the lock (serialport's), no new crate.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 # The workspace forbids unsafe code; this crate is the one place a raw CAN socket is opened,
-# so it denies unsafe everywhere but its one socket module, where every block says why it is
-# sound.
+# so it denies unsafe everywhere but its socket and lock modules, where every block says why
+# it is sound.
 [lints.rust]
 unsafe_code = "deny"
 

@@ -18,6 +18,8 @@ sx-embodiment-drivers.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# This crate's own suites drive its simulated bus.
+sx-damiao-can = { path = ".", features = ["sim"] }
 serde.workspace = true
 # Exact float parsing: the transcripts compare decoded positions bit for bit.
 serde_json = { workspace = true, features = ["float_roundtrip"] }

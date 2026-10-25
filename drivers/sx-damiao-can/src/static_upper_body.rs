@@ -5,9 +5,14 @@
 //! puts every motor on `can1` (Linux `SocketCAN`) at 50 Hz, and its `<motor_parameters>` give
 //! each joint's send id, answer id (send id + 0x20) and MIT `kp` and `kd`. Those gains are that
 //! file's driver's, not a qualification: whole-body qualification is the station's bench work.
-//! The same file's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad with a
-//! 0.5 s feedback and 0.75 s heartbeat timeout; this crate does not apply those, the station's
-//! supervision does.
+//! The same file's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad, with a
+//! 0.5 s feedback and a 0.75 s heartbeat timeout. The heartbeat is enforced here: every motor's
+//! `TIMEOUT` register is written to 0.75 s at open ([`crate::chain`]), so an enabled motor that
+//! hears no command for that long disables itself. Speed and tracking error are not enforced by
+//! this chain: they are `sx_embodiment_drivers::Governor`'s, which bounds them only when the
+//! caller wraps the chain in it with those limits. Nothing applies the 0.5 s feedback timeout.
+//! Both forearm yaws span more than one turn, so each is commanded only within one turn of its
+//! motor's zero (`DamiaoAxis::motor_window`).
 //!
 //! The axes and their bindings are the registry's (`sx_embodiments/known/static_upper_body.py`,
 //! a development body), read from `bindings/sentient-static-upper-body.json`, which
@@ -15,6 +20,8 @@
 //! sign, every commandable range the confirmed limits. The grippers and the SO-101 neck have
 //! no motor entry and are in no chain. No bound, address, model, sign or reduction is spelled
 //! here; what is added is controller configuration, keyed by joint name.
+
+use std::time::Duration;
 
 use crate::body::{DamiaoBody, JointGains};
 
@@ -28,6 +35,8 @@ pub const MASTER_ID_OFFSET: u16 = 0x20;
 pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
     bindings: BINDINGS,
     master_id_offset: MASTER_ID_OFFSET,
+    // The received driver's heartbeat_timeout, written to every motor's TIMEOUT register.
+    can_timeout: Some(Duration::from_millis(750)),
     joints: &[
         JointGains::new("torso_joint", 40.0, 1.0),
         JointGains::new("left_shoulder_pitch_joint", 60.984, 1.091),

@@ -28,6 +28,27 @@
 //! - A stop is proven motor by motor: a fresh answer reporting disabled. A silent motor is asked
 //!   once more with `refresh_motor_status`. After an unproven stop every command is refused
 //!   until a stop is proven.
+//! - **Communication timeout.** An axis that carries a `can_timeout` has it written to the
+//!   motor's `TIMEOUT` register (0x09) at open, in RAM and never saved to flash, then confirmed
+//!   by the motor's echo and by reading the register back. Damiao's "DM-J4340-2EC User Manual
+//!   V1.1" (2026-09-08; gitee `kit-miao/DM-J4340-2EC` at `c1d567db`, `说明书/`), "Register Map"
+//!   (p. 20: `0x09 TIMEOUT`, uint32) and "Parameter Management" (p. 30: "Time base: 50 μs per
+//!   count. Only effective when the motor is enabled."): an enabled motor that hears no command
+//!   for that long leaves enable mode and reports fault 0xD, communication lost. "Write
+//!   Parameters" (p. 18): a write "takes effect immediately" and is "lost upon power-off" unless
+//!   saved. This crate never sends the save. A motor that tripped keeps reporting 0xD until it
+//!   is power-cycled or sent Damiao's clear frame (`FF..FB`, p. 17), which `DM_CAN.py` does not
+//!   carry and this crate does not send, so its stop stays unproven.
+//! - **One turn.** Damiao's joint motors report the output shaft's position from a single-turn
+//!   absolute encoder (same manual, "Motor Features", p. 5), so after power-up a joint sitting
+//!   more than half a turn from zero reads as its alias within one turn. Where an axis's motor
+//!   range spans more than one turn, its commandable range is cut to the motor's single-turn
+//!   window, -pi..pi in actuator coordinates, so this chain never drives a joint where its
+//!   position would read ambiguously after a power cycle. Where the range spans less than a
+//!   turn, every alias of a position inside it lies outside it. Either way open refuses a motor
+//!   whose disabled answer lies more than [`REST_TOLERANCE`] outside its axis's commandable
+//!   range, the motor's own reading of an aliased or out-of-range joint. A joint turned by hand
+//!   past the window while unpowered, onto an alias inside it, cannot be told apart.
 
 use std::time::Duration;
 
@@ -58,10 +79,14 @@ const KD_MAX: f64 = 5.0;
 const MAX_MOTOR_ID: u16 = 0x7FE;
 const ANSWER_POLLS: usize = 20;
 const ANSWER_POLL_INTERVAL: Duration = Duration::from_millis(1);
-/// What the link adds to each frame the stop sends, on top of the waits it takes: the USB2CAN
-/// transmit packet (30 bytes) and the motor's answer (16 bytes) at 921600 baud take under
-/// 0.6 ms, and a USB full-speed bridge adds up to a 1 ms frame of latency each way.
-const LINK_ALLOWANCE: Duration = Duration::from_millis(2);
+/// How far outside its commandable range, in actuator radians, a motor may rest at open: a
+/// joint against its hard stop reads a little past the limit the stop sits at.
+pub const REST_TOLERANCE: f64 = 0.05;
+/// A range of exactly one turn, as the humanoid's shoulder pitches declare to the URDF's
+/// rounding, is not cut: it aliases only at its two ends.
+const TURN_SLACK: f64 = 1e-6;
+/// The `TIMEOUT` register's time base: 50 µs per count.
+const TIMEOUT_COUNT: Duration = Duration::from_micros(50);
 /// The DM4340 velocity ranges Damiao publishes: `DM_CAN.py`'s row, then `damiao.h`'s.
 const DM4340_VMAX: [f64; 2] = [10.0, 8.0];
 
@@ -99,16 +124,33 @@ pub struct DamiaoAxis {
     /// The motor's own commandable range, radians, inside its model's `Q_MAX`.
     pub motor_lower: f64,
     pub motor_upper: f64,
+    /// How long the enabled motor may hear no command before it disables itself, written to
+    /// its `TIMEOUT` register at open; `None` leaves the register as the motor holds it.
+    pub can_timeout: Option<Duration>,
 }
 
 impl DamiaoAxis {
+    /// The motor range this axis is driven within, radians: the configured range, cut to the
+    /// motor's single-turn window when it spans more than one turn.
+    #[must_use]
+    pub fn motor_window(&self) -> (f64, f64) {
+        let turn = std::f64::consts::TAU;
+        if self.motor_upper - self.motor_lower > turn + TURN_SLACK {
+            let half = std::f64::consts::PI;
+            (self.motor_lower.max(-half), self.motor_upper.min(half))
+        } else {
+            (self.motor_lower, self.motor_upper)
+        }
+    }
+
     /// The joint range this axis is commanded within: the declared bounds intersected with the
-    /// motor range mapped back through the binding.
+    /// motor's window ([`DamiaoAxis::motor_window`]) mapped back through the binding.
     #[must_use]
     pub fn commandable(&self) -> CommandRange {
+        let (motor_lower, motor_upper) = self.motor_window();
         let ends = [
-            self.axis.joint_from_actuator(self.motor_lower),
-            self.axis.joint_from_actuator(self.motor_upper),
+            self.axis.joint_from_actuator(motor_lower),
+            self.axis.joint_from_actuator(motor_upper),
         ];
         CommandRange {
             lower: self.axis.lower.max(ends[0].min(ends[1])),
@@ -216,6 +258,19 @@ pub enum DamiaoChainError {
     },
     #[error("an earlier stop is unproven; motion is refused until a stop is proven")]
     StopPending,
+    #[error("bus_id {0} has a CAN timeout its TIMEOUT register cannot hold")]
+    TimeoutRange(u16),
+    #[error("bus_id {bus_id} did not confirm its TIMEOUT register at {counts} counts of 50 µs")]
+    TimeoutNotConfirmed { bus_id: u16, counts: u32 },
+    #[error(
+        "bus_id {bus_id} rests at {position} rad, outside its commandable motor range {lower}..{upper} rad; move the joint into range, or check for a joint more than half a turn from zero"
+    )]
+    RestingOutside {
+        bus_id: u16,
+        position: f64,
+        lower: f64,
+        upper: f64,
+    },
     #[error(transparent)]
     DmCan(#[from] DmCanError),
 }
@@ -283,8 +338,39 @@ fn bring_up<P: CanPort>(
             v_max: found[1],
             t_max: found[2],
         });
+        if let Some(timeout) = motor.can_timeout {
+            let counts = timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
+            write_timeout(control, bus_id, counts)?;
+        }
     }
     Ok(limits)
+}
+
+/// `timeout` in the `TIMEOUT` register's counts of 50 µs, when it is at least one count and
+/// the register can hold it.
+fn timeout_counts(timeout: Duration) -> Option<u32> {
+    u32::try_from(timeout.as_micros() / TIMEOUT_COUNT.as_micros())
+        .ok()
+        .filter(|counts| *counts > 0)
+}
+
+/// Write `counts` to the motor's `TIMEOUT` register in RAM, then require the motor's echo and
+/// a fresh read of the register to carry it.
+fn write_timeout<P: CanPort>(
+    control: &mut MotorControl<P>,
+    bus_id: u16,
+    counts: u32,
+) -> Result<(), DamiaoChainError> {
+    let refused = DamiaoChainError::TimeoutNotConfirmed { bus_id, counts };
+    control.forget_param(bus_id, DmVariable::TIMEOUT)?;
+    if !control.change_motor_param(bus_id, DmVariable::TIMEOUT, f64::from(counts))? {
+        return Err(refused);
+    }
+    control.forget_param(bus_id, DmVariable::TIMEOUT)?;
+    if control.read_motor_param(bus_id, DmVariable::TIMEOUT)? != Some(ParamValue::Uint32(counts)) {
+        return Err(refused);
+    }
+    Ok(())
 }
 
 /// Send every named motor its disable frame, whatever any answered: the last word of an open
@@ -354,7 +440,31 @@ impl<P: CanPort> DamiaoChain<P> {
         if let Err(error) = chain.settle_disabled() {
             return Err(disable_all(&mut chain.control, &chain.motors, error));
         }
+        chain.check_resting()?;
         Ok(chain)
+    }
+
+    /// Refuse a motor whose disabled answer lies outside its commandable range by more than
+    /// [`REST_TOLERANCE`], in actuator coordinates.
+    fn check_resting(&self) -> Result<(), DamiaoChainError> {
+        for (motor, range) in self.motors.iter().zip(&self.commandable) {
+            let bus_id = motor.axis.binding.bus_id;
+            let position = f64::from(self.control.motor(bus_id)?.get_position());
+            let ends = [
+                motor.axis.actuator_from_joint(range.lower),
+                motor.axis.actuator_from_joint(range.upper),
+            ];
+            let (lower, upper) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
+            if !(lower - REST_TOLERANCE..=upper + REST_TOLERANCE).contains(&position) {
+                return Err(DamiaoChainError::RestingOutside {
+                    bus_id,
+                    position,
+                    lower,
+                    upper,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Disable every motor and hold each one's disabled answer.
@@ -479,6 +589,12 @@ fn validate(motor: &DamiaoAxis, ids: &mut Vec<u16>) -> Result<(), DamiaoChainErr
     }
     if !((0.0..=KP_MAX).contains(&motor.kp) && (0.0..=KD_MAX).contains(&motor.kd)) {
         return Err(DamiaoChainError::Gains(bus_id));
+    }
+    if motor
+        .can_timeout
+        .is_some_and(|timeout| timeout_counts(timeout).is_none())
+    {
+        return Err(DamiaoChainError::TimeoutRange(bus_id));
     }
     let q_max = model.limit_param()[0];
     let range = motor.commandable();
@@ -611,21 +727,37 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
 
     /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: every
     /// motor's `disable` and its 0.01 s wait, an answer poll, a `refresh_motor_status` for
-    /// every motor that stayed silent, a second poll, and the link's allowance for each of those
-    /// frames.
+    /// every motor that stayed silent, a second poll, and the link's own allowance for each of
+    /// those frames (`CanPort::frame_allowance`, which counts a send that waits for queue room).
     fn stop_budget(&self) -> Duration {
         let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
         let polls = u32::try_from(ANSWER_POLLS - 1).unwrap_or(u32::MAX);
-        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + LINK_ALLOWANCE * motors * 2
+        let frame = self.control.port().frame_allowance();
+        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + frame * motors * 2
+    }
+
+    /// Every motor's latest answered position, in joint coordinates: from open, each stop and
+    /// each command.
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        let feedback = self.feedback().ok()?;
+        Some(
+            self.motors
+                .iter()
+                .zip(feedback)
+                .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
+                .collect(),
+        )
     }
 }
 
 impl ChainError for DamiaoChainError {
     fn failure(&self) -> ChainFailure {
         match self {
-            Self::Body(_) | Self::Target(_) | Self::Uncommandable { .. } | Self::StopPending => {
-                ChainFailure::Refused
-            }
+            Self::Body(_)
+            | Self::Target(_)
+            | Self::Uncommandable { .. }
+            | Self::StopPending
+            | Self::RestingOutside { .. } => ChainFailure::Refused,
             Self::Silent(_) => ChainFailure::Timeout,
             _ => ChainFailure::Fault,
         }

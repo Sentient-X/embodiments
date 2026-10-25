@@ -106,7 +106,7 @@ impl PortSource for SystemPorts {
                 .map(|port| Box::new(port) as Port)
                 .map_err(|error| OpenError::Port {
                     serial: serial.to_owned(),
-                    reason: format!("{interface}: {error}"),
+                    reason: error.to_string(),
                 }),
             #[cfg(all(feature = "socketcan", not(target_os = "linux")))]
             Bridge::SocketCan(interface) => Err(OpenError::Port {
@@ -129,6 +129,7 @@ mod tests {
         let device = root.join("usb").join(name);
         let interface = device.join(format!("{name}:1.0"));
         fs::create_dir_all(&interface).expect("interface");
+        fs::write(device.join("idVendor"), "2e88\n").expect("vendor");
         fs::write(device.join("serial"), format!("{serial}\n")).expect("serial");
         if let Some(tty) = tty {
             fs::create_dir_all(interface.join("tty").join(tty)).expect("tty");

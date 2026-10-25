@@ -70,11 +70,18 @@ fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
             (motor.axis.binding.sign, motor.axis.binding.reduction),
             (1, 1.0)
         );
+        // The forearm yaws span more than one turn: each is commanded within one turn of zero.
         let range = motor.commandable();
-        assert_eq!(
-            (range.lower, range.upper),
+        let expected = if joint.ends_with("forearm_yaw_joint") {
+            assert!(motor.axis.upper - motor.axis.lower > std::f64::consts::TAU);
+            (
+                motor.axis.lower.max(-std::f64::consts::PI),
+                motor.axis.upper.min(std::f64::consts::PI),
+            )
+        } else {
             (motor.axis.lower, motor.axis.upper)
-        );
+        };
+        assert_eq!((range.lower, range.upper), expected, "{joint}");
     }
 }
 

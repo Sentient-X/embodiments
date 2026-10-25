@@ -7,6 +7,11 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// What a chain budgets for one frame it sends and the answer it reads when the link names
+/// nothing longer: a USB serial bridge's, under 0.6 ms of serial time for the transmit packet
+/// and the answer at 921600 baud, and up to a 1 ms USB full-speed frame of latency each way.
+pub const FRAME_ALLOWANCE: Duration = Duration::from_millis(2);
+
 /// One classic CAN data frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CanFrame {
@@ -36,6 +41,13 @@ pub trait CanPort: Send {
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
     }
+
+    /// The longest one frame and its answer can hold a chain on this link, waits included: a
+    /// link whose `send` waits for room in a transmit queue says how long, so a chain's stop
+    /// budget stays honest. [`FRAME_ALLOWANCE`] unless the link waits longer.
+    fn frame_allowance(&self) -> Duration {
+        FRAME_ALLOWANCE
+    }
 }
 
 /// A port chosen at run time, as a station opens whichever bridge its commissioning names.
@@ -50,6 +62,10 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn sleep(&mut self, duration: Duration) {
         (**self).sleep(duration);
+    }
+
+    fn frame_allowance(&self) -> Duration {
+        (**self).frame_allowance()
     }
 }
 
@@ -91,5 +107,11 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
             Ok(mut port) => port.sleep(duration),
             Err(_) => std::thread::sleep(duration),
         }
+    }
+
+    fn frame_allowance(&self) -> Duration {
+        self.0
+            .lock()
+            .map_or(FRAME_ALLOWANCE, |port| port.frame_allowance())
     }
 }
