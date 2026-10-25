@@ -15,7 +15,7 @@ use sx_embodiment_bodies::{
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
-    ActuatorChain, AxisLimits, BodyBindings, Evidence, Governor, InstanceDrive,
+    ActuatorChain, AxisLimits, BodyBindings, Evidence, Governor, GovernorError, InstanceDrive,
 };
 use sx_feetech_serial::FeetechChainError;
 use sx_feetech_serial::sim::SimBus;
@@ -670,12 +670,12 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
     assert!(body.stop().is_proven());
 }
 
-#[test]
-fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it() {
+/// The static upper body opened on simulated buses resting where the probe found every servo,
+/// with its neck's bus.
+fn probed_body() -> (Body, SimBus, BTreeMap<String, SimBus>) {
     let drive = drive("sentient-static-upper-body");
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     let serial = probed_buses();
-    let neck = serial["5A7C118709"].clone();
     let mut bridges = Bridges {
         buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
         serial: serial.clone(),
@@ -688,27 +688,68 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
         &mut bridges,
     )
     .expect("open");
-    // Where each axis rests, held inside its declared bounds: the target.
-    let target: Vec<f64> = body
-        .last_observed()
+    (body, serial["5A7C118709"].clone(), serial)
+}
+
+/// Where each axis rests, held inside its declared bounds.
+fn rest_held(body: &Body) -> Vec<f64> {
+    body.last_observed()
         .expect("rest")
         .iter()
         .zip(body.axes())
         .map(|(rest, axis)| rest.clamp(axis.lower, axis.upper))
-        .collect();
-    // Slower than the servos' own 0.23 rad/s, so a following servo never falls behind.
-    let limits = vec![
+        .collect()
+}
+
+/// Every axis 0.2 rad/s and 0.2 rad: slower than the servos' own 0.23 rad/s, so a following
+/// servo never falls behind.
+fn bring_up_limits() -> Vec<AxisLimits> {
+    vec![
         AxisLimits {
             max_speed: 0.2,
             max_tracking_error: 0.2,
         };
         25
-    ];
-    let mut governed = Governor::new(body, limits).expect("limits");
+    ]
+}
+
+/// The tilt's lowest calibrated tick.
+const TILT_MIN: u16 = 1760;
+
+/// A clock the test moves: one 20 ms control period per command.
+#[derive(Clone)]
+struct Stepped(std::sync::Arc<std::sync::Mutex<std::time::Instant>>);
+
+impl Stepped {
+    fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            std::time::Instant::now(),
+        )))
+    }
+
+    fn tick(&self) {
+        *self.0.lock().expect("clock") += Duration::from_millis(20);
+    }
+}
+
+impl sx_embodiment_drivers::Clock for Stepped {
+    fn now(&self) -> std::time::Instant {
+        *self.0.lock().expect("clock")
+    }
+}
+
+#[test]
+fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it() {
+    let (body, neck, serial) = probed_body();
+    let target = rest_held(&body);
+    let clock = Stepped::new();
+    let mut governed =
+        Governor::with_clock(body, bring_up_limits(), clock.clone()).expect("limits");
     // Hold every axis where it rests, the out-of-range neck axes at their nearest in-range
     // position, which the servos themselves approach at their own speed.
     let mut tilt = Vec::new();
-    for _ in 0..100 {
+    for _ in 0..900 {
+        clock.tick();
         governed
             .command(&target)
             .unwrap_or_else(|error| panic!("{error}"));
@@ -717,10 +758,81 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
         }
         tilt.push(neck.present(6));
     }
-    // The camera tilt left tick 753 at the servo's pace, about 150 ticks a second, and no
-    // faster: two seconds bring it at most 300 ticks nearer its 1760 minimum (the simulated
-    // servo moves whole ticks per 20 ms step, so it lags that pace: 2 a step).
+    // The camera tilt left tick 753 at the servo's pace, about 150 ticks a second and no
+    // faster (the simulated servo moves whole ticks per 20 ms step, so it lags that pace: 2 a
+    // step), until it reached its range.
     assert!(tilt[0] > 753 && tilt[0] <= 753 + 3);
     let moved = tilt[99] - 753;
     assert!((150..=300).contains(&moved), "{moved}");
+    // It came to rest at the in-range position the governor held, the tilt's declared lower
+    // bound (tick 2265, the calibration's mid-range 2334 less 6 degrees), inside its range.
+    let held = neck.state().goal(6);
+    assert!(held > TILT_MIN, "{held}");
+    assert_eq!(*tilt.last().expect("ticks"), held);
+    // Inside, the tilt is tracked again like any axis: commanded away while its servo stalls,
+    // the governor stops the body and latches a tracking fault.
+    let mut away = target.clone();
+    away[24] = 1.0;
+    let mut failure = None;
+    for _ in 0..200 {
+        clock.tick();
+        if let Err(error) = governed.command(&away) {
+            failure = Some(error);
+            break;
+        }
+    }
+    assert!(
+        matches!(failure, Some(GovernorError::Tracking { ref joint, .. }) if joint == "so101_camera_tilt_joint"),
+        "{failure:?}"
+    );
+}
+
+/// A body that does not claim its devices bound their own approach.
+struct Unlimited(Body);
+
+impl ActuatorChain for Unlimited {
+    type Error = <Body as ActuatorChain>::Error;
+    type Feedback = <Body as ActuatorChain>::Feedback;
+
+    fn axes(&self) -> &[sx_embodiment_drivers::BoundAxis] {
+        self.0.axes()
+    }
+
+    fn commandable(&self) -> &[sx_embodiment_drivers::CommandRange] {
+        self.0.commandable()
+    }
+
+    fn command(
+        &mut self,
+        joints: &[f64],
+    ) -> Result<sx_embodiment_drivers::Receipt<Self::Feedback>, Self::Error> {
+        self.0.command(joints)
+    }
+
+    fn stop(&mut self) -> sx_embodiment_drivers::StopReport {
+        self.0.stop()
+    }
+
+    fn stop_budget(&self) -> Duration {
+        self.0.stop_budget()
+    }
+
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        self.0.last_observed()
+    }
+}
+
+#[test]
+fn without_a_confirmed_approach_limit_the_governor_refuses_a_neck_resting_outside() {
+    let (body, neck, _) = probed_body();
+    let target = rest_held(&body);
+    let mut governed = Governor::new(Unlimited(body), bring_up_limits()).expect("limits");
+    let written = neck.state().written.len();
+    let refused = governed.command(&target).expect_err("refused");
+    assert!(
+        matches!(refused, GovernorError::RestingOutside { .. }),
+        "{refused}"
+    );
+    assert_eq!(neck.state().written.len(), written, "nothing was sent");
+    assert_eq!(neck.state().torque(6), 0);
 }
