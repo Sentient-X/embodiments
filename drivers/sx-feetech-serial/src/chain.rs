@@ -77,8 +77,18 @@
 //!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
 //!   where it rests, is approached at the limit: [`ActuatorChain::approach_speed_limited`]
 //!   reports it. A servo without one (the SO-101 follower's) keeps `LeRobot`'s registers and
-//!   reports `false`, so a governor refuses to move it from outside its range. Those registers
-//!   are RAM: a servo whose power cycles while its USB link stays up comes back with
+//!   reports `false`, so a governor refuses to move it from outside its range.
+//!
+//!   **The `Goal_Speed` unit is unverified.** 0.732 rpm per step is the vendor's own
+//!   `sms_sts/write.py` comment ("V=60 * 0.732=43.92rpm"); Feetech's STS documentation and its
+//!   other examples give the register in steps/s (1/4096 rev/s, about 0.0147 rpm), about 50
+//!   times slower per step. Rounded down from either reading, 0.25 rad/s is slow: 3 steps is
+//!   0.23 rad/s at 0.732 rpm and 0.005 rad/s at steps/s, so neither reading moves a servo faster
+//!   than its declared limit; the second only makes the approach crawl. Which one the firmware
+//!   uses is settled by a supervised one-servo check at bring-up (time a known move at a known
+//!   `Goal_Speed`), and then this note and [`SPEED_STEP_RAD_PER_S`] become the measured value.
+//!
+//!   Those registers are RAM: a servo whose power cycles while its USB link stays up comes back with
 //!   `Goal_Speed` 0 (full speed) and torque off. So the limit is never trusted for the
 //!   chain's life: every enable reads it back (and rewrites and reads again where it differs,
 //!   refusing a servo that still does not hold it), and every command's SYNC READ covers
@@ -201,6 +211,8 @@ pub struct ServoConfiguration {
 }
 
 /// One `Goal_Speed` step: 0.732 rpm, in rad/s (`sms_sts/write.py`: "V=60 * 0.732=43.92rpm").
+/// Unverified: Feetech's documentation reads the register in steps/s, about 50 times slower
+/// per step; both are slow (see the module's header), and bring-up measures which holds.
 pub const SPEED_STEP_RAD_PER_S: f64 = 0.732 * std::f64::consts::TAU / 60.0;
 /// One `Acceleration` step: 8.7 °/s², in rad/s² (`sms_sts/write.py`: "A=50 * 8.7deg/s^2").
 pub const ACCELERATION_STEP_RAD_PER_S2: f64 = 8.7 * std::f64::consts::PI / 180.0;
