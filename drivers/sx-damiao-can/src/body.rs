@@ -46,6 +46,9 @@ pub struct DamiaoBody {
     /// How long each enabled motor may hear no command before it disables itself
     /// ([`DamiaoAxis::can_timeout`]); `None` where the body's sources state none.
     pub can_timeout: Option<Duration>,
+    /// Whether the motors' feedback state field reports enable and disable
+    /// ([`DamiaoAxis::reports_enable_state`]).
+    pub reports_enable_state: bool,
 }
 
 /// Every single-bus Damiao body this crate opens.
@@ -130,6 +133,7 @@ impl DamiaoBody {
             kp: gains.kp,
             kd: gains.kd,
             can_timeout: self.can_timeout,
+            reports_enable_state: self.reports_enable_state,
         }
     }
 }

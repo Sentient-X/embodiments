@@ -40,7 +40,11 @@ pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
     bindings: BINDINGS,
     master_id_offset: MASTER_ID_OFFSET,
     // The received driver's heartbeat_timeout, written to every motor's TIMEOUT register.
+    // Open on the bench (2026-10-25): the left arm's motors fault 0xD at enable once TIMEOUT is
+    // written while the right arm's accept it, so their time bases evidently differ. The watchdog
+    // stays on; establish each arm's unit before enabling the left arm.
     can_timeout: Some(Duration::from_millis(750)),
+    reports_enable_state: false,
     joints: &[
         JointGains::new("torso_joint", 40.0, 1.0),
         JointGains::new("left_shoulder_pitch_joint", 60.984, 1.091),

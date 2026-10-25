@@ -87,8 +87,14 @@ pub const REST_TOLERANCE: f64 = 0.05;
 const TURN_SLACK: f64 = 1e-6;
 /// The `TIMEOUT` register's time base: 50 µs per count.
 const TIMEOUT_COUNT: Duration = Duration::from_micros(50);
-/// The DM4340 velocity ranges Damiao publishes: `DM_CAN.py`'s row, then `damiao.h`'s.
-const DM4340_VMAX: [f64; 2] = [10.0, 8.0];
+/// The DM4340 velocity ranges Damiao publishes: `DM_CAN.py`'s row, then `damiao.h`'s; and 20,
+/// which the static upper body's upper-arm yaw and elbow motors (0x1A, 0x1B, 0x11, 0x12) report
+/// (read 2026-10-25). `VMAX` only scales the velocity field of MIT frames and feedback, and each
+/// motor is scaled by the value it reports.
+const DM4340_VMAX: [f64; 3] = [10.0, 8.0, 20.0];
+/// `PMAX` values reported beside a model's table row: 12.57 (≈ 4π) on the static upper body's
+/// right shoulder roll (0x10, read 2026-10-25). Positions are scaled by the value reported.
+const EXTRA_PMAX: [f64; 1] = [12.57];
 
 /// The `DM_CAN.py` limit row a qualified registry model is driven with.
 #[must_use]
@@ -127,6 +133,12 @@ pub struct DamiaoAxis {
     /// How long the enabled motor may hear no command before it disables itself, written to
     /// its `TIMEOUT` register at open; `None` leaves the register as the motor holds it.
     pub can_timeout: Option<Duration>,
+    /// Whether the motor's feedback state field reports enable and disable. Firmware on the
+    /// static upper body's motors answers state 1 whether enabled or not (verified 2026-10-25:
+    /// a wrist motor held at kp 5 and released on disable, LED green then red, while the field
+    /// read 1 throughout). Where it does not, a fresh answer with no fault code is accepted for
+    /// either state, and stop is proven by that answer to the disable.
+    pub reports_enable_state: bool,
 }
 
 impl DamiaoAxis {
@@ -307,10 +319,10 @@ fn bring_up<P: CanPort>(
             .into_iter()
             .enumerate()
         {
-            let accepted = if register == DmVariable::VMAX {
-                accepted_vmax(model)
-            } else {
-                vec![row[index]]
+            let accepted = match register {
+                DmVariable::VMAX => accepted_vmax(model),
+                DmVariable::PMAX => std::iter::once(row[index]).chain(EXTRA_PMAX).collect(),
+                _ => vec![row[index]],
             };
             let value = control.read_motor_param(bus_id, register)?;
             match value {
@@ -419,6 +431,14 @@ impl<P: CanPort> DamiaoChain<P> {
             let model =
                 motor_type(binding.model).ok_or(DamiaoChainError::Unqualified(binding.bus_id))?;
             control.add_motor(Motor::new(model, binding.bus_id, motor.master_id));
+        }
+        // Disable every motor before anything is written. A motor left enabled by an earlier
+        // run (which firmware that does not report its enable state hides) would otherwise
+        // start counting the communication timeout the moment bring-up writes it, and trip
+        // (fault 0xD) while the rest are still being brought up (seen 2026-10-25 on the static
+        // upper body: bring-up of 14 motors takes over 2 s against a 0.75 s timeout).
+        for motor in &motors {
+            control.disable(motor.axis.binding.bus_id)?;
         }
         // A motor brought up before a later one failed may hold MIT mode with torque enabled
         // (a motor left enabled by a crashed run answers its mode switch as it is): every motor
@@ -558,7 +578,9 @@ impl<P: CanPort> DamiaoChain<P> {
                 return Err(DamiaoChainError::Silent(bus_id));
             }
             let state = MotorState::from_err(self.control.motor(bus_id)?.get_error());
-            if state != expected {
+            let unreported = !self.motors[index].reports_enable_state
+                && matches!(state, MotorState::Enabled | MotorState::Disabled);
+            if state != expected && !unreported {
                 return Err(DamiaoChainError::UnexpectedState {
                     bus_id,
                     state,
@@ -740,6 +762,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 .map(|motor| MotorState::from_err(motor.get_error()));
             match (fresh.get(index).copied().unwrap_or(false), state) {
                 (true, Ok(MotorState::Disabled)) => {}
+                (true, Ok(MotorState::Enabled)) if !self.motors[index].reports_enable_state => {}
                 (true, Ok(MotorState::Fault(code))) => {
                     report.faults.push((bus_id, code));
                     report.unproven.push(bus_id);

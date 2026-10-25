@@ -164,3 +164,44 @@ fn the_governor_starts_from_where_the_body_rests_and_slews() {
     // Fifteen motors on a USB bridge: each disable and refresh budgets the default allowance.
     assert!(governed.stop_budget() >= FRAME_ALLOWANCE * 30);
 }
+
+#[test]
+fn firmware_that_always_answers_state_1_still_proves_a_stop_and_a_silent_motor_does_not() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    assert!(axes.iter().all(|motor| !motor.reports_enable_state));
+    // Every motor's feedback reads state 1, enabled or not, as the bench firmware does.
+    let bus = Sim::for_axes(&axes);
+    assert!(
+        bus.state()
+            .motors
+            .values()
+            .all(|motor| !motor.reports_enable_state)
+    );
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    let report = chain.stop();
+    assert!(report.is_proven(), "{report:?}");
+    assert!(bus.state().motors.values().all(|motor| motor.state == 0));
+    // A motor that stops answering leaves the stop unproven and motion refused.
+    chain.command(&rest).expect("a command at rest");
+    let silent = axes[0].axis.binding.bus_id;
+    bus.kill(silent);
+    let report = chain.stop();
+    assert_eq!(report.unproven, vec![silent]);
+    assert!(chain.command(&rest).is_err());
+    // The same firmware read as reporting its state refuses the open: state 1 where disabled.
+    let mut reporting = axes;
+    for motor in &mut reporting {
+        motor.reports_enable_state = true;
+    }
+    let bus = Sim::for_axes(&reporting);
+    for motor in bus.state().motors.values_mut() {
+        motor.reports_enable_state = false;
+    }
+    assert!(matches!(
+        DamiaoChain::open(bus.clone(), reporting),
+        Err(DamiaoChainError::UnexpectedState { .. })
+    ));
+    assert!(bus.state().motors.values().all(|motor| motor.state == 0));
+}
