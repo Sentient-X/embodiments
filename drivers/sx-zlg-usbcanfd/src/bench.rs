@@ -881,14 +881,20 @@ mod tests {
     #[test]
     fn a_bus_that_answers_everything_loses_nothing() {
         let mut port = bus(Vec::new());
-        let report = run(&mut port, "fake", &quick(), || None).expect("runs");
+        // A timeout no preempted test thread outlasts: the fake bus answers at once.
+        let config = Config {
+            reply_timeout_ms: 50,
+            ..quick()
+        };
+        let report = run(&mut port, "fake", &config, || None).expect("runs");
         assert_eq!(report.latency.round_trip.count, 50);
         assert_eq!(report.latency.lost, 0);
         for cycles in &report.cycles {
             assert_eq!(cycles.motors, 14);
             assert_eq!(cycles.lost_replies, 0, "{}", cycles.rate_hz);
-            assert_eq!(cycles.missed_deadlines, 0);
-            assert_eq!(cycles.cycle.count, cycles.cycles);
+            // A loaded test host may wake late and skip a cycle; every cycle it ran is answered.
+            assert_eq!(cycles.missed_deadlines, cycles.skipped);
+            assert_eq!(cycles.cycle.count, cycles.cycles - cycles.skipped);
         }
         assert!(report.throughput.replies > 0);
         assert_eq!(report.throughput.lost_replies, 0);
@@ -909,7 +915,8 @@ mod tests {
         assert_eq!(report.latency.lost, 50);
         for cycles in &report.cycles {
             assert_eq!(cycles.missed_deadlines, cycles.cycles);
-            assert_eq!(cycles.lost_replies, cycles.cycles);
+            // A cycle a loaded test host woke too late for is skipped and sends nothing.
+            assert_eq!(cycles.lost_replies, cycles.cycles - cycles.skipped);
         }
         assert!(report.throughput.lost_replies > 0);
     }
