@@ -179,8 +179,8 @@ def test_each_gripper_is_two_feetech_servos_on_a_bus_of_its_own() -> None:
 
 def test_the_neck_is_the_official_new_calibration_so101() -> None:
     """Below its base the neck is TheRobotStudio's so101_new_calib chain under our names, so a
-    LeRobot degree reading is its joint angle; the camera tilt keeps the official axis, sits
-    half a turn round the wrist roll horn, and declares the free arc its camera rests in."""
+    LeRobot degree reading is its joint angle; the camera tilt keeps the official origin and
+    axis and declares the free arc its camera rests in."""
     asset = ROOT / "assets/sentient_static_upper_body"
     official = {
         j.attrib["name"]: j
@@ -209,16 +209,9 @@ def test_the_neck_is_the_official_new_calibration_so101() -> None:
     bounds = {axis.name: axis.bounds for axis in STATIC_UPPER_BODY_NECK.layout.axes}
     for upstream, name in names.items():
         theirs, mine = official[upstream], ours[name]
-        tags = [("axis", ("xyz",))]
+        tags = [("origin", ("xyz", "rpy")), ("axis", ("xyz",))]
         if upstream != "gripper":
-            tags += [("origin", ("xyz", "rpy")), ("limit", ("lower", "upper"))]
-        else:
-            # The camera tilt is the official joint turned half a turn round the wrist roll
-            # horn, where the received holder carries it (CAMERA_ROLL_TURN).
-            xyz = numbers(theirs, "origin", ("xyz",))
-            assert numbers(mine, "origin", ("xyz",)) == pytest.approx(
-                [-xyz[0], -xyz[1], xyz[2]], abs=1e-6
-            ), name
+            tags.append(("limit", ("lower", "upper")))
         for tag, keys in tags:
             assert numbers(mine, tag, keys) == pytest.approx(
                 numbers(theirs, tag, keys), abs=1e-6

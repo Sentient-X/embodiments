@@ -100,11 +100,12 @@ Vec = NDArray[np.float64]
 #   jaw's frame (allisa_bot's tilt axis is the official jaw's, 3.4 mm further along it). The
 #   bracket is not the jaw, so how it sits on the servo horn is this build's fact, which no
 #   upstream file states: ``CAMERA_MOUNT_TILT`` is allisa_bot's tilt angle that the official
-#   zero takes: with ``CAMERA_ROLL_TURN`` the camera faces forward, and the angle puts it 7.95 deg
-#   nose down at the recorded neck pose of 2026-10-26, the IMU's tilt magnitude, with the sense
-#   the operator saw (slightly down). The IMU tool reported that pose as 7.95 deg nose *up*, so
-#   its pitch sign is suspect; and its +9.8 deg for a +114 tick step then means the model's
-#   sense of the tilt joint is unconfirmed. Settle both by eye and IMU before trusting the tilt.
+#   zero takes: the camera turns only about the tilt axis, and this angle puts the ZED 2i's
+#   body upright, facing forward and 7.8 deg nose down at the recorded neck pose of 2026-10-26,
+#   as the operator sees it and matching the side photo. At this angle the ``ZED_camera`` frame
+#   comes out upside down against the ZED's own meshes (its z points down), so the frame built
+#   from allisa_bot's left optical frame, and the IMU mounted on it, carry a convention error
+#   that is still open; the IMU's reported pitch sign is wrong for the same reason.
 NECK_LINKS = {
     "base_link": "so101_base_link",
     "shoulder_link": "so101_shoulder_pan_link",
@@ -130,11 +131,7 @@ NECK_DROPPED_MESHES = ("wrist_roll_follower_so101_v1.stl",)
 #: The received holder that carries the camera tilt servo where the official fixed jaw was.
 RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
-CAMERA_MOUNT_TILT = math.pi + math.radians(158.56)
-#: The holder sits half a turn round the wrist roll horn from the official fixed jaw, so the
-#: camera looks forward over the chest at the recorded wrist roll (operator, 2026-10-26: the
-#: camera faces forward and slightly down; without the turn it faced backwards into the wrist).
-CAMERA_ROLL_TURN = math.pi
+CAMERA_MOUNT_TILT = math.radians(141.71)
 #: The camera tilt's range. The official joint's limits are its jaw's; with the bracket on the
 #: horn the camera meets the wrist between about +10 and +130 deg (a MuJoCo sweep of the
 #: rendered collisions from the recorded rest), so the range is the free arc it rests in, kept
@@ -260,9 +257,6 @@ def _graft_neck(robot: ET.Element) -> None:
                 filename = mesh.get("filename", "").removeprefix(SOURCE_MESH_PREFIX)
                 if filename != RECEIVED_CAMERA_HOLDER:
                     continue  # the received servo, which the official one replaces
-                _set_origin(visual, _rz(CAMERA_ROLL_TURN) @ _matrix(origin))
-                origin = visual.find("origin")
-                assert origin is not None
                 link.append(visual)
                 collision = ET.SubElement(link, "collision", {"name": f"{name}_holder"})
                 ET.SubElement(collision, "origin", origin.attrib)
@@ -280,7 +274,6 @@ def _graft_neck(robot: ET.Element) -> None:
             assert element is not None
             element.set("link", NECK_LINKS[element.get("link", "")])
         if name == NECK_JOINTS["gripper"]:
-            _set_origin(joint, _rz(CAMERA_ROLL_TURN) @ _matrix(joint.find("origin")))
             limit = joint.find("limit")
             assert limit is not None
             limit.set("lower", CAMERA_TILT_RANGE[0])
