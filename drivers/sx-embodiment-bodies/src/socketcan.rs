@@ -6,7 +6,7 @@
 //! `serial` of the USB device its `device` link sits in, for a USB adapter (`gs_usb`,
 //! `peak_usb`), or else its own name, for a controller on the board itself, which has no
 //! serial and which the device tree names the same on every boot. Commissioning records that
-//! identity, and the one interface carrying it is opened as a [`SocketCanPort`].
+//! identity, and the one interface carrying it is opened as an `sx_socketcan::SocketCanPort`.
 //!
 //! The interface's bitrate and up state are the operating system's, set before the station
 //! starts; an interface that is down opens and then fails its first send.
@@ -38,13 +38,20 @@ impl SocketCanPorts {
         }
     }
 
+    /// The kernel view under `net` (`/sys/class/net`).
+    #[cfg(test)]
+    pub(crate) fn rooted(net: PathBuf) -> Self {
+        Self { net }
+    }
+
     /// The interface whose identity is `identity`: its USB adapter's serial number, or, for an
     /// interface on no USB device, its own name.
     ///
     /// # Errors
     ///
-    /// Returns [`OpenError::NotAttached`] when no CAN interface carries the identity, and
-    /// [`OpenError::Port`] when two do or the kernel's view cannot be read.
+    /// Returns [`OpenError::NotAttached`] when no CAN interface carries the identity,
+    /// [`OpenError::Ambiguous`] when two do, and [`OpenError::Port`] when the kernel's view
+    /// cannot be read.
     pub fn interface(&self, identity: &str) -> Result<String, OpenError> {
         let port = |reason: String| OpenError::Port {
             serial: identity.to_owned(),
@@ -66,10 +73,10 @@ impl SocketCanPorts {
         match found.as_slice() {
             [] => Err(OpenError::NotAttached(identity.to_owned())),
             [interface] => Ok(interface.clone()),
-            _ => Err(port(format!(
-                "CAN interfaces {} all carry this identity",
-                found.join(", ")
-            ))),
+            _ => Err(OpenError::Ambiguous {
+                identity: identity.to_owned(),
+                bridges: found,
+            }),
         }
     }
 }
@@ -128,9 +135,7 @@ mod tests {
         interface(&root, "can0", CAN_LINK_TYPE, None);
         interface(&root, "can1", CAN_LINK_TYPE, Some("UB-CAN"));
         interface(&root, "eth0", "1", Some("NOT-CAN"));
-        let ports = SocketCanPorts {
-            net: root.join("net"),
-        };
+        let ports = SocketCanPorts::rooted(root.join("net"));
         assert_eq!(ports.interface("UB-CAN").expect("usb"), "can1");
         assert_eq!(ports.interface("can0").expect("on the board"), "can0");
         // A USB adapter is commissioned by its serial, never the name it enumerated as.
@@ -145,7 +150,7 @@ mod tests {
         interface(&root, "can2", CAN_LINK_TYPE, Some("UB-CAN"));
         assert!(matches!(
             ports.interface("UB-CAN"),
-            Err(OpenError::Port { .. })
+            Err(OpenError::Ambiguous { .. })
         ));
         let _ = fs::remove_dir_all(root);
     }

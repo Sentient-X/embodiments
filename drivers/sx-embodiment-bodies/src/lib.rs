@@ -11,7 +11,8 @@
 //! static upper bodies). It opens each named bridge once through a [`PortSource`] (two port
 //! names on one serial share one bridge, as the B601-DM's arm and gripper can): `usb_serial`
 //! (feature `usb-serial`) for Damiao USB2CAN bridges, `socketcan` (feature `socketcan`, Linux)
-//! for `SocketCAN` interfaces. It returns one [`Body`], an [`ActuatorChain`] the station drives
+//! for `SocketCAN` interfaces, and `system::SystemPorts` (either feature), which looks an identity up across
+//! every transport compiled in and is what a station opens through. It returns one [`Body`], an [`ActuatorChain`] the station drives
 //! without naming a vendor, a joint or a limit.
 //!
 //! Every mismatch between the drive, the commissioning and the opener is refused before any
@@ -38,6 +39,8 @@ use thiserror::Error;
 
 #[cfg(feature = "socketcan")]
 pub mod socketcan;
+#[cfg(any(feature = "usb-serial", feature = "socketcan"))]
+pub mod system;
 #[cfg(feature = "usb-serial")]
 pub mod usb_serial;
 
@@ -259,6 +262,11 @@ pub enum OpenError {
     MissingPort(String),
     #[error("no bridge with USB serial {0} is attached")]
     NotAttached(String),
+    #[error("more than one bridge carries identity {identity}: {}", bridges.join(", "))]
+    Ambiguous {
+        identity: String,
+        bridges: Vec<String>,
+    },
     #[error("the bridge with USB serial {serial} cannot be opened: {reason}")]
     Port { serial: String, reason: String },
     #[error(transparent)]
