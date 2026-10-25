@@ -24,11 +24,13 @@ pub struct ActuatorModel(&'static str);
 
 impl ActuatorModel {
     /// Every member of the registry's `ActuatorModel`, by wire value.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self("feetech_sts3215"),
         Self("damiao_dm4310"),
         Self("damiao_dm4340"),
         Self("damiao_dm8009"),
+        Self("dynamixel_xl330_m288"),
+        Self("dynamixel_xm430_w350"),
     ];
 
     #[must_use]
@@ -54,7 +56,11 @@ pub struct ActuatorBus(&'static str);
 
 impl ActuatorBus {
     /// Every member of the registry's `ActuatorBus`, by wire value.
-    pub const ALL: [Self; 2] = [Self("feetech_serial"), Self("damiao_can")];
+    pub const ALL: [Self; 3] = [
+        Self("feetech_serial"),
+        Self("damiao_can"),
+        Self("dynamixel_serial"),
+    ];
 
     #[must_use]
     pub const fn new(wire: &'static str) -> Self {
@@ -115,6 +121,10 @@ impl ActuatorBinding {
 pub struct BoundAxis {
     /// The registry's joint name (`JointAxis.name`).
     pub joint: String,
+    /// The physical bus the actuator is wired to, by the name commissioning records its
+    /// bridge under (`ActuatorBinding.bus_port`): `can` for a body's one Damiao bus, `neck`
+    /// for the static upper body's Feetech neck.
+    pub port: String,
     /// The joint's declared bounds, in its own unit.
     pub lower: f64,
     pub upper: f64,
@@ -173,6 +183,9 @@ impl BoundAxis {
         if !(self.lower.is_finite() && self.upper.is_finite() && self.lower < self.upper) {
             return Err(BindingError::Bounds(self.joint.clone()));
         }
+        if !is_port_name(&self.port) {
+            return Err(BindingError::Port(self.joint.clone()));
+        }
         if !self.zero.is_finite() {
             return Err(BindingError::Zero(self.joint.clone()));
         }
@@ -189,7 +202,8 @@ impl BoundAxis {
     }
 }
 
-/// Validate every axis and `JointLayout`'s law: one address per bus within a chain.
+/// Validate every axis and `JointLayout`'s law: one address per bus within a chain, each
+/// port being its own bus.
 ///
 /// # Errors
 ///
@@ -198,17 +212,27 @@ pub fn validate_chain(axes: &[BoundAxis]) -> Result<(), BindingError> {
     if axes.is_empty() {
         return Err(BindingError::EmptyChain);
     }
+    let address = |axis: &BoundAxis| (axis.binding.bus, axis.port.clone(), axis.binding.bus_id);
     for (index, axis) in axes.iter().enumerate() {
         axis.validate()?;
-        let address = (axis.binding.bus, axis.binding.bus_id);
         if axes[..index]
             .iter()
-            .any(|earlier| (earlier.binding.bus, earlier.binding.bus_id) == address)
+            .any(|earlier| address(earlier) == address(axis))
         {
             return Err(BindingError::DuplicateAddress(axis.binding.bus_id));
         }
     }
     Ok(())
+}
+
+/// Whether `port` is spelled as the registry's `BusPort` is: lowercase letters, digits, `_`
+/// and `-`, starting with a letter.
+#[must_use]
+pub fn is_port_name(port: &str) -> bool {
+    port.starts_with(|first: char| first.is_ascii_lowercase())
+        && port
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'))
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -227,6 +251,8 @@ pub enum BindingError {
     Reduction(u16),
     #[error("joint {0} has bounds that are not finite lower < upper")]
     Bounds(String),
+    #[error("joint {0} names a port that is not a lowercase identifier")]
+    Port(String),
     #[error("bus_id {0} appears twice on one bus within the chain")]
     DuplicateAddress(u16),
 }
@@ -241,6 +267,7 @@ mod tests {
     fn axis(bus_id: u16) -> BoundAxis {
         BoundAxis {
             joint: format!("joint{bus_id}"),
+            port: "can".to_owned(),
             lower: -1.0,
             upper: 1.0,
             binding: ActuatorBinding {
@@ -301,6 +328,14 @@ mod tests {
             Err(BindingError::DuplicateAddress(1))
         );
         assert_eq!(validate_chain(&[axis(1), axis(2)]), Ok(()));
+        let mut elsewhere = axis(1);
+        elsewhere.port = "neck".to_owned();
+        assert_eq!(validate_chain(&[axis(1), elsewhere]), Ok(()));
+        for spelled in ["", "Neck", "1can", "neck bus"] {
+            let mut bad = axis(1);
+            bad.port = spelled.to_owned();
+            assert!(matches!(bad.validate(), Err(BindingError::Port(_))));
+        }
     }
 
     #[test]
@@ -310,6 +345,8 @@ mod tests {
             Some(ActuatorModel::ALL[1])
         );
         assert_eq!(ActuatorModel::parse("dynamixel_xl330"), None);
+        assert!(ActuatorModel::parse("dynamixel_xl330_m288").is_some());
+        assert!(ActuatorBus::parse("dynamixel_serial").is_some());
         assert_eq!(ActuatorBus::parse("damiao_can"), Some(ActuatorBus::ALL[1]));
         assert_eq!(ActuatorBus::parse("can"), None);
     }

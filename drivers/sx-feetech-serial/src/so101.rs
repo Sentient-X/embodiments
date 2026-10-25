@@ -10,11 +10,12 @@
 //! configuration, from `SOFollower.configure` (`so_follower.py:159-173`): P 16, I 0, D 32 on
 //! every servo, and on the gripper a torque limit of 500, a protection current of 250 and an
 //! overload torque of 25. The calibration is per unit, so the caller supplies it, in native
-//! state order.
+//! state order. The body is one [`FeetechBody`], [`SO101`].
 
+use sx_embodiment_drivers::BodyBindings;
 use sx_embodiment_drivers::serial::SerialPort;
-use sx_embodiment_drivers::{BodyBindings, BodyError};
 
+use crate::body::{FeetechBody, ServoSetup};
 use crate::chain::{
     FeetechChain, FeetechChainError, FeetechServo, MotorCalibration, MotorNormMode,
     ServoConfiguration, TorqueProtection,
@@ -25,7 +26,7 @@ pub const BINDINGS: &str = include_str!("../bindings/so101.json");
 
 /// The position loop on every servo: P lowered from 32 "to avoid shakiness", I and D at their
 /// defaults.
-const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
+pub const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
     p_coefficient: 16,
     i_coefficient: 0,
     d_coefficient: 32,
@@ -38,39 +39,41 @@ const GRIPPER_PROTECTION: TorqueProtection = TorqueProtection {
     overload_torque: 25,
 };
 
-/// Each joint's wire normalization, in native state order: `SOFollower`'s motor table.
-const NORMALIZATION: [(&str, MotorNormMode); 6] = [
-    ("shoulder_pan", MotorNormMode::Degrees),
-    ("shoulder_lift", MotorNormMode::Degrees),
-    ("elbow_flex", MotorNormMode::Degrees),
-    ("wrist_flex", MotorNormMode::Degrees),
-    ("wrist_roll", MotorNormMode::Degrees),
-    ("gripper", MotorNormMode::Range0100),
-];
+const fn arm(joint: &'static str) -> ServoSetup {
+    ServoSetup {
+        joint,
+        norm_mode: MotorNormMode::Degrees,
+        configuration: POSITION_LOOP,
+    }
+}
+
+/// `SOFollower`'s motor table, in native state order.
+pub const SO101: FeetechBody = FeetechBody {
+    bindings: BINDINGS,
+    servos: &[
+        arm("shoulder_pan"),
+        arm("shoulder_lift"),
+        arm("elbow_flex"),
+        arm("wrist_flex"),
+        arm("wrist_roll"),
+        ServoSetup {
+            joint: "gripper",
+            norm_mode: MotorNormMode::Range0100,
+            configuration: ServoConfiguration {
+                protection: Some(GRIPPER_PROTECTION),
+                ..POSITION_LOOP
+            },
+        },
+    ],
+};
 
 /// The SO-101's arm and jaw, calibrated by `calibration` in native state order.
 ///
 /// # Errors
 ///
 /// Refuses rendered bindings whose joints are not `SOFollower`'s six.
-pub fn so101(calibration: [MotorCalibration; 6]) -> Result<Vec<FeetechServo>, BodyError> {
-    let body = BodyBindings::parse(BINDINGS)?;
-    body.require_joints(&NORMALIZATION.map(|(joint, _)| joint))?;
-    Ok(body
-        .axes
-        .into_iter()
-        .zip(NORMALIZATION)
-        .zip(calibration)
-        .map(|((axis, (_, norm_mode)), calibration)| FeetechServo {
-            axis,
-            norm_mode,
-            calibration,
-            configuration: ServoConfiguration {
-                protection: (norm_mode == MotorNormMode::Range0100).then_some(GRIPPER_PROTECTION),
-                ..POSITION_LOOP
-            },
-        })
-        .collect())
+pub fn so101(calibration: [MotorCalibration; 6]) -> Result<Vec<FeetechServo>, FeetechChainError> {
+    SO101.servos(SO101.axes(BodyBindings::parse(BINDINGS)?)?, &calibration)
 }
 
 /// Open the SO-101 follower's chain on `port`, calibrated by `calibration`.

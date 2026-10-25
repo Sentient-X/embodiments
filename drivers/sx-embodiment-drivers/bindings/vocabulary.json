@@ -3,10 +3,13 @@
     "feetech_sts3215",
     "damiao_dm4310",
     "damiao_dm4340",
-    "damiao_dm8009"
+    "damiao_dm8009",
+    "dynamixel_xl330_m288",
+    "dynamixel_xm430_w350"
   ],
   "buses": [
     "feetech_serial",
-    "damiao_can"
+    "damiao_can",
+    "dynamixel_serial"
   ]
 }

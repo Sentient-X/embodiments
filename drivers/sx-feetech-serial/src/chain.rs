@@ -281,6 +281,8 @@ pub enum FeetechChainError {
     Unqualified(u16),
     #[error("bus_id {0} is above the protocol's last servo id, 252")]
     Ids(u16),
+    #[error("{found} servo calibrations supplied for {expected} servos")]
+    CalibrationCount { expected: usize, found: usize },
     #[error("bus_id {0} has an empty or out-of-resolution calibrated range")]
     Calibration(u16),
     #[error("bus_id {bus_id} reports model {model}; only the STS3215 (777) is qualified")]
@@ -657,6 +659,7 @@ impl ChainError for FeetechChainError {
             Self::Body(_)
             | Self::Target(_)
             | Self::Unencodable(_)
+            | Self::CalibrationCount { .. }
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,
             Self::Comm {

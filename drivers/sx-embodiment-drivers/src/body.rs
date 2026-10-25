@@ -5,6 +5,11 @@
 //! A driver crate embeds that document and parses it here, so no joint bound, address, model,
 //! sign or reduction is spelled in Rust. What a crate adds is its vendor's controller
 //! configuration, keyed by joint name.
+//!
+//! Every axis names the port its bus is commissioned under. A body on several buses is opened
+//! port by port: [`BodyBindings::buses`] splits the native state order into one [`Bus`] per
+//! port, each a contiguous run of one bus kind, and [`BodyBindings::on`] keeps one kind's axes
+//! for a crate that drives only that kind.
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -40,6 +45,7 @@ struct Axis {
     upper: f64,
     model: String,
     bus: String,
+    port: String,
     bus_id: u16,
     sign: i8,
     reduction: f64,
@@ -61,12 +67,38 @@ pub enum BodyError {
     Unit { expected: String, found: String },
     #[error("{embodiment} has no joint {joint}")]
     MissingJoint { embodiment: String, joint: String },
+    #[error("{embodiment}'s port {port} carries both {first} and {second} actuators")]
+    MixedPort {
+        embodiment: String,
+        port: String,
+        first: &'static str,
+        second: &'static str,
+    },
+    #[error(
+        "{embodiment}'s port {port} returns after another port in native state order, so its \
+         chains cannot be composed in that order"
+    )]
+    InterleavedPort { embodiment: String, port: String },
+    #[error("{embodiment}'s axes for this driver are on ports {ports:?}; it drives one bus")]
+    Buses {
+        embodiment: String,
+        ports: Vec<String>,
+    },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]
     Joints {
         embodiment: String,
         found: Vec<String>,
         expected: Vec<String>,
     },
+}
+
+/// One port's axes: a contiguous run of the native state order on one bus.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bus {
+    /// The name commissioning records this bus's bridge under.
+    pub port: String,
+    pub kind: ActuatorBus,
+    pub axes: Vec<BoundAxis>,
 }
 
 impl BodyBindings {
@@ -96,6 +128,7 @@ impl BodyBindings {
                 })?;
                 Ok(BoundAxis {
                     joint: axis.joint,
+                    port: axis.port,
                     lower: axis.lower,
                     upper: axis.upper,
                     binding: ActuatorBinding {
@@ -116,6 +149,73 @@ impl BodyBindings {
             id,
             axes,
         })
+    }
+
+    /// The body's buses, in native state order: each port's axes, which must be one run of
+    /// one bus kind, so that composing the buses' chains in this order is the state order.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a port carrying two bus kinds, and a port whose axes are not contiguous.
+    pub fn buses(&self) -> Result<Vec<Bus>, BodyError> {
+        let mut buses: Vec<Bus> = Vec::new();
+        for axis in &self.axes {
+            if let Some(last) = buses.last_mut().filter(|bus| bus.port == axis.port) {
+                if last.kind != axis.binding.bus {
+                    return Err(BodyError::MixedPort {
+                        embodiment: self.embodiment.clone(),
+                        port: axis.port.clone(),
+                        first: last.kind.wire(),
+                        second: axis.binding.bus.wire(),
+                    });
+                }
+                last.axes.push(axis.clone());
+                continue;
+            }
+            if buses.iter().any(|bus| bus.port == axis.port) {
+                return Err(BodyError::InterleavedPort {
+                    embodiment: self.embodiment.clone(),
+                    port: axis.port.clone(),
+                });
+            }
+            buses.push(Bus {
+                port: axis.port.clone(),
+                kind: axis.binding.bus,
+                axes: vec![axis.clone()],
+            });
+        }
+        Ok(buses)
+    }
+
+    /// The one bus these axes are on.
+    ///
+    /// # Errors
+    ///
+    /// Refuses axes on no bus or on several, and what [`BodyBindings::buses`] refuses.
+    pub fn one_bus(&self) -> Result<Bus, BodyError> {
+        let mut buses = self.buses()?;
+        if buses.len() == 1 {
+            Ok(buses.remove(0))
+        } else {
+            Err(BodyError::Buses {
+                embodiment: self.embodiment.clone(),
+                ports: buses.into_iter().map(|bus| bus.port).collect(),
+            })
+        }
+    }
+
+    /// The axes on buses of `kind` alone, in native state order: what a crate driving only
+    /// that kind composes.
+    #[must_use]
+    pub fn on(self, kind: ActuatorBus) -> Self {
+        Self {
+            axes: self
+                .axes
+                .into_iter()
+                .filter(|axis| axis.binding.bus == kind)
+                .collect(),
+            ..self
+        }
     }
 
     /// The axis bound to `joint`.
@@ -163,7 +263,7 @@ mod tests {
 
     const DOCUMENT: &str = r#"{"embodiment": "b", "id": "0", "axes": [
         {"joint": "j1", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
-         "bus": "damiao_can", "bus_id": 1, "sign": -1, "reduction": 2.0}]}"#;
+         "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": -1, "reduction": 2.0}]}"#;
 
     #[test]
     fn a_rendered_body_parses_uncalibrated() {
@@ -181,6 +281,78 @@ mod tests {
             body.axis("j2"),
             Err(BodyError::MissingJoint { .. })
         ));
+    }
+
+    fn axis(joint: &str, bus: &str, port: &str, bus_id: u16) -> String {
+        format!(
+            r#"{{"joint": "{joint}", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
+                "bus": "{bus}", "port": "{port}", "bus_id": {bus_id}, "sign": 1,
+                "reduction": 1.0}}"#
+        )
+    }
+
+    fn document(axes: &[String]) -> String {
+        format!(
+            r#"{{"embodiment": "b", "id": "0", "axes": [{}]}}"#,
+            axes.join(",")
+        )
+    }
+
+    #[test]
+    fn a_body_splits_into_one_bus_per_port_in_state_order() {
+        let body = BodyBindings::parse(&document(&[
+            axis("j1", "damiao_can", "can", 1),
+            axis("j2", "damiao_can", "can", 2),
+            axis("n1", "feetech_serial", "neck", 1),
+        ]))
+        .expect("parses");
+        let buses = body.buses().expect("buses");
+        let ports: Vec<(&str, &str, usize)> = buses
+            .iter()
+            .map(|bus| (bus.port.as_str(), bus.kind.wire(), bus.axes.len()))
+            .collect();
+        assert_eq!(
+            ports,
+            [("can", "damiao_can", 2), ("neck", "feetech_serial", 1)]
+        );
+        let can = body.clone().on(ActuatorBus::new("damiao_can"));
+        assert_eq!(can.axes.len(), 2);
+        assert_eq!(can.id, body.id);
+    }
+
+    #[test]
+    fn a_port_of_two_kinds_or_out_of_order_is_refused() {
+        let mixed = BodyBindings::parse(&document(&[
+            axis("j1", "damiao_can", "can", 1),
+            axis("j2", "feetech_serial", "can", 2),
+        ]))
+        .expect("parses");
+        assert!(matches!(mixed.buses(), Err(BodyError::MixedPort { .. })));
+        let interleaved = BodyBindings::parse(&document(&[
+            axis("j1", "damiao_can", "can", 1),
+            axis("n1", "feetech_serial", "neck", 1),
+            axis("j2", "damiao_can", "can", 2),
+        ]))
+        .expect("parses");
+        assert!(matches!(
+            interleaved.buses(),
+            Err(BodyError::InterleavedPort { port, .. }) if port == "can"
+        ));
+        // One address on two ports is two buses; on one port it is refused.
+        assert!(
+            BodyBindings::parse(&document(&[
+                axis("a", "feetech_serial", "left", 1),
+                axis("b", "feetech_serial", "right", 1),
+            ]))
+            .is_ok()
+        );
+        assert_eq!(
+            BodyBindings::parse(&document(&[
+                axis("a", "feetech_serial", "left", 1),
+                axis("b", "feetech_serial", "left", 1),
+            ])),
+            Err(BodyError::Binding(BindingError::DuplicateAddress(1)))
+        );
     }
 
     #[test]

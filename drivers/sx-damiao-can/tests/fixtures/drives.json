@@ -250,8 +250,8 @@
   "sentient-static-upper-body": {
     "nominal": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "cdee7a4131a780d48fcd866a631949b9c3eaf0f5ffe3fbf287b7de5107eaa63b",
-      "instance": "171329ceef4d93ee39e4e56b7e224b32575d2625fc6257b3d3695527759363a6",
+      "embodiment": "b2d106f95c5bd5115de90c5d2d35869b36c3f0823cbd5c2c5b7e0741f050a97a",
+      "instance": "5fe9f0ce72449b71c994a0805a64a914b230af99877d1d36da9d2825af9f6eb8",
       "joints": [
         {
           "joint": "torso_joint",
@@ -342,13 +342,49 @@
           "zero": 0.0,
           "direction": 1,
           "calibration": null
+        },
+        {
+          "joint": "so101_shoulder_pan_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_shoulder_lift_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_elbow_flex_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_wrist_flex_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_wrist_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_camera_tilt_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
         }
       ]
     },
     "measured": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "cdee7a4131a780d48fcd866a631949b9c3eaf0f5ffe3fbf287b7de5107eaa63b",
-      "instance": "a0c3fa8b1c382cce72650558be09fbcda49fc797facfa0bfc34b0052e982e10f",
+      "embodiment": "b2d106f95c5bd5115de90c5d2d35869b36c3f0823cbd5c2c5b7e0741f050a97a",
+      "instance": "fa490448853841d9bac3723c9dd376931e383b7f2cbf8d6f39f291ac79ff75ad",
       "joints": [
         {
           "joint": "torso_joint",
@@ -436,6 +472,42 @@
         },
         {
           "joint": "right_wrist_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_shoulder_pan_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_shoulder_lift_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_elbow_flex_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_wrist_flex_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_wrist_roll_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "so101_camera_tilt_joint",
           "zero": 0.0,
           "direction": 1,
           "calibration": null
