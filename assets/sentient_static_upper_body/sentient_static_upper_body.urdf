@@ -4131,7 +4131,7 @@
     <limit effort="10" velocity="10" lower="-2.74385" upper="2.84121" />
   </joint>
   <joint name="so101_camera_tilt_joint" type="revolute">
-    <origin xyz="-0.0202 -0.0188 -0.0234" rpy="1.5708 -5.24284e-08 3.14159265" />
+    <origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.24284e-08 -1.41553e-15" />
     <parent link="so101_wrist_roll_link" />
     <child link="camera_link" />
     <axis xyz="0 0 1" />
@@ -4315,7 +4315,7 @@
       </geometry>
     </collision>
     <visual name="so101_wrist_roll_link_visual_1">
-      <origin xyz="0 0.000218214 0.000949706" rpy="-3.14159 -0 3.14159265" />
+      <origin xyz="1.66533453694e-16 -0.000218214 0.000949706" rpy="-3.14159 0 6.93893072986e-18" />
       <geometry>
         <mesh filename="meshes/Wrist_Roll_Follower_SO101_5__Fillet1.stl" scale="1 1 1" />
       </geometry>
@@ -4324,7 +4324,7 @@
       </material>
     </visual>
     <collision name="so101_wrist_roll_link_holder">
-      <origin xyz="0 0.000218214 0.000949706" rpy="-3.14159 -0 3.14159265" />
+      <origin xyz="1.66533453694e-16 -0.000218214 0.000949706" rpy="-3.14159 0 6.93893072986e-18" />
       <geometry>
         <mesh filename="meshes/Wrist_Roll_Follower_SO101_5__Fillet1.stl" />
       </geometry>
@@ -4332,12 +4332,12 @@
   </link>
   <link name="camera_link">
     <inertial>
-      <origin xyz="-0.037329623 -0.0166484995 0.0160623939" rpy="0 0 0" />
-      <mass value="0.264253" />
-      <inertia ixx="0.000544739" ixy="-3.70636e-06" ixz="5.92755e-07" iyy="0.00059886" iyz="6.1442e-07" izz="0.000140933" />
+      <origin xyz="0.0405527791 0.00511310872 0.0160623772" rpy="0 0 0" />
+      <mass value="0.264252" />
+      <inertia ixx="0.000547229" ixy="1.19309e-05" ixz="-7.45393e-07" iyy="0.000596369" iyz="-4.16123e-07" izz="0.000140933" />
     </inertial>
     <visual name="camera_link_visual_0">
-      <origin xyz="-0.0382010257 -0.0194866529 0.00722524256" rpy="2.44874889 1.57078815 -1.23539645" />
+      <origin xyz="0.0422094771 0.0075768098 0.00722524256" rpy="2.44874912 1.57078815 1.61210846" />
       <geometry>
         <mesh filename="meshes/Camera_Component___Body___ZED_2i___4_6mm___Cover_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4346,7 +4346,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_1">
-      <origin xyz="0 0 0.0161940731" rpy="-2.53553565e-12 -9.95618931e-13 -0.542546096" />
+      <origin xyz="0 0 0.0161940731" rpy="2.13806989e-12 1.6878408e-12 2.30495858" />
       <geometry>
         <mesh filename="meshes/Moving_Jaw_SO101__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4355,7 +4355,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_2">
-      <origin xyz="-0.0377724019 -0.0197444743 0.00722521625" rpy="-0.174667543 1.5707932 2.42437975" />
+      <origin xyz="0.0418739894 0.00794780611 0.00722521625" rpy="-0.174668866 1.5707932 -1.01130221" />
       <geometry>
         <mesh filename="meshes/Rear_case___ZED_2i_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4364,7 +4364,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_3">
-      <origin xyz="-0.0376869033 -0.0197962974 0.00722514503" rpy="-0.174667543 1.5707932 2.42437975" />
+      <origin xyz="0.0418071834 0.00802218748 0.00722514503" rpy="-0.174668866 1.5707932 -1.01130221" />
       <geometry>
         <mesh filename="meshes/Front_case___ZED_2i_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4373,7 +4373,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_4">
-      <origin xyz="-0.0261062542 -0.0292216385 0.0162292462" rpy="-2.85199927 -1.57079059 -0.832146209" />
+      <origin xyz="0.0334558237 0.0203997188 0.0162292462" rpy="-2.85199862 -1.57079059 2.01535782" />
       <geometry>
         <mesh filename="meshes/USB_Type_C_Port_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4382,7 +4382,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_5">
-      <origin xyz="-0.0403702441 -0.0259892597 -0.0438063183" rpy="-1.57079471 -1.95367144e-07 1.02824372" />
+      <origin xyz="0.0461704561 0.0131714545 -0.0438063183" rpy="-1.57079471 -1.95371817e-07 -2.40743691" />
       <geometry>
         <mesh filename="meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4391,7 +4391,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_6">
-      <origin xyz="-0.0587523225 -0.0149073378 0.0761937519" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605510504 -0.00276304604 0.0761937519" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______0_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4400,7 +4400,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_7">
-      <origin xyz="-0.0587523225 -0.0149073378 0.0761937519" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605510504 -0.00276304604 0.0761937519" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4409,7 +4409,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_8">
-      <origin xyz="-0.0587523225 -0.0149073378 0.0761937519" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605510504 -0.00276304604 0.0761937519" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/Narrow_lens_4_6mm_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4418,7 +4418,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_9">
-      <origin xyz="-0.0339213605 -0.0182002418 0.0886937044" rpy="-0.174667543 1.5707932 2.42437975" />
+      <origin xyz="0.037740663 0.00758616251 0.0886937044" rpy="-0.174668866 1.5707932 -1.01130221" />
       <geometry>
         <mesh filename="meshes/PCB_ZED2i_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4427,7 +4427,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_10">
-      <origin xyz="-0.0587522143 -0.0149069931 -0.0438062682" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605508468 -0.00276334454 -0.0438062682" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/Narrow_lens_4_6mm_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4436,7 +4436,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_11">
-      <origin xyz="-0.0587522143 -0.0149069931 -0.0438062682" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605508468 -0.00276334454 -0.0438062682" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4445,7 +4445,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_12">
-      <origin xyz="-0.0587522143 -0.0149069931 -0.0438062682" rpy="-2.28563616e-06 1.61615907e-06 -0.542549206" />
+      <origin xyz="0.0605508468 -0.00276334454 -0.0438062682" rpy="-2.28563149e-06 1.61616175e-06 2.30495547" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______0_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4454,7 +4454,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_13">
-      <origin xyz="-0.0403695295 -0.0259890378 0.0761936598" rpy="1.57079621 -4.86257843e-07 -2.11334886" />
+      <origin xyz="0.0461697078 0.0131714493 0.0761936598" rpy="1.57079621 -4.8625317e-07 0.734155814" />
       <geometry>
         <mesh filename="meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4473,7 +4473,7 @@
   <joint name="zed2i_left_optical_joint" type="fixed">
     <parent link="camera_link" />
     <child link="zed2i_left_optical_frame" />
-    <origin xyz="-0.05875235 -0.0149073367 0.0761937731" rpy="2.73522519 1.57079633 -0.948913556" />
+    <origin xyz="0.0605510764 -0.00276305502 0.0761937731" rpy="-2.55382532 1.57079633 2.89272591" />
   </joint>
   <link name="ZED_camera" />
   <joint name="zed2i_left_optical_frame_to_ZED_camera" type="fixed">
