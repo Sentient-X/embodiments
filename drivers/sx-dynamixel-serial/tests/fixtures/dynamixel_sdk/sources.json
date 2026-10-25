@@ -1,0 +1,61 @@
+{
+ "sources": {
+  "dynamixel_sdk/robotis_def.py": {
+   "repository": "https://github.com/ROBOTIS-GIT/DynamixelSDK",
+   "revision": "a8d35d51c87e7d253ece1baa963f498a8d933fa0",
+   "path": "python/src/dynamixel_sdk/robotis_def.py",
+   "sha256": "8b5b751973ff54ee4c039440bc7501e0ad2ffaf313387d7fad548ced0a24fa1a"
+  },
+  "dynamixel_sdk/protocol2_packet_handler.py": {
+   "repository": "https://github.com/ROBOTIS-GIT/DynamixelSDK",
+   "revision": "a8d35d51c87e7d253ece1baa963f498a8d933fa0",
+   "path": "python/src/dynamixel_sdk/protocol2_packet_handler.py",
+   "sha256": "b67d515ec5c89c73ac9096e463253e1fb4e95f47f7a67bb598c709921ef97f3d"
+  },
+  "dynamixel_sdk/group_sync_write.py": {
+   "repository": "https://github.com/ROBOTIS-GIT/DynamixelSDK",
+   "revision": "a8d35d51c87e7d253ece1baa963f498a8d933fa0",
+   "path": "python/src/dynamixel_sdk/group_sync_write.py",
+   "sha256": "837b1b103bff4822331f771869eef7fdd7a767d5077d5514958dd495a19ffdcd"
+  },
+  "dynamixel_sdk/group_sync_read.py": {
+   "repository": "https://github.com/ROBOTIS-GIT/DynamixelSDK",
+   "revision": "a8d35d51c87e7d253ece1baa963f498a8d933fa0",
+   "path": "python/src/dynamixel_sdk/group_sync_read.py",
+   "sha256": "6719c38607d87f04ee11863333dd2a87c36f411209973a6fdb46c2577eb22604"
+  },
+  "dynamixel_sdk/port_handler.py": {
+   "repository": "https://github.com/ROBOTIS-GIT/DynamixelSDK",
+   "revision": "a8d35d51c87e7d253ece1baa963f498a8d933fa0",
+   "path": "python/src/dynamixel_sdk/port_handler.py",
+   "sha256": "95f77b12cd88d7d3584dd593df30a14a68cf9781074edc741b776211eac324f7"
+  },
+  "src/lerobot/motors/motors_bus.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/motors_bus.py",
+   "sha256": "ade55d42046f1f0fa737eb61c360d76ed98211f200e10918dc2e6fcfd640a688"
+  },
+  "src/lerobot/motors/dynamixel/dynamixel.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/dynamixel/dynamixel.py",
+   "sha256": "6dd0c14c99f7bbd60e202094539e620347004c18cc1f0a2ad3c1be7710d6a37f"
+  },
+  "src/lerobot/motors/dynamixel/tables.py": {
+   "repository": "https://github.com/huggingface/lerobot",
+   "revision": "30da8e687a6dfc617fcd94afc367ac7071c376ce",
+   "path": "src/lerobot/motors/dynamixel/tables.py",
+   "sha256": "65dfec2f2974411ed71b62dd28baa7ab4d4c1e5d94c60f2d56df4946e81734c1"
+  },
+  "bindings.json": {
+   "sha256": "215917bce6a279e27147115a85a992d78ac7121853d86037ad8cc034af6b4bd2"
+  },
+  "mint.py": {
+   "sha256": "4d243c6e3106c48d2214517b59813fda3dbd8c380d9292974248669d187f29d8"
+  }
+ },
+ "xl330_xm430.json": {
+  "sha256": "5c144eb7c07c1321e1c5c9348b7f007026963c4f78af414b6249a77a7f05b5be"
+ }
+}

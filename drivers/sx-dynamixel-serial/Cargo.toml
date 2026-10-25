@@ -1,0 +1,21 @@
+[package]
+name = "sx-dynamixel-serial"
+description = "Dynamixel X-series servos over Protocol 2.0, ported from ROBOTIS's own DynamixelSDK"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# dynamixel_sdk.rs translates ROBOTIS's Apache-2.0 DynamixelSDK (LICENSE-THIRD-PARTY).
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
