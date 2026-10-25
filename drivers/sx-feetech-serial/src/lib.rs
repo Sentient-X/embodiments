@@ -18,6 +18,7 @@ pub mod so101;
 pub mod static_upper_body;
 
 pub use chain::{
-    FEETECH_SERIAL, FEETECH_STS3215, FeetechChain, FeetechChainError, FeetechServo,
-    MotorCalibration, MotorNormMode, STS3215_MODEL_NUMBER, ServoConfiguration, TorqueProtection,
+    ApproachLimit, BRING_UP_APPROACH, FEETECH_SERIAL, FEETECH_STS3215, FeetechChain,
+    FeetechChainError, FeetechServo, MotorCalibration, MotorNormMode, STS3215_MODEL_NUMBER,
+    ServoConfiguration, TorqueProtection,
 };

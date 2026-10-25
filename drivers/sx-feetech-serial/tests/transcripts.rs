@@ -550,7 +550,11 @@ fn a_servo_whose_registers_disagree_with_its_calibration_is_refused_at_open() {
 fn a_configure_write_the_servo_flags_refuses_open() {
     let golden = golden();
     let mut configure = golden.configure.clone();
-    let last = configure.last_mut().expect("overload torque");
+    // The gripper's Overload_Torque (36) write, the last of SOFollower.configure's.
+    let last = configure
+        .iter_mut()
+        .rfind(|exchange| bytes(&exchange.request)[4..6] == [0x03, 36])
+        .expect("overload torque");
     answer(last, 0x08, &[]);
     let exchanges = with(&[&golden.identify, &golden.read_calibration, &configure]);
     assert!(matches!(
@@ -766,4 +770,66 @@ fn a_line_that_keeps_delivering_foreign_bytes_still_times_out() {
             result: CommResult::RxCorrupt | CommResult::RxTimeout
         })
     ));
+}
+
+#[test]
+fn open_limits_every_servos_approach_speed_and_reads_it_back() {
+    let golden = golden();
+    let chain = open(&opening(&golden), "so101");
+    assert!((0..6).all(|axis| chain.approach_speed_limited(axis)));
+    assert!(!chain.approach_speed_limited(6));
+    // The bring-up limit in the vendor's steps: Acceleration 3 and Goal_Speed 3.
+    let writes: Vec<&Exchange> = golden
+        .configure
+        .iter()
+        .filter(|exchange| {
+            let request = bytes(&exchange.request);
+            request[4..7] == [0x03, 41, 3] || request[4..8] == [0x03, 46, 3, 0]
+        })
+        .collect();
+    assert_eq!(writes.len(), 12);
+    // A servo whose Goal_Speed reads back otherwise is refused.
+    let mut configure = golden.configure.clone();
+    let speed_read = configure
+        .iter_mut()
+        .rfind(|exchange| bytes(&exchange.request)[4..6] == [0x02, 46])
+        .expect("servo 6's Goal_Speed read-back");
+    answer(speed_read, 0, &[0, 0]);
+    let exchanges = with(&[&golden.identify, &golden.read_calibration, &configure]);
+    assert!(matches!(
+        FeetechChain::open(FakePort::expecting(&exchanges), servos(&golden, "so101")),
+        Err(FeetechChainError::ApproachUnconfirmed {
+            bus_id: 6,
+            speed: 0,
+            acceleration: 3
+        })
+    ));
+    // A limit too slow for the servo's one step is refused before the bus.
+    let mut crawling = servos(&golden, "so101");
+    crawling[0].configuration.approach.speed = 0.01;
+    assert!(matches!(
+        FeetechChain::open(FakePort::default(), crawling),
+        Err(FeetechChainError::ApproachLimit(1))
+    ));
+}
+
+#[test]
+fn enabling_first_holds_every_servo_where_it_rests() {
+    let golden = golden();
+    let mut chain = open(&with(&[&opening(&golden), &golden.torque_enable]), "so101");
+    chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command");
+    // Each servo's Present_Position was read and written to Goal_Position before any
+    // Torque_Enable 1.
+    let written: Vec<Vec<u8>> = chain.port().written[opening(&golden).len()..].to_vec();
+    let first_enable = written
+        .iter()
+        .position(|packet| packet[4..7] == [0x03, 40, 1])
+        .expect("an enable");
+    let holds = written[..first_enable]
+        .iter()
+        .filter(|packet| packet[4..6] == [0x03, 42])
+        .count();
+    assert_eq!(holds, 6);
 }

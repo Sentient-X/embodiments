@@ -63,6 +63,18 @@
 //!
 //! What this chain adds over those calls, and why:
 //!
+//! - **The servo bounds its own approach speed.** At the end of open, with torque still off,
+//!   each servo's `Acceleration` (41) and `Goal_Speed` (46, `sms_sts.py`'s memory table) are
+//!   written from its [`ApproachLimit`] (the joint's rad/s and rad/s², through the binding's
+//!   reduction, in the vendor's units of 0.732 rpm and 8.7 °/s² per step, rounded down) and
+//!   read back; open refuses a servo that does not hold them. `LeRobot` leaves `Goal_Speed` at
+//!   0, which the servo reads as its full speed, and writes `Acceleration` 254; here they
+//!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
+//!   where it rests, is approached at the limit: [`ActuatorChain::approach_speed_limited`]
+//!   reports it.
+//! - **Enabling never drives toward a stale goal.** Before `Torque_Enable` 1, each servo's
+//!   `Present_Position` is read and written to its `Goal_Position`, so the instant torque comes
+//!   on it holds where it rests; `LeRobot` enables with whatever goal the register last held.
 //! - It refuses before any frame: a wrong width, a target outside the axis's commandable range
 //!   or not finite, a magnitude that reaches the sign bit (`LeRobot`'s `encode_sign_magnitude`
 //!   raises there; the vendor's `scs_toscs` would set overlapping bits), a model or bus this
@@ -103,8 +115,9 @@ use thiserror::Error;
 
 use crate::scservo_sdk::{
     CommResult, GroupSyncWrite, MAX_ID, ProtocolPacketHandler, SMS_STS_ACC,
-    SMS_STS_GOAL_POSITION_L, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODE,
-    SMS_STS_MODEL_L, SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE, SmsSts,
+    SMS_STS_GOAL_POSITION_L, SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L,
+    SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODE, SMS_STS_MODEL_L, SMS_STS_OFS_L,
+    SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE, SmsSts,
 };
 
 /// `ActuatorModel.FEETECH_STS3215` in the registry.
@@ -158,13 +171,54 @@ pub struct TorqueProtection {
     pub overload_torque: u8,
 }
 
-/// The position loop `SOFollower.configure` writes to every servo.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The position loop `SOFollower.configure` writes to every servo, and the speed the servo
+/// itself approaches any goal at.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ServoConfiguration {
     pub p_coefficient: u8,
     pub i_coefficient: u8,
     pub d_coefficient: u8,
     pub protection: Option<TorqueProtection>,
+    pub approach: ApproachLimit,
+}
+
+/// The fastest a servo moves toward any goal, written to its own `Goal_Speed` and
+/// `Acceleration` at open, in the joint's units: rad/s and rad/s².
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ApproachLimit {
+    pub speed: f64,
+    pub acceleration: f64,
+}
+
+/// The static upper body's bring-up speed (its received driver's 0.25 rad/s), reached over
+/// half a second.
+pub const BRING_UP_APPROACH: ApproachLimit = ApproachLimit {
+    speed: 0.25,
+    acceleration: 0.5,
+};
+
+/// One `Goal_Speed` step: 0.732 rpm, in rad/s (`sms_sts/write.py`: "V=60 * 0.732=43.92rpm").
+pub const SPEED_STEP_RAD_PER_S: f64 = 0.732 * std::f64::consts::TAU / 60.0;
+/// One `Acceleration` step: 8.7 °/s², in rad/s² (`sms_sts/write.py`: "A=50 * 8.7deg/s^2").
+pub const ACCELERATION_STEP_RAD_PER_S2: f64 = 8.7 * std::f64::consts::PI / 180.0;
+/// `Goal_Speed`'s largest magnitude below its sign bit.
+const GOAL_SPEED_MAX: f64 = 32_767.0;
+
+impl ApproachLimit {
+    /// The `Goal_Speed` and `Acceleration` register values that move an actuator geared at
+    /// `reduction` no faster than this, rounded down; `None` when a value rounds to 0, which
+    /// the servo reads as no limit at all, or does not fit its register.
+    #[must_use]
+    pub fn registers(&self, reduction: f64) -> Option<(u16, u8)> {
+        let speed = (self.speed * reduction / SPEED_STEP_RAD_PER_S).floor();
+        let acceleration = (self.acceleration * reduction / ACCELERATION_STEP_RAD_PER_S2).floor();
+        if !(1.0..=GOAL_SPEED_MAX).contains(&speed) || !(1.0..=254.0).contains(&acceleration) {
+            return None;
+        }
+        // Both are integers checked inside their registers just above.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Some((speed as u16, acceleration as u8))
+    }
 }
 
 /// One bound axis with what its Feetech servo needs beyond the registry's binding.
@@ -278,6 +332,17 @@ pub enum FeetechChainError {
     Ids(u16),
     #[error("{found} servo calibrations supplied for {expected} servos")]
     CalibrationCount { expected: usize, found: usize },
+    #[error("bus_id {0}'s approach limit rounds to no limit or overflows its registers")]
+    ApproachLimit(u16),
+    #[error(
+        "bus_id {bus_id} reads back Goal_Speed {speed} and Acceleration {acceleration}, not the \
+         approach limit written"
+    )]
+    ApproachUnconfirmed {
+        bus_id: u16,
+        speed: u16,
+        acceleration: u8,
+    },
     #[error("bus_id {0} has an empty or out-of-resolution calibrated range")]
     Calibration(u16),
     #[error("bus_id {bus_id} reports model {model}; only the STS3215 (777) is qualified")]
@@ -321,6 +386,8 @@ pub struct FeetechChain<P> {
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
     observed: Option<Vec<f64>>,
+    /// Every servo's approach limit was written and read back at open.
+    approach_limited: bool,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no flags.
@@ -363,6 +430,14 @@ impl<P: SerialPort> FeetechChain<P> {
             if range_min >= range_max || f64::from(range_max) >= RESOLUTION {
                 return Err(FeetechChainError::Calibration(binding.bus_id));
             }
+            if servo
+                .configuration
+                .approach
+                .registers(binding.reduction)
+                .is_none()
+            {
+                return Err(FeetechChainError::ApproachLimit(binding.bus_id));
+            }
         }
         let mut sms = SmsSts::new(port);
         for servo in &servos {
@@ -383,6 +458,7 @@ impl<P: SerialPort> FeetechChain<P> {
             stop_pending: false,
             faults: Vec::new(),
             observed: None,
+            approach_limited: false,
         };
         chain.is_calibrated()?;
         chain.configure()?;
@@ -485,6 +561,49 @@ impl<P: SerialPort> FeetechChain<P> {
                 self.write1(bus_id, scs_id, OVERLOAD_TORQUE, protection.overload_torque)?;
             }
         }
+        self.limit_approach()?;
+        Ok(())
+    }
+
+    /// Write every servo's `Acceleration` and `Goal_Speed` from its approach limit and read
+    /// both back, so the servo itself moves slowly toward whatever goal it is given.
+    fn limit_approach(&mut self) -> Result<(), FeetechChainError> {
+        let limits: Vec<(u16, u8, (u16, u8))> = self
+            .servos
+            .iter()
+            .map(|servo| {
+                let binding = servo.axis.binding;
+                let registers = servo
+                    .configuration
+                    .approach
+                    .registers(binding.reduction)
+                    .ok_or(FeetechChainError::ApproachLimit(binding.bus_id))?;
+                Ok((binding.bus_id, servo.scs_id(), registers))
+            })
+            .collect::<Result<_, FeetechChainError>>()?;
+        for (bus_id, scs_id, (speed, acceleration)) in &limits {
+            self.write1(*bus_id, *scs_id, SMS_STS_ACC, *acceleration)?;
+            expect(
+                *bus_id,
+                self.sms
+                    .ph
+                    .write2_byte_tx_rx(*scs_id, SMS_STS_GOAL_SPEED_L, *speed),
+            )?;
+        }
+        for (bus_id, scs_id, (speed, acceleration)) in limits {
+            let (read_acceleration, result, error) =
+                self.sms.ph.read1_byte_tx_rx(scs_id, SMS_STS_ACC);
+            expect(bus_id, (result, error))?;
+            let read_speed = self.read2(bus_id, scs_id, SMS_STS_GOAL_SPEED_L)?;
+            if (read_speed, read_acceleration) != (speed, acceleration) {
+                return Err(FeetechChainError::ApproachUnconfirmed {
+                    bus_id,
+                    speed: read_speed,
+                    acceleration: read_acceleration,
+                });
+            }
+        }
+        self.approach_limited = true;
         Ok(())
     }
 
@@ -532,6 +651,21 @@ impl<P: SerialPort> FeetechChain<P> {
 
     /// `FeetechMotorsBus.enable_torque`: `Torque_Enable` 1, then `Lock` 1, on every servo.
     fn enable_torque(&mut self) -> Result<(), FeetechChainError> {
+        // Hold every servo where it is first, so enabling never drives toward a stale goal.
+        let ids: Vec<(u16, u8)> = self
+            .servos
+            .iter()
+            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
+            .collect();
+        for (bus_id, scs_id) in ids {
+            let present = self.read2(bus_id, scs_id, SMS_STS_PRESENT_POSITION_L)?;
+            expect(
+                bus_id,
+                self.sms
+                    .ph
+                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_POSITION_L, present),
+            )?;
+        }
         for servo in &self.servos {
             let (bus_id, scs_id) = (servo.axis.binding.bus_id, servo.scs_id());
             expect(
@@ -657,6 +791,11 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         report
     }
 
+    /// Every servo's, once its approach limit was confirmed at open.
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        self.approach_limited && axis < self.servos.len()
+    }
+
     /// Where every servo was read at open or after the last stop, when no command has been
     /// sent since and every servo answered.
     fn last_observed(&self) -> Option<Vec<f64>> {
@@ -688,6 +827,7 @@ impl ChainError for FeetechChainError {
             | Self::Target(_)
             | Self::Unencodable(_)
             | Self::CalibrationCount { .. }
+            | Self::ApproachLimit(_)
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,
             Self::Comm {

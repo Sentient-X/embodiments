@@ -5,8 +5,10 @@
 //! limits and homing offset a supplied calibration. An instruction packet (`FF FF id len inst
 //! params checksum`) is answered with a status packet: READ with the registers asked for,
 //! WRITE by storing and acknowledging, SYNC WRITE (broadcast) by storing each servo's bytes
-//! with no answer. A servo with torque on is at its goal at once; one with torque off rests
-//! where it was put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
+//! with no answer. A servo with torque on moves toward its goal as simulated time passes
+//! ([`SimBus::advance`]), no faster than its `Goal_Speed` (in the vendor's steps of 0.732 rpm;
+//! 0, as the firmware reads it, is no limit: at once); one with torque off rests where it was
+//! put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
 //! nothing. The link's packet timeout runs out as
 //! soon as nothing more is pending, as a recording port's does. Clones share one bus.
 
@@ -21,8 +23,8 @@ use sx_embodiment_drivers::serial::SerialPort;
 use crate::chain::STS3215_MODEL_NUMBER;
 use crate::scservo_sdk::{
     BROADCAST_ID, INST_READ, INST_SYNC_WRITE, INST_WRITE, SMS_STS_GOAL_POSITION_L,
-    SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L, SMS_STS_OFS_L,
-    SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE,
+    SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L,
+    SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE,
 };
 
 /// Every servo's registers, the servos that answer nothing, and what is waiting to be read.
@@ -109,6 +111,45 @@ impl SimBus {
         registers[at..at + 2].copy_from_slice(&raw.to_le_bytes());
     }
 
+    /// Let `elapsed` pass: every servo holding torque moves toward its goal, at most its
+    /// `Goal_Speed` times `elapsed`.
+    pub fn advance(&self, elapsed: Duration) {
+        let mut state = self.state();
+        for registers in state.servos.values_mut() {
+            if registers[usize::from(SMS_STS_TORQUE_ENABLE)] != 1 {
+                continue;
+            }
+            let read = |registers: &[u8; 256], address: u8| {
+                let at = usize::from(address);
+                i32::from(u16::from_le_bytes([registers[at], registers[at + 1]]) & 0x7FFF)
+            };
+            let goal = read(registers, SMS_STS_GOAL_POSITION_L);
+            let present = read(registers, SMS_STS_PRESENT_POSITION_L);
+            let speed = read(registers, SMS_STS_GOAL_SPEED_L);
+            let next = if speed == 0 {
+                goal
+            } else {
+                // Steps per second at `speed` steps of 0.732 rpm: 4096 * 0.732 / 60 each.
+                let reach = f64::from(speed) * 4096.0 * 0.732 / 60.0 * elapsed.as_secs_f64();
+                // A sub-step is the servo's whole resolution; it is a step or nothing.
+                #[allow(clippy::cast_possible_truncation)]
+                let reach = reach.floor() as i32;
+                present + (goal - present).clamp(-reach, reach)
+            };
+            let at = usize::from(SMS_STS_PRESENT_POSITION_L);
+            let next = u16::try_from(next).unwrap_or(0);
+            registers[at..at + 2].copy_from_slice(&next.to_le_bytes());
+        }
+    }
+
+    /// A servo's `Present_Position`, as its register holds it.
+    #[must_use]
+    pub fn present(&self, id: u8) -> u16 {
+        let state = self.state();
+        let at = usize::from(SMS_STS_PRESENT_POSITION_L);
+        u16::from_le_bytes([state.servos[&id][at], state.servos[&id][at + 1]])
+    }
+
     /// Make servo `id` answer nothing from now on.
     pub fn kill(&self, id: u8) {
         self.state().dead.insert(id);
@@ -183,14 +224,6 @@ impl SerialPort for SimBus {
         let mut state = self.state();
         state.written.push(packet.to_vec());
         state.answer(packet);
-        // A servo holding torque is where it was told to be.
-        for registers in state.servos.values_mut() {
-            if registers[usize::from(SMS_STS_TORQUE_ENABLE)] == 1 {
-                let goal = usize::from(SMS_STS_GOAL_POSITION_L);
-                let present = usize::from(SMS_STS_PRESENT_POSITION_L);
-                registers.copy_within(goal..goal + 2, present);
-            }
-        }
         Ok(packet.len())
     }
 

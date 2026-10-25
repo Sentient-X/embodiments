@@ -166,6 +166,19 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         Some(observed)
     }
 
+    /// The chain carrying `axis` answers for it.
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        let mut first = 0;
+        for chain in &self.members {
+            let width = chain.axes().len();
+            if axis < first + width {
+                return chain.approach_speed_limited(axis - first);
+            }
+            first += width;
+        }
+        false
+    }
+
     /// One stop after the other.
     fn stop_budget(&self) -> Duration {
         self.members
@@ -208,6 +221,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn last_observed(&self) -> Option<Vec<f64>> {
         (**self).last_observed()
+    }
+
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        (**self).approach_speed_limited(axis)
     }
 
     fn clear_faults(&mut self) {

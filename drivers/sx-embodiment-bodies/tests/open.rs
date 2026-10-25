@@ -602,3 +602,64 @@ fn an_open_that_fails_part_way_leaves_every_motor_it_reached_disabled() {
         "the motor it reached is disabled"
     );
 }
+
+#[test]
+fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_own_speed() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let serial = probed_buses();
+    let neck = serial["5A7C118709"].clone();
+    // The camera tilt (id 6) rests at tick 753, about 1000 below its calibrated 1760.
+    assert_eq!(neck.present(6), 753);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        serial,
+        opened: Vec::new(),
+    };
+    let mut body = open_calibrated(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        &mut bridges,
+    )
+    .expect("open does not refuse a servo resting outside its range");
+    // The Feetech axes bound their own approach; the Damiao ones do not.
+    assert!((0..15).all(|axis| !body.approach_speed_limited(axis)));
+    assert!((15..25).all(|axis| body.approach_speed_limited(axis)));
+    // Every Feetech servo holds Goal_Speed 3 and Acceleration 3 (0.25 rad/s, 0.5 rad/s²).
+    {
+        let state = neck.state();
+        let registers = &state.servos[&6];
+        assert_eq!((registers[46], registers[47], registers[41]), (3, 0, 3));
+    }
+    // The first command asks for the tilt's nearest commandable joint, its lower bound.
+    let mut target = rest_inside(&body);
+    target[24] = body.commandable()[24].lower;
+    let before = neck.state().written.len();
+    body.command(&target).expect("commanded");
+    let written: Vec<Vec<u8>> = neck.state().written[before..].to_vec();
+    // Before torque came on, servo 6's goal was written to where it rests: 753.
+    let enable = written
+        .iter()
+        .position(|packet| packet[2] == 6 && packet[4..7] == [0x03, 40, 1])
+        .expect("servo 6 enabled");
+    let [low, high] = 753_u16.to_le_bytes();
+    assert!(
+        written[..enable]
+            .iter()
+            .any(|packet| packet[2] == 6 && packet[4..8] == [0x03, 42, low, high]),
+        "the goal was held at the rest position before enabling"
+    );
+    let goal = neck.state().goal(6);
+    assert!(
+        goal >= 1760,
+        "the goal is inside the calibrated range: {goal}"
+    );
+    // The servo itself moves at most 3 steps of 0.732 rpm: about 150 ticks a second.
+    neck.advance(Duration::from_millis(100));
+    let moved = neck.present(6) - 753;
+    assert!((1..=15).contains(&moved), "{moved} ticks in 100 ms");
+    neck.advance(Duration::from_secs(1));
+    assert!(neck.present(6) - 753 <= 15 + 150);
+    assert!(body.stop().is_proven());
+}
