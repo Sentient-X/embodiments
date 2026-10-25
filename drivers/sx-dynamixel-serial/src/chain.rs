@@ -33,15 +33,22 @@
 //!      (`src/lerobot/robots/koch_follower/koch_follower.py`). Every write is acknowledged and
 //!      an error byte refuses. Where `torque_disabled` re-enables torque on leaving, open leaves
 //!      the chain disabled: the first command enables it.
+//!   5. Its own limits, which `LeRobot` does not write: per servo its `Goal Current` (102,
+//!      where declared), `Profile Acceleration` (108) and `Profile Velocity` (112), then one
+//!      READ of 102..=135 confirming each, then every servo's `Present_Position` (132), which is
+//!      [`ActuatorChain::last_observed`].
 //! - Command enables a disabled chain as `enable_torque` does (`dynamixel.py:199-201`):
-//!   `Torque_Enable` 1 per servo, each acknowledged. It then sends one broadcast SYNC WRITE of
-//!   every `Goal_Position` (116, four bytes, two's complement as `_encode_sign` writes it), as
-//!   `sync_write("Goal_Position", ...)` does. The bus answers nothing to it, so a command's
-//!   receipt claims only a dispatch.
+//!   `Torque_Enable` 1 per servo, each acknowledged, after proving every limit still holds
+//!   and writing each servo's `Present_Position` to its `Goal_Position`. It then sends one
+//!   broadcast SYNC WRITE of every `Goal_Position` (116, four bytes, two's complement as
+//!   `_encode_sign` writes it), as `sync_write("Goal_Position", ...)` does. The bus answers
+//!   nothing to it, so a command's receipt claims only a dispatch; right after it one SYNC READ
+//!   (`GroupSyncRead`) of 102..=135 is the receipt's observed joints.
 //! - Stop disables as `disable_torque` does (`dynamixel.py:191-193`): `Torque_Enable` 0 on
 //!   every servo, each acknowledged, whatever an earlier one answered. Then it reads every
 //!   servo's seven bytes from `Torque_Enable` (64) to `Hardware_Error_Status` (70) in one READ;
-//!   a servo is proven stopped only when its `Torque_Enable` reads 0.
+//!   a servo is proven stopped only when its `Torque_Enable` reads 0. Then every servo's
+//!   `Present_Position`, the stop's [`ActuatorChain::last_observed`].
 //!
 //! A goal position is the registry's drive map, then `LeRobot`'s normalization through the
 //! unit's calibration ([`sx_embodiment_drivers::lerobot::unnormalize`], with
@@ -59,20 +66,44 @@
 //!   fault of a stop that may still be proven; faults are latched, and every command is refused
 //!   until [`ActuatorChain::clear_faults`] clears them. After an unproven stop every command is
 //!   refused until a stop is proven.
+//! - **Every servo declares an approach limit** ([`DynamixelServo::approach`]), written to its
+//!   `Profile Velocity` and `Profile Acceleration` (e-manual: velocity-based profile, 0.229
+//!   rev/min and 214.577 rev/min² per step; `Drive_Mode` bit 2 clear, which open's calibration
+//!   check holds). Both read 0 as no limit at all, so a limit that rounds below one step, or
+//!   past 32,767, is refused at open. The servo itself then approaches any goal at that pace,
+//!   and [`ActuatorChain::approach_speed_limited`] says so only while the registers were last
+//!   read back as written. They are RAM, reset at power-on, so they are never trusted for the
+//!   chain's life: every enable reads them back (rewriting and reading again where they
+//!   differ, refusing a servo that still does not hold them), and every command's SYNC READ
+//!   covers them, so a servo found unlimited is `NaN`, no longer approach-limited, and the
+//!   next command enables afresh.
+//! - **Current-based position** (mode 5) pushes with whatever `Goal Current` (102) holds, which
+//!   power-on resets to `Current Limit`: such a servo must declare its `Goal Current`, held and
+//!   checked as its profile is, and any other servo must not.
+//! - **Multi-turn modes are declared.** Extended position (4) and current-based position (5)
+//!   ignore `Min/Max_Position_Limit` (e-manual `Operating Mode(11)`); a servo is refused either
+//!   unless its body declares [`DynamixelServo::multi_turn`].
+//! - **Enabling never drives toward a stale goal.** Before `Torque_Enable` 1, each servo's
+//!   `Present_Position` is read and written to its `Goal_Position`; `LeRobot` enables with
+//!   whatever goal the register last held.
+//! - **A command observes.** Each command's SYNC READ reports every servo's position, `NaN`
+//!   for one that misses it or no longer holds its limits; either marks the chain disabled.
 
 use std::time::Duration;
 
-use sx_embodiment_drivers::lerobot::unnormalize;
 pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
+use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
-    ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, BindingError, BodyError, BoundAxis,
+    ChainError, ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError,
+    validate_chain,
 };
 use thiserror::Error;
 
 use crate::dynamixel_sdk::{
-    CommResult, GroupSyncWrite, MAX_ID, Protocol2PacketHandler, dxl_hiword, dxl_loword,
+    CommResult, GroupSyncRead, GroupSyncWrite, MAX_ID, Protocol2PacketHandler, dxl_hiword,
+    dxl_loword,
 };
 
 /// `ActuatorModel.DYNAMIXEL_XL330_M288` in the registry.
@@ -106,6 +137,7 @@ pub const MIN_POSITION_LIMIT: u16 = 52;
 pub const TORQUE_ENABLE: u16 = 64;
 pub const HARDWARE_ERROR_STATUS: u16 = 70;
 pub const GOAL_CURRENT: u16 = 102;
+pub const PROFILE_ACCELERATION: u16 = 108;
 pub const PROFILE_VELOCITY: u16 = 112;
 pub const GOAL_POSITION: u16 = 116;
 pub const PRESENT_CURRENT: u16 = 126;
@@ -117,8 +149,19 @@ const RESOLUTION: f64 = 4096.0;
 const APPLY_DRIVE_MODE: bool = false;
 /// `configure_motors`' `return_delay_time`: 2 µs, down from the 500 µs default.
 const RETURN_DELAY: u8 = 0;
-/// Exchanges a stop makes per servo: torque off, and the read-back.
-const STOP_EXCHANGES_PER_SERVO: u32 = 2;
+/// Exchanges a stop makes per servo: torque off, the read-back, and the position read.
+const STOP_EXCHANGES_PER_SERVO: u32 = 3;
+/// One `Profile Velocity` step: 0.229 rev/min (e-manual `Profile Velocity(112)`, velocity-based
+/// profile), in rad/s.
+pub const PROFILE_VELOCITY_STEP_RAD_PER_S: f64 = 0.229 * std::f64::consts::TAU / 60.0;
+/// One `Profile Acceleration` step: 214.577 rev/min² (e-manual `Profile Acceleration(108)`,
+/// velocity-based profile), in rad/s².
+pub const PROFILE_ACCELERATION_STEP_RAD_PER_S2: f64 = 214.577 * std::f64::consts::TAU / 3600.0;
+/// Both profile registers' largest value (e-manual: 0 ~ 32,767).
+const PROFILE_MAX: u32 = 32_767;
+/// The registers each command's SYNC READ and each enable's read-back cover: `Goal Current`
+/// (102) through `Present Position`'s last byte (135), one contiguous range of the RAM area.
+pub const LIMITS_READ_LENGTH: u16 = PRESENT_POSITION + 4 - GOAL_CURRENT;
 /// The bytes a stop reads back, `Torque_Enable` (64) through `Hardware_Error_Status` (70).
 const STOP_READ_LENGTH: u16 = HARDWARE_ERROR_STATUS - TORQUE_ENABLE + 1;
 
@@ -152,9 +195,48 @@ pub struct DynamixelServo {
     pub norm_mode: MotorNormMode,
     pub calibration: MotorCalibration,
     pub operating_mode: OperatingMode,
+    /// The speed the servo itself approaches any goal at, written to its `Profile Velocity`
+    /// and `Profile Acceleration`, which read 0 as no limit at all: every servo declares one.
+    pub approach: ApproachLimit,
+    /// `Goal Current` (102) in the servo's own units: the most current a current-based
+    /// position servo may push with, required in that mode and refused in any other.
+    pub goal_current: Option<u16>,
+    /// Whether the body declares this servo may turn more than once: the extended and
+    /// current-based position modes ignore the position limits and are refused without it.
+    pub multi_turn: bool,
 }
 
 impl DynamixelServo {
+    /// The `Profile Velocity` and `Profile Acceleration` that hold this servo to its approach
+    /// limit, in the velocity-based profile's steps (the `Drive_Mode` open checks is 0 or 1,
+    /// so its time-based bit 2 is clear).
+    #[must_use]
+    pub fn profile(&self) -> Option<(u32, u32)> {
+        self.approach.steps(
+            self.axis.binding.reduction,
+            (PROFILE_VELOCITY_STEP_RAD_PER_S, PROFILE_MAX),
+            (PROFILE_ACCELERATION_STEP_RAD_PER_S2, PROFILE_MAX),
+        )
+    }
+
+    /// The joint coordinate a `Present_Position` reading of `raw` ticks is at, unclamped.
+    #[must_use]
+    pub fn joint_from_raw(&self, raw: i32) -> f64 {
+        let axis = &self.axis;
+        let ends = [
+            axis.actuator_from_joint(axis.lower),
+            axis.actuator_from_joint(axis.upper),
+        ];
+        axis.joint_from_actuator(normalize(
+            self.norm_mode,
+            &self.calibration,
+            APPLY_DRIVE_MODE,
+            RESOLUTION,
+            f64::from(raw),
+            (ends[0].min(ends[1]), ends[0].max(ends[1])),
+        ))
+    }
+
     fn dxl_id(&self) -> u8 {
         // Open refuses an address above `MAX_ID`, so the narrowing never saturates.
         u8::try_from(self.axis.binding.bus_id).unwrap_or(u8::MAX)
@@ -224,6 +306,21 @@ pub enum DynamixelChainError {
     Unqualified(u16),
     #[error("bus_id {0} is above the protocol's last device id, 252")]
     Ids(u16),
+    #[error("bus_id {0}'s approach limit rounds to no limit or overflows its profile registers")]
+    ApproachLimit(u16),
+    #[error(
+        "bus_id {0} turns more than once in its operating mode, which its body does not declare"
+    )]
+    MultiTurn(u16),
+    #[error("bus_id {0} needs a Goal Current exactly when it runs current-based position")]
+    GoalCurrent(u16),
+    #[error("bus_id {bus_id} reads back {register} {read}, not the {written} written")]
+    Unconfirmed {
+        bus_id: u16,
+        register: &'static str,
+        written: u32,
+        read: u32,
+    },
     #[error("bus_id {0} could not be added to a group packet: its id is already in it")]
     GroupParam(u16),
     #[error("the chain's axes are on ports {0:?}; one chain drives one bus")]
@@ -278,6 +375,12 @@ pub struct DynamixelChain<P> {
     enabled: bool,
     stop_pending: bool,
     faults: Vec<(u16, u8)>,
+    /// Every servo's position, read at open and after each stop; `None` once a command may
+    /// have moved it, or when a read failed.
+    observed: Option<Vec<f64>>,
+    /// Per servo: its profile (and `Goal Current`, where declared) was last read back as
+    /// written, at the last enable or in the last command's SYNC READ.
+    approach_limited: Vec<bool>,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no error.
@@ -289,6 +392,59 @@ fn expect(bus_id: u16, (result, error): (CommResult, u8)) -> Result<(), Dynamixe
         return Err(DynamixelChainError::ServoError { bus_id, error });
     }
     Ok(())
+}
+
+/// A read-back that must equal what was written.
+fn confirm(
+    bus_id: u16,
+    register: &'static str,
+    written: u32,
+    read: u32,
+) -> Result<(), DynamixelChainError> {
+    if read == written {
+        Ok(())
+    } else {
+        Err(DynamixelChainError::Unconfirmed {
+            bus_id,
+            register,
+            written,
+            read,
+        })
+    }
+}
+
+/// What one servo must hold in its RAM before it is enabled.
+#[derive(Clone, Copy)]
+struct Limits {
+    goal_current: Option<u16>,
+    velocity: u32,
+    acceleration: u32,
+}
+
+impl Limits {
+    fn held_by(&self, read: &LimitsRead) -> bool {
+        self.goal_current
+            .is_none_or(|current| read.word(GOAL_CURRENT, 2) == Some(u32::from(current)))
+            && read.word(PROFILE_ACCELERATION, 4) == Some(self.acceleration)
+            && read.word(PROFILE_VELOCITY, 4) == Some(self.velocity)
+    }
+}
+
+/// One servo's bytes from `Goal Current` (102) on.
+struct LimitsRead(Vec<u8>);
+
+impl LimitsRead {
+    /// The little-endian `length`-byte register at `address`.
+    fn word(&self, address: u16, length: usize) -> Option<u32> {
+        let start = usize::from(address.checked_sub(GOAL_CURRENT)?);
+        let bytes = self.0.get(start..start + length)?;
+        Some(
+            bytes
+                .iter()
+                .rev()
+                .fold(0, |word, byte| (word << 8) | u32::from(*byte)),
+        )
+    }
 }
 
 /// A four-byte register's two's-complement value.
@@ -332,6 +488,18 @@ impl<P: SerialPort> DynamixelChain<P> {
             if range_min >= range_max || f64::from(range_max) >= RESOLUTION {
                 return Err(DynamixelChainError::Calibration(binding.bus_id));
             }
+            if servo.profile().is_none() {
+                return Err(DynamixelChainError::ApproachLimit(binding.bus_id));
+            }
+            let multi_turn = servo.operating_mode != OperatingMode::Position;
+            if multi_turn && !servo.multi_turn {
+                return Err(DynamixelChainError::MultiTurn(binding.bus_id));
+            }
+            if (servo.operating_mode == OperatingMode::CurrentPosition)
+                != servo.goal_current.is_some()
+            {
+                return Err(DynamixelChainError::GoalCurrent(binding.bus_id));
+            }
         }
         let commandable = servos.iter().map(DynamixelServo::commandable).collect();
         let mut chain = Self {
@@ -342,6 +510,8 @@ impl<P: SerialPort> DynamixelChain<P> {
             enabled: false,
             stop_pending: false,
             faults: Vec::new(),
+            observed: None,
+            approach_limited: Vec::new(),
         };
         chain.identify()?;
         chain.is_calibrated()?;
@@ -466,11 +636,169 @@ impl<P: SerialPort> DynamixelChain<P> {
                 self.ph.write1_byte_tx_rx(dxl_id, OPERATING_MODE, mode),
             )?;
         }
+        self.approach_limited = vec![false; self.servos.len()];
+        for index in 0..self.servos.len() {
+            self.hold_limits(index, true)?;
+        }
+        self.observed = self.read_positions();
         Ok(())
     }
 
-    /// `enable_torque`: `Torque_Enable` 1 on every servo.
+    /// The `Goal Current` (where declared), `Profile Velocity` and `Profile Acceleration`
+    /// servo `index` must hold.
+    fn limits(&self, index: usize) -> Result<Limits, DynamixelChainError> {
+        let servo = &self.servos[index];
+        let (velocity, acceleration) = servo.profile().ok_or(
+            DynamixelChainError::ApproachLimit(servo.axis.binding.bus_id),
+        )?;
+        Ok(Limits {
+            goal_current: servo.goal_current,
+            velocity,
+            acceleration,
+        })
+    }
+
+    /// Prove servo `index` holds its limits: read `Goal Current` through `Present Position`
+    /// in one READ, and where they differ (or `rewrite`) write them and read again. All three
+    /// are RAM (e-manual "Control Table": the RAM area is reset at power-on, `Profile
+    /// Velocity` to 0, which is no limit at all, and `Goal Current` to `Current Limit`), so a
+    /// servo whose power cycled while its link stayed up has lost them. One that does not read
+    /// them back is refused.
+    fn hold_limits(&mut self, index: usize, rewrite: bool) -> Result<(), DynamixelChainError> {
+        let limits = self.limits(index)?;
+        let (bus_id, dxl_id) = {
+            let servo = &self.servos[index];
+            (servo.axis.binding.bus_id, servo.dxl_id())
+        };
+        if !rewrite && limits.held_by(&self.read_limits(bus_id, dxl_id)?) {
+            self.approach_limited[index] = true;
+            return Ok(());
+        }
+        self.approach_limited[index] = false;
+        if let Some(current) = limits.goal_current {
+            expect(
+                bus_id,
+                self.ph.write2_byte_tx_rx(dxl_id, GOAL_CURRENT, current),
+            )?;
+        }
+        expect(
+            bus_id,
+            self.ph
+                .write4_byte_tx_rx(dxl_id, PROFILE_ACCELERATION, limits.acceleration),
+        )?;
+        expect(
+            bus_id,
+            self.ph
+                .write4_byte_tx_rx(dxl_id, PROFILE_VELOCITY, limits.velocity),
+        )?;
+        let read = self.read_limits(bus_id, dxl_id)?;
+        if let Some(current) = limits.goal_current {
+            confirm(
+                bus_id,
+                "Goal Current",
+                u32::from(current),
+                read.word(GOAL_CURRENT, 2).unwrap_or(0),
+            )?;
+        }
+        confirm(
+            bus_id,
+            "Profile Acceleration",
+            limits.acceleration,
+            read.word(PROFILE_ACCELERATION, 4).unwrap_or(0),
+        )?;
+        confirm(
+            bus_id,
+            "Profile Velocity",
+            limits.velocity,
+            read.word(PROFILE_VELOCITY, 4).unwrap_or(0),
+        )?;
+        self.approach_limited[index] = true;
+        Ok(())
+    }
+
+    /// One servo's registers from `Goal Current` (102) to `Present Position` (132..=135).
+    fn read_limits(&mut self, bus_id: u16, dxl_id: u8) -> Result<LimitsRead, DynamixelChainError> {
+        let (data, result, error) = self.ph.read_tx_rx(dxl_id, GOAL_CURRENT, LIMITS_READ_LENGTH);
+        expect(bus_id, (result, error))?;
+        if data.len() != usize::from(LIMITS_READ_LENGTH) {
+            return Err(DynamixelChainError::Comm {
+                bus_id,
+                result: CommResult::RxCorrupt,
+            });
+        }
+        Ok(LimitsRead(data))
+    }
+
+    /// Every servo's `Present_Position` as a joint coordinate, or `None` when any servo did
+    /// not answer.
+    fn read_positions(&mut self) -> Option<Vec<f64>> {
+        let ids: Vec<u8> = self.servos.iter().map(DynamixelServo::dxl_id).collect();
+        let mut observed = Vec::with_capacity(ids.len());
+        for (index, dxl_id) in ids.into_iter().enumerate() {
+            let (raw, result, error) = self.ph.read4_byte_tx_rx(dxl_id, PRESENT_POSITION);
+            if result != CommResult::Success || error & !crate::dynamixel_sdk::ERRBIT_ALERT != 0 {
+                return None;
+            }
+            observed.push(self.servos[index].joint_from_raw(signed(raw)));
+        }
+        Some(observed)
+    }
+
+    /// One SYNC READ (`GroupSyncRead`, as `sync_read("Present_Position")` reads it, widened)
+    /// of every servo's `Goal Current` (102) through `Present_Position` (132..=135), as joint
+    /// coordinates in native state order. A servo whose answer is missing or corrupt, or that
+    /// no longer holds its limits, is `NaN`, which no tracking bound admits; either marks the
+    /// chain disabled, so the next enable proves every limit again and holds every servo where
+    /// it rests.
+    fn sync_read_positions(&mut self) -> Result<Vec<f64>, DynamixelChainError> {
+        let mut reader = GroupSyncRead::new(GOAL_CURRENT, LIMITS_READ_LENGTH);
+        for servo in &self.servos {
+            if !reader.add_param(servo.dxl_id()) {
+                return Err(DynamixelChainError::GroupParam(servo.axis.binding.bus_id));
+            }
+        }
+        let _ = reader.tx_rx_packet(&mut self.ph);
+        let mut observed = Vec::with_capacity(self.servos.len());
+        for index in 0..self.servos.len() {
+            let limits = self.limits(index)?;
+            let servo = &self.servos[index];
+            let id = servo.dxl_id();
+            let read = |address: u16, length: u16| reader.get_data(id, address, length);
+            let held = limits.goal_current.map_or_else(
+                || read(GOAL_CURRENT, 2).is_some(),
+                |current| read(GOAL_CURRENT, 2) == Some(u32::from(current)),
+            ) && read(PROFILE_ACCELERATION, 4) == Some(limits.acceleration)
+                && read(PROFILE_VELOCITY, 4) == Some(limits.velocity);
+            let position = read(PRESENT_POSITION, 4)
+                .filter(|_| held)
+                .map(|raw| servo.joint_from_raw(signed(raw)));
+            if !held {
+                self.approach_limited[index] = false;
+            }
+            if position.is_none() {
+                self.enabled = false;
+            }
+            observed.push(position.unwrap_or(f64::NAN));
+        }
+        Ok(observed)
+    }
+
+    /// `enable_torque`: `Torque_Enable` 1 on every servo, once every servo is proven to hold
+    /// its limits and holds where it rests.
     fn enable_torque(&mut self) -> Result<(), DynamixelChainError> {
+        for index in 0..self.servos.len() {
+            self.hold_limits(index, false)?;
+        }
+        // Hold every servo where it is first, so enabling never drives toward a stale goal:
+        // `Goal Position` keeps whatever it last held (e-manual `Goal Position(116)`), and the
+        // instant torque comes on the servo drives toward it.
+        for (bus_id, dxl_id) in self.ids() {
+            let present = self.read4(bus_id, dxl_id, PRESENT_POSITION)?;
+            expect(
+                bus_id,
+                self.ph.write4_byte_tx_rx(dxl_id, GOAL_POSITION, present),
+            )?;
+        }
         for (bus_id, dxl_id) in self.ids() {
             expect(bus_id, self.ph.write1_byte_tx_rx(dxl_id, TORQUE_ENABLE, 1))?;
         }
@@ -551,6 +879,8 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
                 return Err(DynamixelChainError::GroupParam(servo.axis.binding.bus_id));
             }
         }
+        // From here the servos may move: what open or the last stop read no longer holds.
+        self.observed = None;
         if !self.enabled {
             self.enable_torque()?;
             self.enabled = true;
@@ -558,10 +888,13 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
         match writer.tx_packet(&mut self.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
-                observed: Vec::new(),
+                observed: self.sync_read_positions()?,
                 feedback: Vec::new(),
             }),
-            result => Err(DynamixelChainError::SyncWrite(result)),
+            result => {
+                self.enabled = false;
+                Err(DynamixelChainError::SyncWrite(result))
+            }
         }
     }
 
@@ -605,10 +938,21 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
                 self.faults.push(*fault);
             }
         }
+        self.observed = self.read_positions();
         report
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain: two exchanges per servo, each
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        self.observed.clone()
+    }
+
+    /// A servo's, while its profile was last read back as written: at the last enable, and
+    /// in every command's SYNC READ since.
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        self.approach_limited.get(axis).copied().unwrap_or(false)
+    }
+
+    /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo, each
     /// bounded by the link's [`SerialPort::timeout`].
     fn stop_budget(&self) -> Duration {
         let servos = u32::try_from(self.servos.len()).unwrap_or(u32::MAX);
@@ -633,6 +977,9 @@ impl ChainError for DynamixelChainError {
             | Self::OutsideCalibration { .. }
             | Self::CalibrationCount { .. }
             | Self::GroupParam(_)
+            | Self::ApproachLimit(_)
+            | Self::MultiTurn(_)
+            | Self::GoalCurrent(_)
             | Self::Ports(_)
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,

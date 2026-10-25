@@ -21,20 +21,26 @@ Consumer: `sx-embodiment-bodies`, which opens a body's Dynamixel port beside its
 | Item | Path |
 |---|---|
 | The chain trait | `sx_embodiment_drivers::ActuatorChain`; `DynamixelChainError` implements `ChainError` |
-| A command's evidence | `Receipt<()>`: always `DispatchAttempted`, since the `Goal_Position` SYNC WRITE has no answer |
+| A command's evidence | `Receipt<()>`: always `DispatchAttempted`, since the `Goal_Position` SYNC WRITE has no answer; `observed` is the SYNC READ of 102..=135 right after it, `NaN` for a servo that missed it or no longer holds its limits |
+| Where the body rests | `ActuatorChain::last_observed`: every `Present_Position` read at open and after each stop |
+| Approach limit | every servo's `ApproachLimit`, written to `Profile Velocity` (112) and `Profile Acceleration` (108), refused if it rounds to 0 (no limit) and re-proven at every enable and in every SYNC READ; `approach_speed_limited` only while confirmed |
 | A stop's proof | `StopReport`: a servo is unproven unless `Torque_Enable` reads back 0; a `Hardware_Error_Status` (or else an error byte) read while stopping is a fault |
 | Fault latch | `DynamixelChain::faults()`, refusing commands until `ActuatorChain::clear_faults()` |
 | The port | `sx_embodiment_drivers::serial::SerialPort` |
-| A body | `body::DynamixelBody { bindings, baud, servos }`, each `ServoSetup` a joint's `MotorNormMode` and `OperatingMode` (position, extended position, current-based position) |
+| A body | `body::DynamixelBody { bindings, baud, servos }`, each `ServoSetup` a joint's `MotorNormMode`, `OperatingMode` (position, extended position, current-based position), `approach`, `goal_current` (declared exactly for current-based position, written to `Goal Current` (102)) and `multi_turn` (required for modes 4 and 5) |
 | Per-unit calibration | `sx_embodiment_drivers::lerobot::MotorCalibration`, as `LeRobot` records it; open refuses a servo whose `Homing_Offset`, position limits or `Drive_Mode` disagree |
 | Model check | `model_number`: XL330-M288 1200, XM430-W350 1020, from each model's e-manual page; open pings every servo and refuses another number |
-| Stop budget | the port's `timeout()` times two exchanges (torque off, read-back) per servo |
+| Stop budget | the port's `timeout()` times three exchanges (torque off, read-back, position) per servo |
 
 - **Sequencing** is `LeRobot` 0.6.0's Dynamixel bus: at open the ping, a refusal of any servo
   reporting a hardware error (it needs a reboot, a person's call), `is_calibrated`, then torque
-  off, `Return_Delay_Time` 0 and each servo's `Operating_Mode`; `Torque_Enable` 1 before the
-  first command after open or a stop; one `Goal_Position` SYNC WRITE per command; torque off on
-  every servo at stop, then one seven-byte read from `Torque_Enable` to `Hardware_Error_Status`.
+  off, `Return_Delay_Time` 0 and each servo's `Operating_Mode`, then (the chain's own) each
+  servo's `Goal Current` where declared and its profile, read back, and every
+  `Present_Position`; `Torque_Enable` 1 before the first command after open or a stop, once
+  every limit reads back and each servo's `Goal_Position` is its `Present_Position`; one
+  `Goal_Position` SYNC WRITE and one SYNC READ per command; torque off on every servo at stop,
+  then one seven-byte read from `Torque_Enable` to `Hardware_Error_Status`, then every
+  `Present_Position`.
 - **Wire values** are `LeRobot`'s `_unnormalize` with `apply_drive_mode` false (the servo
   reverses itself by its `Drive_Mode`); a goal outside the unit's calibrated range is refused,
   since the extended and current-based modes ignore the servo's position limits.

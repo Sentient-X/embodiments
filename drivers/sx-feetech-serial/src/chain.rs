@@ -123,6 +123,7 @@ use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
     ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, validate_chain,
 };
+pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
 
 use crate::scservo_sdk::{
@@ -199,43 +200,24 @@ pub struct ServoConfiguration {
     pub approach: Option<ApproachLimit>,
 }
 
-/// The fastest a servo moves toward any goal, written to its own `Goal_Speed` and
-/// `Acceleration` at open, in the joint's units: rad/s and rad/s².
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ApproachLimit {
-    pub speed: f64,
-    pub acceleration: f64,
-}
-
-/// The static upper body's bring-up speed (its received driver's 0.25 rad/s), reached over
-/// half a second.
-pub const BRING_UP_APPROACH: ApproachLimit = ApproachLimit {
-    speed: 0.25,
-    acceleration: 0.5,
-};
-
 /// One `Goal_Speed` step: 0.732 rpm, in rad/s (`sms_sts/write.py`: "V=60 * 0.732=43.92rpm").
 pub const SPEED_STEP_RAD_PER_S: f64 = 0.732 * std::f64::consts::TAU / 60.0;
 /// One `Acceleration` step: 8.7 °/s², in rad/s² (`sms_sts/write.py`: "A=50 * 8.7deg/s^2").
 pub const ACCELERATION_STEP_RAD_PER_S2: f64 = 8.7 * std::f64::consts::PI / 180.0;
 /// `Goal_Speed`'s largest magnitude below its sign bit.
-const GOAL_SPEED_MAX: f64 = 32_767.0;
+const GOAL_SPEED_MAX: u32 = 32_767;
 
-impl ApproachLimit {
-    /// The `Goal_Speed` and `Acceleration` register values that move an actuator geared at
-    /// `reduction` no faster than this, rounded down; `None` when a value rounds to 0, which
-    /// the servo reads as no limit at all, or does not fit its register.
-    #[must_use]
-    pub fn registers(&self, reduction: f64) -> Option<(u16, u8)> {
-        let speed = (self.speed * reduction / SPEED_STEP_RAD_PER_S).floor();
-        let acceleration = (self.acceleration * reduction / ACCELERATION_STEP_RAD_PER_S2).floor();
-        if !(1.0..=GOAL_SPEED_MAX).contains(&speed) || !(1.0..=254.0).contains(&acceleration) {
-            return None;
-        }
-        // Both are integers checked inside their registers just above.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        Some((speed as u16, acceleration as u8))
-    }
+/// The `Goal_Speed` and `Acceleration` register values that move an actuator geared at
+/// `reduction` no faster than `approach`, rounded down; `None` when a value rounds to 0, which
+/// the servo reads as no limit at all, or does not fit its register.
+#[must_use]
+pub fn approach_registers(approach: &ApproachLimit, reduction: f64) -> Option<(u16, u8)> {
+    let (speed, acceleration) = approach.steps(
+        reduction,
+        (SPEED_STEP_RAD_PER_S, GOAL_SPEED_MAX),
+        (ACCELERATION_STEP_RAD_PER_S2, 254),
+    )?;
+    Some((u16::try_from(speed).ok()?, u8::try_from(acceleration).ok()?))
 }
 
 /// One bound axis with what its Feetech servo needs beyond the registry's binding.
@@ -459,7 +441,7 @@ impl<P: SerialPort> FeetechChain<P> {
             if servo
                 .configuration
                 .approach
-                .is_some_and(|approach| approach.registers(binding.reduction).is_none())
+                .is_some_and(|approach| approach_registers(&approach, binding.reduction).is_none())
             {
                 return Err(FeetechChainError::ApproachLimit(binding.bus_id));
             }
@@ -608,8 +590,7 @@ impl<P: SerialPort> FeetechChain<P> {
             .configuration
             .approach
             .map(|approach| {
-                approach
-                    .registers(binding.reduction)
+                approach_registers(&approach, binding.reduction)
                     .ok_or(FeetechChainError::ApproachLimit(binding.bus_id))
             })
             .transpose()

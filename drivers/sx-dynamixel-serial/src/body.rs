@@ -8,7 +8,7 @@
 //! and one [`DynamixelBody`] constant listed here, with no code.
 
 use sx_embodiment_drivers::serial::SerialPort;
-use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, InstanceDrive};
+use sx_embodiment_drivers::{ApproachLimit, BodyBindings, BodyError, BoundAxis, InstanceDrive};
 
 use crate::chain::{
     DYNAMIXEL_SERIAL, DynamixelChain, DynamixelChainError, DynamixelServo, MotorCalibration,
@@ -16,11 +16,17 @@ use crate::chain::{
 };
 
 /// What one joint's servo needs beyond the registry's binding and the unit's calibration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ServoSetup {
     pub joint: &'static str,
     pub norm_mode: MotorNormMode,
     pub operating_mode: OperatingMode,
+    /// The speed the servo itself approaches any goal at (`DynamixelServo::approach`).
+    pub approach: ApproachLimit,
+    /// `Goal Current`, declared exactly for a current-based position servo.
+    pub goal_current: Option<u16>,
+    /// Whether the servo may turn more than once (the extended and current-based modes).
+    pub multi_turn: bool,
 }
 
 /// One Dynamixel body on one bus.
@@ -101,6 +107,9 @@ impl DynamixelBody {
                 norm_mode: setup.norm_mode,
                 calibration: *calibration,
                 operating_mode: setup.operating_mode,
+                approach: setup.approach,
+                goal_current: setup.goal_current,
+                multi_turn: setup.multi_turn,
             })
             .collect())
     }

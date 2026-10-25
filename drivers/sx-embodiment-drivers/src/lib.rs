@@ -28,6 +28,7 @@
 //! Synchronous and allocation-light on purpose: the station wraps a chain in its own async
 //! actuator, and nothing here owns a thread or a runtime.
 
+pub mod approach;
 pub mod binding;
 pub mod body;
 pub mod can;
@@ -42,6 +43,7 @@ pub mod lerobot;
 pub mod media;
 pub mod serial;
 
+pub use approach::{ApproachLimit, BRING_UP_APPROACH};
 pub use binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
     UNCALIBRATED_ZERO, is_port_name, validate_chain,
