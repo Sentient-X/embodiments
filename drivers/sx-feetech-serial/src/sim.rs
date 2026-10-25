@@ -7,7 +7,9 @@
 //! WRITE by storing and acknowledging, SYNC WRITE (broadcast) by storing each servo's bytes
 //! with no answer, SYNC READ by each live servo's status packet in the order asked. A servo with torque on moves toward its goal as simulated time passes
 //! ([`SimBus::advance`]), no faster than its `Goal_Speed` (in the vendor's steps of 0.732 rpm;
-//! 0, as the firmware reads it, is no limit: at once); one with torque off rests where it was
+//! 0, as the firmware reads it, is no limit: at once), the goal clamped into its
+//! `Min_Angle_Limit`..`Max_Angle_Limit` as the firmware clamps it (the register keeps what was
+//! written; limits of 0..0 clamp nothing); one with torque off rests where it was
 //! put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
 //! nothing. The link's packet timeout runs out as
 //! soon as nothing more is pending, as a recording port's does. Clones share one bus.
@@ -127,7 +129,16 @@ impl SimBus {
                 let at = usize::from(address);
                 i32::from(u16::from_le_bytes([registers[at], registers[at + 1]]) & 0x7FFF)
             };
+            let (min, max) = (
+                read(registers, SMS_STS_MIN_ANGLE_LIMIT_L),
+                read(registers, SMS_STS_MAX_ANGLE_LIMIT_L),
+            );
             let goal = read(registers, SMS_STS_GOAL_POSITION_L);
+            let goal = if min < max {
+                goal.clamp(min, max)
+            } else {
+                goal
+            };
             let present = read(registers, SMS_STS_PRESENT_POSITION_L);
             let speed = read(registers, SMS_STS_GOAL_SPEED_L);
             let next = if speed == 0 {
@@ -411,6 +422,152 @@ mod tests {
             .iter()
             .any(|packet| packet[2] == 3 && packet[4..7] == [0x03, 46, 3]);
         assert!(rewrote);
+    }
+
+    /// SO-101 servos calibrated narrower than their declared bounds: 1500..2500, about
+    /// ±0.77 rad around mid-range, inside every arm joint's declared ±1.65 rad or more.
+    fn narrow() -> MotorCalibration {
+        MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 1500,
+            range_max: 2500,
+        }
+    }
+
+    #[test]
+    fn a_degrees_axis_is_commanded_only_where_its_unit_reaches() {
+        let bus = SimBus::sts3215(&(1..=6).map(|id| (id, narrow())).collect::<Vec<_>>());
+        let mut chain =
+            crate::FeetechChain::open(bus.clone(), so101([narrow(); 6]).expect("composes"))
+                .expect("opens");
+        let reach = (2500.0 - 2000.0) * std::f64::consts::TAU / 4095.0;
+        for (range, axis) in chain.commandable().iter().zip(chain.axes()).take(5) {
+            assert!((range.upper - reach).abs() < 1e-9, "{}", axis.joint);
+            assert!((range.lower + reach).abs() < 1e-9, "{}", axis.joint);
+            assert!(axis.upper > range.upper && axis.lower < range.lower);
+        }
+        // The gripper's percent spans its calibrated range onto its declared bounds.
+        let gripper = &chain.axes()[5];
+        assert_eq!(chain.servos()[5].calibrated_reach(), None);
+        assert!(chain.commandable()[5].admits(gripper.lower));
+        assert!(chain.commandable()[5].admits(gripper.upper));
+        // A target in the declared-only band is refused before the bus.
+        let written = bus.state().written.len();
+        let mut target = [0.0; 6];
+        target[1] = 1.0;
+        assert!(matches!(
+            chain.command(&target),
+            Err(crate::FeetechChainError::Target(_))
+        ));
+        assert_eq!(bus.state().written.len(), written);
+    }
+
+    #[test]
+    fn an_axis_whose_declared_and_calibrated_ranges_do_not_overlap_is_refused_at_open() {
+        let bus = calibrated_bus();
+        let mut servos = so101([narrow(); 6]).expect("composes");
+        servos[1].axis.lower = 1.0;
+        servos[1].axis.upper = 1.5;
+        let error = crate::FeetechChain::open(bus.clone(), servos).err();
+        assert!(
+            matches!(
+                &error,
+                Some(crate::FeetechChainError::RangeMismatch {
+                    joint,
+                    declared_lower,
+                    calibrated_upper,
+                    ..
+                }) if joint == "shoulder_lift" && (*declared_lower - 1.0).abs() < 1e-12 && *calibrated_upper < 1.0
+            ),
+            "{error:?}"
+        );
+        assert!(bus.state().written.is_empty(), "refused before the bus");
+    }
+
+    #[test]
+    fn a_servo_resting_outside_its_limits_is_given_the_nearest_one_at_its_confirmed_approach() {
+        let bus = calibrated_bus();
+        // The shoulder lift rests at tick 3303, 2.0 rad above mid-range and past its 3200
+        // limit, as a servo pushed past its stop can read.
+        bus.rest_at(2, 3303);
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
+        let rest = chain.last_observed().expect("read at open");
+        assert!((rest[1] - 2.0).abs() < 1e-3, "{rest:?}");
+        assert!(rest[1] > chain.commandable()[1].upper);
+        let before = bus.state().written.len();
+        chain.command(&[0.0; 6]).expect("enabled and commanded");
+        assert_eq!(
+            chain.held_inside(),
+            [crate::HeldInside {
+                bus_id: 2,
+                present: 3303,
+                goal: 3200
+            }]
+        );
+        let state = bus.state();
+        let written = &state.written[before..];
+        let enable = written
+            .iter()
+            .position(|packet| packet[2] == 2 && packet[4..7] == [0x03, 40, 1])
+            .expect("servo 2 enabled");
+        let [low, high] = 3200_u16.to_le_bytes();
+        assert!(
+            written[..enable]
+                .iter()
+                .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 42, low, high]),
+            "the clamped goal was written before torque came on"
+        );
+    }
+
+    #[test]
+    fn a_servo_resting_outside_its_limits_without_an_approach_limit_refuses_the_enable() {
+        let calibration = MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 800,
+            range_max: 3200,
+        };
+        let bus = calibrated_bus();
+        bus.rest_at(2, 3303);
+        let mut chain =
+            crate::FeetechChain::open(bus.clone(), so101([calibration; 6]).expect("composes"))
+                .expect("opens");
+        let error = chain.command(&[0.0; 6]).expect_err("refused");
+        assert!(matches!(
+            error,
+            crate::FeetechChainError::RestsOutside {
+                bus_id: 2,
+                present: 3303,
+                range_min: 800,
+                range_max: 3200
+            }
+        ));
+        assert_eq!(
+            sx_embodiment_drivers::ChainError::failure(&error),
+            sx_embodiment_drivers::ChainFailure::Refused
+        );
+        assert!(
+            (1..=6).all(|id| bus.state().torque(id) == 0),
+            "no torque came on"
+        );
+    }
+
+    #[test]
+    fn the_simulated_firmware_clamps_a_goal_to_its_limit_registers() {
+        let bus = calibrated_bus();
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
+        chain.command(&[0.0; 6]).expect("commanded");
+        // A goal written straight to the register, past the 3200 limit.
+        bus.state().servos.get_mut(&1).expect("servo 1")[42..44]
+            .copy_from_slice(&3500_u16.to_le_bytes());
+        bus.advance(Duration::from_secs(60));
+        assert_eq!(bus.present(1), 3200);
+        assert_eq!(
+            bus.state().goal(1),
+            3500,
+            "the register keeps what was written"
+        );
     }
 
     /// The bytes one command puts on the line once torque is on: the `Goal_Position` SYNC

@@ -660,17 +660,25 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
     let before = neck.state().written.len();
     body.command(&target).expect("commanded");
     let written: Vec<Vec<u8>> = neck.state().written[before..].to_vec();
-    // Before torque came on, servo 6's goal was written to where it rests: 753.
+    // Before torque came on, servo 6's goal was written to where it rests clamped into its
+    // calibrated limits, 1760: the firmware would have driven it there anyway, and this enable
+    // had just confirmed its approach limit.
     let enable = written
         .iter()
         .position(|packet| packet[2] == 6 && packet[4..7] == [0x03, 40, 1])
         .expect("servo 6 enabled");
-    let [low, high] = 753_u16.to_le_bytes();
+    let [low, high] = TILT_MIN.to_le_bytes();
     assert!(
         written[..enable]
             .iter()
             .any(|packet| packet[2] == 6 && packet[4..8] == [0x03, 42, low, high]),
-        "the goal was held at the rest position before enabling"
+        "the goal was held at the nearest limit before enabling"
+    );
+    assert!(
+        !written[..enable]
+            .iter()
+            .any(|packet| packet[2] == 6 && packet[4..8] == [0x03, 42, 0xF1, 0x02]),
+        "never at the rest tick 753, outside the limits"
     );
     let goal = neck.state().goal(6);
     assert!(
@@ -801,6 +809,82 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
         matches!(failure, Some(GovernorError::Tracking { ref joint, .. }) if joint == "so101_camera_tilt_joint"),
         "{failure:?}"
     );
+}
+
+#[test]
+fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_it_reaches() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let serial = probed_buses();
+    let neck = serial["5A7C118709"].clone();
+    // The shoulder lift (id 2) rests at +2.0 rad: inside its declared -0.035..3.63 rad, past
+    // its unit's calibrated 932..3039 ticks, 1985.5 +/- 1053.5 about the drive's zero.
+    let resting = 3289;
+    neck.rest_at(2, resting);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let body = bring_up(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        &mut bridges,
+    )
+    .expect("open");
+    let lift = body
+        .axes()
+        .iter()
+        .position(|axis| axis.joint == "so101_shoulder_lift_joint")
+        .expect("the shoulder lift");
+    let declared = body.axes()[lift].upper;
+    let range = body.commandable()[lift];
+    let reach = 1053.5 * std::f64::consts::TAU / 4095.0;
+    assert!((range.upper - reach).abs() < 1e-9, "{range:?}");
+    assert!(range.upper < 2.0 && 2.0 < declared);
+    let rest = body.last_observed().expect("rest");
+    assert!((rest[lift] - 2.0).abs() < 1e-3, "{}", rest[lift]);
+    // Asked for 2.5 rad, inside the declared bound and past what the unit reaches.
+    let mut target = rest_held(&body);
+    target[lift] = 2.5;
+    let clock = Stepped::new();
+    let mut governed =
+        Governor::with_clock(body, bring_up_limits(), clock.clone()).expect("limits");
+    let before = neck.state().written.len();
+    let mut lifts = Vec::new();
+    for _ in 0..900 {
+        clock.tick();
+        governed
+            .command(&target)
+            .unwrap_or_else(|error| panic!("{error}"));
+        for bus in serial.values() {
+            bus.advance(Duration::from_millis(20));
+        }
+        lifts.push(neck.present(2));
+    }
+    // Before torque came on, its goal was its rest clamped into its limits: 3039.
+    let written = neck.state().written[before..].to_vec();
+    let enable = written
+        .iter()
+        .position(|packet| packet[2] == 2 && packet[4..7] == [0x03, 40, 1])
+        .expect("servo 2 enabled");
+    let [low, high] = 3039_u16.to_le_bytes();
+    assert!(
+        written[..enable]
+            .iter()
+            .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 42, low, high])
+    );
+    // It came in at the servo's own pace, then held at the edge it reaches: the governor
+    // never tracked it toward 2.5 rad, which the firmware would clamp.
+    assert!(
+        lifts[0] < resting && resting - lifts[0] <= 3,
+        "{}",
+        lifts[0]
+    );
+    let last = *lifts.last().expect("ticks");
+    assert!((3030..=3039).contains(&last), "{last}");
+    assert!(neck.state().goal(2) <= 3039);
 }
 
 /// A body that does not claim its devices bound their own approach.

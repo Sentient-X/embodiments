@@ -42,8 +42,8 @@ minted from).
   ``Homing_Offset`` read (``read2ByteTxRx``), answered with the ``so101`` calibration, the
   offset in sign-magnitude at bit 11 (the vendor's ``scs_toscs``).
 - ``present_position``: per servo, ``Present_Position`` read (``read2ByteTxRx``), as the chain
-  reads it after open and after every stop, servos 2 and 4 answering below their calibrated
-  range; ``present_joints``: the joints LeRobot's own ``_normalize`` makes of it, through the
+  reads it after open and after every stop, servos 2 and 4 answering just above their
+  calibrated minimum; ``present_joints``: the joints LeRobot's own ``_normalize`` makes of it, through the
   drive map.
 - ``sync_read``: the chain's observation after every command, one ``GroupSyncRead``
   (``txRxPacket``) of ``Torque_Enable`` through ``Present_Position`` and every servo's answer
@@ -214,8 +214,10 @@ STS3215_RESOLUTION = 4096  # tables.py MODEL_RESOLUTION["sts3215"]
 STS3215_MODEL = 777  # tables.py MODEL_NUMBER_TABLE["sts3215"]
 SIGN_BIT = 15  # sms_sts.py scs_toscs(position, 15)
 # What each servo's Present_Position answers at open and after a stop: servos 2 and 4 rest
-# below the so101 calibration's minimum, as the static upper body's neck was found resting.
-PRESENT_POSITIONS = [2050, 700, 3100, 700, 2045, 2500]
+# just above the so101 calibration's minimum. A servo resting outside its limits, as the
+# static upper body's neck was found, refuses the enable unless it holds an approach limit
+# (the chain's simulated-bus tests cover that); the SO-101 declares none.
+PRESENT_POSITIONS = [2050, 850, 3100, 880, 2045, 2500]
 # The chain's SYNC READ after each command: Torque_Enable (40) to Present_Position's high byte.
 SYNC_READ_LENGTH = 18
 

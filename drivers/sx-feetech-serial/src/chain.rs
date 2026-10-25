@@ -95,10 +95,30 @@
 //!   `Torque_Enable` through `Present_Position`, so a servo found limp or unlimited is `NaN`
 //!   and no longer approach-limited, and the chain enables afresh on the next command.
 //! - **Enabling never drives toward a stale goal.** Before `Torque_Enable` 1, each servo's
-//!   `Present_Position` is read and written to its `Goal_Position`, so the instant torque comes
-//!   on it holds where it rests; `LeRobot` enables with whatever goal the register last held.
+//!   `Present_Position` is read and written to its `Goal_Position`; `LeRobot` enables with
+//!   whatever goal the register last held. That holds a servo where it rests only when it rests
+//!   inside its `Min_Angle_Limit`..`Max_Angle_Limit` (9, 11): the firmware clamps every goal
+//!   into them, so a servo resting outside drives to its nearest limit the instant torque comes
+//!   on. The chain makes that move explicit: such a servo's goal is written as `Present_Position`
+//!   clamped into its calibrated limits, recorded in [`FeetechChain::held_inside`], and only
+//!   when the servo's approach limit was confirmed by this same enable's read-back, so the
+//!   move runs at that limit. A servo resting outside without one (the SO-101 follower's)
+//!   refuses the enable ([`FeetechChainError::RestsOutside`]): move it inside by hand. Open and
+//!   every stop report the unclamped rest through [`ActuatorChain::last_observed`], outside the
+//!   axis's commandable range, so a governor's approach phase covers that move.
+//! - **The commandable range is what the unit reaches.** A [`MotorNormMode::Degrees`] axis is
+//!   commanded within its declared bounds intersected with its unit's calibrated reach,
+//!   `normalize(range_min)..normalize(range_max)` through the drive map in the axis's unit
+//!   ([`FeetechServo::calibrated_reach`]). A goal past the limit registers is one the firmware
+//!   clamps, so the servo would sit at its limit while a governor tracked it toward the
+//!   declared bound and faulted; narrowed here, a governor holds the target at the reachable
+//!   edge instead. An axis whose two ranges do not overlap is refused at open
+//!   ([`FeetechChainError::RangeMismatch`]). This applies to every Degrees servo, the SO-101
+//!   follower's arm included, whose commandable range was its declared bounds before. A
+//!   [`MotorNormMode::Range0100`] servo (a gripper) cannot mismatch: its percent maps the
+//!   calibrated range onto the declared bounds by construction.
 //! - It refuses before any frame: a wrong width, a target outside the axis's commandable range
-//!   or not finite, a magnitude that reaches the sign bit (`LeRobot`'s `encode_sign_magnitude`
+//!   or not finite, an axis whose declared and calibrated ranges do not overlap, a magnitude that reaches the sign bit (`LeRobot`'s `encode_sign_magnitude`
 //!   raises there; the vendor's `scs_toscs` would set overlapping bits), a model or bus this
 //!   crate is not qualified for, an address the protocol cannot carry, and an empty or
 //!   out-of-resolution calibration.
@@ -108,7 +128,7 @@
 //!   minted from) took a float32 target and compared it with each bound at float32 under
 //!   `NumPy`'s promotion rules. Each axis's commandable range is the union of its declared
 //!   bounds and those bounds rounded to float32: `[min(lower, f32(lower)), max(upper,
-//!   f32(upper))]`. Every declared bound is admitted, and so is a bound's float32 rounding
+//!   f32(upper))]`, intersected for a Degrees axis with its calibrated reach as above. Every declared bound is admitted, and so is a bound's float32 rounding
 //!   where that lands outside it, by less than half a float32 step, which moves no servo by a
 //!   tick; that much departs from the trait's "inside the declared bounds". Admission is that
 //!   range, in `f64`, exactly as [`ActuatorChain::commandable`] reports it, and every later step
@@ -248,13 +268,39 @@ impl FeetechServo {
     }
 
     /// The joint range this servo is commanded within: its declared bounds, widened to their
-    /// float32 roundings where those land outside them.
+    /// float32 roundings where those land outside them, and for a Degrees servo intersected
+    /// with its [`FeetechServo::calibrated_reach`]. Empty (`lower > upper`) when the two do not
+    /// overlap, which open refuses.
     #[must_use]
     pub fn commandable(&self) -> CommandRange {
-        CommandRange {
+        let declared = CommandRange {
             lower: self.axis.lower.min(float32(self.axis.lower)),
             upper: self.axis.upper.max(float32(self.axis.upper)),
+        };
+        self.calibrated_reach()
+            .map_or(declared, |reach| CommandRange {
+                lower: declared.lower.max(reach.lower),
+                upper: declared.upper.min(reach.upper),
+            })
+    }
+
+    /// The joint range the unit's calibrated limit registers reach, in the axis's unit:
+    /// `normalize(range_min)..normalize(range_max)` through the drive map, ordered. `None` for
+    /// a `RANGE_0_100` servo, whose percent maps the calibrated range onto the declared bounds,
+    /// so the two cannot disagree.
+    #[must_use]
+    pub fn calibrated_reach(&self) -> Option<CommandRange> {
+        if self.norm_mode != MotorNormMode::Degrees {
+            return None;
         }
+        let ends = [
+            self.joint_from_raw(i32::from(self.calibration.range_min)),
+            self.joint_from_raw(i32::from(self.calibration.range_max)),
+        ];
+        Some(CommandRange {
+            lower: ends[0].min(ends[1]),
+            upper: ends[0].max(ends[1]),
+        })
     }
 
     /// The goal-position register value that drives this servo to `joint`.
@@ -356,6 +402,28 @@ pub enum FeetechChainError {
     },
     #[error("bus_id {0} could not be added to a group packet: its id is already in it")]
     GroupParam(u16),
+    #[error(
+        "joint {joint} is declared {declared_lower}..{declared_upper} but its unit's calibrated \
+         range reaches {calibrated_lower}..{calibrated_upper}: the two do not overlap"
+    )]
+    RangeMismatch {
+        joint: String,
+        declared_lower: f64,
+        declared_upper: f64,
+        calibrated_lower: f64,
+        calibrated_upper: f64,
+    },
+    #[error(
+        "bus_id {bus_id} rests at tick {present}, outside its calibrated limits \
+         {range_min}..{range_max}, with no confirmed approach limit to bring it in slowly; move \
+         it inside by hand"
+    )]
+    RestsOutside {
+        bus_id: u16,
+        present: i32,
+        range_min: u16,
+        range_max: u16,
+    },
     #[error("the chain's axes are on ports {0:?}; one chain drives one bus")]
     Ports(Vec<String>),
     #[error("bus_id {0} has an empty or out-of-resolution calibrated range")]
@@ -403,6 +471,20 @@ pub struct FeetechChain<P> {
     observed: Option<Vec<f64>>,
     /// Per servo, whether its approach limit was written and read back.
     approach_limited: Vec<bool>,
+    /// The servos the last enable found resting outside their calibrated limits, and the
+    /// goal each was given inside them.
+    held_inside: Vec<HeldInside>,
+}
+
+/// A servo an enable found resting outside its calibrated limits: its goal was written as its
+/// `Present_Position` clamped into them, which it then approached at its confirmed limit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HeldInside {
+    pub bus_id: u16,
+    /// Where it rested, in ticks.
+    pub present: i32,
+    /// The goal written before `Torque_Enable`, in ticks.
+    pub goal: u16,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no flags.
@@ -457,6 +539,18 @@ impl<P: SerialPort> FeetechChain<P> {
             {
                 return Err(FeetechChainError::ApproachLimit(binding.bus_id));
             }
+            if let Some(reach) = servo.calibrated_reach() {
+                let commandable = servo.commandable();
+                if commandable.lower > commandable.upper {
+                    return Err(FeetechChainError::RangeMismatch {
+                        joint: servo.axis.joint.clone(),
+                        declared_lower: servo.axis.lower,
+                        declared_upper: servo.axis.upper,
+                        calibrated_lower: reach.lower,
+                        calibrated_upper: reach.upper,
+                    });
+                }
+            }
         }
         let mut sms = SmsSts::new(port);
         for servo in &servos {
@@ -478,6 +572,7 @@ impl<P: SerialPort> FeetechChain<P> {
             faults: Vec::new(),
             observed: None,
             approach_limited: Vec::new(),
+            held_inside: Vec::new(),
         };
         chain.is_calibrated()?;
         chain.configure()?;
@@ -735,6 +830,13 @@ impl<P: SerialPort> FeetechChain<P> {
         &self.faults
     }
 
+    /// The servos the last enable found resting outside their calibrated limits, each with
+    /// the goal it was given inside them.
+    #[must_use]
+    pub fn held_inside(&self) -> &[HeldInside] {
+        &self.held_inside
+    }
+
     /// The servos, in native state order.
     #[must_use]
     pub fn servos(&self) -> &[FeetechServo] {
@@ -757,19 +859,49 @@ impl<P: SerialPort> FeetechChain<P> {
         for index in 0..self.servos.len() {
             self.hold_approach(index, false)?;
         }
-        // Hold every servo where it is first, so enabling never drives toward a stale goal.
-        let ids: Vec<(u16, u8)> = self
+        // Hold every servo where it is first, so enabling never drives toward a stale goal; a
+        // servo resting outside its limits is given the nearest one, which the firmware would
+        // drive it to anyway, and only at an approach limit this enable just confirmed.
+        self.held_inside.clear();
+        let ids: Vec<(u16, u8, MotorCalibration)> = self
             .servos
             .iter()
-            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
+            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id(), servo.calibration))
             .collect();
-        for (bus_id, scs_id) in ids {
-            let present = self.read2(bus_id, scs_id, SMS_STS_PRESENT_POSITION_L)?;
+        for (index, (bus_id, scs_id, calibration)) in ids.into_iter().enumerate() {
+            let register = self.read2(bus_id, scs_id, SMS_STS_PRESENT_POSITION_L)?;
+            let present =
+                ProtocolPacketHandler::<()>::scs_tohost(register, PRESENT_POSITION_SIGN_BIT);
+            let (range_min, range_max) = (calibration.range_min, calibration.range_max);
+            let goal = if (i32::from(range_min)..=i32::from(range_max)).contains(&present) {
+                register
+            } else if self.approach_limited[index] {
+                // Inside `range_min..=range_max`, both below 4096: positive, so its
+                // sign-magnitude encoding is itself.
+                let goal = if present < i32::from(range_min) {
+                    range_min
+                } else {
+                    range_max
+                };
+                self.held_inside.push(HeldInside {
+                    bus_id,
+                    present,
+                    goal,
+                });
+                goal
+            } else {
+                return Err(FeetechChainError::RestsOutside {
+                    bus_id,
+                    present,
+                    range_min,
+                    range_max,
+                });
+            };
             expect(
                 bus_id,
                 self.sms
                     .ph
-                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_POSITION_L, present),
+                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_POSITION_L, goal),
             )?;
         }
         for servo in &self.servos {
@@ -942,6 +1074,8 @@ impl ChainError for FeetechChainError {
             | Self::CalibrationCount { .. }
             | Self::ApproachLimit(_)
             | Self::GroupParam(_)
+            | Self::RangeMismatch { .. }
+            | Self::RestsOutside { .. }
             | Self::Ports(_)
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,
