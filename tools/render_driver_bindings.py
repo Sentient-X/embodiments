@@ -130,9 +130,12 @@ def drives() -> str:
 
 
 def media() -> str:
-    """The Quest head as one stereo track and as two, and the humanoid, which declares none."""
+    """The Quest head as one stereo track and as two, the humanoid, which declares no
+    microphone, and the static upper body, which registers no camera yet: its ZED head camera's
+    model is unknown, so it plans no track rather than a guessed one."""
     quest = embodiments["quest-ego"]
     humanoid = embodiments["sentient-humanoid-upper-body"]
+    static = registered("sentient-static-upper-body")
 
     def plan(body: Embodiment, rig: MediaRig = NO_RIG) -> object:
         return media_document(body, resolve(body, nominal_instance(body), ()), rig)
@@ -141,6 +144,7 @@ def media() -> str:
         "quest-ego-stereo": plan(quest, QUEST_RIG),
         "quest-ego-mono": plan(quest),
         "sentient-humanoid-upper-body": plan(humanoid),
+        "sentient-static-upper-body": plan(static),
     }
     return json.dumps(document, indent=2) + "\n"
 

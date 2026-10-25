@@ -701,5 +701,12 @@
       }
     ],
     "microphones": []
+  },
+  "sentient-static-upper-body": {
+    "schema": "sx.media-plan/v2",
+    "embodiment": "8ff56d13ef8b0a82cd93068f35dc6cc9b9e7b2447d11139e30847eddcd996255",
+    "instance": "fe0ca3d3e56cbcf0c78e779972f5547584b9794bb8b2be87e6a61c41227aad17",
+    "tracks": [],
+    "microphones": []
   }
 }
