@@ -62,6 +62,7 @@ from .layout import (
     ActuatorFeedback,
     ActuatorModel,
     Bounds,
+    BusPort,
     CoordinateUnit,
     DirectDrive,
     EncoderReadout,
@@ -666,13 +667,18 @@ def _layout_to_dict(layout: JointLayout) -> list[dict[str, object]]:
 
 
 def _actuator_to_dict(binding: ActuatorBinding) -> dict[str, object]:
-    return {
+    document: dict[str, object] = {
         "model": binding.model.value,
         "bus": binding.bus.value,
         "bus_id": binding.bus_id,
         "sign": binding.sign,
         "reduction": binding.reduction,
     }
+    # An unnamed port is the bus kind's default and is not written, so bodies that name
+    # none keep the identity they had before ports could be named.
+    if binding.port is not None:
+        document["port"] = binding.port
+    return document
 
 
 def _observation_to_dict(value: ObservationBinding) -> dict[str, object]:
@@ -876,10 +882,8 @@ def _parse_layout(document: decode.Document) -> JointLayout:
 
 
 def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
-    binding = decode.exactly(
-        entry,
-        {"model", "bus", "bus_id", "sign", "reduction"},
-    )
+    fields = {"model", "bus", "bus_id", "sign", "reduction"}
+    binding = decode.exactly(entry, fields | {"port"} if "port" in entry else fields)
     try:
         model = ActuatorModel(decode.text(binding, "model"))
     except ValueError as exc:
@@ -900,6 +904,7 @@ def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
         bus_id=decode.integer(binding, "bus_id"),
         sign=decode.integer(binding, "sign"),
         reduction=decode.number(binding, "reduction"),
+        port=BusPort(decode.text(binding, "port")) if "port" in binding else None,
     )
 
 

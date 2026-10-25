@@ -38,12 +38,24 @@ that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that 
 a qualification. The right forearm yaw's entry contradicts itself: it flags
 ``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
 calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
-as received until the hardware owner settles which holds. The grippers and the SO-101 neck
-have no motor entry, so they stay undocumented drives.
+as received until the hardware owner settles which holds. The grippers have no motor entry, so
+they stay undocumented drives.
 
 The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_left`` and
 ``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
 published as one side-by-side ``head`` track (:data:`STATIC_UPPER_BODY_RIG`).
+
+**The neck, from a read-only probe on 2026-10-25.** The received file has no entry for the
+SO-101 neck either. A probe that wrote nothing found it on its own USB serial bus (a WCH
+CH343, 1,000,000 baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order,
+the sixth the camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are
+bound here on a serial bus named ``neck``, identity drive map. Still provisional: the
+identity sign and that each joint's zero is its servo's mid-range, as LeRobot's degree mode
+assumes, are unconfirmed, and the servos' calibration registers are a unit's facts, not the
+design's, so the station's opener refuses to open the neck until that unit's LeRobot
+calibration is supplied, and then refuses any servo whose registers disagree with it. The
+probe found ids 2, 3, 4 and 6 resting outside their calibrated ranges: a first command must
+be slewed from the observed position, never snapped into range.
 """
 
 from typing import Final
@@ -64,6 +76,7 @@ from ..layout import (
     ActuatorBus,
     ActuatorFeedback,
     ActuatorModel,
+    BusPort,
     CoordinateUnit,
     DirectDrive,
 )
@@ -204,6 +217,22 @@ STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
     ),
 )
 
+#: The neck's serial bus, as commissioning names its bridge. Provisional, as the module says.
+STATIC_UPPER_BODY_NECK_PORT: Final = BusPort("neck")
+
+
+def _neck_servo(bus_id: int) -> DirectDrive:
+    """One STS3215 at its SO-101 id on the neck's bus, identity drive map. Provisional."""
+    return DirectDrive(
+        ActuatorBinding(
+            model=ActuatorModel.FEETECH_STS3215,
+            bus=ActuatorBus.FEETECH_SERIAL,
+            bus_id=bus_id,
+            port=STATIC_UPPER_BODY_NECK_PORT,
+        )
+    )
+
+
 #: The SO-101 on the chest, its gripper replaced by a camera tilt joint carrying the ZED.
 STATIC_UPPER_BODY_NECK: Final = ChainSpec(
     part_id=PartId("sentient-static-upper-body-neck"),
@@ -236,6 +265,8 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
             2.86233997327,
             2.04203522483,
         ),
+        actuations=tuple(_neck_servo(bus_id) for bus_id in range(1, 7)),
+        observations=(ActuatorFeedback(),) * 6,
     ),
     home=(0.0,) * 6,
 )

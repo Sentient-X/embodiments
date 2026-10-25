@@ -70,3 +70,28 @@ def test_the_bindings_are_the_received_motor_table() -> None:
         assert (binding.sign, motor["encoder_turns"]) == (1, "0"), axis.name
         assert motor["direction_confirmed"] == motor["limits_confirmed"] == "true", axis.name
         assert axis.bounds == Bounds(float(motor["lower"]), float(motor["upper"])), axis.name
+
+
+def test_the_neck_is_bound_provisionally_as_an_so101_on_its_own_port() -> None:
+    from sx_embodiments.known.static_upper_body import (
+        STATIC_UPPER_BODY_NECK,
+        STATIC_UPPER_BODY_NECK_PORT,
+    )
+    from sx_embodiments.layout import ActuatorBus, ActuatorModel
+
+    bindings = [axis.actuator for axis in STATIC_UPPER_BODY_NECK.layout.axes]
+    assert [binding.bus_id for binding in bindings if binding is not None] == [1, 2, 3, 4, 5, 6]
+    for binding in bindings:
+        assert binding is not None
+        assert binding.model is ActuatorModel.FEETECH_STS3215
+        assert binding.bus is ActuatorBus.FEETECH_SERIAL
+        assert binding.bus_port == STATIC_UPPER_BODY_NECK_PORT == "neck"
+    robot = embodiment_from_definition(DEVELOPMENT_EMBODIMENTS[STATIC_UPPER_BODY_SPEC.name].spec)
+    # The grippers stay undocumented until the robot is probed.
+    undriven = [c.axis.name for c in robot.state.coordinates if c.axis.actuator is None]
+    assert undriven == [
+        "left_gripper_left_finger_joint",
+        "left_gripper_right_finger_joint",
+        "right_gripper_left_finger_joint",
+        "right_gripper_right_finger_joint",
+    ]

@@ -18,7 +18,7 @@ from .cameras import camera_label
 from .collection import CollectionDevice, CollectionDeviceKind, CollectionSetup
 from .errors import ComponentGraphError, CompositionError, LayoutError
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
-from .layout import ActuatorBus, ChannelKind, StateCoordinate, StateSpace
+from .layout import ActuatorBus, BusPort, ChannelKind, StateCoordinate, StateSpace
 from .parts import (
     CameraBinding,
     CameraModality,
@@ -375,7 +375,7 @@ def validate_components(name: str, kind: EmbodimentKind, components: tuple[Compo
 
 
 def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -> None:
-    """One mounted assembly is one physical daisy chain: its bus addresses are unique.
+    """One mounted assembly is one physical daisy chain per port: its bus addresses are unique.
 
     Separately rooted assemblies (each bimanual side on its own root) are separate
     chains and may reuse addresses; an arm and the jaw mounted on it share one chain
@@ -384,7 +384,7 @@ def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -
     """
 
     roots: dict[str, str] = {}
-    addresses: dict[tuple[str, ActuatorBus, int], str] = {}
+    addresses: dict[tuple[str, ActuatorBus, BusPort, int], str] = {}
     for component in components:
         mount = component.mount
         roots[component.instance] = (
@@ -396,7 +396,12 @@ def _validate_actuator_addresses(name: str, components: tuple[Component, ...]) -
         for axis in part.layout.axes:
             if axis.actuator is None:
                 continue
-            key = (roots[component.instance], axis.actuator.bus, axis.actuator.bus_id)
+            key = (
+                roots[component.instance],
+                axis.actuator.bus,
+                axis.actuator.bus_port,
+                axis.actuator.bus_id,
+            )
             holder = f"{component.instance}/{axis.name}"
             if key in addresses:
                 raise CompositionError(
