@@ -13,20 +13,29 @@
 //! put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
 //! nothing. The link's packet timeout runs out as
 //! soon as nothing more is pending, as a recording port's does. Clones share one bus.
+//!
+//! A servo answers PING with an empty status packet. A servo may be given hard stops
+//! ([`SimBus::stops`]): it never moves past them, and while its goal lies beyond the stop it
+//! rests against, its `Present_Load` (60) reads the push, sign-magnitude at bit 10 as
+//! Feetech's `SMS_STS::ReadLoad` decodes it (`FTServo_Arduino` `src/SMS_STS.cpp`), in tenths
+//! of a percent and never above its `Torque_Limit` (48, 1000 at power-on). Moving freely or
+//! limp, it reads 0. [`RealTime`] advances the bus by the wall-clock time between packets, for
+//! a caller that waits on real time.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::serial::SerialPort;
 
 use crate::chain::STS3215_MODEL_NUMBER;
 use crate::scservo_sdk::{
-    BROADCAST_ID, INST_READ, INST_SYNC_READ, INST_SYNC_WRITE, INST_WRITE, SMS_STS_GOAL_POSITION_L,
-    SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L,
-    SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE,
+    BROADCAST_ID, INST_PING, INST_READ, INST_SYNC_READ, INST_SYNC_WRITE, INST_WRITE,
+    SMS_STS_GOAL_POSITION_L, SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L,
+    SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L, SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L,
+    SMS_STS_TORQUE_ENABLE,
 };
 
 /// Every servo's registers, the servos that answer nothing, and what is waiting to be read.
@@ -41,7 +50,20 @@ pub struct SimState {
     pub read: usize,
     /// (servo, address) pairs whose writes the firmware does not take.
     pub ignored: BTreeSet<(u8, u8)>,
+    /// Each servo's hard stops, in ticks: it never moves below the first or above the second.
+    pub stops: BTreeMap<u8, (i32, i32)>,
+    /// The part of a step each moving servo has travelled and not yet shown, so time advanced
+    /// in slices shorter than a step still moves it.
+    pub carry: BTreeMap<u8, f64>,
 }
+
+/// `Torque_Limit`, RAM, in tenths of a percent; the firmware loads it from `Max_Torque_Limit`
+/// (16) at power-on (`SMS_STS_TORQUE_LIMIT_L` in `FTServo_Arduino`'s `src/SMS_STS.h`).
+const TORQUE_LIMIT: u8 = 48;
+/// `Present_Load`, sign-magnitude at bit 10.
+const PRESENT_LOAD: u8 = 60;
+/// Load, in tenths of a percent, per tick a goal lies past the stop the servo rests against.
+const LOAD_PER_TICK: i32 = 10;
 
 impl SimState {
     /// A servo's `Torque_Enable`.
@@ -86,6 +108,7 @@ impl SimBus {
                 registers[usize::from(address) + 1] = high;
             };
             put(SMS_STS_MODEL_L, STS3215_MODEL_NUMBER);
+            put(TORQUE_LIMIT, 1000);
             put(SMS_STS_MIN_ANGLE_LIMIT_L, calibration.range_min);
             put(SMS_STS_MAX_ANGLE_LIMIT_L, calibration.range_max);
             put(SMS_STS_OFS_L, homing_register(calibration.homing_offset));
@@ -117,12 +140,34 @@ impl SimBus {
         registers[at..at + 2].copy_from_slice(&raw.to_le_bytes());
     }
 
+    /// Give servo `id` hard stops at `low` and `high` ticks.
+    pub fn stops(&self, id: u8, low: i32, high: i32) {
+        self.state().stops.insert(id, (low, high));
+    }
+
+    /// A servo's `Present_Load`, decoded: positive pushing toward higher ticks.
+    #[must_use]
+    pub fn load(&self, id: u8) -> i32 {
+        let state = self.state();
+        let at = usize::from(PRESENT_LOAD);
+        let raw = u16::from_le_bytes([state.servos[&id][at], state.servos[&id][at + 1]]);
+        crate::scservo_sdk::ProtocolPacketHandler::<()>::scs_tohost(raw, 10)
+    }
+
     /// Let `elapsed` pass: every servo holding torque moves toward its goal, at most its
-    /// `Goal_Speed` times `elapsed`.
+    /// `Goal_Speed` times `elapsed`, and no further than its stops.
     pub fn advance(&self, elapsed: Duration) {
         let mut state = self.state();
-        for registers in state.servos.values_mut() {
+        let SimState {
+            servos,
+            stops,
+            carry,
+            ..
+        } = &mut *state;
+        for (id, registers) in servos.iter_mut() {
+            let load_at = usize::from(PRESENT_LOAD);
             if registers[usize::from(SMS_STS_TORQUE_ENABLE)] != 1 {
+                registers[load_at..load_at + 2].copy_from_slice(&[0, 0]);
                 continue;
             }
             let read = |registers: &[u8; 256], address: u8| {
@@ -145,12 +190,29 @@ impl SimBus {
                 goal
             } else {
                 // Steps per second at `speed` steps of 0.732 rpm: 4096 * 0.732 / 60 each.
-                let reach = f64::from(speed) * 4096.0 * 0.732 / 60.0 * elapsed.as_secs_f64();
-                // A sub-step is the servo's whole resolution; it is a step or nothing.
+                let travel = f64::from(speed) * 4096.0 * 0.732 / 60.0 * elapsed.as_secs_f64()
+                    + carry.get(id).copied().unwrap_or_default();
+                // A sub-step is the servo's whole resolution: it shows a step or nothing, and
+                // keeps the rest for the next slice of time.
                 #[allow(clippy::cast_possible_truncation)]
-                let reach = reach.floor() as i32;
+                let reach = travel.floor() as i32;
+                let fraction = if (goal - present).abs() > reach {
+                    travel - travel.floor()
+                } else {
+                    0.0
+                };
+                carry.insert(*id, fraction);
                 present + (goal - present).clamp(-reach, reach)
             };
+            let (next, push) = match stops.get(id) {
+                Some(&(low, _)) if next < low => (low, goal - low),
+                Some(&(_, high)) if next > high => (high, goal - high),
+                _ => (next, 0),
+            };
+            let limit = read(registers, TORQUE_LIMIT);
+            let load = (push.abs() * LOAD_PER_TICK).min(limit);
+            let load = u16::try_from(if push < 0 { load | (1 << 10) } else { load }).unwrap_or(0);
+            registers[load_at..load_at + 2].copy_from_slice(&load.to_le_bytes());
             let at = usize::from(SMS_STS_PRESENT_POSITION_L);
             let next = u16::try_from(next).unwrap_or(0);
             registers[at..at + 2].copy_from_slice(&next.to_le_bytes());
@@ -244,6 +306,7 @@ impl SimState {
             return;
         };
         let reply = match (*instruction, params) {
+            (INST_PING, []) => status(*id, &[]),
             (INST_READ, [address, count]) => {
                 let start = usize::from(*address);
                 status(*id, &registers[start..start + usize::from(*count)])
@@ -289,6 +352,52 @@ impl SerialPort for SimBus {
 
     fn is_packet_timeout(&mut self) -> bool {
         self.state().inbox.is_empty()
+    }
+}
+
+/// A [`SimBus`] that lets the wall-clock time since the last packet pass
+/// ([`SimBus::advance`]) before each packet it is written, for a caller that waits in real time.
+pub struct RealTime {
+    pub bus: SimBus,
+    last: Instant,
+}
+
+impl RealTime {
+    #[must_use]
+    pub fn new(bus: SimBus) -> Self {
+        Self {
+            bus,
+            last: Instant::now(),
+        }
+    }
+}
+
+impl SerialPort for RealTime {
+    fn clear_port(&mut self) -> io::Result<()> {
+        self.bus.clear_port()
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        let now = Instant::now();
+        self.bus.advance(now - self.last);
+        self.last = now;
+        self.bus.write_port(packet)
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        self.bus.read_port(length)
+    }
+
+    fn timeout(&self) -> Duration {
+        self.bus.timeout()
+    }
+
+    fn set_packet_timeout(&mut self, packet_length: usize) {
+        self.bus.set_packet_timeout(packet_length);
+    }
+
+    fn is_packet_timeout(&mut self) -> bool {
+        self.bus.is_packet_timeout()
     }
 }
 
@@ -551,6 +660,29 @@ mod tests {
             (1..=6).all(|id| bus.state().torque(id) == 0),
             "no torque came on"
         );
+    }
+
+    #[test]
+    fn a_servo_against_a_stop_stays_there_and_reads_its_push_up_to_its_torque_limit() {
+        let bus = calibrated_bus();
+        bus.stops(1, 1500, 2100);
+        {
+            let mut state = bus.state();
+            let registers = state.servos.get_mut(&1).expect("servo 1");
+            registers[42..44].copy_from_slice(&2150_u16.to_le_bytes());
+            registers[40] = 1;
+        }
+        bus.advance(Duration::from_secs(1));
+        assert_eq!((bus.present(1), bus.load(1)), (2100, 500));
+        bus.state().servos.get_mut(&1).expect("servo 1")[48..50]
+            .copy_from_slice(&300_u16.to_le_bytes());
+        bus.state().servos.get_mut(&1).expect("servo 1")[42..44]
+            .copy_from_slice(&1400_u16.to_le_bytes());
+        bus.advance(Duration::from_secs(1));
+        assert_eq!((bus.present(1), bus.load(1)), (1500, -300));
+        bus.state().servos.get_mut(&1).expect("servo 1")[40] = 0;
+        bus.advance(Duration::from_secs(1));
+        assert_eq!(bus.load(1), 0);
     }
 
     #[test]

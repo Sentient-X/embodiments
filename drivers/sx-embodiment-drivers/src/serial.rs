@@ -45,6 +45,33 @@ pub trait SerialPort: Send {
     fn is_packet_timeout(&mut self) -> bool;
 }
 
+/// A link lent for a while, as a read-only scan borrows the port a caller keeps using.
+impl<P: SerialPort + ?Sized> SerialPort for &mut P {
+    fn clear_port(&mut self) -> io::Result<()> {
+        (**self).clear_port()
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        (**self).write_port(packet)
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        (**self).read_port(length)
+    }
+
+    fn timeout(&self) -> Duration {
+        (**self).timeout()
+    }
+
+    fn set_packet_timeout(&mut self, packet_length: usize) {
+        (**self).set_packet_timeout(packet_length);
+    }
+
+    fn is_packet_timeout(&mut self) -> bool {
+        (**self).is_packet_timeout()
+    }
+}
+
 /// A link chosen at run time, as a station opens whichever bridge its commissioning names.
 impl<P: SerialPort + ?Sized> SerialPort for Box<P> {
     fn clear_port(&mut self) -> io::Result<()> {

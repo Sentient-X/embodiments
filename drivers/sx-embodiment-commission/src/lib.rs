@@ -1,4 +1,5 @@
-//! A robot's hardware found and commissioned, read-only.
+//! A robot's hardware found and commissioned, read-only; and a Feetech bus calibrated, which
+//! alone may write, only under an explicit `--move` ([`calibrate`]).
 //!
 //! Commissioning answers one question for a station: which physical bridge carries each of the
 //! body's buses. It is answered by asking the hardware, never by a device path or an
@@ -22,6 +23,7 @@
 //! writes files only under an explicit `--write <dir>`.
 
 pub mod bridges;
+pub mod calibrate;
 pub mod declared;
 pub mod host;
 pub mod matching;

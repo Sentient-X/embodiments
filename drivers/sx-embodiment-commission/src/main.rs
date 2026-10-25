@@ -4,13 +4,19 @@
 //! sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
 //! sx-commission commission --bindings <file>... [--instance <id> --pod <id> --revision <n>]
 //!                          [--json] [--write <dir>]
+//! sx-commission calibrate read|gripper|jog --bus <tty> ... [--move]
+//! sx-commission calibrate --restore <journal>
 //! ```
 //!
-//! Everything it sends a bus is a PING, a READ or a register read; see the library header.
-//! `commission` prints what it would record and writes only under `--write`.
+//! `probe` and `commission` send a bus only PINGs, READs and register reads; see the library
+//! header. `commission` prints what it would record and writes only under `--write`.
+//! `calibrate` writes registers and moves servos only under `--move`
+//! (`sx_embodiment_commission::calibrate`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use serde_json::json;
 use sx_embodiment_commission::declared::{BusKind, DeclaredBody};
@@ -20,11 +26,51 @@ use sx_embodiment_commission::output::{
     Station, calibration, commission_report, commissioning, probe_json, probe_report, warnings,
 };
 use sx_embodiment_commission::probe::{Ids, probe};
+use sx_embodiment_commission::tty::TtyPort;
 
 const USAGE: &str = "usage:
   sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
   sx-commission commission --bindings <file> [--bindings <file>...]
-                           [--instance <id> --pod <id> --revision <n>] [--json] [--write <dir>]";
+                           [--instance <id> --pod <id> --revision <n>] [--json] [--write <dir>]
+  sx-commission calibrate ... (sx-commission calibrate --help)";
+
+/// `calibrate`: every terminating signal a person or a supervisor sends sets `stop` instead of
+/// killing the process, so the run undoes what it did before it exits.
+fn calibrate(words: &[String]) -> ExitCode {
+    use sx_embodiment_commission::calibrate::cli;
+    if words.iter().any(|word| word == "--help") {
+        println!("{}", cli::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    let args = match cli::parse(words) {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!("{error}\n{}", cli::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let stop = Arc::new(AtomicUsize::new(0));
+    for signal in [
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGHUP,
+        signal_hook::consts::SIGQUIT,
+    ] {
+        let number = usize::try_from(signal).unwrap_or(usize::MAX);
+        if let Err(error) = signal_hook::flag::register_usize(signal, Arc::clone(&stop), number) {
+            eprintln!("cannot catch signal {signal}: {error}; refusing to run");
+            return ExitCode::from(2);
+        }
+    }
+    let code = cli::run(
+        &args,
+        TtyPort::open,
+        &stop,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    );
+    ExitCode::from(code)
+}
 
 #[derive(Default)]
 struct Args {
@@ -220,7 +266,11 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
 }
 
 fn main() -> ExitCode {
-    let args = match parse(std::env::args().skip(1)) {
+    let words: Vec<String> = std::env::args().skip(1).collect();
+    if words.first().is_some_and(|word| word == "calibrate") {
+        return calibrate(&words[1..]);
+    }
+    let args = match parse(words.into_iter()) {
         Ok(args) => args,
         Err(error) => {
             eprintln!("{error}\n{USAGE}");
