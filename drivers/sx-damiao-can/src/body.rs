@@ -10,6 +10,8 @@
 //! by joint name, refused unless its joints are the bindings' in their order. The B601-DM is
 //! not one: its gripper is a second chain with its own transmission and soft box.
 
+use std::time::Duration;
+
 use sx_embodiment_drivers::can::CanPort;
 use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, InstanceDrive};
 
@@ -41,6 +43,9 @@ pub struct DamiaoBody {
     pub master_id_offset: u16,
     /// Every driven joint's gains, in the bindings' native state order.
     pub joints: &'static [JointGains],
+    /// How long each enabled motor may hear no command before it disables itself
+    /// ([`DamiaoAxis::can_timeout`]); `None` where the body's sources state none.
+    pub can_timeout: Option<Duration>,
 }
 
 /// Every single-bus Damiao body this crate opens.
@@ -120,6 +125,7 @@ impl DamiaoBody {
             axis,
             kp: gains.kp,
             kd: gains.kd,
+            can_timeout: self.can_timeout,
         }
     }
 }

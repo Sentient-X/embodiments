@@ -47,7 +47,8 @@ impl UsbSerialPorts {
     ///
     /// Returns [`OpenError::NotAttached`] when no attached device reporting the serial carries
     /// a tty (a `SocketCAN` adapter carries none), [`OpenError::Ambiguous`] when more than one
-    /// tty does, and [`OpenError::Port`] when the kernel's view cannot be read.
+    /// tty does or a tty and another device both report it, and [`OpenError::Port`] when the
+    /// kernel's view cannot be read.
     pub fn tty(&self, serial: &str) -> Result<PathBuf, OpenError> {
         let port = |reason: String| OpenError::Port {
             serial: serial.to_owned(),
@@ -55,6 +56,8 @@ impl UsbSerialPorts {
         };
         let entries = fs::read_dir(&self.usb_devices).map_err(|error| port(error.to_string()))?;
         let mut found: Vec<PathBuf> = Vec::new();
+        // Devices reporting the serial that carry no tty, such as a SocketCAN adapter.
+        let mut others: Vec<PathBuf> = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| port(error.to_string()))?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -66,15 +69,24 @@ impl UsbSerialPorts {
             {
                 let ttys =
                     interface_ttys(&entry.path()).map_err(|error| port(error.to_string()))?;
+                if ttys.is_empty() {
+                    others.push(entry.path());
+                }
                 found.extend(ttys.iter().map(|tty| self.dev.join(tty)));
             }
         }
-        match found.as_slice() {
-            [] => Err(OpenError::NotAttached(serial.to_owned())),
-            [tty] => Ok(tty.clone()),
+        match (found.as_slice(), others.is_empty()) {
+            ([], _) => Err(OpenError::NotAttached(serial.to_owned())),
+            ([tty], true) => Ok(tty.clone()),
+            // Two ttys, or a tty and another device reporting the same serial: which one is
+            // the commissioned bridge cannot be told.
             _ => Err(OpenError::Ambiguous {
                 identity: serial.to_owned(),
-                bridges: found.iter().map(|tty| tty.display().to_string()).collect(),
+                bridges: found
+                    .iter()
+                    .chain(&others)
+                    .map(|path| path.display().to_string())
+                    .collect(),
             }),
         }
     }
@@ -173,6 +185,23 @@ mod tests {
         assert!(matches!(
             ports.tty("B601-ARM"),
             Err(OpenError::Ambiguous { .. })
+        ));
+        // A serial bridge and a device with no tty (a CAN adapter) reporting one serial.
+        let adapter = root.join("1-4");
+        fs::create_dir_all(adapter.join("1-4:1.0")).expect("adapter");
+        fs::write(adapter.join("serial"), "B601-GRIP\n").expect("serial");
+        match ports.tty("B601-GRIP") {
+            Err(OpenError::Ambiguous { identity, bridges }) => {
+                assert_eq!(identity, "B601-GRIP");
+                assert_eq!(bridges.len(), 2);
+            }
+            other => panic!("expected an ambiguity, got {other:?}"),
+        }
+        // That device alone is no serial bridge.
+        fs::write(adapter.join("serial"), "UB-CAN\n").expect("serial");
+        assert!(matches!(
+            ports.tty("UB-CAN"),
+            Err(OpenError::NotAttached(_))
         ));
         let _ = fs::remove_dir_all(root);
     }

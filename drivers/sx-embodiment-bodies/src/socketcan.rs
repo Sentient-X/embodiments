@@ -2,11 +2,15 @@
 //!
 //! As with the USB serial bridges, a bus is commissioned by a kernel fact that does not depend
 //! on enumeration order: `can0` and `can1` name whichever adapter the kernel found first. Each
-//! CAN interface under `/sys/class/net` (link type 280, `ARPHRD_CAN`) has one identity: the
-//! `serial` of the USB device its `device` link sits in, for a USB adapter (`gs_usb`,
-//! `peak_usb`), or else its own name, for a controller on the board itself, which has no
-//! serial and which the device tree names the same on every boot. Commissioning records that
-//! identity, and the one interface carrying it is opened as an `sx_socketcan::SocketCanPort`.
+//! CAN interface under `/sys/class/net` (link type 280, `ARPHRD_CAN`) has at most one identity:
+//! for a USB adapter (`gs_usb`, `peak_usb`; its `device` link sits in a USB device, the one
+//! carrying `idVendor`), that device's `serial`; for a controller on the board itself, or an
+//! interface on no device, its own name, which the device tree names the same on every boot.
+//! A USB adapter whose serial cannot be read has no identity and is never opened: its name
+//! follows enumeration order, so it could be a different adapter on the next boot.
+//! Commissioning records the identity, and the one interface carrying it is opened as an
+//! `sx_socketcan::SocketCanPort`, which also holds that interface's lock against a second of
+//! our processes.
 //!
 //! The interface's bitrate and up state are the operating system's, set before the station
 //! starts; an interface that is down opens and then fails its first send.
@@ -66,7 +70,7 @@ impl SocketCanPorts {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if usb_serial(&path).unwrap_or_else(|| name.clone()) == identity {
+            if commissioned_as(&path, &name).as_deref() == Some(identity) {
                 found.push(name);
             }
         }
@@ -81,11 +85,20 @@ impl SocketCanPorts {
     }
 }
 
-/// The serial number of the USB device an interface's `device` link sits in: the link names
-/// the USB interface (`1-1:1.0`), whose parent is the device.
-fn usb_serial(interface: &Path) -> Option<String> {
-    let device = fs::canonicalize(interface.join("device")).ok()?;
-    let serial = fs::read_to_string(device.parent()?.join("serial")).ok()?;
+/// The identity an interface is commissioned by: its USB device's serial when its `device`
+/// link sits in a USB device (the ancestor carrying `idVendor`), else its own name; `None` for
+/// a USB adapter whose serial cannot be read.
+fn commissioned_as(interface: &Path, name: &str) -> Option<String> {
+    let Ok(device) = fs::canonicalize(interface.join("device")) else {
+        return Some(name.to_owned());
+    };
+    let Some(usb) = device
+        .ancestors()
+        .find(|dir| dir.join("idVendor").is_file())
+    else {
+        return Some(name.to_owned());
+    };
+    let serial = fs::read_to_string(usb.join("serial")).ok()?;
     Some(serial.trim().to_owned()).filter(|serial| !serial.is_empty())
 }
 
@@ -95,7 +108,7 @@ impl PortSource for SocketCanPorts {
         let interface = self.interface(serial)?;
         let port = SocketCanPort::open(&interface).map_err(|error| OpenError::Port {
             serial: serial.to_owned(),
-            reason: format!("{interface}: {error}"),
+            reason: error.to_string(),
         })?;
         Ok(Box::new(port))
     }
@@ -105,15 +118,25 @@ impl PortSource for SocketCanPorts {
 mod tests {
     use super::*;
 
-    /// A CAN interface, on a USB adapter reporting `serial` when one is given.
-    fn interface(root: &Path, name: &str, kind: &str, serial: Option<&str>) {
+    /// Where an interface's device sits.
+    #[derive(Clone, Copy)]
+    enum On<'a> {
+        Board,
+        Usb(Option<&'a str>),
+    }
+
+    /// A CAN interface, on the board or on a USB adapter reporting `serial` when it has one.
+    fn interface(root: &Path, name: &str, kind: &str, on: On<'_>) {
         let net = root.join("net").join(name);
         fs::create_dir_all(&net).expect("net");
         fs::write(net.join("type"), format!("{kind}\n")).expect("type");
-        let device = if let Some(serial) = serial {
+        let device = if let On::Usb(serial) = on {
             let usb = root.join("usb").join(format!("1-{name}"));
             fs::create_dir_all(usb.join(format!("1-{name}:1.0"))).expect("usb");
-            fs::write(usb.join("serial"), format!("{serial}\n")).expect("serial");
+            fs::write(usb.join("idVendor"), "1d50\n").expect("vendor");
+            if let Some(serial) = serial {
+                fs::write(usb.join("serial"), format!("{serial}\n")).expect("serial");
+            }
             usb.join(format!("1-{name}:1.0"))
         } else {
             let platform = root.join("platform").join(name);
@@ -132,9 +155,10 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos())
         ));
-        interface(&root, "can0", CAN_LINK_TYPE, None);
-        interface(&root, "can1", CAN_LINK_TYPE, Some("UB-CAN"));
-        interface(&root, "eth0", "1", Some("NOT-CAN"));
+        interface(&root, "can0", CAN_LINK_TYPE, On::Board);
+        interface(&root, "can1", CAN_LINK_TYPE, On::Usb(Some("UB-CAN")));
+        interface(&root, "eth0", "1", On::Usb(Some("NOT-CAN")));
+        interface(&root, "can3", CAN_LINK_TYPE, On::Usb(None));
         let ports = SocketCanPorts::rooted(root.join("net"));
         assert_eq!(ports.interface("UB-CAN").expect("usb"), "can1");
         assert_eq!(ports.interface("can0").expect("on the board"), "can0");
@@ -147,7 +171,12 @@ mod tests {
             ports.interface("NOT-CAN"),
             Err(OpenError::NotAttached(_))
         ));
-        interface(&root, "can2", CAN_LINK_TYPE, Some("UB-CAN"));
+        // A USB adapter without a readable serial is never opened, not even by its name.
+        assert!(matches!(
+            ports.interface("can3"),
+            Err(OpenError::NotAttached(_))
+        ));
+        interface(&root, "can2", CAN_LINK_TYPE, On::Usb(Some("UB-CAN")));
         assert!(matches!(
             ports.interface("UB-CAN"),
             Err(OpenError::Ambiguous { .. })

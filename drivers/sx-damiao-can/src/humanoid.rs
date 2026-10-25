@@ -38,6 +38,8 @@ pub const MASTER_ID_OFFSET: u16 = 0x20;
 pub const HUMANOID_UPPER_BODY: DamiaoBody = DamiaoBody {
     bindings: BINDINGS,
     master_id_offset: MASTER_ID_OFFSET,
+    // `sentient_can` leaves the motors' TIMEOUT register as it finds it.
+    can_timeout: None,
     joints: &[
         JointGains::new("torso_joint", 350.0, 5.0),
         JointGains::new("right_shoulder_pitch_joint", 100.0, 5.0),

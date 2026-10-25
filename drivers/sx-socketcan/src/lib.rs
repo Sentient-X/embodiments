@@ -6,20 +6,41 @@
 //! trait rather than in a vendor crate; `sx-damiao-can`'s `usb2can` is the other transport,
 //! Damiao's own serial framing.
 //!
-//! [`SocketCanPort`] (Linux only) opens one raw socket (`AF_CAN`, `SOCK_RAW`, `CAN_RAW`),
-//! non-blocking, bound to one interface. The interface's bitrate and state are the operating
+//! `SocketCanPort` (Linux only) opens one raw socket (`AF_CAN`, `SOCK_RAW`, `CAN_RAW`),
+//! non-blocking, bound to one interface, holding that interface's [`InterfaceLock`] so a second
+//! of our processes cannot open it too. The interface's bitrate and state are the operating
 //! system's: it must already be up (`ip link set can1 up type can bitrate 1000000`). The frame
 //! layout is [`encode`] and [`decode`], the kernel's `struct can_frame`, kept portable so it is
 //! tested on every host.
 
 use std::io;
+use std::path::PathBuf;
 
 use sx_embodiment_drivers::can::CanFrame;
+use thiserror::Error;
 
+#[cfg(unix)]
+mod lock;
 #[cfg(target_os = "linux")]
 mod socket;
+#[cfg(unix)]
+pub use lock::InterfaceLock;
 #[cfg(target_os = "linux")]
 pub use socket::SocketCanPort;
+
+/// Why an interface could not be opened.
+#[derive(Debug, Error)]
+pub enum SocketCanError {
+    #[error("{0:?} is not a network interface name")]
+    Name(String),
+    #[error("SocketCAN interface {interface} is already open in another process ({})", lock.display())]
+    Busy { interface: String, lock: PathBuf },
+    #[error("SocketCAN interface {interface}: {source}")]
+    Io {
+        interface: String,
+        source: io::Error,
+    },
+}
 
 /// The size of the kernel's `struct can_frame`: id, length, three reserved bytes, data.
 pub const FRAME_BYTES: usize = 16;

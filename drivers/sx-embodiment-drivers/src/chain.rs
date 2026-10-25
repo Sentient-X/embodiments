@@ -169,6 +169,14 @@ pub trait ActuatorChain {
     /// The longest [`ActuatorChain::stop`] can take, whatever the actuators answer.
     fn stop_budget(&self) -> Duration;
 
+    /// The joint coordinates every actuator last reported, in native state order, or `None`
+    /// when the bus answers nothing or an actuator has not answered. A chain that observes
+    /// reports them from open and from each stop, so a caller can start from where the body
+    /// rests before it commands anything.
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        None
+    }
+
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
     fn clear_faults(&mut self) {}

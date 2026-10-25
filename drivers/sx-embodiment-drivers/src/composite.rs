@@ -139,6 +139,12 @@ where
         self.first.stop_budget() + self.second.stop_budget()
     }
 
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        let mut observed = self.first.last_observed()?;
+        observed.extend(self.second.last_observed()?);
+        Some(observed)
+    }
+
     fn clear_faults(&mut self) {
         self.first.clear_faults();
         self.second.clear_faults();

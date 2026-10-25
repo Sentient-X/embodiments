@@ -15,7 +15,8 @@
 //! [`ProvenStop`] exists only when every actuator proved it stopped. Port traits are per bus
 //! kind ([`can::CanPort`], [`serial::SerialPort`]); one crate per bus implements the chain over
 //! its port, translating its vendor's own driver. A body spanning two chains (two devices, or
-//! two buses) is one [`Composite`].
+//! two buses) is one [`Composite`]. [`Governor`] wraps any chain with a speed and tracking-error
+//! bound per axis, stopping and latching a fault when the body does not follow.
 //!
 //! [`MediaPlan`] is the same rule for what a robot streams: its declared cameras and
 //! microphones as the registry resolves them for one instance, captured through
@@ -31,6 +32,7 @@ pub mod can;
 pub mod chain;
 pub mod composite;
 pub mod drive;
+pub mod governor;
 pub mod kinematics;
 pub mod layout;
 pub mod media;
@@ -47,6 +49,9 @@ pub use chain::{
 };
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
+pub use governor::{
+    AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
+};
 pub use kinematics::{Chain, ChainStep, PlacementError};
 pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};
 pub use media::{

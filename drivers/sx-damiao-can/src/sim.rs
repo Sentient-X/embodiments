@@ -1,7 +1,7 @@
 //! A simulated Damiao CAN bus answering as the vendor's firmware does (feature `sim`).
 //!
-//! Each motor answers on its master id: a register write is echoed, a register read answers
-//! its model's limit table, a refresh or command answers feedback at the position last
+//! Each motor answers on its master id: a register write is echoed and held, a register read
+//! answers what was written, else its model's limit table, a refresh or command answers feedback at the position last
 //! commanded, and enable and disable set the state its feedback reports. A killed motor never
 //! answers. Waits are recorded rather than slept unless `real` is set, as on the bench.
 //! Shared by every suite that drives a Damiao body: this crate's, the bodies crate's and the
@@ -23,6 +23,10 @@ pub struct SimMotor {
     pub limits: [f64; 3],
     pub state: u8,
     pub q: f64,
+    /// Register values written to the motor, by register id, as their four data bytes.
+    pub registers: BTreeMap<u8, [u8; 4]>,
+    /// Registers whose writes are echoed but not held, as firmware without them answers.
+    pub ignored: BTreeSet<u8>,
 }
 
 /// The bus's motors and what crossed it.
@@ -32,6 +36,8 @@ pub struct SimState {
     pub dead: BTreeSet<u16>,
     pub inbox: VecDeque<CanFrame>,
     pub sent: usize,
+    /// Every frame sent, in order.
+    pub frames: Vec<CanFrame>,
     pub waited: Duration,
     /// Waits really sleep, as on the bench.
     pub real: bool,
@@ -55,6 +61,8 @@ impl Sim {
                         limits: model.limit_param(),
                         state: 0,
                         q: 0.0,
+                        registers: BTreeMap::new(),
+                        ignored: BTreeSet::new(),
                     },
                 )
             })
@@ -193,19 +201,30 @@ pub fn answer(id: u16, motor: &mut SimMotor, frame: &CanFrame) -> Option<CanFram
     let data = frame.data;
     if frame.id == 0x7FF {
         return match data[2] {
-            0x55 => Some(CanFrame {
-                id: u32::from(motor.master),
-                data,
-            }),
+            0x55 => {
+                if !motor.ignored.contains(&data[3]) {
+                    motor
+                        .registers
+                        .insert(data[3], [data[4], data[5], data[6], data[7]]);
+                }
+                Some(CanFrame {
+                    id: u32::from(motor.master),
+                    data,
+                })
+            }
             0x33 => {
-                let value = match data[3] {
+                let table = match data[3] {
                     21 => motor.limits[0],
                     22 => motor.limits[1],
                     23 => motor.limits[2],
                     _ => 0.0,
                 };
                 #[allow(clippy::cast_possible_truncation)]
-                let value = (value as f32).to_le_bytes();
+                let value = motor
+                    .registers
+                    .get(&data[3])
+                    .copied()
+                    .unwrap_or_else(|| (table as f32).to_le_bytes());
                 Some(CanFrame {
                     id: u32::from(motor.master),
                     data: [
@@ -232,6 +251,7 @@ impl CanPort for Sim {
     fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
         let mut state = self.state();
         state.sent += 1;
+        state.frames.push(*frame);
         let id = address(frame);
         if state.dead.contains(&id) {
             return Ok(());

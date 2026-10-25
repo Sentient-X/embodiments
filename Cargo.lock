@@ -295,6 +295,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sx-damiao-can",
  "sx-embodiment-drivers",
  "thiserror 2.0.21",
 ]
@@ -349,6 +350,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "sx-embodiment-drivers",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

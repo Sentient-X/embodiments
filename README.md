@@ -253,8 +253,11 @@ Cargo workspace pinned to the station's toolchain (`rust-toolchain.toml`).
 actuators an axis's `ActuatorBinding` names, indexed in the body's native state order, each
 failure classified as a `ChainFailure`, and a stop becomes a `ProvenStop` only when every
 actuator answered stopped. A body spanning two devices or buses is one `Composite` chain, and
-`can::SharedCanPort` lets chains take turns on one bridge. The station drives every body through
-this trait and names no vendor.
+`can::SharedCanPort` lets chains take turns on one bridge. `Governor` wraps any chain with a
+per-axis speed bound (each command slewed from where the body rests, `last_observed`) and a
+tracking-error bound that stops the chain and latches a fault when the body does not follow;
+the limits are the operator's to pass. The station drives every body through this trait and
+names no vendor.
 
 A bus crate is a translation of its vendor's own driver — the same structure, names, frames,
 clamps and command order — pinned to transcripts recorded by running that driver, with each
@@ -271,7 +274,7 @@ driver's chain.
 |---|---|---|---|
 | `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601`, `humanoid::open_humanoid_upper_body` and `body::DamiaoBody::open` (any single-bus body: the humanoid and static upper bodies) |
 | `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to the bridge's USB serial, or a board CAN interface's name), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0), feature `socketcan` finds `SocketCAN` interfaces by their adapter's serial; `system::SystemPorts` looks a commissioned identity up across every transport compiled in, opens the one bridge carrying it and refuses two (`OpenError::Ambiguous`), so the station names no transport | the `sx` station's `StationRobot::open_actuator`, over `SystemPorts::system()` |
-| `sx-socketcan` | any CAN bus | none: Linux `SocketCAN` (`CAN_RAW`) as a `can::CanPort`, through `libc`; the one crate allowed `unsafe`, in its one socket module | `sx-embodiment-bodies`'s `socketcan::SocketCanPorts` and `system::SystemPorts` |
+| `sx-socketcan` | any CAN bus | none: Linux `SocketCAN` (`CAN_RAW`) as a `can::CanPort`, through `libc`, holding a per-interface `flock` so a second of our processes cannot open the bus (a foreign driver is not excluded); the one crate allowed `unsafe`, in its socket and lock modules | `sx-embodiment-bodies`'s `socketcan::SocketCanPorts` and `system::SystemPorts` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
 Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's

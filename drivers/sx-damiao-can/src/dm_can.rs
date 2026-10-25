@@ -43,10 +43,12 @@
 //!   `fa8f511cab00ac424a10fb94d4ad2c11e270f5b2`); `DM_CAN.py`'s `change_limit_param` mutates
 //!   the row every motor of that model shares.
 //! - Translated only where a consumer drives it: MIT control, enable, disable, set zero,
-//!   refresh, register read and write, control-mode switch, limit change. The position,
-//!   velocity, force-position and CSP modes, `enable_old`, `control_delay`,
-//!   `change_motor_param` and `save_motor_param` (a flash write) are left out; `Pd`, `Vd` and
+//!   refresh, register read and write (`change_motor_param`), control-mode switch, limit
+//!   change. The position, velocity, force-position and CSP modes, `enable_old`,
+//!   `control_delay` and `save_motor_param` (a flash write) are left out; `Pd`, `Vd` and
 //!   `isEnable`, which `DM_CAN.py` never reads, too.
+//! - [`MotorControl::forget_param`] drops one cached register value, so a following read or
+//!   write is judged by the motor's fresh answer; `DM_CAN.py` keeps every value it has seen.
 //! - Kept from `DM_CAN.py` as it is: `recv` decodes a register reply arriving on a `MasterID`
 //!   as feedback, as the vendor's `__process_packet` does; replies are consumed by
 //!   `recv_set_param_data` first in every sequence this crate runs.
@@ -280,6 +282,7 @@ const SET_ZERO_WAIT: Duration = Duration::from_millis(100);
 const PARAM_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const SWITCH_MODE_RETRIES: usize = 10;
 const READ_PARAM_RETRIES: usize = 20;
+const CHANGE_PARAM_RETRIES: usize = 20;
 const PARAM_ID: u16 = 0x7FF;
 
 /// `MotorControl`: the motors on one CAN link, addressed by `SlaveID`.
@@ -520,6 +523,45 @@ impl<P: CanPort> MotorControl<P> {
             }
         }
         Ok(false)
+    }
+
+    /// `change_motor_param`: write `rid`, then read the motor's echo up to twenty times, 0.05 s
+    /// apart. `true` only when the echoed value is within 0.1 of `data`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor, a value the register cannot hold, or the link's failure.
+    pub fn change_motor_param(
+        &mut self,
+        slave_id: u16,
+        rid: DmVariable,
+        data: f64,
+    ) -> Result<bool, DmCanError> {
+        let index = self.index(slave_id)?;
+        self.write_motor_param(slave_id, rid, data)?;
+        for _ in 0..CHANGE_PARAM_RETRIES {
+            self.recv_set_param_data()?;
+            if let Some(value) = self.motors[index].get_param(rid) {
+                let echoed = match value {
+                    ParamValue::Uint32(value) => f64::from(value),
+                    ParamValue::Float(value) => f64::from(value),
+                };
+                return Ok((echoed - data).abs() < 0.1);
+            }
+            self.port.sleep(PARAM_RETRY_INTERVAL);
+        }
+        Ok(false)
+    }
+
+    /// Drop the cached value of `rid` for one motor (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor.
+    pub fn forget_param(&mut self, slave_id: u16, rid: DmVariable) -> Result<(), DmCanError> {
+        let index = self.index(slave_id)?;
+        self.motors[index].temp_param_dict.remove(&(rid as u8));
+        Ok(())
     }
 
     /// `changeMotorLimit` of Damiao's `SocketCAN` routine: rescale one motor's frames to the
