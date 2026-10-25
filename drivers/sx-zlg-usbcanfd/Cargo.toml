@@ -23,6 +23,7 @@ sx-socketcan = { path = "../sx-socketcan", optional = true }
 # macOS leaves this vendor-class adapter unconfigured, and the legacy IOUSBDeviceInterface's
 # SetConfiguration that nusb uses fails on it; Apple's IOUSBHost framework configures it.
 [target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.5"
 objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }

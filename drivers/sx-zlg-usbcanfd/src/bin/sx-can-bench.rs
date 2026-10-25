@@ -9,7 +9,8 @@
 //! fourteen answering motors, without the faulty torso 0x1F) --samples N --rates 50,100,200,250
 //! --seconds S --throughput-seconds S --timeout-ms N --json PATH --max-load L (default 20).
 //!
-//! `--spin` makes the ZLG channel poll instead of sleeping while it waits for a frame (the
+//! `--realtime` (macOS) puts the bench thread under Mach's `THREAD_TIME_CONSTRAINT_POLICY`, as
+//! the robot's real-time layer does for its loop threads. `--spin` makes the ZLG channel poll instead of sleeping while it waits for a frame (the
 //! opt-in `ReceiveWait::Spin`). `--exercise-recovery` first checks the stall recovery on the
 //! adapter: it marks the channel stalled twice in a row, so the next sends run a channel
 //! restart and then a device close and open (only the channel lifecycle's commands), and then
@@ -46,7 +47,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let transport = args.next().ok_or("name a transport: zlg or socketcan")?;
     let mut config = Config::static_upper_body();
     let (mut serial, mut channel, mut in_flight) = (None, 1_u8, 1_usize);
-    let (mut spin, mut exercise_recovery) = (false, false);
+    let (mut spin, mut exercise_recovery, mut realtime) = (false, false, false);
     let (mut interface, mut json, mut max_load) = (None, None, 20.0_f64);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -83,6 +84,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "--timeout-ms" => config.reply_timeout_ms = number(&value()?)?,
             "--json" => json = Some(value()?),
             "--spin" => spin = true,
+            "--realtime" => realtime = true,
             "--exercise-recovery" => exercise_recovery = true,
             "--max-load" => max_load = value()?.parse().map_err(|_| "bad --max-load")?,
             other if interface.is_none() && !other.starts_with("--") => {
@@ -97,6 +99,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
         );
     }
     bench::check(&config).map_err(|error| error.to_string())?;
+    if realtime {
+        realtime_thread(&config)?;
+        config.wake_margin_us = 100;
+    }
     match bench::load_average() {
         Some(load) if load >= max_load => {
             return Err(format!(
@@ -238,4 +244,21 @@ fn exercise(
             None => return Err("no answer to a read after the recoveries".to_owned()),
         }
     }
+}
+
+/// The bench thread under Mach's time-constraint policy, for the fastest rate's period.
+#[cfg(target_os = "macos")]
+fn realtime_thread(config: &Config) -> Result<(), String> {
+    use std::time::Duration;
+    let fastest = config.rates_hz.iter().copied().max().unwrap_or(50).max(1);
+    let period = Duration::from_secs_f64(1.0 / f64::from(fastest));
+    sx_zlg_usbcanfd::macos::time_constraint(period, period / 4, period / 2)
+        .map_err(|status| format!("THREAD_TIME_CONSTRAINT_POLICY refused: kern_return {status}"))?;
+    eprintln!("bench thread: THREAD_TIME_CONSTRAINT_POLICY, period {period:?}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn realtime_thread(_config: &Config) -> Result<(), String> {
+    Err("--realtime is the macOS time-constraint policy; on Linux use SCHED_FIFO (chrt)".to_owned())
 }

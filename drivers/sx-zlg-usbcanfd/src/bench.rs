@@ -132,6 +132,10 @@ pub struct Config {
     pub throughput_seconds: f64,
     /// How long one reply may take before it counts as lost.
     pub reply_timeout_ms: u64,
+    /// How early the pacing sleep stops before a cycle is due, the rest spun: 1000 us, since
+    /// macOS wakes a default thread about 0.75 ms late (p50), more than 250 Hz's slack; 100 us
+    /// under the time-constraint policy, which wakes within about 10 us.
+    pub wake_margin_us: u64,
 }
 
 impl Config {
@@ -146,6 +150,7 @@ impl Config {
             cycle_seconds: 10.0,
             throughput_seconds: 10.0,
             reply_timeout_ms: 20,
+            wake_margin_us: 1000,
         }
     }
 }
@@ -460,16 +465,12 @@ fn latency<P: CanPort>(
     })
 }
 
-/// How early the pacing sleep stops before a cycle is due: macOS wakes a sleeping thread about
-/// 0.75 ms late (p50, measured on the bench Mac), more than 250 Hz's slack.
-const WAKE_MARGIN: Duration = Duration::from_millis(1);
-
-/// Sleep until shortly before `at`, then spin the rest, so a cycle starts on time without
+/// Sleep until `margin` before `at`, then spin the rest, so a cycle starts on time without
 /// spinning the whole period.
-fn pace_until(at: Instant) {
+fn pace_until(at: Instant, margin: Duration) {
     if let Some(wait) = at
         .checked_duration_since(Instant::now())
-        .and_then(|left| left.checked_sub(WAKE_MARGIN))
+        .and_then(|left| left.checked_sub(margin))
     {
         std::thread::sleep(wait);
     }
@@ -499,7 +500,7 @@ fn cycles_at<P: CanPort>(
     for cycle in 0..count {
         let start = started + period * u32::try_from(cycle).unwrap_or(u32::MAX);
         let deadline = start + period;
-        pace_until(start);
+        pace_until(start, Duration::from_micros(config.wake_margin_us));
         let first = Instant::now();
         // Late: what is left of the period cannot carry the cycle's bus time. Skip it.
         if deadline.saturating_duration_since(first) < budget {
