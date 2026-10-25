@@ -416,6 +416,44 @@ pub fn sweep_finger<P: SerialPort>(
     })
 }
 
+/// Move servo `id` to `target` ticks and leave it there limp: widen its limits by `widen`
+/// first where asked (a servo resting outside them is otherwise refused), power it where it
+/// rests, drive it, and undo what was done to it. Its gears hold it where it was left.
+///
+/// # Errors
+///
+/// A target outside its limits, a signal, the deadline, or the bus.
+pub fn go_to<P: SerialPort>(
+    session: &mut Session<P>,
+    id: u8,
+    target: u16,
+    slow: &Slow,
+    watch: &Watch,
+    widen: Option<u16>,
+) -> Result<Arrival, CalibrateError> {
+    let (min, max) = session.limits(id)?;
+    if let Some(widen) = widen {
+        session.widen_limits(
+            id,
+            min.saturating_sub(widen),
+            max.saturating_add(widen).min(super::MAX_TICK),
+        )?;
+    }
+    let (min, max) = session.limits(id)?;
+    if target < min || target > max {
+        return Err(CalibrateError::OutsideLimits {
+            id,
+            goal: i32::from(target),
+            min,
+            max,
+        });
+    }
+    session.enable(id, slow)?;
+    let arrival = drive_to(session, id, i32::from(target), watch)?;
+    session.finish_servo(id)?;
+    Ok(arrival)
+}
+
 /// A joint nudged and brought back.
 #[derive(Clone, Debug)]
 pub struct Jog {

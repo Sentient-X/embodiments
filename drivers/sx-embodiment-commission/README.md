@@ -52,6 +52,7 @@ sx-commission calibrate read --bus <tty> [--ids 1-20] [--json]
 sx-commission calibrate gripper --bus <tty> --ids 1,2 [--move] [--widen <ticks>] \
   [--closed 1:low,2:high] [--json]
 sx-commission calibrate jog --bus <tty> --id <n> --delta <ticks> [--move] [--json]
+sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
 sx-commission calibrate --restore <journal>
 ```
 
@@ -83,7 +84,11 @@ sx-commission calibrate --restore <journal>
   where the goal is clamped) and `MaxTravel`. A move that stops short without load holds where
   it is; only a load stall backs off. A missed status packet is read again up to three times.
   `--trace <file>` writes one JSON line per read, goal, enable and torque-off.
-- Without `--move`, `gripper` and `jog` are dry runs. They read through the scan's read-only
+- `goto` powers one servo, moves it to `--to` ticks and leaves it there with torque off;
+  its gears hold it. With one servo powered at a time, it parks the opposite finger at its
+  closed position, so a sweep's closed end is where the fingers meet. Do not start a sweep
+  with the finger resting on a stop: it moves less than a lead and reports `Stuck`.
+- Without `--move`, `gripper`, `jog` and `goto` are dry runs. They read through the scan's read-only
   port and print the plan. They create no session and no journal, so they cannot write.
 
 How it keeps a servo from being left powered (`src/calibrate/`):

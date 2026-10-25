@@ -573,3 +573,38 @@ fn a_stall_a_few_ticks_short_of_the_limit_is_the_limit_not_a_stop() {
     assert_eq!(end.end, End::Limit(2100));
     assert!(session.close().is_clean());
 }
+
+#[test]
+fn goto_leaves_a_servo_at_its_target_limp_even_from_outside_its_limits() {
+    let bus = fingers();
+    bus.rest_at(1, 3100);
+    let dir = journal_dir("goto");
+    let words: Vec<String> = [
+        "goto",
+        "--bus",
+        BUS,
+        "--id",
+        "1",
+        "--to",
+        "2128",
+        "--widen",
+        "200",
+        "--move",
+        "--journal-dir",
+        dir.to_str().expect("utf-8"),
+    ]
+    .map(String::from)
+    .to_vec();
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = cli::run(
+        &parse(&words).expect("parsed"),
+        |_, _| Ok(RealTime::new(bus.clone())),
+        &Arc::new(AtomicUsize::new(0)),
+        &mut stdout,
+        &mut stderr,
+    );
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert!((i32::from(bus.present(1)) - 2128).abs() <= 4);
+    untouched(&bus, 1, (1000, 3000));
+    assert!(!Journal::path_for(&dir, BUS).exists());
+}

@@ -13,7 +13,7 @@ use sx_feetech_serial::scservo_sdk::ProtocolPacketHandler;
 
 use super::CalibrateError;
 use super::journal::Journal;
-use super::motion::{Closed, Sweep, Watch, jog, sweep_finger};
+use super::motion::{Closed, Sweep, Watch, go_to, jog, sweep_finger};
 use super::read::{self, read_bus};
 use super::session::{Session, Slow};
 
@@ -23,6 +23,7 @@ pub const USAGE: &str = "usage:
                                   [--closed 1:low,2:high] [--json] [motion settings]
   sx-commission calibrate jog --bus <tty> --id <n> --delta <ticks> [--move] [--json]
                               [motion settings]
+  sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
   sx-commission calibrate --restore <journal>
 
   Without --move, gripper and jog only read and print what they would do.
@@ -39,7 +40,15 @@ pub const MAX_JOG: i32 = 400;
 pub enum Mode {
     Read,
     Gripper,
-    Jog { id: u8, delta: i32 },
+    Jog {
+        id: u8,
+        delta: i32,
+    },
+    /// Move one servo to a position and leave it there, limp.
+    Goto {
+        id: u8,
+        to: u16,
+    },
     Restore(PathBuf),
 }
 
@@ -154,7 +163,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         journal_dir: Journal::default_dir(),
         trace: None,
     };
-    let (mut id, mut delta, mut restore) = (None, None, None);
+    let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
     while let Some(flag) = words.next() {
         let mut value = || words.next().ok_or(format!("{flag} needs a value"));
         let sweep = &mut args.sweep;
@@ -164,6 +173,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--ids" => args.ids = ids(value()?)?,
             "--id" => id = Some(number::<u8>(flag, value()?)?),
             "--delta" => delta = Some(number::<i32>(flag, value()?)?),
+            "--to" => to = Some(number::<u16>(flag, value()?)?),
             "--move" => args.moves = true,
             "--json" => args.json = true,
             "--widen" => args.widen = Some(number(flag, value()?)?),
@@ -206,6 +216,15 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             }
             Mode::Jog { id, delta }
         }
+        (Some("goto"), None) => {
+            let (Some(id), Some(to)) = (id, to) else {
+                return Err("goto needs --id and --to".to_owned());
+            };
+            if to > super::MAX_TICK {
+                return Err(format!("--to is 0 to {}", super::MAX_TICK));
+            }
+            Mode::Goto { id, to }
+        }
         (Some(other), None) => return Err(format!("unknown calibrate mode {other}")),
         (None, None) => return Err("calibrate needs a mode".to_owned()),
     };
@@ -244,8 +263,12 @@ pub fn run<P: SerialPort>(
     let result = match &args.mode {
         Mode::Restore(path) => restore(args, path, &mut open, stop, &mut out),
         Mode::Read => read_mode(args, &mut open, &mut out),
-        Mode::Gripper | Mode::Jog { .. } if !args.moves => dry_run(args, &mut open, &mut out),
-        Mode::Gripper | Mode::Jog { .. } => moving(args, &mut open, stop, &mut out),
+        Mode::Gripper | Mode::Jog { .. } | Mode::Goto { .. } if !args.moves => {
+            dry_run(args, &mut open, &mut out)
+        }
+        Mode::Gripper | Mode::Jog { .. } | Mode::Goto { .. } => {
+            moving(args, &mut open, stop, &mut out)
+        }
     };
     if let Err(error) = result {
         let _ = writeln!(out.stderr, "{error}");
@@ -311,7 +334,7 @@ fn read_mode<P: SerialPort>(
 /// The ids a moving mode touches.
 fn targets(args: &Args) -> Vec<u8> {
     match args.mode {
-        Mode::Jog { id, .. } => vec![id],
+        Mode::Jog { id, .. } | Mode::Goto { id, .. } => vec![id],
         _ => args.ids.clone(),
     }
 }
@@ -351,7 +374,26 @@ fn dry_run<P: SerialPort>(
         let limits = read::limits(&mut ph, id)?;
         let state = read::state(&mut ph, id)?;
         let control = read::control(&mut ph, id)?;
-        let line = if let Mode::Jog { delta, .. } = args.mode {
+        let line = if let Mode::Goto { to, .. } = args.mode {
+            let (min, max) = args.widen.map_or(limits, |w| {
+                (
+                    limits.0.saturating_sub(w),
+                    limits.1.saturating_add(w).min(super::MAX_TICK),
+                )
+            });
+            format!(
+                "servo {id}: rests at {}, limits {}..{} (for the move {min}..{max}); would power \
+                 it there, move it to {to}{} and leave it there with torque off",
+                state.position,
+                limits.0,
+                limits.1,
+                if (min..=max).contains(&to) {
+                    ""
+                } else {
+                    " (REFUSED: outside its limits)"
+                }
+            )
+        } else if let Mode::Jog { delta, .. } = args.mode {
             let target = state.position + delta;
             let inside = target >= i32::from(limits.0) && target <= i32::from(limits.1);
             format!(
@@ -458,6 +500,27 @@ fn moving<P: SerialPort>(
                 jog.json()
             })
         }
+        Mode::Goto { id, to } => go_to(
+            &mut session,
+            id,
+            to,
+            &args.sweep.slow,
+            &args.sweep.watch,
+            args.widen,
+        )
+        .map(|arrival| {
+            let _ = writeln!(
+                out.stdout,
+                "servo {id}: from {} to {} ({:?} after {:.2} s), left there with torque off",
+                arrival.from,
+                arrival.at,
+                arrival.end,
+                arrival.elapsed.as_secs_f64()
+            );
+            json!({ "id": id, "to": to, "from": arrival.from, "at": arrival.at,
+                    "seconds": arrival.elapsed.as_secs_f64(),
+                    "ticks_per_second": arrival.ticks_per_second() })
+        }),
         _ => gripper(args, &mut session, out),
     };
     let report = session.close();
