@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build the Sentient static upper body URDF from its received description.
 
-The source is ``assets/sentient_static_upper_body/source/received.urdf``, the description
-package as received on 2026-10-24, byte for byte. Every change
-below is a defect in that file for simulation or retargeting; ``known/static_upper_body.py``
-says why each one is made and what evidence would replace it.
+The source is ``assets/sentient_static_upper_body/source/received.urdf``, the description as
+received on 2026-10-25 with its Damiao motor table, byte for byte. Every change below is a
+gap in that file for simulation or retargeting; ``known/static_upper_body.py`` says why each
+one is made and what evidence would replace it. Joint limits pass through unchanged: the
+motor table marks each driven joint's limits as confirmed on the robot.
 
 Run from the package root:
 ``uv run --with numpy --with scipy python tools/compose_static_upper_body_urdf.py``.
@@ -28,23 +29,12 @@ ASSET = ROOT / "assets/sentient_static_upper_body"
 SOURCE = ASSET / "source/received.urdf"
 TARGET = ASSET / "sentient_static_upper_body.urdf"
 SOURCE_MESH_PREFIX = (
-    # The received package's folder name; incidental, not the robot's name.
-    "package://allisa_feedback_portable/meshes/models/allisa_current/meshes_preview/"
+    # The received package's model folder; incidental, not the robot's name.
+    "package://humanoid_pkg/models/allisa_current/meshes_preview/"
 )
+#: Driver configuration inside the description; the body's actuator bindings carry it.
+MOTOR_TAGS = ("motor_configuration", "motor_parameters")
 
-# Elbow flexion measured from the straight arm, which the description puts at -pi/2 (left)
-# and +pi/2 (right): the shoulder-to-wrist distance peaks there. The source range runs from
-# 80.5 deg past straight (forearm behind the body) to 90 deg of flexion, which no elbow can
-# do; its span is placed on the flexion side instead. The offset elbow folds the forearm
-# beside the upper arm, and the wrist first touches the upper arm at 2.79 rad (left) and
-# 2.81 rad (right) of flexion on this file's collision geometry (MuJoCo sweep, 5 mrad
-# steps), so flexion stops 2.5 deg short of that.
-ELBOW_STRAIGHT = {"left": -math.pi / 2, "right": math.pi / 2}
-ELBOW_FLEX_SIGN = {"left": 1.0, "right": -1.0}
-ELBOW_MAX_FLEX_RAD = 2.75
-# A yaw axis with cables cannot turn more than once; the source's 8.7 and 7.4 rad forearm
-# ranges are encoder readings, so they are cut to one turn about zero.
-ONE_TURN = (-math.pi, math.pi)
 # One density for every link's convex hull. The hulls overstate solid volume, so this is
 # below aluminium; it is an estimate for simulation until the CAD's mass properties arrive.
 HULL_DENSITY_KG_M3 = 600.0
@@ -151,6 +141,9 @@ def render() -> dict[Path, bytes]:
     outputs: dict[Path, bytes] = {}
 
     # The base is clamped to a table edge; the table, not the description, places it.
+    for parent in robot.iter():
+        for child in [c for c in parent if c.tag in MOTOR_TAGS]:
+            parent.remove(child)
     for joint in robot.findall("joint"):
         if joint.get("name") == "world_to_base":
             robot.remove(joint)
@@ -195,22 +188,6 @@ def render() -> dict[Path, bytes]:
             path = ASSET / relpath
             _write_stl(path, vertices, faces)
             outputs[path] = path.read_bytes()
-
-    for joint in robot.findall("joint"):
-        name = joint.get("name", "")
-        limit = joint.find("limit")
-        if limit is None:
-            continue
-        lower, upper = float(limit.get("lower", "0")), float(limit.get("upper", "0"))
-        side = name.split("_", 1)[0]
-        if name.endswith("_elbow_pitch_joint"):
-            straight, sign = ELBOW_STRAIGHT[side], ELBOW_FLEX_SIGN[side]
-            flex = min(upper - lower, ELBOW_MAX_FLEX_RAD)
-            lower, upper = sorted((straight, straight + sign * flex))
-        elif name.endswith("_forearm_yaw_joint"):
-            lower, upper = max(lower, ONE_TURN[0]), min(upper, ONE_TURN[1])
-        limit.set("lower", f"{lower:.12g}")
-        limit.set("upper", f"{upper:.12g}")
 
     ET.indent(robot, space="  ")
     xml = '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(robot, encoding="unicode")

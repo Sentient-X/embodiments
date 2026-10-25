@@ -9,32 +9,34 @@ ending in a two-finger gripper with a ``*_gripper_tcp`` frame, and an SO-101 arm
 used as a six-joint neck whose last joint tilts a ZED camera (``ZED_camera`` frame).
 
 The description is ``tools/compose_static_upper_body_urdf.py``'s rendering of the
-description package as received on 2026-10-24 (maintainer ``suprajs``,
-licence ``Proprietary``), kept byte for byte under ``source/``. The rendering changes the
-received file where it cannot be right, and each change is replaced by evidence when it comes:
+description as received on 2026-10-25 (maintainer ``suprajs``, licence ``Proprietary``; its
+meshes resolve under ``humanoid_pkg``'s ``models/allisa_current``), kept byte for byte under
+``source/``. That file carries the robot's Damiao motor table: per driven joint the model, CAN
+send and answer ids (answer = send + 0x20, on ``can1``), MIT gains, limits, and flags that its
+mapping, direction and limits are confirmed on the robot. The bindings below are that table;
+the joint limits pass through unchanged, and each joint drives its motor with identity sign.
 
-* **Elbows.** The received range ran from 80.5 deg past straight, the forearm swinging
-  behind the body, to 90 deg of flexion. Its span is placed on the flexion side, from the
-  straight arm (-pi/2 left, +pi/2 right, where shoulder-to-wrist distance peaks) to 157.6
-  deg of flexion, 2.5 deg short of where the wrist meets the upper arm. A measured stop
-  from the hardware replaces both ends.
-* **Forearm yaw.** The received 8.7 rad (left) and 7.4 rad (right) ranges are cut to one
-  turn about zero; they read as multi-turn encoder values.
-* **Mass properties.** The received file has no inertial on any link. Each link gets its
-  visual meshes' convex hull at one density (600 kg/m^3), 11.6 kg in all; the CAD's mass
-  properties replace them, and the estimate is likely light on the arm actuators.
+* **Elbows** bend both ways about the forearm hanging straight (-pi/2 left, +pi/2 right): about
+  90 deg forward to the stop at zero and about 80 deg back. The first rendering read the
+  backward half as impossible and moved the range; the robot's confirmed stops replace that.
+* **Forearm yaw** turns 8.7 rad (left) and 7.4 rad (right), more than once; also confirmed.
+
+The rendering still changes the received file where simulation needs it:
+
+* **Mass properties.** No link has an inertial. Each link gets its visual meshes' convex hull
+  at one density (600 kg/m^3), 11.6 kg in all; the CAD's mass properties replace them, and the
+  estimate is likely light on the arm actuators. This is why it is still a development body.
 * **Collision.** The received capsules on the four distal links of each arm and the torso
   box stay; every other link with geometry gets its visual hull as its collision mesh.
-* Visual names are made unique, meshes are referenced as ``meshes/<name>.stl``, and the
-  ``world`` link and joint are removed.
+* The motor table is removed (the bindings carry it), visual names are made unique, meshes
+  are referenced as ``meshes/<name>.stl``, and the ``world`` link and joint are removed.
 
-Still as received, and questions for the hardware owner: the left upper-arm yaw spans
--5.12..0.81 rad while the right spans -2.42..2.76; every arm joint declares 54 Nm and
-0.5 rad/s, too slow to replay human motion; and left and right do not mirror one sign
-convention (the same shoulder-pitch value raises one arm and lowers the other, while upper-
-arm yaw turns both the same way). No source names the motors, their bus ids or the ZED
-model, so every axis is an undocumented drive and the camera stays a frame, not a sensor.
-That makes this a development body.
+Still open with the hardware owner: every arm joint declares 54 Nm and 0.5 rad/s, too slow to
+replay human motion, and the received driver configuration caps speed at 0.25 rad/s; left and
+right do not mirror one sign convention; the right arm's first id is 0x09 where the rest of
+that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that driver's, not
+a qualification. The grippers and the SO-101 neck have no motor entry, so they stay
+undocumented drives, and the ZED stays a frame, not a sensor.
 """
 
 from typing import Final
@@ -49,22 +51,29 @@ from ..compose import (
     body_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
-from ..layout import CoordinateUnit
+from ..layout import (
+    ActuatorBinding,
+    ActuatorBus,
+    ActuatorFeedback,
+    ActuatorModel,
+    CoordinateUnit,
+    DirectDrive,
+)
 from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
 
 _RECEIVED: Final = AssetProvenance(
     repository="https://github.com/Sentient-X/sx-embodiments",
-    revision="31de0542f8ffa16020e9fbd03081a4a97b4d08cc6f6bd83213c2d2ba724915ee",
+    revision="788bb9be9911747df56d2bebf6ff45d5da0461b0287e5a881718217735ceb080",
     path="assets/sentient_static_upper_body/source/received.urdf",
     license_id="LicenseRef-Sentient-Proprietary",
 )
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="54c53d3d3f8d13f9f4c21e6e19b18b125a6dea809ce6de320da5bc660a85aa49",
-    size_bytes=234543,
+    sha256="6c8d85891f0c85fa8a79d5b8a80505d2f4963e0239006525c65e4831ab278fe0",
+    size_bytes=234759,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -86,70 +95,103 @@ _ARM_JOINTS: Final = (
     "wrist_pitch",
     "wrist_roll",
 )
+_ARM_MODELS: Final = (
+    ActuatorModel.DAMIAO_DM8009,
+    ActuatorModel.DAMIAO_DM8009,
+    ActuatorModel.DAMIAO_DM4340,
+    ActuatorModel.DAMIAO_DM4340,
+    ActuatorModel.DAMIAO_DM4340,
+    ActuatorModel.DAMIAO_DM4310,
+    ActuatorModel.DAMIAO_DM4310,
+)
+#: Each arm's CAN send ids in ``_ARM_JOINTS`` order, as the received motor table lists them.
+_ARM_IDS: Final = {
+    "left": (0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E),
+    "right": (0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15),
+}
+#: The motors' answer ids are their send ids plus this.
+STATIC_UPPER_BODY_MASTER_ID_OFFSET: Final = 0x20
+
+
+def _damiao(model: ActuatorModel, bus_id: int) -> DirectDrive:
+    """One motor on the body's one Damiao CAN bus, identity drive map."""
+    return DirectDrive(ActuatorBinding(model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id))
+
 
 STATIC_UPPER_BODY_TORSO: Final = ChainSpec(
     part_id=PartId("sentient-static-upper-body-torso"),
     layout=bounded_layout(
         names=("torso_joint",),
         units=(CoordinateUnit.RADIAN,),
-        lower=(-1.22129396506,),
-        upper=(1.14995803769,),
+        lower=(-1.221293965056839,),
+        upper=(1.1499580376897836,),
+        actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x1F),),
+        observations=(ActuatorFeedback(),),
     ),
     home=(0.0,),
 )
 
-STATIC_UPPER_BODY_LEFT_ARM: Final = ChainSpec(
-    part_id=PartId("sentient-static-upper-body-left-arm"),
-    layout=bounded_layout(
-        names=tuple(f"left_{name}_joint" for name in _ARM_JOINTS),
-        units=(CoordinateUnit.RADIAN,) * 7,
-        lower=(
-            -2.64267185473,
-            -0.387388418402,
-            -5.12302586404,
-            -1.57079632679,
-            -3.14159265359,
-            -2.12806134127,
-            -2.09601739528,
+
+def _arm(side: str, lower: tuple[float, ...], upper: tuple[float, ...]) -> ChainSpec:
+    return ChainSpec(
+        part_id=PartId(f"sentient-static-upper-body-{side}-arm"),
+        layout=bounded_layout(
+            names=tuple(f"{side}_{name}_joint" for name in _ARM_JOINTS),
+            units=(CoordinateUnit.RADIAN,) * 7,
+            lower=lower,
+            upper=upper,
+            actuations=tuple(
+                _damiao(model, bus_id)
+                for model, bus_id in zip(_ARM_MODELS, _ARM_IDS[side], strict=True)
+            ),
+            observations=(ActuatorFeedback(),) * 7,
         ),
-        upper=(
-            2.88986800946,
-            1.20183871214,
-            0.807011520562,
-            1.17920367321,
-            1.88391699092,
-            2.44087129015,
-            2.09678034638,
-        ),
+        home=(0.0,) * 7,
+    )
+
+
+STATIC_UPPER_BODY_LEFT_ARM: Final = _arm(
+    "left",
+    lower=(
+        -2.642671854734111,
+        -0.3873884184023808,
+        -5.1230258640421145,
+        -2.9753185320820936,
+        -6.82669565880827,
+        -2.1280613412680243,
+        -2.096017395284962,
     ),
-    home=(0.0,) * 7,
+    upper=(
+        2.889868009460594,
+        1.2018387121385512,
+        0.8070115205615327,
+        0.000953688868543523,
+        1.8839169909208824,
+        2.4408712901503016,
+        2.0967803463797967,
+    ),
 )
 
-STATIC_UPPER_BODY_RIGHT_ARM: Final = ChainSpec(
-    part_id=PartId("sentient-static-upper-body-right-arm"),
-    layout=bounded_layout(
-        names=tuple(f"right_{name}_joint" for name in _ARM_JOINTS),
-        units=(CoordinateUnit.RADIAN,) * 7,
-        lower=(
-            -2.91390096895,
-            -1.21010342679,
-            -2.42103456168,
-            -1.17920367321,
-            -3.14159265359,
-            -2.30888075074,
-            -2.11203936828,
-        ),
-        upper=(
-            3.12256809339,
-            0.354649110181,
-            2.75978484779,
-            1.57079632679,
-            1.42614633402,
-            2.25585564965,
-            2.09868772412,
-        ),
+STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
+    "right",
+    lower=(
+        -2.9139009689478907,
+        -1.2101034267894413,
+        -2.4210345616845963,
+        -0.029182879377431803,
+        -6.009575036240177,
+        -2.308880750743878,
+        -2.112039368276493,
     ),
-    home=(0.0,) * 7,
+    upper=(
+        3.1225680933852136,
+        0.35464911018127765,
+        2.7597848477912574,
+        2.966544594491493,
+        1.4261463340199896,
+        2.255855649652858,
+        2.0986877241168838,
+    ),
 )
 
 #: The SO-101 on the chest, its gripper replaced by a camera tilt joint carrying the ZED.
