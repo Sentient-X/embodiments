@@ -175,7 +175,8 @@ impl Host for System {
 
     #[cfg(target_os = "linux")]
     fn open_can(&mut self, name: &str) -> io::Result<SystemCan> {
-        sx_socketcan::SocketCanPort::open(name)
+        // A busy interface (another of our processes holds its lock) keeps its typed message.
+        sx_socketcan::SocketCanPort::open(name).map_err(io::Error::other)
     }
 
     #[cfg(not(target_os = "linux"))]
