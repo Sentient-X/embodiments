@@ -77,7 +77,10 @@ sx-commission calibrate --restore <journal>
   `--widen <ticks>` widens the limits for the sweep and restores them after.
 - `jog` powers one joint where it rests and moves it `--delta` ticks (at most 400), then back,
   and turns torque off. It prints each position and the measured ticks per second at the given
-  `--goal-speed`. That measurement settles the `Goal_Speed` unit, which
+  `--goal-speed`. `--hold-seconds <s>` holds it at the target first, printing `HOLDING id N at
+  <ticks>` when the hold starts and `RETURNED` once it is back and limp; `--json` gives the hold's
+  wall-clock start and end and the positions read during it. `--widen` works as for `gripper`.
+  That measurement settles the `Goal_Speed` unit, which
   `sx-feetech-serial`'s README records as unverified.
 - A sweep's end is one of `Load`, `NoProgress` (a stop), `Stuck` (it never moved a lead's
   worth, so it proves no stop), `Limit` (its position limit, or a stall within a lead of it,

@@ -454,6 +454,41 @@ pub fn go_to<P: SerialPort>(
     Ok(arrival)
 }
 
+/// Seconds since the Unix epoch, for aligning a hold with another recorder's clock.
+fn unix_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_secs_f64())
+}
+
+/// A jog's hold at its target, with the wall clock at each end.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hold {
+    pub started_unix: f64,
+    pub ended_unix: f64,
+    /// `Present_Position` at the start and end of the hold, and its extremes during it.
+    pub at_start: i32,
+    pub at_end: i32,
+    pub min: i32,
+    pub max: i32,
+}
+
+/// What a jog announces as it holds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JogEvent {
+    Holding { id: u8, at: i32 },
+    Returned { id: u8, at: i32 },
+}
+
+/// How a jog runs beyond its delta.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct JogPlan {
+    /// Widen the servo's limits by this many ticks for the jog, as a sweep does.
+    pub widen: Option<u16>,
+    /// Hold at the target this long before coming back.
+    pub hold: Duration,
+}
+
 /// A joint nudged and brought back.
 #[derive(Clone, Debug)]
 pub struct Jog {
@@ -461,6 +496,7 @@ pub struct Jog {
     pub start: i32,
     pub target: i32,
     pub out: Arrival,
+    pub hold: Option<Hold>,
     pub back: Arrival,
     pub slow: Slow,
     pub undone: RestoreReport,
@@ -486,13 +522,22 @@ impl Jog {
             "acceleration": self.slow.acceleration,
             "torque_limit": self.slow.torque_limit,
             "out": arrival(&self.out),
+            "hold": self.hold.map(|h| json!({
+                "started_unix": h.started_unix,
+                "ended_unix": h.ended_unix,
+                "at_start": h.at_start,
+                "at_end": h.at_end,
+                "min": h.min,
+                "max": h.max,
+            })),
             "back": arrival(&self.back),
         })
     }
 }
 
-/// Power servo `id` where it rests, move it `delta` ticks, bring it back, and undo what was
-/// done to it. Whatever stops the move out, the servo is still brought back.
+/// Power servo `id` where it rests, move it `delta` ticks, hold it there `plan.hold` while
+/// reading where it is, bring it back, and undo what was done to it. `notify` hears the hold
+/// start and the return. Whatever stops the move out, the servo is still brought back.
 ///
 /// # Errors
 ///
@@ -503,7 +548,17 @@ pub fn jog<P: SerialPort>(
     delta: i32,
     slow: &Slow,
     watch: &Watch,
+    plan: &JogPlan,
+    notify: &mut dyn FnMut(JogEvent),
 ) -> Result<Jog, CalibrateError> {
+    if let Some(widen) = plan.widen {
+        let (min, max) = session.limits(id)?;
+        session.widen_limits(
+            id,
+            min.saturating_sub(widen),
+            max.saturating_add(widen).min(super::MAX_TICK),
+        )?;
+    }
     let (min, max) = session.limits(id)?;
     let start = session.state(id)?.position;
     let target = start + delta;
@@ -517,13 +572,37 @@ pub fn jog<P: SerialPort>(
     }
     let start = session.enable(id, slow)?;
     let out = drive_to(session, id, start + delta, watch)?;
+    let hold = if plan.hold.is_zero() {
+        None
+    } else {
+        let at_start = session.state(id)?.position;
+        notify(JogEvent::Holding { id, at: at_start });
+        let started_unix = unix_now();
+        let until = Instant::now() + plan.hold;
+        let (mut low, mut high, mut at_end) = (at_start, at_start, at_start);
+        while Instant::now() < until {
+            session.sleep(watch.period.max(Duration::from_millis(50)))?;
+            at_end = session.state(id)?.position;
+            (low, high) = (low.min(at_end), high.max(at_end));
+        }
+        Some(Hold {
+            started_unix,
+            ended_unix: unix_now(),
+            at_start,
+            at_end,
+            min: low,
+            max: high,
+        })
+    };
     let back = drive_to(session, id, start, watch)?;
     let undone = session.finish_servo(id)?;
+    notify(JogEvent::Returned { id, at: back.at });
     Ok(Jog {
         id,
         start,
         target,
         out,
+        hold,
         back,
         slow: *slow,
         undone,

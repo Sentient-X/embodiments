@@ -13,7 +13,7 @@ use sx_feetech_serial::scservo_sdk::ProtocolPacketHandler;
 
 use super::CalibrateError;
 use super::journal::Journal;
-use super::motion::{Closed, Sweep, Watch, go_to, jog, sweep_finger};
+use super::motion::{Closed, JogEvent, JogPlan, Sweep, Watch, go_to, jog, sweep_finger};
 use super::read::{self, read_bus};
 use super::session::{Session, Slow};
 
@@ -21,7 +21,8 @@ pub const USAGE: &str = "usage:
   sx-commission calibrate read --bus <tty> [--ids 1-20] [--json]
   sx-commission calibrate gripper --bus <tty> --ids 1,2 [--move] [--widen <ticks>]
                                   [--closed 1:low,2:high] [--json] [motion settings]
-  sx-commission calibrate jog --bus <tty> --id <n> --delta <ticks> [--move] [--json]
+  sx-commission calibrate jog --bus <tty> --id <n> --delta <ticks> [--hold-seconds <s>]
+                              [--widen <ticks>] [--move] [--json]
                               [motion settings]
   sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
   sx-commission calibrate --restore <journal>
@@ -69,6 +70,8 @@ pub struct Args {
     pub journal_dir: PathBuf,
     /// One JSON line per motion step, for a moving run.
     pub trace: Option<PathBuf>,
+    /// How long `jog` holds at its target.
+    pub hold: Duration,
 }
 
 /// The settings a gripper sweep starts from: slow, weak and quick to give up.
@@ -162,6 +165,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         max_seconds: 180,
         journal_dir: Journal::default_dir(),
         trace: None,
+        hold: Duration::ZERO,
     };
     let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
     while let Some(flag) = words.next() {
@@ -181,6 +185,10 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--restore" => restore = Some(PathBuf::from(value()?)),
             "--journal-dir" => args.journal_dir = PathBuf::from(value()?),
             "--trace" => args.trace = Some(PathBuf::from(value()?)),
+            "--hold-seconds" => {
+                args.hold =
+                    Duration::from_secs_f64(number::<f64>(flag, value()?)?.clamp(0.0, 600.0));
+            }
             "--goal-speed" => sweep.slow.goal_speed = number(flag, value()?)?,
             "--acceleration" => sweep.slow.acceleration = number(flag, value()?)?,
             "--torque-limit" => sweep.slow.torque_limit = number(flag, value()?)?,
@@ -446,6 +454,57 @@ fn dry_run<P: SerialPort>(
     Ok(())
 }
 
+fn run_jog<P: SerialPort>(
+    args: &Args,
+    session: &mut Session<P>,
+    id: u8,
+    delta: i32,
+    out: &mut Out<'_>,
+) -> Result<Value, CalibrateError> {
+    let plan = JogPlan {
+        widen: args.widen,
+        hold: args.hold,
+    };
+    let mut notify = |event: JogEvent| {
+        match event {
+            JogEvent::Holding { id, at } => {
+                let _ = writeln!(out.stdout, "HOLDING id {id} at {at}");
+            }
+            JogEvent::Returned { id, at } => {
+                let _ = writeln!(out.stdout, "RETURNED id {id} at {at}, torque off");
+            }
+        }
+        let _ = out.stdout.flush();
+    };
+    let jogged = jog(
+        session,
+        id,
+        delta,
+        &args.sweep.slow,
+        &args.sweep.watch,
+        &plan,
+        &mut notify,
+    );
+    jogged.map(|jog| {
+        let speed = jog
+            .out
+            .ticks_per_second()
+            .map_or_else(String::new, |v| format!(", {v:.0} ticks/s"));
+        let _ = writeln!(
+            out.stdout,
+            "servo {id}: start {}, out to {} ({:?} after {:.2} s{speed}), back to {} \
+             ({:?}), torque off",
+            jog.start,
+            jog.out.at,
+            jog.out.end,
+            jog.out.elapsed.as_secs_f64(),
+            jog.back.at,
+            jog.back.end
+        );
+        jog.json()
+    })
+}
+
 fn moving<P: SerialPort>(
     args: &Args,
     open: &mut impl FnMut(&str, u32) -> io::Result<P>,
@@ -480,26 +539,7 @@ fn moving<P: SerialPort>(
         }
     }
     let result = match args.mode {
-        Mode::Jog { id, delta } => {
-            jog(&mut session, id, delta, &args.sweep.slow, &args.sweep.watch).map(|jog| {
-                let speed = jog
-                    .out
-                    .ticks_per_second()
-                    .map_or_else(String::new, |v| format!(", {v:.0} ticks/s"));
-                let _ = writeln!(
-                    out.stdout,
-                    "servo {id}: start {}, out to {} ({:?} after {:.2} s{speed}), back to {} \
-                     ({:?}), torque off",
-                    jog.start,
-                    jog.out.at,
-                    jog.out.end,
-                    jog.out.elapsed.as_secs_f64(),
-                    jog.back.at,
-                    jog.back.end
-                );
-                jog.json()
-            })
-        }
+        Mode::Jog { id, delta } => run_jog(args, &mut session, id, delta, out),
         Mode::Goto { id, to } => go_to(
             &mut session,
             id,

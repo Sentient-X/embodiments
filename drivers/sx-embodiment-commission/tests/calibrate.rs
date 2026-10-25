@@ -12,7 +12,7 @@ use sx_embodiment_commission::calibrate::CalibrateError;
 use sx_embodiment_commission::calibrate::cli::{self, parse};
 use sx_embodiment_commission::calibrate::journal::Journal;
 use sx_embodiment_commission::calibrate::motion::{
-    Direction, End, Sweep, Watch, drive_to, jog, sweep, sweep_finger,
+    Direction, End, JogEvent, JogPlan, Sweep, Watch, drive_to, jog, sweep, sweep_finger,
 };
 use sx_embodiment_commission::calibrate::session::{Session, Slow};
 use sx_feetech_serial::MotorCalibration;
@@ -351,7 +351,25 @@ fn a_jog_moves_out_and_back_and_times_the_move() {
     let dir = journal_dir("jog");
     let mut session = session(&bus, &dir, Duration::from_secs(30));
     let s = settings();
-    let jogged = jog(&mut session, 1, 120, &s.slow, &s.watch).expect("jogged");
+    let mut events = Vec::new();
+    let plan = JogPlan {
+        widen: None,
+        hold: Duration::from_millis(200),
+    };
+    let jogged = jog(&mut session, 1, 120, &s.slow, &s.watch, &plan, &mut |e| {
+        events.push(e);
+    })
+    .expect("jogged");
+    let hold = jogged.hold.expect("held");
+    assert!(hold.ended_unix - hold.started_unix >= 0.2);
+    assert!((hold.min - 2120).abs() <= 4 && (hold.max - 2120).abs() <= 4);
+    assert!(matches!(
+        events[..],
+        [
+            JogEvent::Holding { id: 1, .. },
+            JogEvent::Returned { id: 1, .. }
+        ]
+    ));
     assert_eq!((jogged.start, jogged.target), (2000, 2120));
     assert_eq!(jogged.out.end, End::Arrived);
     assert_eq!(jogged.back.end, End::Arrived);
