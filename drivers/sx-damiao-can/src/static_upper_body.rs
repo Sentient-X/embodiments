@@ -1,11 +1,13 @@
 //! The Sentient static upper body's fifteen directly driven Damiao motors as one chain.
 //!
-//! Reference: `assets/sentient_static_upper_body/source/received.urdf` in this repository, the
-//! description as received on 2026-10-25 (maintainer `suprajs`). Its `<motor_configuration>`
-//! puts every motor on `can1` (Linux `SocketCAN`) at 50 Hz, and its `<motor_parameters>` give
-//! each joint's send id, answer id (send id + 0x20) and MIT `kp` and `kd`. Those gains are that
-//! file's driver's, not a qualification: whole-body qualification is the station's bench work.
-//! The same file's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad, with a
+//! Reference: `assets/sentient_static_upper_body/source/humanoid_allisa_bot_hardware.json`, the
+//! hardware profile `humanoid_pkg` ships with the selected `allisa_bot` description: each arm
+//! joint's send id, answer id (send id + 0x20), model, sign and MIT `kp` and `kd`, on `can0`.
+//! Those gains are that driver's, not a qualification: whole-body qualification is the
+//! station's bench work. The torso has no entry there; its id and gains, and the timeouts below,
+//! are the superseded `allisa_feedback` description's motor table (`source/received.urdf`
+//! before 2026-10-26, in git history), which agrees with the profile on every arm motor. That
+//! table's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad, with a
 //! 0.5 s feedback and a 0.75 s heartbeat timeout. The heartbeat is enforced here: every motor's
 //! `TIMEOUT` register is written to 0.75 s at open ([`crate::chain`]), so an enabled motor that
 //! hears no command for that long disables itself. Speed and tracking error are not enforced by
@@ -17,7 +19,8 @@
 //! The axes and their bindings are the registry's (`sx_embodiments/known/static_upper_body.py`,
 //! a development body), read from `bindings/sentient-static-upper-body.json`, which
 //! `tools/render_driver_bindings.py` renders: the torso yaw and both seven-joint arms, identity
-//! sign, every commandable range the confirmed limits. The grippers and the SO-101 neck are
+//! sign except both wrists (sign -1: `allisa_bot` turns those axes against their motors), every
+//! commandable range the confirmed limits. The grippers and the SO-101 neck are
 //! Feetech servos on serial buses of their own, the same document's other ports, composed by
 //! `sx-feetech-serial`, not here. No bound, address, model, sign or reduction is spelled
 //! here; what is added is controller configuration, keyed by joint name.
@@ -29,7 +32,7 @@ use crate::body::{DamiaoBody, JointGains};
 /// The registry's static upper-body axes, rendered.
 pub const BINDINGS: &str = include_str!("../bindings/sentient-static-upper-body.json");
 
-/// The received motor table's answer ids: `recv_id = send_id + 0x20`.
+/// The motor table's answer ids: `recv_id = send_id + 0x20`.
 pub const MASTER_ID_OFFSET: u16 = 0x20;
 
 /// The torso yaw and both arms on one bus.

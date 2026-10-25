@@ -113,11 +113,12 @@ grippers are modules whose servo and jaw no source describes, so the body with t
 `sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
 arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge
 (`MountKind.CLAMP_EDGE`). Its description is `tools/compose_static_upper_body_urdf.py`'s
-rendering of the file as received, kept under `source/`. That file's Damiao motor table
-(model, CAN ids, robot-confirmed limits and directions for the torso and arms) is the body's
-actuator bindings, and `tests/test_static_upper_body.py` holds the two equal; the rendering
-drops the table, keeps the limits, and estimates mass and collision from the meshes' convex
-hulls, which `tests/test_static_upper_body.py` re-renders byte for byte. Its masses are
+rendering of `allisa_bot.urdf`, the description its operator selected, kept under `source/`
+with `humanoid_pkg`'s hardware profile. That profile (models, CAN ids and signs for the arms)
+is the body's actuator bindings, and `tests/test_static_upper_body.py` holds the two equal; the
+rendering keeps the source's limits (both wrists' in their motors' coordinates), estimates mass
+and collision from the meshes' convex hulls, and adds the ZED's frames, which
+`tests/test_static_upper_body.py` re-renders byte for byte. Its masses are
 estimates, so it is a development body.
 
 Observation and controller semantics are owned by `sx-actions`, which depends on this

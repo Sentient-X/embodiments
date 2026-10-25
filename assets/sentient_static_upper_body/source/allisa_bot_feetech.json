@@ -1,0 +1,161 @@
+{
+  "schema": "humanoid.feetech.reported_ticks.v1",
+  "version": 3,
+  "baud": 1000000,
+  "position_convention": "Reported position-register ticks; existing hardware homing offset already applied by servo. Goals do not apply it again.",
+  "boards": {
+    "left": {
+      "serial_number": "5AB0158173",
+      "baud": 1000000,
+      "fingers": {
+        "left": "left_gripper_left_finger_joint",
+        "right": "left_gripper_right_finger_joint"
+      }
+    },
+    "right": {
+      "serial_number": "5B91028463",
+      "baud": 1000000,
+      "fingers": {
+        "left": "right_gripper_left_finger_joint",
+        "right": "right_gripper_right_finger_joint"
+      }
+    }
+  },
+  "motors": {
+    "left_gripper_left_finger_joint": {
+      "id": 3,
+      "finger": "left",
+      "status": "calibrated",
+      "closed": 1806,
+      "open": 1269,
+      "min": 1269,
+      "max": 1806,
+      "offset": -466,
+      "expected_homing_offset_raw": 2514,
+      "expected_model": 777,
+      "expected_mode": 0,
+      "captures": {
+        "zero": {
+          "raw_ticks": 1806,
+          "unwrapped_ticks": 1806,
+          "captured_at": "2026-10-23T10:57:56.689584+00:00",
+          "source": "recordings/gripper_closed_reference_20261023T105756.689680Z.json",
+          "pose": "operator_confirmed_fully_closed"
+        },
+        "max": {
+          "raw_ticks": 1269,
+          "unwrapped_ticks": 1269,
+          "captured_at": "2026-10-23T10:34:54.687916+00:00",
+          "source_revision": "left_wrist_20261023T105353.744567Z",
+          "pose": "opposite_recorded_endpoint_fully_open"
+        }
+      }
+    },
+    "left_gripper_right_finger_joint": {
+      "id": 4,
+      "finger": "right",
+      "status": "calibrated",
+      "closed": 2199,
+      "open": 2805,
+      "min": 2199,
+      "max": 2805,
+      "offset": 482,
+      "expected_homing_offset_raw": 482,
+      "expected_model": 777,
+      "expected_mode": 0,
+      "captures": {
+        "zero": {
+          "raw_ticks": 2199,
+          "unwrapped_ticks": 2199,
+          "captured_at": "2026-10-23T10:57:56.689584+00:00",
+          "source": "recordings/gripper_closed_reference_20261023T105756.689680Z.json",
+          "pose": "operator_confirmed_fully_closed"
+        },
+        "max": {
+          "raw_ticks": 2805,
+          "unwrapped_ticks": 2805,
+          "captured_at": "2026-10-23T10:34:57.027040+00:00",
+          "source_revision": "left_wrist_20261023T105353.744567Z",
+          "pose": "opposite_recorded_endpoint_fully_open"
+        }
+      }
+    },
+    "right_gripper_left_finger_joint": {
+      "id": 1,
+      "finger": "left",
+      "status": "calibrated",
+      "closed": 2128,
+      "open": 2749,
+      "min": 2128,
+      "max": 2749,
+      "offset": 480,
+      "expected_homing_offset_raw": 480,
+      "expected_model": 777,
+      "expected_mode": 0,
+      "captures": {
+        "zero": {
+          "raw_ticks": 2128,
+          "unwrapped_ticks": 2128,
+          "captured_at": "2026-10-23T10:57:56.689584+00:00",
+          "source": "recordings/gripper_closed_reference_20261023T105756.689680Z.json",
+          "pose": "operator_confirmed_fully_closed"
+        },
+        "max": {
+          "raw_ticks": 2749,
+          "unwrapped_ticks": 2749,
+          "captured_at": "2026-10-23T10:33:25.974292+00:00",
+          "source_revision": "right_wrist_20261023T105353.745119Z",
+          "pose": "opposite_recorded_endpoint_fully_open"
+        }
+      }
+    },
+    "right_gripper_right_finger_joint": {
+      "id": 2,
+      "finger": "right",
+      "status": "calibrated",
+      "closed": 1853,
+      "open": 1339,
+      "min": 1339,
+      "max": 1853,
+      "offset": -273,
+      "expected_homing_offset_raw": 2321,
+      "expected_model": 777,
+      "expected_mode": 0,
+      "captures": {
+        "zero": {
+          "raw_ticks": 1853,
+          "unwrapped_ticks": 1853,
+          "captured_at": "2026-10-23T10:57:56.689584+00:00",
+          "source": "recordings/gripper_closed_reference_20261023T105756.689680Z.json",
+          "pose": "operator_confirmed_fully_closed"
+        },
+        "max": {
+          "raw_ticks": 1339,
+          "unwrapped_ticks": 1339,
+          "captured_at": "2026-10-23T10:33:57.352194+00:00",
+          "source_revision": "right_wrist_20261023T105353.745119Z",
+          "pose": "opposite_recorded_endpoint_fully_open"
+        }
+      }
+    }
+  },
+  "calibration_evidence": {
+    "left": {
+      "status": "imported_complete",
+      "revision": "left_wrist_20261023T105920.109207Z",
+      "saved_at": "2026-10-23T10:59:20.109214+00:00",
+      "hardware_offsets_written": false,
+      "runtime_applied_by_source": false,
+      "source": "hardware_evidence/originals/humanoid_quest/config/servo_calibration/left_wrist_limits.json"
+    },
+    "right": {
+      "status": "imported_complete",
+      "revision": "right_wrist_20261023T105920.109762Z",
+      "saved_at": "2026-10-23T10:59:20.109769+00:00",
+      "hardware_offsets_written": false,
+      "runtime_applied_by_source": false,
+      "source": "hardware_evidence/originals/humanoid_quest/config/servo_calibration/right_wrist_limits.json"
+    }
+  },
+  "parameter_writes_allowed": false
+}

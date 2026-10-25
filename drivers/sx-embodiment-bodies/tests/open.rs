@@ -313,11 +313,11 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
         .stop_budget();
     assert_eq!(body.stop_budget(), damiao + Duration::from_millis(400));
     // Where every axis rests, in state order: the neck's camera tilt (id 6), found ~1000 ticks
-    // below its calibrated minimum, is reported there, far outside its declared bounds.
+    // below its calibrated minimum, is reported there, far outside what its unit reaches.
     let rest = body.last_observed().expect("every bus observed at open");
     assert_eq!(rest.len(), 25);
     let tilt = rest[24];
-    assert!(tilt < body.axes()[24].lower - 1.0, "{tilt}");
+    assert!(tilt < body.commandable()[24].lower - 1.0, "{tilt}");
     let receipt = body.command(&rest_inside(&body)).expect("a command");
     // The Feetech SYNC WRITEs have no answer, so the evidence is a dispatch; every bus still
     // observes every axis, the Feetech ones through their SYNC READs.
@@ -680,10 +680,12 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
             .any(|packet| packet[2] == 6 && packet[4..8] == [0x03, 42, 0xF1, 0x02]),
         "never at the rest tick 753, outside the limits"
     );
+    // Its declared range reaches below what its unit does, so its goal is that reach's edge,
+    // tick 1760 to within the radian round trip.
     let goal = neck.state().goal(6);
     assert!(
-        goal >= 1760,
-        "the goal is inside the calibrated range: {goal}"
+        goal + 1 >= TILT_MIN,
+        "the goal is at the calibrated range's edge: {goal}"
     );
     // The servo itself moves at most 3 steps of 0.732 rpm: about 150 ticks a second.
     neck.advance(Duration::from_millis(100));
@@ -788,15 +790,16 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
     assert!(tilt[0] > 753 && tilt[0] <= 753 + 3);
     let moved = tilt[99] - 753;
     assert!((150..=300).contains(&moved), "{moved}");
-    // It came to rest at the in-range position the governor held, the tilt's declared lower
-    // bound (tick 2265, the calibration's mid-range 2334 less 6 degrees), inside its range.
+    // It came to rest at the in-range position the governor held: its declared range reaches
+    // below its unit's, so the edge its unit reaches, tick 1760 to within the radian round trip.
     let held = neck.state().goal(6);
-    assert!(held > TILT_MIN, "{held}");
-    assert_eq!(*tilt.last().expect("ticks"), held);
+    assert!(held + 1 >= TILT_MIN && held <= TILT_MIN + 1, "{held}");
+    // The servo stops at its own calibrated minimum.
+    assert_eq!(*tilt.last().expect("ticks"), TILT_MIN);
     // Inside, the tilt is tracked again like any axis: commanded away while its servo stalls,
     // the governor stops the body and latches a tracking fault.
     let mut away = target.clone();
-    away[24] = 1.0;
+    away[24] = -0.5;
     let mut failure = None;
     for _ in 0..200 {
         clock.tick();
@@ -817,9 +820,9 @@ fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     let serial = probed_buses();
     let neck = serial["5A7C118709"].clone();
-    // The shoulder lift (id 2) rests at +2.0 rad: inside its declared -0.035..3.63 rad, past
-    // its unit's calibrated 932..3039 ticks, 1985.5 +/- 1053.5 about the drive's zero.
-    let resting = 3289;
+    // The shoulder lift (id 2) rests at +1.7 rad: inside its declared +/-1.745 rad, past its
+    // unit's calibrated 932..3039 ticks, 1985.5 +/- 1053.5 (1.616 rad) about the drive's zero.
+    let resting = 3093;
     neck.rest_at(2, resting);
     let mut bridges = Bridges {
         buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
@@ -842,12 +845,12 @@ fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_
     let range = body.commandable()[lift];
     let reach = 1053.5 * std::f64::consts::TAU / 4095.0;
     assert!((range.upper - reach).abs() < 1e-9, "{range:?}");
-    assert!(range.upper < 2.0 && 2.0 < declared);
+    assert!(range.upper < 1.7 && 1.7 < declared);
     let rest = body.last_observed().expect("rest");
-    assert!((rest[lift] - 2.0).abs() < 1e-3, "{}", rest[lift]);
-    // Asked for 2.5 rad, inside the declared bound and past what the unit reaches.
+    assert!((rest[lift] - 1.7).abs() < 1e-3, "{}", rest[lift]);
+    // Asked for 1.74 rad, inside the declared bound and past what the unit reaches.
     let mut target = rest_held(&body);
-    target[lift] = 2.5;
+    target[lift] = 1.74;
     let clock = Stepped::new();
     let mut governed =
         Governor::with_clock(body, bring_up_limits(), clock.clone()).expect("limits");
@@ -876,7 +879,7 @@ fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_
             .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 42, low, high])
     );
     // It came in at the servo's own pace, then held at the edge it reaches: the governor
-    // never tracked it toward 2.5 rad, which the firmware would clamp.
+    // never tracked it toward 1.74 rad, which the firmware would clamp.
     assert!(
         lifts[0] < resting && resting - lifts[0] <= 3,
         "{}",
