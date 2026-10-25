@@ -7,6 +7,7 @@
 //! endpoint abstraction; [`usb`] its binding to `nusb`; [`device`] the adapter and its channels,
 //! each a `sx_embodiment_drivers::can::CanPort`.
 
+pub mod bench;
 pub mod crc;
 pub mod device;
 pub mod engine;
