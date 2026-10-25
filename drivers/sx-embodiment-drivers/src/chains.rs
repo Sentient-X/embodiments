@@ -118,7 +118,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         let mut evidence = Evidence::BusObservedComplete;
         let mut observed = Vec::with_capacity(joints.len());
         let mut feedback = Vec::with_capacity(joints.len());
-        let mut complete = true;
+        let (mut observed_whole, mut feedback_whole) = (true, true);
         let mut rest = joints;
         for (index, chain) in self.members.iter_mut().enumerate() {
             let width = chain.axes().len();
@@ -132,12 +132,15 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             if receipt.evidence == Evidence::DispatchAttempted {
                 evidence = Evidence::DispatchAttempted;
             }
-            complete &= receipt.observed.len() == width && receipt.feedback.len() == width;
+            observed_whole &= receipt.observed.len() == width;
+            feedback_whole &= receipt.feedback.len() == width;
             observed.extend(receipt.observed);
             feedback.extend(receipt.feedback);
         }
-        if !complete {
+        if !observed_whole {
             observed.clear();
+        }
+        if !feedback_whole {
             feedback.clear();
         }
         Ok(Receipt {

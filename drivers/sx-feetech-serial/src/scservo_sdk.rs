@@ -49,11 +49,17 @@
 //!   `COMM_RX_CORRUPT`; the vendor raises `IndexError`.
 //! - [`GroupSyncWrite::tx_packet`] takes the handler it sends through as an argument, where
 //!   the vendor's `GroupSyncWrite` keeps a reference to it.
+//! - `syncReadRx` reads until the replies' whole length arrives or the wait runs out, as the
+//!   vendor does; `GroupSyncRead.readRx`, which scans that buffer for each servo's packet, is
+//!   ported with its indices bounds-checked, and a servo whose packet is absent or fails its
+//!   checksum is reported absent ([`GroupSyncRead::get_data`] `None`) without failing the
+//!   others', where the vendor's `rxPacket` reports only the last servo's result.
 //! - Translated only where a consumer drives it: `txPacket`, `rxPacket`, `txRxPacket`,
 //!   `readTxRx`, `read1ByteTxRx`, `read2ByteTxRx`, `writeTxRx`, `write1ByteTxRx`,
-//!   `write2ByteTxRx`, `syncWriteTxOnly`, the byte helpers, `scs_toscs` and `scs_tohost`,
-//!   `GroupSyncWrite`'s parameter handling, and `sms_sts`'s register table, `LockEprom` and
-//!   `unLockEprom`. Ping, action, reg-write, sync-read, offset calibration, reset, the
+//!   `write2ByteTxRx`, `syncWriteTxOnly`, `syncReadTx`, `syncReadRx`, the byte helpers,
+//!   `scs_toscs` and `scs_tohost`, `GroupSyncWrite`'s and `GroupSyncRead`'s parameter handling
+//!   (`group_sync_read.py`), and `sms_sts`'s register table, `LockEprom` and
+//!   `unLockEprom`. Ping, action, reg-write, offset calibration, reset, the
 //!   four-byte reads and writes, and `sms_sts`'s position, speed and wheel-mode helpers are
 //!   left out.
 
@@ -476,6 +482,163 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
 
         result
     }
+}
+
+impl<P: SerialPort> ProtocolPacketHandler<P> {
+    /// `syncReadTx`: ask every servo in `param` (one id each) for `data_length` bytes from
+    /// `start_address`; each answers in turn with its own status packet.
+    pub fn sync_read_tx(&mut self, start_address: u8, data_length: u8, param: &[u8]) -> CommResult {
+        let Ok(param_length) = u8::try_from(param.len()) else {
+            return CommResult::TxError;
+        };
+        // 8: HEADER0 HEADER1 ID LEN INST START_ADDR DATA_LEN CHKSUM
+        let mut txpacket = vec![0_u8; param.len() + 8];
+
+        txpacket[PKT_ID] = BROADCAST_ID;
+        txpacket[PKT_LENGTH] = param_length.saturating_add(4); // INST START_ADDR DATA_LEN CHKSUM
+        txpacket[PKT_INSTRUCTION] = INST_SYNC_READ;
+        txpacket[PKT_PARAMETER0] = start_address;
+        txpacket[PKT_PARAMETER0 + 1] = data_length;
+
+        txpacket[PKT_PARAMETER0 + 2..PKT_PARAMETER0 + 2 + param.len()].copy_from_slice(param);
+
+        self.tx_packet(&mut txpacket)
+    }
+
+    /// `syncReadRx`: every byte of `param_length` servos' answers of `data_length` bytes, or
+    /// what arrived before the wait ran out.
+    pub fn sync_read_rx(&mut self, data_length: u8, param_length: usize) -> (CommResult, Vec<u8>) {
+        let wait_length = (6 + usize::from(data_length)) * param_length;
+        self.port_handler.set_packet_timeout(wait_length);
+        let mut rxpacket: Vec<u8> = Vec::new();
+        let result = loop {
+            let Ok(bytes) = self
+                .port_handler
+                .read_port(wait_length.saturating_sub(rxpacket.len()))
+            else {
+                break CommResult::RxFail;
+            };
+            rxpacket.extend(bytes);
+            if rxpacket.len() >= wait_length {
+                break CommResult::Success;
+            }
+            // check timeout
+            if self.port_handler.is_packet_timeout() {
+                break timed_out(rxpacket.len());
+            }
+        };
+        (result, rxpacket)
+    }
+}
+
+/// `GroupSyncRead`: one register range read from many servos by one broadcast packet.
+pub struct GroupSyncRead {
+    start_address: u8,
+    data_length: u8,
+    /// In insertion order, as the vendor's `dict` keeps it: each servo's error byte, then its
+    /// data, once read.
+    data_dict: Vec<(u8, Option<Vec<u8>>)>,
+}
+
+impl GroupSyncRead {
+    #[must_use]
+    pub const fn new(start_address: u8, data_length: u8) -> Self {
+        Self {
+            start_address,
+            data_length,
+            data_dict: Vec::new(),
+        }
+    }
+
+    /// Add one servo; refused (`false`) for an id already added.
+    pub fn add_param(&mut self, scs_id: u8) -> bool {
+        if self.data_dict.iter().any(|(id, _)| *id == scs_id) {
+            return false;
+        }
+        self.data_dict.push((scs_id, None));
+        true
+    }
+
+    /// `txRxPacket`: send the SYNC READ through `ph` and parse every servo's answer; the result
+    /// is the read's, and each servo's own packet is [`GroupSyncRead::get_data`]'s.
+    pub fn tx_rx_packet<P: SerialPort>(&mut self, ph: &mut ProtocolPacketHandler<P>) -> CommResult {
+        if self.data_dict.is_empty() {
+            return CommResult::NotAvailable;
+        }
+        for (_, data) in &mut self.data_dict {
+            *data = None;
+        }
+        let param: Vec<u8> = self.data_dict.iter().map(|(id, _)| *id).collect();
+        let result = ph.sync_read_tx(self.start_address, self.data_length, &param);
+        if result != CommResult::Success {
+            return result;
+        }
+        let (result, rxpacket) = ph.sync_read_rx(self.data_length, param.len());
+        for (scs_id, data) in &mut self.data_dict {
+            *data = read_rx(&rxpacket, *scs_id, self.data_length);
+        }
+        result
+    }
+
+    /// `getData` for two bytes: the word at `address` from `scs_id`'s answer, when its packet
+    /// arrived whole.
+    #[must_use]
+    pub fn get_data2(&self, ph_end: u8, scs_id: u8, address: u8) -> Option<u16> {
+        let data = self
+            .data_dict
+            .iter()
+            .find(|(id, _)| *id == scs_id)?
+            .1
+            .as_ref()?;
+        let at = usize::from(address.checked_sub(self.start_address)?) + 1;
+        let (low, high) = (*data.get(at)?, *data.get(at + 1)?);
+        Some(if ph_end == 0 {
+            u16::from(low) | (u16::from(high) << 8)
+        } else {
+            u16::from(high) | (u16::from(low) << 8)
+        })
+    }
+}
+
+/// `GroupSyncRead.readRx`: `scs_id`'s error byte and `data_length` bytes from the replies in
+/// `rxpacket`, found by its `FF FF id` header and checked by its checksum.
+fn read_rx(rxpacket: &[u8], scs_id: u8, data_length: u8) -> Option<Vec<u8>> {
+    let data_length = usize::from(data_length);
+    let rx_length = rxpacket.len();
+    let mut rx_index = 0;
+    while rx_index + 6 + data_length <= rx_length {
+        let mut headpacket = [0_u8; 3];
+        while rx_index < rx_length {
+            headpacket[2] = headpacket[1];
+            headpacket[1] = headpacket[0];
+            headpacket[0] = rxpacket[rx_index];
+            rx_index += 1;
+            if headpacket[2] == 0xFF && headpacket[1] == 0xFF && headpacket[0] == scs_id {
+                break;
+            }
+        }
+        if rx_index + 3 + data_length > rx_length {
+            break;
+        }
+        if usize::from(rxpacket[rx_index]) != data_length + 2 {
+            rx_index += 1;
+            continue;
+        }
+        rx_index += 1;
+        let error = rxpacket[rx_index];
+        rx_index += 1;
+        let mut cal_sum = scs_id
+            .wrapping_add(u8::try_from(data_length + 2).unwrap_or(u8::MAX))
+            .wrapping_add(error);
+        let mut data = vec![error];
+        data.extend_from_slice(&rxpacket[rx_index..rx_index + data_length]);
+        for byte in &rxpacket[rx_index..rx_index + data_length] {
+            cal_sum = cal_sum.wrapping_add(*byte);
+        }
+        rx_index += data_length;
+        return (!cal_sum == rxpacket[rx_index]).then_some(data);
+    }
+    None
 }
 
 fn timed_out(rx_length: usize) -> CommResult {

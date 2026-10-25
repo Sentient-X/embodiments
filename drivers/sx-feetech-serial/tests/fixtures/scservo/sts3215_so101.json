@@ -43,6 +43,10 @@
    "upper": 2.0944
   }
  ],
+ "sync_read": {
+  "request": "fffffe0a82380201020304050626",
+  "response": "ffff0104000208f0ffff020400bc023bffff0304001c0cd0ffff040400bc0239ffff050400fd07f2ffff060400c40928"
+ },
  "present_position": [
   {
    "request": "ffff0104023802be",

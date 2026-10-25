@@ -14,7 +14,7 @@ it on an SO-101's serial adapter once a serial device binding exists there.
 | Item | Path |
 |---|---|
 | The chain trait | `sx_embodiment_drivers::ActuatorChain` (`axes`, `commandable`, `command`, `stop`, `stop_budget`, `clear_faults`); `FeetechChainError` implements `ChainError` |
-| A command's evidence | `sx_embodiment_drivers::Receipt<()>`: always `DispatchAttempted`, since the SYNC WRITE has no answer |
+| A command's evidence | `sx_embodiment_drivers::Receipt<()>`: always `DispatchAttempted`, since the SYNC WRITE has no answer; its `observed` is one SYNC READ of every servo's `Present_Position` right after it (`GroupSyncRead`, `group_sync_read.py`), in native state order, `NaN` for a servo that missed it so a tracking check fails closed. On the line at 1 Mbaud that is 88 bytes for six servos (880 µs) and 40 for two (400 µs), before adapter latency |
 | A stop's proof | `sx_embodiment_drivers::StopReport`: a servo is unproven unless its `Torque_Enable` reads back 0; error flags reported while stopping are `faults` |
 | Fault latch | `FeetechChain::faults()`: every flag a stop reported, refusing commands until `ActuatorChain::clear_faults()` |
 | The port | `sx_embodiment_drivers::serial::SerialPort`, the shape of the vendor's `PortHandler` |

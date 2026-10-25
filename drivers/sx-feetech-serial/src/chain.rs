@@ -37,7 +37,10 @@
 //!   of every goal position (`GroupSyncWrite` at `SMS_STS_GOAL_POSITION_L`, two bytes), as
 //!   `SOFollower.send_action` does (`sync_write("Goal_Position", ...)`,
 //!   `src/lerobot/robots/so_follower/so_follower.py:231`). The bus answers nothing to it, so a
-//!   command's receipt claims only a dispatch.
+//!   command's receipt claims only a dispatch. Right after it, one SYNC READ of every servo's
+//!   `Present_Position` (`GroupSyncRead` at `SMS_STS_PRESENT_POSITION_L`, two bytes, as
+//!   `sms_sts/sync_read.py` reads it) is the receipt's observed joints, in native state order;
+//!   a servo that misses it is reported `NaN`, so a tracking check fails closed.
 //! - Stop disables as `disable_torque` does (`feetech.py:291-294`): per servo, `Torque_Enable`
 //!   0, then `Lock` 0 (`sms_sts.unLockEprom`), each acknowledged, on every servo whatever an
 //!   earlier one answered. Then it reads every servo's `Torque_Enable` back
@@ -114,7 +117,7 @@ use sx_embodiment_drivers::{
 use thiserror::Error;
 
 use crate::scservo_sdk::{
-    CommResult, GroupSyncWrite, MAX_ID, ProtocolPacketHandler, SMS_STS_ACC,
+    CommResult, GroupSyncRead, GroupSyncWrite, MAX_ID, ProtocolPacketHandler, SMS_STS_ACC,
     SMS_STS_GOAL_POSITION_L, SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L,
     SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODE, SMS_STS_MODEL_L, SMS_STS_OFS_L,
     SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE, SmsSts,
@@ -626,6 +629,31 @@ impl<P: SerialPort> FeetechChain<P> {
         Some(observed)
     }
 
+    /// One SYNC READ of every servo's `Present_Position`, as joint coordinates in native state
+    /// order; a servo whose answer is missing or corrupt is `NaN`, which no tracking bound
+    /// admits.
+    fn sync_read_positions(&mut self) -> Vec<f64> {
+        let mut reader = GroupSyncRead::new(SMS_STS_PRESENT_POSITION_L, 2);
+        for servo in &self.servos {
+            reader.add_param(servo.scs_id());
+        }
+        let _ = reader.tx_rx_packet(&mut self.sms.ph);
+        let end = self.sms.ph.scs_getend();
+        self.servos
+            .iter()
+            .map(|servo| {
+                reader
+                    .get_data2(end, servo.scs_id(), SMS_STS_PRESENT_POSITION_L)
+                    .map_or(f64::NAN, |raw| {
+                        servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
+                            raw,
+                            PRESENT_POSITION_SIGN_BIT,
+                        ))
+                    })
+            })
+            .collect()
+    }
+
     /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
     /// proven or not, as (bus id, flags).
     #[must_use]
@@ -682,7 +710,8 @@ impl<P: SerialPort> FeetechChain<P> {
 
 impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     type Error = FeetechChainError;
-    /// The SYNC WRITE that carries a command has no answer.
+    /// The SYNC WRITE that carries a command has no answer; its observed joints are the SYNC
+    /// READ that follows it.
     type Feedback = ();
 
     fn axes(&self) -> &[BoundAxis] {
@@ -731,7 +760,7 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         match writer.tx_packet(&mut self.sms.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
-                observed: Vec::new(),
+                observed: self.sync_read_positions(),
                 feedback: Vec::new(),
             }),
             result => Err(FeetechChainError::SyncWrite(result)),

@@ -5,7 +5,7 @@
 //! limits and homing offset a supplied calibration. An instruction packet (`FF FF id len inst
 //! params checksum`) is answered with a status packet: READ with the registers asked for,
 //! WRITE by storing and acknowledging, SYNC WRITE (broadcast) by storing each servo's bytes
-//! with no answer. A servo with torque on moves toward its goal as simulated time passes
+//! with no answer, SYNC READ by each live servo's status packet in the order asked. A servo with torque on moves toward its goal as simulated time passes
 //! ([`SimBus::advance`]), no faster than its `Goal_Speed` (in the vendor's steps of 0.732 rpm;
 //! 0, as the firmware reads it, is no limit: at once); one with torque off rests where it was
 //! put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
@@ -22,7 +22,7 @@ use sx_embodiment_drivers::serial::SerialPort;
 
 use crate::chain::STS3215_MODEL_NUMBER;
 use crate::scservo_sdk::{
-    BROADCAST_ID, INST_READ, INST_SYNC_WRITE, INST_WRITE, SMS_STS_GOAL_POSITION_L,
+    BROADCAST_ID, INST_READ, INST_SYNC_READ, INST_SYNC_WRITE, INST_WRITE, SMS_STS_GOAL_POSITION_L,
     SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L,
     SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE,
 };
@@ -35,6 +35,8 @@ pub struct SimState {
     pub inbox: VecDeque<u8>,
     /// Every packet written, in order.
     pub written: Vec<Vec<u8>>,
+    /// Every byte the host has read.
+    pub read: usize,
 }
 
 impl SimState {
@@ -177,6 +179,21 @@ impl SimState {
             return;
         };
         let params = &rest[..usize::from(*length).saturating_sub(2).min(rest.len())];
+        if *id == BROADCAST_ID && *instruction == INST_SYNC_READ {
+            if let [address, count, servos @ ..] = params {
+                for servo in servos {
+                    if self.dead.contains(servo) {
+                        continue;
+                    }
+                    if let Some(registers) = self.servos.get(servo) {
+                        let start = usize::from(*address);
+                        let reply = status(*servo, &registers[start..start + usize::from(*count)]);
+                        self.inbox.extend(reply);
+                    }
+                }
+            }
+            return;
+        }
         if *id == BROADCAST_ID {
             if *instruction == INST_SYNC_WRITE
                 && let [address, width, servos @ ..] = params
@@ -230,6 +247,7 @@ impl SerialPort for SimBus {
     fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
         let mut state = self.state();
         let available = length.min(state.inbox.len());
+        state.read += available;
         Ok(state.inbox.drain(..available).collect())
     }
 
@@ -276,5 +294,40 @@ mod tests {
         assert!((1..=6).all(|id| bus.state().torque(id) == 0));
         bus.kill(3);
         assert_eq!(chain.stop().unproven, [3]);
+    }
+
+    /// The bytes one command puts on the line once torque is on: the `Goal_Position` SYNC
+    /// WRITE, the SYNC READ, and every servo's answer to it.
+    fn command_bytes(servos: u8) -> usize {
+        let calibration = MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 800,
+            range_max: 3200,
+        };
+        let bus = SimBus::sts3215(&(1..=servos).map(|id| (id, calibration)).collect::<Vec<_>>());
+        let mut setups = so101([calibration; 6]).expect("composes");
+        setups.truncate(usize::from(servos));
+        let mut chain = crate::FeetechChain::open(bus.clone(), setups).expect("opens");
+        let zeros = vec![0.0; usize::from(servos)];
+        chain.command(&zeros).expect("enabled and commanded");
+        let (written, read) = {
+            let state = bus.state();
+            (state.written.len(), state.read)
+        };
+        let receipt = chain.command(&zeros).expect("commanded");
+        assert!(receipt.observed.iter().all(|joint| joint.is_finite()));
+        let state = bus.state();
+        let sent: usize = state.written[written..].iter().map(Vec::len).sum();
+        sent + state.read - read
+    }
+
+    #[test]
+    fn one_command_costs_ten_bits_a_byte_of_its_write_read_and_answers() {
+        // Six servos: a 26-byte SYNC WRITE, a 14-byte SYNC READ and six 8-byte answers: 88
+        // bytes, 880 us at 1 Mbaud before any adapter latency. Two servos: 14 + 10 + 16 = 40
+        // bytes, 400 us.
+        assert_eq!(command_bytes(6), 88);
+        assert_eq!(command_bytes(2), 40);
     }
 }

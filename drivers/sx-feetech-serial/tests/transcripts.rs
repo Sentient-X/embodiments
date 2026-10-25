@@ -36,6 +36,7 @@ struct Golden {
     configure: Vec<Exchange>,
     present_position: Vec<Exchange>,
     present_joints: Vec<f64>,
+    sync_read: Exchange,
 }
 
 #[derive(Deserialize)]
@@ -125,7 +126,13 @@ impl SerialPort for FakePort {
 
     fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
         self.written.push(packet.to_vec());
-        if packet.get(2) == Some(&0xFE) {
+        // A broadcast has no answer unless an expectation names it (a SYNC READ).
+        if packet.get(2) == Some(&0xFE)
+            && self
+                .expected
+                .front()
+                .is_none_or(|(request, _)| request.as_slice() != packet)
+        {
             return Ok(packet.len());
         }
         if let Some((request, response)) = self.expected.pop_front() {
@@ -270,19 +277,31 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
         assert_eq!(ticks, case.ticks, "{} {:?}", case.calibration, case.radians);
         let receipt = chain.command(&case.radians).expect("command");
         assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
-        assert!(receipt.observed.is_empty() && receipt.feedback.is_empty());
+        // No servo answers the SYNC READ here: every axis is unobserved, NaN.
+        assert!(receipt.observed.len() == 6 && receipt.observed.iter().all(|joint| joint.is_nan()));
+        assert!(receipt.feedback.is_empty());
         assert!(chain.port().expected.is_empty(), "torque was enabled first");
+        let written = chain.port().written.len();
         assert_eq!(
-            chain.port().written.last().map(|packet| hex(packet)),
+            chain
+                .port()
+                .written
+                .get(written - 2)
+                .map(|packet| hex(packet)),
             Some(case.packet.clone()),
             "{} {:?}",
             case.calibration,
             case.radians
         );
-        // An enabled chain sends the SYNC WRITE alone.
+        assert_eq!(
+            chain.port().written.last().map(|packet| hex(packet)),
+            Some(golden.sync_read.request.clone()),
+            "the SYNC READ follows it"
+        );
+        // An enabled chain sends the SYNC WRITE and the SYNC READ alone.
         let before = chain.port().written.len();
         chain.command(&case.radians).expect("second command");
-        assert_eq!(chain.port().written.len(), before + 1);
+        assert_eq!(chain.port().written.len(), before + 2);
     }
 }
 
@@ -832,4 +851,49 @@ fn enabling_first_holds_every_servo_where_it_rests() {
         .filter(|packet| packet[4..6] == [0x03, 42])
         .count();
     assert_eq!(holds, 6);
+}
+
+#[test]
+fn every_command_observes_every_servo_through_one_sync_read() {
+    let golden = golden();
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &golden.torque_enable,
+            std::slice::from_ref(&golden.sync_read),
+        ]),
+        "so101",
+    );
+    let receipt = chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command");
+    assert_eq!(receipt.observed, golden.present_joints);
+    assert!(
+        chain.port().expected.is_empty(),
+        "the vendor's SYNC READ, byte for byte"
+    );
+    // Servo 4's answer corrupted: that axis alone is NaN.
+    let mut corrupt = golden.sync_read.clone();
+    let mut response = bytes(&corrupt.response);
+    let at = 3 * 8 + 7; // servo 4's checksum
+    response[at] ^= 0xFF;
+    corrupt.response = hex(&response);
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &golden.torque_enable,
+            std::slice::from_ref(&corrupt),
+        ]),
+        "so101",
+    );
+    let observed = chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command")
+        .observed;
+    assert!(observed[3].is_nan());
+    for (index, (seen, rested)) in observed.iter().zip(&golden.present_joints).enumerate() {
+        if index != 3 {
+            assert_eq!(seen.to_bits(), rested.to_bits());
+        }
+    }
 }

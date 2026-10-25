@@ -45,6 +45,9 @@ minted from).
   reads it after open and after every stop, servos 2 and 4 answering below their calibrated
   range; ``present_joints``: the joints LeRobot's own ``_normalize`` makes of it, through the
   drive map.
+- ``sync_read``: the chain's observation after every command, one ``GroupSyncRead`` of
+  ``Present_Position`` (``txRxPacket``) and every servo's answer in turn, with
+  ``present_position``'s ticks.
 - ``configure``: ``disable_torque``, then ``configure_motors`` per servo (``Return_Delay_Time``
   0, ``Maximum_Acceleration`` 254, ``Acceleration`` 254, ``Phase`` read, and written back with
   bit 4 cleared where the answer had it, as servo 6's does), then per servo ``Operating_Mode``
@@ -568,8 +571,31 @@ def main() -> None:
         else:
             value = math.radians(value)
         present_joints.append(value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO)
+    # The chain's observation after every command: one GroupSyncRead of Present_Position,
+    # every servo answering in turn.
+    reader = scs.GroupSyncRead(handler, scs.SMS_STS_PRESENT_POSITION_L, 2)
+    for scs_id in ids:
+        if not reader.addParam(scs_id):
+            raise SystemExit(f"GroupSyncRead refused servo {scs_id}")
+    answers = [
+        status(scs_id, [handler.scs_lobyte(raw), handler.scs_hibyte(raw)])
+        for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True)
+    ]
+    port.written.clear()
+    port.pending = [byte for answer in answers for byte in answer]
+    if reader.txRxPacket() != scs.COMM_SUCCESS:
+        raise SystemExit("GroupSyncRead.txRxPacket failed")
+    for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True):
+        if reader.getData(scs_id, scs.SMS_STS_PRESENT_POSITION_L, 2) != raw:
+            raise SystemExit(f"GroupSyncRead read servo {scs_id} otherwise")
+    (sync_request,) = port.written
+    sync_read = {
+        "request": bytes(sync_request).hex(),
+        "response": bytes(byte for answer in answers for byte in answer).hex(),
+    }
     document = {
         "motors": motors,
+        "sync_read": sync_read,
         "present_position": present_position,
         "present_joints": present_joints,
         "calibrations": {

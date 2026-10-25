@@ -304,9 +304,15 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
     let tilt = rest[24];
     assert!(tilt < body.axes()[24].lower - 1.0, "{tilt}");
     let receipt = body.command(&rest_inside(&body)).expect("a command");
-    // The Feetech SYNC WRITEs have no answer, so no partial joint vector is reported.
+    // The Feetech SYNC WRITEs have no answer, so the evidence is a dispatch; every bus still
+    // observes every axis, the Feetech ones through their SYNC READs.
     assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
-    assert!(receipt.observed.is_empty());
+    assert_eq!(receipt.observed.len(), 25);
+    assert!(receipt.observed.iter().all(|joint| joint.is_finite()));
+    assert!(
+        (receipt.observed[24] - tilt).abs() < 1e-9,
+        "the tilt has not moved yet"
+    );
     assert_eq!(
         body.last_observed(),
         None,
