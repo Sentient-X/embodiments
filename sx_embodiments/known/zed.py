@@ -20,8 +20,17 @@ track (:class:`~sx_embodiments.media.StereoPair`).
   intrinsics are the factory calibration Stereolabs publishes per serial
   (:func:`sx_embodiments.factory_intrinsics.zed_factory_calibration`).
 
-Depth (the ZED SDK's stereo matching, its IMU and its neural modes) is not modelled: the camera is
-two image streams.
+* **Inertial unit.** The ZED 2i's sensor module (its own USB HID interface, ``2b03:f881``) reports
+  an accelerometer and gyroscope at 400 Hz, a magnetometer, a barometer and temperatures, on what
+  Stereolabs' ``zed-open-capture`` calls the RAW axes (``README.md``, "Coordinates system", at
+  ``93739154``): x down, y towards the left eye, z out of the lenses, about the device centre.
+  That is the ROS ZED frame turned a quarter turn about its y axis, so :func:`zed_2i_imu` mounts on
+  the body's ZED frame at that rotation. The SDK reads a per-unit camera-to-IMU transform from the
+  device which ``zed-open-capture`` does not expose; the nominal offset is zero, which a gravity
+  direction does not depend on.
+
+Depth (the ZED SDK's stereo matching and its neural modes) is not modelled: the camera is two image
+streams and an inertial unit.
 """
 
 import math
@@ -34,6 +43,8 @@ from ..parts import (
     CameraOpticsAuthority,
     CameraSpec,
     FactSource,
+    InertialQuantity,
+    InertialSpec,
     SensorModel,
 )
 
@@ -54,6 +65,17 @@ _DATASHEET: Final = FactSource(
     "c059860f8fe49f3856f6b8da770eb13cc543ac2c.pdf/ZED%202i%20Datasheet%20v1.2.pdf",
     revision="ZED 2i Datasheet v1.2",
     path="Lens: field of view 110 (H) x 70 (V) x 120 (D) max., 2.1 mm",
+)
+
+
+#: The description frame a body names its ZED by, Stereolabs' ROS convention.
+ZED_FRAME: Final = "ZED_camera"
+#: The sensor module's accelerometer and gyroscope rate.
+ZED_2I_IMU_HZ: Final = 400.0
+_RAW_AXES: Final = FactSource(
+    repository="https://github.com/stereolabs/zed-open-capture",
+    revision="93739154903a66c112ee52c3c6fbfd83b7218617",
+    path="README.md#coordinates-system (images/imu_axis.jpg): x down, y left eye, z forward",
 )
 
 
@@ -94,4 +116,17 @@ def zed_2i_eye(eye: Eye) -> CameraSpec:
             authority=CameraOpticsAuthority.MODEL_NOMINAL,
             source=_DATASHEET,
         ),
+    )
+
+
+def zed_2i_imu() -> InertialSpec:
+    """The ZED 2i's sensor module, mounted on the body's ZED frame (:data:`ZED_FRAME`)."""
+    half = math.sqrt(0.5)
+    return InertialSpec(
+        part_id=PartId("zed-2i-imu"),
+        model=ZED_2I,
+        rate_hz=ZED_2I_IMU_HZ,
+        measures=tuple(InertialQuantity),
+        mount_from_sensor=((0.0, 0.0, 0.0), (0.0, half, 0.0, half)),
+        source=_RAW_AXES,
     )

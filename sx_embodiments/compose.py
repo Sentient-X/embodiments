@@ -29,6 +29,7 @@ from .parts import (
     ForceTorqueSpec,
     GraspKind,
     GripperSpec,
+    InertialSpec,
     Limb,
     MobileBaseSpec,
     Part,
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 class ComponentRole(StrEnum):
     BODY = "body"  # contributes channels to the physical body-state vector
     LEADER = "leader"  # teleop input device: identity + assets, zero channels
-    SENSOR = "sensor"  # cameras/FT: zero channels; cameras define the camera-name set
+    SENSOR = "sensor"  # cameras/FT/IMU: zero channels; cameras define the camera-name set
 
 
 class ComponentKind(StrEnum):
@@ -51,6 +52,7 @@ class ComponentKind(StrEnum):
     MOBILE_BASE = "mobile_base"
     CAMERA = "camera"
     FORCE_TORQUE_SENSOR = "force_torque_sensor"
+    INERTIAL_SENSOR = "inertial_sensor"
     DEVICE = "device"
 
 
@@ -170,7 +172,7 @@ class LeaderAttachment:
 
 @dataclass(frozen=True, slots=True)
 class SensorAttachment:
-    part: CameraSpec | ForceTorqueSpec
+    part: CameraSpec | ForceTorqueSpec | InertialSpec
 
 
 ComponentAttachment = BodyAttachment | LeaderAttachment | SensorAttachment
@@ -246,7 +248,7 @@ def leader_component(
 
 def sensor_component(
     instance: str,
-    part: CameraSpec | ForceTorqueSpec,
+    part: CameraSpec | ForceTorqueSpec | InertialSpec,
     mount: ComponentMount,
 ) -> Component:
     return Component(
@@ -256,7 +258,7 @@ def sensor_component(
     )
 
 
-_SENSOR_PARTS = (CameraSpec, ForceTorqueSpec)
+_SENSOR_PARTS = (CameraSpec, ForceTorqueSpec, InertialSpec)
 _BODY_PARTS = (ChainSpec, GripperSpec, MobileBaseSpec, DeviceSpec)
 
 
@@ -506,6 +508,8 @@ def component_kind(part: object, limb: Limb | None = None) -> ComponentKind:
         return ComponentKind.CAMERA
     if isinstance(part, ForceTorqueSpec):
         return ComponentKind.FORCE_TORQUE_SENSOR
+    if isinstance(part, InertialSpec):
+        return ComponentKind.INERTIAL_SENSOR
     if isinstance(part, DeviceSpec):
         return ComponentKind.DEVICE
     raise ComponentGraphError(f"unsupported embodiment part {part!r}")

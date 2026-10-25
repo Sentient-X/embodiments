@@ -122,7 +122,7 @@ from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
-from .zed import EYES, optical_frame, zed_2i_eye
+from .zed import EYES, ZED_FRAME, optical_frame, zed_2i_eye, zed_2i_imu
 
 _SOURCE: Final = AssetProvenance(
     repository="https://github.com/Sentient-X/humanoid_pkg",
@@ -370,6 +370,7 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
             sensor_component(f"head_{eye}", zed_2i_eye(eye), MountedOn("neck", optical_frame(eye)))
             for eye in EYES
         ),
+        sensor_component("head_imu", zed_2i_imu(), MountedOn("neck", ZED_FRAME)),
     ),
 )
 

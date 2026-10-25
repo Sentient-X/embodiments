@@ -11,20 +11,37 @@
 //! every view in the track's order, or the next audio chunk, each stamped where the sample was
 //! taken. Adapters live beside the body's other drivers in this repository; a publisher only
 //! ever sees these traits.
+//!
+//! The plan also lists every declared inertial sensor ([`InertialSensor`], captured through
+//! [`crate::inertial::InertialSource`]), placed the same way.
 
 use std::time::{Instant, SystemTime};
 
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::inertial::InertialSensor;
 use crate::kinematics::Chain;
 
 /// The schema `media_document` renders.
-pub const MEDIA_SCHEMA: &str = "sx.media-plan/v2";
+pub const MEDIA_SCHEMA: &str = "sx.media-plan/v3";
 /// The fastest track a plan may declare; a rate outside 1..=this is not a camera.
 pub const MAX_FPS: f64 = 1_000.0;
 
-/// Whether `name` is a track or microphone name (`sx_embodiments.media.TRACK_NAME`): it names
+/// Whether a mount is placed coherently: a fixed pose exactly when no joint moves it, a
+/// well-formed chain whose independent joints are `moves_with`, and a unit-quaternion pose.
+pub(crate) fn is_placed(
+    root_from_mount: Option<&Pose>,
+    moves_with: &[String],
+    chain: &Chain,
+) -> bool {
+    root_from_mount.is_none() != moves_with.is_empty()
+        && chain.is_well_formed()
+        && chain.joints() == moves_with
+        && root_from_mount.is_none_or(crate::inertial::is_rigid)
+}
+
+/// Whether `name` is a track, microphone or inertial sensor name (`sx_embodiments.media.TRACK_NAME`): it names
 /// a published track and the journal file beside it, so it is never a path.
 #[must_use]
 pub fn is_track_name(name: &str) -> bool {
@@ -45,7 +62,7 @@ pub enum MediaPlanError {
     Unit { expected: String, found: String },
 }
 
-/// One robot's tracks and microphones.
+/// One robot's tracks, microphones and inertial sensors.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MediaPlan {
     /// The body's content id.
@@ -54,6 +71,7 @@ pub struct MediaPlan {
     pub instance: String,
     pub tracks: Vec<Track>,
     pub microphones: Vec<Microphone>,
+    pub inertial: Vec<InertialSensor>,
 }
 
 /// One published video track: one camera, or a stereo pair side by side.
@@ -135,10 +153,11 @@ struct Document {
     instance: String,
     tracks: Vec<Track>,
     microphones: Vec<Microphone>,
+    inertial: Vec<InertialSensor>,
 }
 
 impl MediaPlan {
-    /// Parse a rendered `sx.media-plan/v2` document resolved for `expected`, the content id of
+    /// Parse a rendered `sx.media-plan/v3` document resolved for `expected`, the content id of
     /// the robot instance the caller is configured as.
     ///
     /// # Errors
@@ -153,6 +172,7 @@ impl MediaPlan {
             instance,
             tracks,
             microphones,
+            inertial,
         } = serde_json::from_str(document)
             .map_err(|error| MediaPlanError::Document(error.to_string()))?;
         if schema != MEDIA_SCHEMA {
@@ -182,14 +202,7 @@ impl MediaPlan {
                         || view.height == 0
                         || (view.fps - track.fps).abs() > f64::EPSILON
                         || view.image_from_camera.len() != 9
-                        || view.root_from_mount.is_none() == view.moves_with.is_empty()
-                        || !view.chain.is_well_formed()
-                        || view.chain.joints() != view.moves_with
-                        || view.root_from_mount.is_some_and(|pose| {
-                            let norm: f64 =
-                                pose.rotation_xyzw.iter().map(|value| value * value).sum();
-                            (norm.sqrt() - 1.0).abs() > 1e-6
-                        })
+                        || !is_placed(view.root_from_mount.as_ref(), &view.moves_with, &view.chain)
                 })
             {
                 return Err(MediaPlanError::Document(format!(
@@ -222,11 +235,23 @@ impl MediaPlan {
                 )));
             }
         }
+        for sensor in &inertial {
+            if !is_track_name(&sensor.sensor)
+                || !names.insert(sensor.sensor.clone())
+                || !sensor.is_coherent()
+            {
+                return Err(MediaPlanError::Document(format!(
+                    "inertial sensor {} is not one coherent sensor",
+                    sensor.sensor
+                )));
+            }
+        }
         Ok(Self {
             embodiment,
             instance,
             tracks,
             microphones,
+            inertial,
         })
     }
 }
@@ -407,6 +432,38 @@ mod tests {
             MediaPlan::parse(&value.to_string(), &instance(&document)),
             Err(MediaPlanError::Document(_))
         ));
+    }
+
+    #[test]
+    fn an_inertial_sensor_is_placed_like_a_view_with_its_axes_in_the_mount() {
+        let document = plan("sentient-static-upper-body");
+        let parsed = MediaPlan::parse(&document, &instance(&document)).expect("plan");
+        let sensor = &parsed.inertial[0];
+        assert_eq!(sensor.sensor, "head_imu");
+        assert_eq!(sensor.mount_frame, "ZED_camera");
+        assert!(sensor.measures(crate::InertialQuantity::AngularVelocity));
+        // Stereolabs' RAW x (down) is the ZED frame's -z.
+        let down = sensor.in_mount([1.0, 0.0, 0.0]);
+        assert!((down[2] + 1.0).abs() < 1e-12);
+        for (field, value) in [
+            ("rate_hz", serde_json::json!(0.0)),
+            ("measures", serde_json::json!(["acceleration"])),
+            ("sensor", serde_json::json!("head")),
+            (
+                "mount_from_sensor",
+                serde_json::json!({"translation_m": [0, 0, 0], "rotation_xyzw": [0, 0, 0, 2]}),
+            ),
+        ] {
+            let mut value_doc: serde_json::Value = serde_json::from_str(&document).expect("plan");
+            value_doc["inertial"][0][field] = value;
+            assert!(
+                matches!(
+                    MediaPlan::parse(&value_doc.to_string(), &instance(&document)),
+                    Err(MediaPlanError::Document(_))
+                ),
+                "{field}"
+            );
+        }
     }
 
     #[test]

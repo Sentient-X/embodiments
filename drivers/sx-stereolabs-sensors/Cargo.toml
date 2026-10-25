@@ -1,0 +1,30 @@
+[package]
+name = "sx-stereolabs-sensors"
+description = "The Stereolabs ZED 2i's sensor module (IMU, magnetometer, barometer) as an InertialSource, over USB HID"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# report.rs ports Stereolabs' MIT-licensed zed-open-capture (LICENSE-THIRD-PARTY).
+license = "Apache-2.0 AND MIT"
+publish.workspace = true
+
+[features]
+# Open real devices through `hidapi`: IOHIDManager on macOS, where the system HID driver owns the
+# interface, and hidraw on Linux, enumerated without libudev. Without it the crate builds
+# anywhere: the report layout, the scales and the source over any `ReportPort`.
+hid = ["dep:hidapi"]
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+hidapi = { version = "=2.6.7", default-features = false, features = ["linux-native-basic-udev"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[bin]]
+name = "sx-imu-still"
+required-features = ["hid"]
+
+[lints]
+workspace = true

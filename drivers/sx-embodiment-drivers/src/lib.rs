@@ -23,7 +23,9 @@
 //! [`MediaPlan`] is the same rule for what a robot streams: its declared cameras and
 //! microphones as the registry resolves them for one instance, captured through
 //! [`FrameSource`] and [`AudioSource`]. A camera riding moving joints is placed at capture by
-//! its view's [`kinematics::Chain`], the description's own joints from root to mount.
+//! its view's [`kinematics::Chain`], the description's own joints from root to mount. The plan's
+//! inertial sensors are captured through [`InertialSource`], each sample on the sensor's own
+//! axes, which the plan places in its mount link.
 //!
 //! Synchronous and allocation-light on purpose: the station wraps a chain in its own async
 //! actuator, and nothing here owns a thread or a runtime.
@@ -37,6 +39,7 @@ pub mod chains;
 pub mod composite;
 pub mod drive;
 pub mod governor;
+pub mod inertial;
 pub mod kinematics;
 pub mod layout;
 pub mod lerobot;
@@ -58,6 +61,10 @@ pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
+};
+pub use inertial::{
+    InertialQuantity, InertialSample, InertialSensor, InertialSource, MAX_INERTIAL_HZ, Stillness,
+    Tilt,
 };
 pub use kinematics::{Chain, ChainStep, PlacementError};
 pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};

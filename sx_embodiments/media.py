@@ -2,7 +2,7 @@
 
 A station publishes exactly the cameras its body declares, through the optics its instance
 resolved (:func:`sx_embodiments.instance.resolve`), so no track, raster or lens is spelled in
-the station. :func:`media_document` renders that as ``sx.media-plan/v2``, which
+the station. :func:`media_document` renders that as ``sx.media-plan/v3``, which
 ``sx_embodiment_drivers::MediaPlan`` parses for one instance and refuses for any other.
 
 A :class:`MediaRig` is the body's media wiring that the design itself does not carry: which
@@ -16,6 +16,11 @@ link's pose in the root frame. A camera that rides on a moving joint names the j
 positions place it instead, and its pose at capture is the chain evaluated at the joint state of
 that instant: ``sx_embodiment_drivers::kinematics`` composes the rendered chain exactly as
 :meth:`~sx_embodiments.kinematics.Kinematics.pose` does, so the station never reads a URDF.
+
+Every declared inertial sensor (:class:`~sx_embodiments.parts.InertialSpec`) is listed under
+``inertial`` with the same placement, its sensing axes at ``mount_from_sensor`` in its mount link,
+and the unit the instance placed in its component slot (the device serial a driver opens it by).
+Its samples are on those axes in REP-103 units; nothing in the plan names a vendor protocol.
 """
 
 from __future__ import annotations
@@ -31,10 +36,11 @@ from sx_contracts.identity import JsonValue
 
 from .embodiment import Embodiment
 from .errors import EmbodimentSchemaError
-from .instance import InstanceError, ResolvedCamera, ResolvedInstance
+from .instance import InstanceError, ResolvedCamera, ResolvedInstance, Slot, SlotKind
 from .kinematics import Joint, JointType, Kinematics, KinematicsError, Transform
+from .parts import InertialSpec
 
-MEDIA_SCHEMA: Final = "sx.media-plan/v2"
+MEDIA_SCHEMA: Final = "sx.media-plan/v3"
 #: A track or microphone name: it names a published track and the journal file beside it.
 TRACK_NAME: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 #: The rates a published microphone track may run at: what WebRTC's audio path accepts.
@@ -228,11 +234,6 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
     binding = next(binding for binding in embodiment.cameras if binding.name == camera.name)
     optics = camera.nominal
     measured = camera.calibration
-    mount = mount_pose(embodiment.urdf_bytes, binding.frame)
-    pose: JsonValue = None
-    if mount.pose is not None:
-        translation, rotation = mount.pose
-        pose = {"translation_m": list(translation), "rotation_xyzw": list(rotation)}
     return {
         "camera": camera.name,
         "model": str(binding.camera.model),
@@ -253,12 +254,54 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
         ),
         "unit": None if camera.unit is None else str(camera.unit),
         "calibration": None if camera.measured is None else str(camera.measured),
-        "mount_frame": binding.frame,
+    } | _placement(embodiment, binding.frame)
+
+
+def _pose(
+    pose: tuple[tuple[float, float, float], tuple[float, float, float, float]],
+) -> dict[str, JsonValue]:
+    translation, rotation = pose
+    return {"translation_m": list(translation), "rotation_xyzw": list(rotation)}
+
+
+def _placement(embodiment: Embodiment, frame: str) -> dict[str, JsonValue]:
+    """Where a sensor's mount link sits: the chain to it, and its pose when rigid."""
+    mount = mount_pose(embodiment.urdf_bytes, frame)
+    return {
+        "mount_frame": frame,
         "root_frame": mount.root_frame,
-        "root_from_mount": pose,
+        "root_from_mount": None if mount.pose is None else _pose(mount.pose),
         "moves_with": list(mount.moves_with),
         "chain": [_step(step) for step in mount.chain],
     }
+
+
+def _inertial(
+    embodiment: Embodiment, resolved: ResolvedInstance, names: set[str]
+) -> list[JsonValue]:
+    units = {entry.slot: entry.unit for entry in resolved.instance.units}
+    sensors: list[JsonValue] = []
+    for component in embodiment.components:
+        part = component.part
+        if not isinstance(part, InertialSpec):
+            continue
+        _require_track_name(component.instance)
+        if component.instance in names:
+            raise MediaRigError(f"{component.instance!r} names a track already")
+        names.add(component.instance)
+        unit = units.get(Slot(SlotKind.COMPONENT, component.instance))
+        sensors.append(
+            {
+                "sensor": component.instance,
+                "model": str(part.model),
+                "unit": None if unit is None else str(unit),
+                "rate_hz": part.rate_hz,
+                "measures": [quantity.value for quantity in part.measures],
+                "mount_from_sensor": _pose(part.mount_from_sensor),
+            }
+            | _placement(embodiment, component.mount.frame)
+        )
+    return sensors
 
 
 def _step(step: ChainStep) -> dict[str, JsonValue]:
@@ -350,10 +393,12 @@ def media_document(
                 "mount_frame": microphone.mount_frame,
             }
         )
+    inertial = _inertial(embodiment, resolved, names)
     return {
         "schema": MEDIA_SCHEMA,
         "embodiment": str(embodiment.id),
         "instance": str(resolved.instance.id),
         "tracks": tracks,
         "microphones": microphones,
+        "inertial": inertial,
     }
