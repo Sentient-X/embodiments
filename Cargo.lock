@@ -1104,6 +1104,7 @@ dependencies = [
  "sx-embodiment-drivers",
  "sx-feetech-serial",
  "sx-socketcan",
+ "sx-zlg-usbcanfd",
  "thiserror 2.0.21",
 ]
 
@@ -1188,6 +1189,18 @@ dependencies = [
 [[package]]
 name = "sx-yubi"
 version = "0.1.0"
+
+[[package]]
+name = "sx-zlg-usbcanfd"
+version = "0.1.0"
+dependencies = [
+ "nusb",
+ "serde",
+ "serde_json",
+ "sx-embodiment-drivers",
+ "sx-socketcan",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "syn"

@@ -3,15 +3,20 @@
 //! A station names no transport. Commissioning records each port's bridge by an identity, a USB
 //! serial number or a board CAN interface's name, and [`SystemPorts`] looks that identity up in
 //! every transport compiled in: Damiao USB2CAN serial bridges ([`crate::usb_serial`], feature
-//! `usb-serial`) and `SocketCAN` interfaces ([`crate::socketcan`], feature `socketcan`). Exactly
-//! one bridge carrying the identity is opened. None is [`OpenError::NotAttached`]; two, on one
-//! transport or across both, is [`OpenError::Ambiguous`], naming each, and nothing is opened.
+//! `usb-serial`), `SocketCAN` interfaces ([`crate::socketcan`], feature `socketcan`) and ZLG
+//! USBCANFD channels driven in userspace (`zlg`, feature `zlg`, identity
+//! `<USB serial>:<channel>`). Exactly one bridge carrying the identity is opened. None is
+//! [`OpenError::NotAttached`]; two, on one transport or across several, is
+//! [`OpenError::Ambiguous`], naming each, and nothing is opened.
 //! A serial-servo bus is carried by a USB serial adapter alone, so its identity is looked up
 //! the same way and refused unless it is that adapter's tty.
-//! The module builds when either transport does.
+//! The module builds when any transport does.
 
 #[cfg(feature = "usb-serial")]
 use std::path::PathBuf;
+
+#[cfg(feature = "zlg")]
+pub mod zlg;
 
 #[cfg(feature = "socketcan")]
 use crate::socketcan::SocketCanPorts;
@@ -28,6 +33,9 @@ pub enum Bridge {
     /// A `SocketCAN` interface.
     #[cfg(feature = "socketcan")]
     SocketCan(String),
+    /// A ZLG USBCANFD adapter's channel.
+    #[cfg(feature = "zlg")]
+    Zlg { serial: String, channel: u8 },
 }
 
 impl std::fmt::Display for Bridge {
@@ -37,6 +45,8 @@ impl std::fmt::Display for Bridge {
             Self::Usb2Can(tty) => write!(formatter, "USB2CAN {}", tty.display()),
             #[cfg(feature = "socketcan")]
             Self::SocketCan(interface) => write!(formatter, "SocketCAN {interface}"),
+            #[cfg(feature = "zlg")]
+            Self::Zlg { serial, channel } => write!(formatter, "ZLG {serial} channel {channel}"),
         }
     }
 }
@@ -47,6 +57,8 @@ pub struct SystemPorts {
     usb_serial: UsbSerialPorts,
     #[cfg(feature = "socketcan")]
     socketcan: SocketCanPorts,
+    #[cfg(feature = "zlg")]
+    zlg: zlg::ZlgPorts,
 }
 
 impl SystemPorts {
@@ -58,6 +70,8 @@ impl SystemPorts {
             usb_serial: UsbSerialPorts::system(),
             #[cfg(feature = "socketcan")]
             socketcan: SocketCanPorts::system(),
+            #[cfg(feature = "zlg")]
+            zlg: zlg::ZlgPorts::system(),
         }
     }
 
@@ -73,6 +87,13 @@ impl SystemPorts {
         found.extend(attached(self.usb_serial.tty(identity))?.map(Bridge::Usb2Can));
         #[cfg(feature = "socketcan")]
         found.extend(attached(self.socketcan.interface(identity))?.map(Bridge::SocketCan));
+        #[cfg(feature = "zlg")]
+        found.extend(
+            attached(self.zlg.channel(identity))?.map(|(serial, channel)| Bridge::Zlg {
+                serial: serial.to_owned(),
+                channel,
+            }),
+        );
         let mut found = found.into_iter();
         match (found.next(), found.next()) {
             (None, _) => Err(OpenError::NotAttached(identity.to_owned())),
@@ -110,6 +131,16 @@ impl PortSource for SystemPorts {
                     "{interface} is a SocketCAN interface, not a serial bus at {baud} baud"
                 ),
             }),
+            #[cfg(feature = "zlg")]
+            Bridge::Zlg {
+                serial: adapter,
+                channel,
+            } => Err(OpenError::Port {
+                serial: serial.to_owned(),
+                reason: format!(
+                    "ZLG {adapter} channel {channel} is a CAN channel, not a serial bus at {baud} baud"
+                ),
+            }),
         }
     }
 
@@ -129,6 +160,11 @@ impl PortSource for SystemPorts {
                 serial: serial.to_owned(),
                 reason: format!("{interface}: SocketCAN opens only on Linux"),
             }),
+            #[cfg(feature = "zlg")]
+            Bridge::Zlg {
+                serial: adapter,
+                channel,
+            } => zlg::open(serial, &adapter, channel),
         }
     }
 }
@@ -179,6 +215,15 @@ mod tests {
         let mut ports = SystemPorts {
             usb_serial: UsbSerialPorts::rooted(root.join("usb"), PathBuf::from("/dev")),
             socketcan: SocketCanPorts::rooted(root.join("net")),
+            #[cfg(feature = "zlg")]
+            zlg: zlg::ZlgPorts::with(|| {
+                Ok(vec![sx_zlg_usbcanfd::Found {
+                    serial: Some("A30F115DD0120A949B80".to_owned()),
+                    vendor_id: 0x3068,
+                    product_id: 0x0009,
+                    speed: None,
+                }])
+            }),
         };
         assert_eq!(
             ports.bridge("B601-ARM").expect("serial bridge"),
@@ -217,6 +262,22 @@ mod tests {
             ports.open_serial("UB-CAN", 1_000_000),
             Err(OpenError::Port { serial, .. }) if serial == "UB-CAN"
         ));
+        // The ZLG's channel is its serial and index; its bare serial names neither channel,
+        // and SocketCAN does not see an adapter driven in userspace.
+        #[cfg(feature = "zlg")]
+        {
+            assert_eq!(
+                ports.bridge("A30F115DD0120A949B80:1").expect("zlg channel"),
+                Bridge::Zlg {
+                    serial: "A30F115DD0120A949B80".to_owned(),
+                    channel: 1
+                }
+            );
+            assert!(matches!(
+                ports.bridge("A30F115DD0120A949B80"),
+                Err(OpenError::NotAttached(_))
+            ));
+        }
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -1,7 +1,9 @@
 //! Measure a CAN link with read-only Damiao register reads; see `sx_zlg_usbcanfd::bench`.
 //!
-//!     sx-can-bench zlg [--serial S] [--channel 1] [--in-flight 1|2] [options]
-//!     sx-can-bench socketcan <interface> [options]        (Linux, feature `socketcan`)
+//! ```text
+//! sx-can-bench zlg [--serial S] [--channel 1] [--in-flight 1|2] [options]
+//! sx-can-bench socketcan <interface> [options]        (Linux, feature socketcan)
+//! ```
 //!
 //! Options: --motors 0x09,0x10,...  (master = send + 0x20; default the static upper body's
 //! fifteen) --samples N --rates 50,100,250,500 --seconds S --throughput-seconds S
