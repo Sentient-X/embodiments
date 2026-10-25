@@ -38,8 +38,7 @@ that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that 
 a qualification. The right forearm yaw's entry contradicts itself: it flags
 ``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
 calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
-as received until the hardware owner settles which holds. The grippers have no motor entry, so
-they stay undocumented drives.
+as received until the hardware owner settles which holds.
 
 The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_left`` and
 ``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
@@ -56,6 +55,16 @@ design's, so the station's opener refuses to open the neck until that unit's LeR
 calibration is supplied, and then refuses any servo whose registers disagree with it. The
 probe found ids 2, 3, 4 and 6 resting outside their calibrated ranges: a first command must
 be slewed from the observed position, never snapped into range.
+
+**The grippers, from the same probe.** They are not in the received motor table either, and
+are not Dynamixel: each finger has its own Feetech STS3215 (model 777, firmware 3.10), and each
+gripper's two are on a USB serial bus of their own (a CH343, 1,000,000 baud), one bus answering
+at ids 1 and 2 and the other at 3 and 4. Which bus is the left gripper and which the right, and
+which id drives which finger, is not yet checked on the robot: they are bound provisionally,
+the bus at ids 1 and 2 as the right gripper (as the right arm has the lower CAN ids) on port
+``right_gripper``, the other as ``left_gripper``, the lower id as the left finger, identity
+drive map, and each finger's declared range as its servo's calibrated range. Like the neck,
+they are refused at open until each unit's LeRobot calibration is supplied.
 """
 
 from typing import Final
@@ -221,14 +230,14 @@ STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
 STATIC_UPPER_BODY_NECK_PORT: Final = BusPort("neck")
 
 
-def _neck_servo(bus_id: int) -> DirectDrive:
-    """One STS3215 at its SO-101 id on the neck's bus, identity drive map. Provisional."""
+def _sts3215(bus_id: int, port: BusPort) -> DirectDrive:
+    """One STS3215 on one of the body's Feetech buses, identity drive map. Provisional."""
     return DirectDrive(
         ActuatorBinding(
             model=ActuatorModel.FEETECH_STS3215,
             bus=ActuatorBus.FEETECH_SERIAL,
             bus_id=bus_id,
-            port=STATIC_UPPER_BODY_NECK_PORT,
+            port=port,
         )
     )
 
@@ -265,16 +274,26 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
             2.86233997327,
             2.04203522483,
         ),
-        actuations=tuple(_neck_servo(bus_id) for bus_id in range(1, 7)),
+        actuations=tuple(_sts3215(bus_id, STATIC_UPPER_BODY_NECK_PORT) for bus_id in range(1, 7)),
         observations=(ActuatorFeedback(),) * 6,
     ),
     home=(0.0,) * 6,
 )
 
 
+#: Each gripper's serial bus, as commissioning names its bridge, and its two servos' ids, the
+#: left finger's first. Provisional, as the module says: which bus is which side, and which id
+#: which finger, is not yet checked on the robot.
+STATIC_UPPER_BODY_GRIPPER_BUSES: Final = {
+    "right": (BusPort("right_gripper"), (1, 2)),
+    "left": (BusPort("left_gripper"), (3, 4)),
+}
+
+
 def _gripper(side: str, left_finger: float, right_finger: float) -> GripperSpec:
-    """Two revolute fingers the description moves independently; no source says whether one
-    motor couples them, so neither a mimic nor an aperture is declared."""
+    """Two revolute fingers, each on its own STS3215; no source says how their travel couples,
+    so neither a mimic nor an aperture is declared."""
+    port, ids = STATIC_UPPER_BODY_GRIPPER_BUSES[side]
     return GripperSpec(
         part_id=PartId(f"sentient-static-upper-body-{side}-gripper"),
         layout=bounded_layout(
@@ -282,6 +301,8 @@ def _gripper(side: str, left_finger: float, right_finger: float) -> GripperSpec:
             units=(CoordinateUnit.RADIAN,) * 2,
             lower=(left_finger, 0.0),
             upper=(0.0, right_finger),
+            actuations=tuple(_sts3215(bus_id, port) for bus_id in ids),
+            observations=(ActuatorFeedback(),) * 2,
         ),
     )
 

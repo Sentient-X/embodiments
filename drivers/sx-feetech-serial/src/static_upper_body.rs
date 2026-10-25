@@ -1,23 +1,34 @@
-//! The Sentient static upper body's neck: an SO-101 on the chest, six Feetech STS3215s.
+//! The Sentient static upper body's Feetech buses: the SO-101 neck and the two grippers.
 //!
-//! **Provisional until the robot is probed.** The axes and their bindings are the registry's
-//! (`sx_embodiments/known/static_upper_body.py`, a development body), read from
-//! `bindings/sentient-static-upper-body.json`, the same document `sx-damiao-can` composes the
-//! body's Damiao bus from, which `tools/render_driver_bindings.py` renders. The registry binds
-//! the neck as an SO-101 is wired, ids 1..6 on a bus of its own named `neck`, its sixth joint
-//! the camera tilt where the SO-101's gripper servo was; no probe has read those ids. Each
-//! servo is set up as [`crate::so101`]'s arm joints are: `LeRobot`'s `DEGREES` normalization and
-//! `SOFollower.configure`'s position loop, the camera tilt included, since it is a revolute
-//! joint and not a jaw. Each servo's `LeRobot` calibration is unknown, and nothing opens the
-//! neck without one: [`FeetechBody::open`] takes it per servo and refuses any servo whose
-//! registers disagree. Whether each joint's zero is its servo's mid-range, as the degree
-//! normalization assumes, is for that calibration to settle.
+//! The axes and their bindings are the registry's (`sx_embodiments/known/static_upper_body.py`,
+//! a development body), read from `bindings/sentient-static-upper-body.json`, the same document
+//! `sx-damiao-can` composes the body's Damiao bus from, which `tools/render_driver_bindings.py`
+//! renders. A read-only probe on 2026-10-25 found each bus on its own CH343 USB serial adapter at
+//! 1,000,000 baud, every servo an STS3215:
+//!
+//! - [`NECK`], port `neck`: ids 1..6 in SO-101 order, the sixth the camera tilt where the
+//!   SO-101's gripper servo was. Each servo is set up as [`crate::so101`]'s arm joints are:
+//!   `LeRobot`'s `DEGREES` normalization and `SOFollower.configure`'s position loop, the camera
+//!   tilt included, since it is a revolute joint and not a jaw.
+//! - [`RIGHT_GRIPPER`] and [`LEFT_GRIPPER`], ports `right_gripper` (ids 1 and 2) and
+//!   `left_gripper` (ids 3 and 4), one servo per finger, each set up as the SO-101's gripper is:
+//!   `RANGE_0_100` over the finger's declared range, and `SOFollower.configure`'s torque and
+//!   current limits.
+//!
+//! **Provisional.** Which gripper bus is which side, which id is which finger, that each neck
+//! joint's zero is its servo's mid-range, and that each finger's declared range is its
+//! servo's calibrated range are not yet checked on the robot. Every servo's `LeRobot`
+//! calibration is the unit's: nothing opens these buses without one, [`FeetechBody::open`]
+//! takes it per servo and refuses any servo whose registers disagree. The probe found neck ids
+//! 2, 3, 4 and 6 resting outside their calibrated ranges: each chain reports where its servos
+//! rest ([`sx_embodiment_drivers::ActuatorChain::last_observed`]) so the first command can be
+//! slewed from there.
 
 use crate::body::{FeetechBody, ServoSetup};
-use crate::chain::MotorNormMode;
-use crate::so101::{LEROBOT_BAUD, POSITION_LOOP};
+use crate::chain::{MotorNormMode, ServoConfiguration};
+use crate::so101::{GRIPPER_PROTECTION, LEROBOT_BAUD, POSITION_LOOP};
 
-/// The registry's static upper-body axes, rendered; the neck's are its Feetech axes.
+/// The registry's static upper-body axes, rendered.
 pub const BINDINGS: &str = include_str!("../bindings/sentient-static-upper-body.json");
 
 const fn degrees(joint: &'static str) -> ServoSetup {
@@ -28,10 +39,21 @@ const fn degrees(joint: &'static str) -> ServoSetup {
     }
 }
 
+const fn finger(joint: &'static str) -> ServoSetup {
+    ServoSetup {
+        joint,
+        norm_mode: MotorNormMode::Range0100,
+        configuration: ServoConfiguration {
+            protection: Some(GRIPPER_PROTECTION),
+            ..POSITION_LOOP
+        },
+    }
+}
+
 /// The neck's six servos on their own bus.
 pub const NECK: FeetechBody = FeetechBody {
     bindings: BINDINGS,
-    // An SO-101's rate; provisional with the rest.
+    port: "neck",
     baud: LEROBOT_BAUD,
     servos: &[
         degrees("so101_shoulder_pan_joint"),
@@ -40,5 +62,27 @@ pub const NECK: FeetechBody = FeetechBody {
         degrees("so101_wrist_flex_joint"),
         degrees("so101_wrist_roll_joint"),
         degrees("so101_camera_tilt_joint"),
+    ],
+};
+
+/// The right gripper's two fingers on their own bus. Provisional, as the module says.
+pub const RIGHT_GRIPPER: FeetechBody = FeetechBody {
+    bindings: BINDINGS,
+    port: "right_gripper",
+    baud: LEROBOT_BAUD,
+    servos: &[
+        finger("right_gripper_left_finger_joint"),
+        finger("right_gripper_right_finger_joint"),
+    ],
+};
+
+/// The left gripper's two fingers on their own bus. Provisional, as the module says.
+pub const LEFT_GRIPPER: FeetechBody = FeetechBody {
+    bindings: BINDINGS,
+    port: "left_gripper",
+    baud: LEROBOT_BAUD,
+    servos: &[
+        finger("left_gripper_left_finger_joint"),
+        finger("left_gripper_right_finger_joint"),
     ],
 };

@@ -1,0 +1,99 @@
+{
+ "source": "read-only probe of the static upper body on 2026-10-25 (Feetech scan, no writes): each Feetech port's calibration registers as LeRobot's calibration file, and where each servo rested",
+ "calibration": {
+  "neck": {
+   "so101_shoulder_pan_joint": {
+    "id": 1,
+    "drive_mode": 0,
+    "homing_offset": -791,
+    "range_min": 979,
+    "range_max": 3052
+   },
+   "so101_shoulder_lift_joint": {
+    "id": 2,
+    "drive_mode": 0,
+    "homing_offset": 526,
+    "range_min": 932,
+    "range_max": 3039
+   },
+   "so101_elbow_flex_joint": {
+    "id": 3,
+    "drive_mode": 0,
+    "homing_offset": -58,
+    "range_min": 1057,
+    "range_max": 3071
+   },
+   "so101_wrist_flex_joint": {
+    "id": 4,
+    "drive_mode": 0,
+    "homing_offset": -315,
+    "range_min": 980,
+    "range_max": 3129
+   },
+   "so101_wrist_roll_joint": {
+    "id": 5,
+    "drive_mode": 0,
+    "homing_offset": 1605,
+    "range_min": 0,
+    "range_max": 4095
+   },
+   "so101_camera_tilt_joint": {
+    "id": 6,
+    "drive_mode": 0,
+    "homing_offset": -42,
+    "range_min": 1760,
+    "range_max": 2909
+   }
+  },
+  "left_gripper": {
+   "left_gripper_left_finger_joint": {
+    "id": 3,
+    "drive_mode": 0,
+    "homing_offset": -466,
+    "range_min": 1712,
+    "range_max": 2322
+   },
+   "left_gripper_right_finger_joint": {
+    "id": 4,
+    "drive_mode": 0,
+    "homing_offset": 482,
+    "range_min": 1756,
+    "range_max": 2342
+   }
+  },
+  "right_gripper": {
+   "right_gripper_left_finger_joint": {
+    "id": 1,
+    "drive_mode": 0,
+    "homing_offset": 480,
+    "range_min": 1720,
+    "range_max": 2302
+   },
+   "right_gripper_right_finger_joint": {
+    "id": 2,
+    "drive_mode": 0,
+    "homing_offset": -273,
+    "range_min": 1813,
+    "range_max": 2358
+   }
+  }
+ },
+ "present_position": {
+  "neck": {
+   "1": 2147,
+   "2": 819,
+   "3": 3086,
+   "4": 857,
+   "5": 1974,
+   "6": 753
+  },
+  "left_gripper": {
+   "3": 1835,
+   "4": 2234
+  },
+  "right_gripper": {
+   "1": 2150,
+   "2": 1878
+  }
+ }
+}

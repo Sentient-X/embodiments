@@ -36,9 +36,9 @@ fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
     assert_eq!(chain.len(), 15);
     assert_eq!(STATIC_UPPER_BODY.joints.len(), 15);
     let axes: Vec<_> = chain.iter().map(|motor| motor.axis.clone()).collect();
-    // The neck's Feetech servos are the same document's, on their own port.
+    // The neck and grippers are the same document's Feetech servos, on their own ports.
     assert_eq!(axes, body.clone().on(DAMIAO_CAN).axes);
-    assert_eq!(body.axes.len(), 21);
+    assert_eq!(body.axes.len(), 25);
     // The received table's send ids and models, torso then left then right.
     let table: [(&str, u16, _); 15] = [
         ("torso_joint", 0x1F, DAMIAO_DM8009),

@@ -13,7 +13,8 @@
 //! commissioned under, [`BodyBindings::buses`] splits the native state order into one bus per
 //! port, and each bus is opened by its vendor's crate from that crate's data for the body: a
 //! [`DamiaoBody`] for its Damiao CAN bus (the humanoid and static upper bodies), a
-//! [`FeetechBody`] for a Feetech serial bus (the SO-101 follower, the static upper body's neck),
+//! [`FeetechBody`] for each Feetech serial bus (the SO-101 follower, the static upper body's
+//! neck and grippers),
 //! a [`DynamixelBody`] for a Dynamixel bus (none registered yet). The chains compose in state
 //! order into one [`Chains`]: every target checked before any bus is written, a stop reaching
 //! every chain and reporting each, its budget the sum of theirs. A serial servo's `LeRobot`
@@ -281,7 +282,7 @@ impl Opener {
         let embodiment = drive.embodiment.as_str();
         DamiaoBody::of(embodiment)?
             .map(|body| body.bindings)
-            .or(FeetechBody::of(embodiment)?.map(|body| body.bindings))
+            .or(FeetechBody::bindings_of(embodiment)?)
             .or(DynamixelBody::of(embodiment)?.map(|body| body.bindings))
             .map(Self::Buses)
             .ok_or_else(|| OpenError::Body(drive.embodiment.clone()))
@@ -330,7 +331,8 @@ impl Opener {
                     body.axes(drive)?;
                     (Part::Damiao(body), Wire::Can)
                 } else if kind == FEETECH_SERIAL {
-                    let body = FeetechBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
+                    let body =
+                        FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
                     let calibration = calibrations.of(&port, &body.calibrated(drive)?)?;
                     let baud = body.baud;
                     (Part::Feetech(body, calibration), Wire::Serial { baud })
@@ -635,6 +637,10 @@ where
         self.0.stop_budget()
     }
 
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        self.0.last_observed()
+    }
+
     fn clear_faults(&mut self) {
         self.0.clear_faults();
     }
@@ -694,6 +700,13 @@ impl ActuatorChain for Body {
         match self {
             Self::B601(chain) => chain.stop_budget(),
             Self::Buses(chain) => chain.stop_budget(),
+        }
+    }
+
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        match self {
+            Self::B601(chain) => chain.last_observed(),
+            Self::Buses(chain) => chain.last_observed(),
         }
     }
 

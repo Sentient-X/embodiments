@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "b2d106f95c5bd5115de90c5d2d35869b36c3f0823cbd5c2c5b7e0741f050a97a",
+  "id": "32eb8c6c4e69ef39bdc7a42be1657bee8586163c827eacbf9544ab6b41085a68",
   "axes": [
     {
       "joint": "torso_joint",
@@ -164,6 +164,50 @@
       "bus": "damiao_can",
       "port": "can",
       "bus_id": 21,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_gripper_left_finger_joint",
+      "lower": -0.823747683095,
+      "upper": 0.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "left_gripper",
+      "bus_id": 3,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_gripper_right_finger_joint",
+      "lower": 0.0,
+      "upper": 0.929592357459,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "left_gripper",
+      "bus_id": 4,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_gripper_left_finger_joint",
+      "lower": -0.952602069277,
+      "upper": 0.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "right_gripper",
+      "bus_id": 1,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_gripper_right_finger_joint",
+      "lower": 0.0,
+      "upper": 0.788466124973,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "right_gripper",
+      "bus_id": 2,
       "sign": 1,
       "reduction": 1.0
     },

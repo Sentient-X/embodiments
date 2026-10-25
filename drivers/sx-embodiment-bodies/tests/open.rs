@@ -14,7 +14,9 @@ use sx_embodiment_bodies::{
     open, open_calibrated, ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
-use sx_embodiment_drivers::{ActuatorChain, BodyBindings, Evidence, InstanceDrive};
+use sx_embodiment_drivers::{
+    ActuatorChain, AxisLimits, BodyBindings, Evidence, Governor, InstanceDrive,
+};
 use sx_feetech_serial::FeetechChainError;
 use sx_feetech_serial::sim::SimBus;
 
@@ -42,34 +44,28 @@ fn commissioning(drive: &InstanceDrive, ports: &[(&str, &str)]) -> Commissioning
     Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning")
 }
 
-/// Every neck servo's calibration on the simulated neck: mid-range 2000.
-const NECK_CALIBRATION: MotorCalibration = MotorCalibration {
+/// Every SO-101 servo's calibration on its simulated bus: mid-range 2000.
+const SO101_CALIBRATION: MotorCalibration = MotorCalibration {
     drive_mode: false,
     homing_offset: -40,
     range_min: 1000,
     range_max: 3000,
 };
 
-/// `LeRobot`'s calibration file for servos `ids`, each holding [`NECK_CALIBRATION`].
+/// `LeRobot`'s calibration file for servos `ids`, each holding [`SO101_CALIBRATION`].
 fn lerobot_calibration(ids: std::ops::RangeInclusive<u16>) -> String {
     let motors: serde_json::Map<String, serde_json::Value> = ids
         .map(|id| {
             (
                 format!("motor_{id}"),
                 serde_json::json!({
-                    "id": id, "drive_mode": 0, "homing_offset": NECK_CALIBRATION.homing_offset,
-                    "range_min": NECK_CALIBRATION.range_min, "range_max": NECK_CALIBRATION.range_max,
+                    "id": id, "drive_mode": 0, "homing_offset": SO101_CALIBRATION.homing_offset,
+                    "range_min": SO101_CALIBRATION.range_min, "range_max": SO101_CALIBRATION.range_max,
                 }),
             )
         })
         .collect();
     serde_json::Value::Object(motors).to_string()
-}
-
-fn neck_calibrations() -> ServoCalibrations {
-    ServoCalibrations::new()
-        .with_lerobot("neck", &lerobot_calibration(1..=6))
-        .expect("parses")
 }
 
 /// The SO-101 follower's nominal drive: every joint uncalibrated.
@@ -180,138 +176,262 @@ fn the_humanoid_upper_body_opens_on_its_one_bridge() {
     assert!(body.stop().is_proven());
 }
 
+/// The static upper body's Feetech ports, by the bridge serial commissioning names each.
+const FEETECH_PORTS: [(&str, &str); 3] = [
+    ("left_gripper", "5AB0158173"),
+    ("right_gripper", "5B91028463"),
+    ("neck", "5A7C118709"),
+];
+
+/// What the read-only probe of the robot found on its Feetech buses.
+fn probe() -> serde_json::Value {
+    serde_json::from_str(include_str!("fixtures/static-upper-body-probe.json")).expect("probe")
+}
+
+/// The probe's calibration registers, as `LeRobot` calibration files per port.
+fn probed_calibrations() -> ServoCalibrations {
+    let probe = probe();
+    FEETECH_PORTS
+        .iter()
+        .fold(ServoCalibrations::new(), |calibrations, (port, _)| {
+            calibrations
+                .with_lerobot(port, &probe["calibration"][port].to_string())
+                .expect("a LeRobot calibration")
+        })
+}
+
+/// A simulated bus per Feetech port, holding the probe's registers and resting where the
+/// probe found each servo.
+fn probed_buses() -> BTreeMap<String, SimBus> {
+    let probe = probe();
+    FEETECH_PORTS
+        .iter()
+        .map(|(port, serial)| {
+            let servos: Vec<(u8, MotorCalibration)> = probe["calibration"][port]
+                .as_object()
+                .expect("motors")
+                .values()
+                .map(|motor| {
+                    let field = |name: &str| motor[name].as_i64().expect(name);
+                    (
+                        u8::try_from(field("id")).expect("id"),
+                        MotorCalibration {
+                            drive_mode: field("drive_mode") == 1,
+                            homing_offset: i16::try_from(field("homing_offset")).expect("offset"),
+                            range_min: u16::try_from(field("range_min")).expect("min"),
+                            range_max: u16::try_from(field("range_max")).expect("max"),
+                        },
+                    )
+                })
+                .collect();
+            let bus = SimBus::sts3215(&servos);
+            for (id, raw) in probe["present_position"][port].as_object().expect("rest") {
+                bus.rest_at(
+                    id.parse().expect("an id"),
+                    u16::try_from(raw.as_u64().expect("ticks")).expect("ticks"),
+                );
+            }
+            ((*serial).to_owned(), bus)
+        })
+        .collect()
+}
+
+fn static_commissioning(drive: &InstanceDrive) -> Commissioning {
+    let mut ports = vec![("can", "CAN")];
+    ports.extend(FEETECH_PORTS);
+    commissioning(drive, &ports)
+}
+
 #[test]
-fn the_static_upper_body_opens_across_its_can_bus_and_feetech_neck_and_stops_both() {
+fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_stops_all() {
     let drive = drive("sentient-static-upper-body");
-    assert_eq!(ports(&drive).expect("ports"), &["can", "neck"]);
+    assert_eq!(
+        ports(&drive).expect("ports"),
+        &["can", "left_gripper", "right_gripper", "neck"]
+    );
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     assert_eq!(axes.len(), 15);
     let can = Sim::for_axes(&axes);
-    let neck = SimBus::sts3215(&(1..=6).map(|id| (id, NECK_CALIBRATION)).collect::<Vec<_>>());
+    let serial = probed_buses();
     let mut bridges = Bridges {
         buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
-        serial: BTreeMap::from([("NECK".to_owned(), neck.clone())]),
+        serial: serial.clone(),
         opened: Vec::new(),
     };
     let mut body = open_calibrated(
         &drive,
-        &commissioning(&drive, &[("can", "CAN"), ("neck", "NECK")]),
-        &neck_calibrations(),
+        &static_commissioning(&drive),
+        &probed_calibrations(),
         &mut bridges,
     )
     .expect("static upper body");
     assert!(matches!(body, Body::Buses(_)));
-    assert_eq!(bridges.opened, ["CAN", "NECK@1000000"]);
-    // The torso and arms, then the neck, as the native state order has them.
-    let joints: Vec<&str> = body.axes().iter().map(|axis| axis.joint.as_str()).collect();
-    assert_eq!(joints[0], "torso_joint");
     assert_eq!(
-        joints[15..],
+        bridges.opened,
         [
-            "so101_shoulder_pan_joint",
-            "so101_shoulder_lift_joint",
-            "so101_elbow_flex_joint",
-            "so101_wrist_flex_joint",
-            "so101_wrist_roll_joint",
-            "so101_camera_tilt_joint",
+            "CAN",
+            "5AB0158173@1000000",
+            "5B91028463@1000000",
+            "5A7C118709@1000000"
         ]
     );
-    // The Damiao bus's 248 ms, then three 10 ms exchanges for each of six neck servos.
-    assert_eq!(body.stop_budget(), Duration::from_millis(248 + 180));
-    let receipt = body
-        .command(&[0.0; 21])
-        .expect("a command at the zero pose");
-    // The neck's SYNC WRITE has no answer, so no partial joint vector is reported.
+    // The torso and arms, then each gripper's two fingers, then the neck, as the native state
+    // order has them.
+    let joints: Vec<&str> = body.axes().iter().map(|axis| axis.joint.as_str()).collect();
+    assert_eq!(joints.len(), 25);
+    assert_eq!(joints[0], "torso_joint");
+    assert_eq!(
+        joints[15..21],
+        [
+            "left_gripper_left_finger_joint",
+            "left_gripper_right_finger_joint",
+            "right_gripper_left_finger_joint",
+            "right_gripper_right_finger_joint",
+            "so101_shoulder_pan_joint",
+            "so101_shoulder_lift_joint",
+        ]
+    );
+    // The Damiao bus's own budget, then four 10 ms exchanges for each of ten servos.
+    let damiao = sx_damiao_can::static_upper_body::STATIC_UPPER_BODY
+        .open(Sim::for_axes(&axes), &drive)
+        .expect("a lone Damiao chain")
+        .stop_budget();
+    assert_eq!(body.stop_budget(), damiao + Duration::from_millis(400));
+    // Where every axis rests, in state order: the neck's camera tilt (id 6), found ~1000 ticks
+    // below its calibrated minimum, is reported there, far outside its declared bounds.
+    let rest = body.last_observed().expect("every bus observed at open");
+    assert_eq!(rest.len(), 25);
+    let tilt = rest[24];
+    assert!(tilt < body.axes()[24].lower - 1.0, "{tilt}");
+    let receipt = body.command(&rest_inside(&body)).expect("a command");
+    // The Feetech SYNC WRITEs have no answer, so no partial joint vector is reported.
     assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
     assert!(receipt.observed.is_empty());
+    assert_eq!(
+        body.last_observed(),
+        None,
+        "a command may have moved the servos"
+    );
     assert!(can.state().motors.values().any(|motor| motor.state == 1));
-    assert!((1..=6).all(|id| neck.state().torque(id) == 1));
-    // Mid-range of 1000..3000 at every neck joint's zero.
-    assert!((1..=6).all(|id| neck.state().goal(id) == 2000));
+    assert!(torques(&serial, 1));
     let stop = body.stop();
     assert!(stop.is_proven(), "{stop:?}");
     assert!(can.state().motors.values().all(|motor| motor.state == 0));
-    assert!((1..=6).all(|id| neck.state().torque(id) == 0));
-    // A neck servo that stops answering leaves the whole stop unproven, and the CAN bus is
-    // still stopped.
-    body.command(&[0.0; 21]).expect("re-enabled");
-    neck.kill(4);
+    assert!(torques(&serial, 0));
+    assert!(body.last_observed().is_some(), "read again after the stop");
+    // A neck servo that stops answering leaves the whole stop unproven; every bus still stops.
+    body.command(&rest_inside(&body)).expect("re-enabled");
+    serial["5A7C118709"].kill(4);
     let stop = body.stop();
     assert_eq!(stop.unproven, [4]);
     assert!(can.state().motors.values().all(|motor| motor.state == 0));
-    // A target outside a neck joint's bounds reaches neither bus.
+    assert_eq!(body.last_observed(), None, "the neck could not be read");
+    // A target outside a neck joint's bounds reaches no bus.
     let sent = can.sent();
-    let written = neck.state().written.len();
-    let mut far = [0.0; 21];
-    far[20] = 3.0;
+    let written: Vec<usize> = serial
+        .values()
+        .map(|bus| bus.state().written.len())
+        .collect();
+    let mut far = rest_inside(&body);
+    far[24] = 3.0;
     assert!(body.command(&far).is_err());
-    assert_eq!((can.sent(), neck.state().written.len()), (sent, written));
+    assert_eq!(can.sent(), sent);
+    assert_eq!(
+        serial
+            .values()
+            .map(|bus| bus.state().written.len())
+            .collect::<Vec<_>>(),
+        written
+    );
+}
+
+/// Whether every servo on every simulated bus has `Torque_Enable` at `value`.
+fn torques(serial: &BTreeMap<String, SimBus>, value: u8) -> bool {
+    serial.values().all(|bus| {
+        let state = bus.state();
+        state.servos.keys().all(|id| state.torque(*id) == value)
+    })
+}
+
+/// Each axis's commandable midpoint: a target every bus admits.
+fn rest_inside(body: &Body) -> Vec<f64> {
+    body.commandable()
+        .iter()
+        .map(|range| range.lower.midpoint(range.upper))
+        .collect()
 }
 
 #[test]
-fn the_neck_is_refused_without_its_calibration_or_on_a_shared_bridge() {
+fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge() {
     let drive = drive("sentient-static-upper-body");
     let mut bridges = Bridges::default();
-    let both = commissioning(&drive, &[("can", "CAN"), ("neck", "NECK")]);
-    // No calibration: refused before any bridge is opened.
+    let every = static_commissioning(&drive);
+    // No calibration: refused before any bridge is opened, naming the first Feetech port.
     assert!(matches!(
-        open(&drive, &both, &mut bridges),
-        Err(OpenError::Uncalibrated { port, bus_id: 1 }) if port == "neck"
+        open(&drive, &every, &mut bridges),
+        Err(OpenError::Uncalibrated { port, bus_id: 3 }) if port == "left_gripper"
     ));
-    // A calibration file missing one servo.
-    let five = ServoCalibrations::new()
-        .with_lerobot("neck", &lerobot_calibration(1..=5))
+    // The neck's calibration file missing one servo.
+    let probe = probe();
+    let mut neck = probe["calibration"]["neck"].clone();
+    neck.as_object_mut()
+        .expect("motors")
+        .remove("so101_camera_tilt_joint");
+    let partial = ServoCalibrations::new()
+        .with_lerobot(
+            "left_gripper",
+            &probe["calibration"]["left_gripper"].to_string(),
+        )
+        .and_then(|c| {
+            c.with_lerobot(
+                "right_gripper",
+                &probe["calibration"]["right_gripper"].to_string(),
+            )
+        })
+        .and_then(|c| c.with_lerobot("neck", &neck.to_string()))
         .expect("parses");
     assert!(matches!(
-        open_calibrated(&drive, &both, &five, &mut bridges),
-        Err(OpenError::Uncalibrated { bus_id: 6, .. })
+        open_calibrated(&drive, &every, &partial, &mut bridges),
+        Err(OpenError::Uncalibrated { port, bus_id: 6 }) if port == "neck"
     ));
-    // The neck commissioned on the CAN bridge, and the neck not commissioned at all.
+    // The neck commissioned on a gripper's bridge, and the neck not commissioned at all.
+    let mut shared: Vec<(&str, &str)> = vec![("can", "CAN")];
+    shared.extend(FEETECH_PORTS[..2].iter().copied());
+    shared.push(("neck", FEETECH_PORTS[0].1));
     assert!(matches!(
-        open_calibrated(
-            &drive,
-            &commissioning(&drive, &[("can", "CAN"), ("neck", "CAN")]),
-            &neck_calibrations(),
-            &mut bridges
-        ),
-        Err(OpenError::SharedBridge(serial)) if serial == "CAN"
+        open_calibrated(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
+        Err(OpenError::SharedBridge(serial)) if serial == FEETECH_PORTS[0].1
     ));
+    shared.pop();
     assert!(matches!(
-        open_calibrated(
-            &drive,
-            &commissioning(&drive, &[("can", "CAN")]),
-            &neck_calibrations(),
-            &mut bridges
-        ),
+        open_calibrated(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
         Err(OpenError::MissingPort(port)) if port == "neck"
     ));
     assert!(
         bridges.opened.is_empty(),
         "nothing opened before the refusals"
     );
-    // A source that carries no serial bus refuses the neck after opening the CAN bridge.
+    // A source that carries no serial bus refuses the first Feetech port after the CAN bridge.
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     assert!(matches!(
-        open_calibrated(&drive, &both, &neck_calibrations(), &mut CanOnly(Sim::for_axes(&axes))),
-        Err(OpenError::Port { serial, .. }) if serial == "NECK"
+        open_calibrated(&drive, &every, &probed_calibrations(), &mut CanOnly(Sim::for_axes(&axes))),
+        Err(OpenError::Port { serial, .. }) if serial == FEETECH_PORTS[0].1
     ));
     // A neck servo whose registers disagree with the calibration supplied.
-    let neck = SimBus::sts3215(
-        &(1..=6)
-            .map(|id| {
-                let mut calibration = NECK_CALIBRATION;
-                calibration.range_max -= u16::from(id == 3);
-                (id, calibration)
-            })
-            .collect::<Vec<_>>(),
-    );
+    let serial = probed_buses();
+    {
+        let mut state = serial["5A7C118709"].state();
+        // Servo 3's maximum position limit (address 11) one tick lower.
+        let registers = state.servos.get_mut(&3).expect("servo 3");
+        registers[11] -= 1;
+    }
     let mut bridges = Bridges {
         buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
-        serial: BTreeMap::from([("NECK".to_owned(), neck)]),
+        serial,
         opened: Vec::new(),
     };
     assert!(matches!(
-        open_calibrated(&drive, &both, &neck_calibrations(), &mut bridges),
+        open_calibrated(&drive, &every, &probed_calibrations(), &mut bridges),
         Err(OpenError::Chain(BusError::Feetech(
             FeetechChainError::Uncalibrated { bus_id: 3, .. }
         )))
@@ -337,7 +457,11 @@ fn the_so101_follower_opens_on_its_one_serial_bus() {
     let calibration = ServoCalibrations::new()
         .with_lerobot("serial", &lerobot_calibration(1..=6))
         .expect("parses");
-    let bus = SimBus::sts3215(&(1..=6).map(|id| (id, NECK_CALIBRATION)).collect::<Vec<_>>());
+    let bus = SimBus::sts3215(
+        &(1..=6)
+            .map(|id| (id, SO101_CALIBRATION))
+            .collect::<Vec<_>>(),
+    );
     let mut bridges = Bridges {
         serial: BTreeMap::from([("ARM".to_owned(), bus.clone())]),
         ..Bridges::default()
@@ -353,6 +477,21 @@ fn the_so101_follower_opens_on_its_one_serial_bus() {
     body.command(&[0.0; 6]).expect("commanded");
     assert!(body.stop().is_proven());
     assert!((1..=6).all(|id| bus.state().torque(id) == 0));
+    // Governed, the first command starts from where the stop read the arm resting (mid-range,
+    // tick 2000) and moves it one step: 0.25 rad/s for 20 ms is under four ticks.
+    let limits = vec![
+        AxisLimits {
+            max_speed: 0.25,
+            max_tracking_error: 0.2,
+        };
+        6
+    ];
+    let mut governed = Governor::new(body, limits).expect("limits");
+    governed
+        .command(&[1.0; 6])
+        .expect("a first, slewed command");
+    let goal = bus.state().goal(1);
+    assert!((2000..=2004).contains(&goal), "{goal}");
 }
 
 #[test]

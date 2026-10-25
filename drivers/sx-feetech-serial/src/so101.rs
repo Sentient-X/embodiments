@@ -36,7 +36,7 @@ pub const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
     protection: None,
 };
 /// The gripper's limits: half of its torque and current, and 25 % torque when overloaded.
-const GRIPPER_PROTECTION: TorqueProtection = TorqueProtection {
+pub const GRIPPER_PROTECTION: TorqueProtection = TorqueProtection {
     max_torque_limit: 500,
     protection_current: 250,
     overload_torque: 25,
@@ -53,6 +53,7 @@ const fn arm(joint: &'static str) -> ServoSetup {
 /// `SOFollower`'s motor table, in native state order.
 pub const SO101: FeetechBody = FeetechBody {
     bindings: BINDINGS,
+    port: "serial",
     baud: LEROBOT_BAUD,
     servos: &[
         arm("shoulder_pan"),
