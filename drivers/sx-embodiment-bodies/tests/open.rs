@@ -10,8 +10,8 @@ use sx_damiao_can::sim::Sim;
 
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
-    Body, BusError, Commissioning, OpenError, Port, PortSource, SerialLink, ServoCalibrations,
-    open, open_calibrated, ports,
+    Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
+    ServoCalibrations, closed_ports, open, open_calibrated, open_with, ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -176,6 +176,21 @@ fn the_humanoid_upper_body_opens_on_its_one_bridge() {
     assert!(body.stop().is_proven());
 }
 
+/// The static upper body's provisional ports, opened for a supervised bring-up.
+const BRING_UP: OpenOptions = OpenOptions {
+    allow_provisional: &["left_gripper", "right_gripper", "neck"],
+};
+
+/// Open with every provisional port opted in, as a supervised bring-up does.
+fn bring_up(
+    drive: &InstanceDrive,
+    commissioning: &Commissioning,
+    calibrations: &ServoCalibrations,
+    source: &mut dyn PortSource,
+) -> Result<Body, OpenError> {
+    open_with(drive, commissioning, calibrations, BRING_UP, source)
+}
+
 /// The static upper body's Feetech ports, by the bridge serial commissioning names each.
 const FEETECH_PORTS: [(&str, &str); 3] = [
     ("left_gripper", "5AB0158173"),
@@ -258,7 +273,7 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
         serial: serial.clone(),
         opened: Vec::new(),
     };
-    let mut body = open_calibrated(
+    let mut body = bring_up(
         &drive,
         &static_commissioning(&drive),
         &probed_calibrations(),
@@ -372,9 +387,10 @@ fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge
     let drive = drive("sentient-static-upper-body");
     let mut bridges = Bridges::default();
     let every = static_commissioning(&drive);
-    // No calibration: refused before any bridge is opened, naming the first Feetech port.
+    // Opted in with no calibration: refused before any bridge is opened, naming the first
+    // Feetech port.
     assert!(matches!(
-        open(&drive, &every, &mut bridges),
+        bring_up(&drive, &every, &ServoCalibrations::new(), &mut bridges),
         Err(OpenError::Uncalibrated { port, bus_id: 3 }) if port == "left_gripper"
     ));
     // The neck's calibration file missing one servo.
@@ -397,7 +413,7 @@ fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge
         .and_then(|c| c.with_lerobot("neck", &neck.to_string()))
         .expect("parses");
     assert!(matches!(
-        open_calibrated(&drive, &every, &partial, &mut bridges),
+        bring_up(&drive, &every, &partial, &mut bridges),
         Err(OpenError::Uncalibrated { port, bus_id: 6 }) if port == "neck"
     ));
     // The neck commissioned on a gripper's bridge, and the neck not commissioned at all.
@@ -405,12 +421,12 @@ fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge
     shared.extend(FEETECH_PORTS[..2].iter().copied());
     shared.push(("neck", FEETECH_PORTS[0].1));
     assert!(matches!(
-        open_calibrated(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
+        bring_up(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
         Err(OpenError::SharedBridge(serial)) if serial == FEETECH_PORTS[0].1
     ));
     shared.pop();
     assert!(matches!(
-        open_calibrated(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
+        bring_up(&drive, &commissioning(&drive, &shared), &probed_calibrations(), &mut bridges),
         Err(OpenError::MissingPort(port)) if port == "neck"
     ));
     assert!(
@@ -420,7 +436,7 @@ fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge
     // A source that carries no serial bus refuses the first Feetech port after the CAN bridge.
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     assert!(matches!(
-        open_calibrated(&drive, &every, &probed_calibrations(), &mut CanOnly(Sim::for_axes(&axes))),
+        bring_up(&drive, &every, &probed_calibrations(), &mut CanOnly(Sim::for_axes(&axes))),
         Err(OpenError::Port { serial, .. }) if serial == FEETECH_PORTS[0].1
     ));
     // A neck servo whose registers disagree with the calibration supplied.
@@ -437,7 +453,7 @@ fn the_feetech_buses_are_refused_without_their_calibration_or_on_a_shared_bridge
         opened: Vec::new(),
     };
     assert!(matches!(
-        open_calibrated(&drive, &every, &probed_calibrations(), &mut bridges),
+        bring_up(&drive, &every, &probed_calibrations(), &mut bridges),
         Err(OpenError::Chain(BusError::Feetech(
             FeetechChainError::Uncalibrated { bus_id: 3, .. }
         )))
@@ -622,7 +638,7 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         serial,
         opened: Vec::new(),
     };
-    let mut body = open_calibrated(
+    let mut body = bring_up(
         &drive,
         &static_commissioning(&drive),
         &probed_calibrations(),
@@ -681,7 +697,7 @@ fn probed_body() -> (Body, SimBus, BTreeMap<String, SimBus>) {
         serial: serial.clone(),
         opened: Vec::new(),
     };
-    let body = open_calibrated(
+    let body = bring_up(
         &drive,
         &static_commissioning(&drive),
         &probed_calibrations(),
@@ -835,4 +851,63 @@ fn without_a_confirmed_approach_limit_the_governor_refuses_a_neck_resting_outsid
     );
     assert_eq!(neck.state().written.len(), written, "nothing was sent");
     assert_eq!(neck.state().torque(6), 0);
+}
+
+#[test]
+fn by_default_the_provisional_neck_and_grippers_stay_off_and_the_damiao_bus_drives() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    assert_eq!(
+        closed_ports(&drive, OpenOptions::default()).expect("closed"),
+        ["left_gripper", "right_gripper", "neck"]
+    );
+    let can = Sim::for_axes(&axes);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: probed_buses(),
+        opened: Vec::new(),
+    };
+    // Commissioning may name the provisional ports; nothing opens them, and no calibration is
+    // needed.
+    let mut body = open(&drive, &static_commissioning(&drive), &mut bridges).expect("open");
+    assert_eq!(bridges.opened, ["CAN"]);
+    assert_eq!(body.axes().len(), 15);
+    assert!(body.axes().iter().all(|axis| axis.port == "can"));
+    body.command(&[0.0; 15]).expect("the Damiao axes drive");
+    assert!(body.stop().is_proven());
+    // An opt-in for a port that is not provisional is refused.
+    for wrong in ["can", "elbow"] {
+        let options = OpenOptions {
+            allow_provisional: &[wrong],
+        };
+        assert!(matches!(
+            open_with(
+                &drive,
+                &static_commissioning(&drive),
+                &probed_calibrations(),
+                options,
+                &mut bridges
+            ),
+            Err(OpenError::NotProvisional(port)) if port == wrong
+        ));
+    }
+    // One port opted in opens that one alone beside the verified bus.
+    let neck_only = OpenOptions {
+        allow_provisional: &["neck"],
+    };
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        serial: probed_buses(),
+        opened: Vec::new(),
+    };
+    let body = open_with(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        neck_only,
+        &mut bridges,
+    )
+    .expect("open with the neck");
+    assert_eq!(bridges.opened, ["CAN", "5A7C118709@1000000"]);
+    assert_eq!(body.axes().len(), 21);
 }

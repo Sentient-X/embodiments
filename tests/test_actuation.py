@@ -165,6 +165,26 @@ def test_a_named_port_is_written_and_read_and_the_default_is_never_spelled() -> 
             )
 
 
+def test_a_provisional_binding_is_written_only_when_marked() -> None:
+    robot = development_embodiments["sentient-static-upper-body"]
+    assert Embodiment.from_json(robot.to_json()) == robot
+    marked = {
+        coordinate.axis.name: binding.provisional
+        for coordinate in robot.state.coordinates
+        if (binding := coordinate.axis.actuator) is not None
+    }
+    assert not marked["torso_joint"]
+    assert marked["so101_camera_tilt_joint"]
+    assert marked["left_gripper_left_finger_joint"]
+    assert '"provisional"' not in embodiments["so101"].to_json()
+    wire = copy.deepcopy(embodiments["so101"].to_dict())
+    components = wire["components"]
+    assert isinstance(components, list)
+    components[0]["attachment"]["part"]["layout"][0]["actuation"]["actuator"]["provisional"] = False
+    with pytest.raises(EmbodimentSchemaError, match="written only as true"):
+        Embodiment.from_dict(wire)
+
+
 def test_one_address_may_recur_on_two_ports_of_one_layout() -> None:
     def neck(bus_id: int, port: str) -> ActuatorBinding:
         return ActuatorBinding(

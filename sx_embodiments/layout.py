@@ -122,6 +122,10 @@ class ActuatorBinding:
     kind's :data:`DEFAULT_PORTS` entry, and a body with more buses names each one beyond
     that. Spelling the default is refused, so one wiring has one form, and an unnamed port
     is not serialized, so a body's identity changes only when it names one.
+
+    ``provisional`` marks a binding not yet verified on the robot it describes (its address,
+    side, drive map or zero), so no driver moves it unless a person bringing the robot up opts
+    in for its port. It is serialized only when set.
     """
 
     model: ActuatorModel
@@ -130,6 +134,7 @@ class ActuatorBinding:
     sign: int = 1
     reduction: float = 1.0
     port: BusPort | None = None
+    provisional: bool = False
 
     def __post_init__(self) -> None:
         if type(self.bus_id) is not int or self.bus_id < 1:
@@ -138,6 +143,8 @@ class ActuatorBinding:
             raise LayoutError("actuator", "sign must be +1 or -1")
         if not math.isfinite(self.reduction) or self.reduction <= 0.0:
             raise LayoutError("actuator", "reduction must be a positive finite ratio")
+        if type(self.provisional) is not bool:
+            raise LayoutError("actuator", "provisional must be a bool")
         if self.port is not None:
             if not _BUS_PORT.fullmatch(self.port):
                 raise LayoutError(

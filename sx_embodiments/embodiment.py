@@ -678,6 +678,8 @@ def _actuator_to_dict(binding: ActuatorBinding) -> dict[str, object]:
     # none keep the identity they had before ports could be named.
     if binding.port is not None:
         document["port"] = binding.port
+    if binding.provisional:
+        document["provisional"] = True
     return document
 
 
@@ -883,7 +885,8 @@ def _parse_layout(document: decode.Document) -> JointLayout:
 
 def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
     fields = {"model", "bus", "bus_id", "sign", "reduction"}
-    binding = decode.exactly(entry, fields | {"port"} if "port" in entry else fields)
+    fields |= {key for key in ("port", "provisional") if key in entry}
+    binding = decode.exactly(entry, fields)
     try:
         model = ActuatorModel(decode.text(binding, "model"))
     except ValueError as exc:
@@ -905,7 +908,17 @@ def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
         sign=decode.integer(binding, "sign"),
         reduction=decode.number(binding, "reduction"),
         port=BusPort(decode.text(binding, "port")) if "port" in binding else None,
+        provisional=_provisional(binding),
     )
+
+
+def _provisional(binding: decode.Document) -> bool:
+    """A binding's provisional mark: only ever written as ``true``."""
+    if "provisional" not in binding:
+        return False
+    if binding["provisional"] is not True:
+        raise EmbodimentSchemaError(f"{binding.where}.provisional is written only as true")
+    return True
 
 
 def _parse_observation(entry: decode.Document) -> ObservationBinding:

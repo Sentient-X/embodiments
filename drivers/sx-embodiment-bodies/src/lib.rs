@@ -19,7 +19,13 @@
 //! order into one [`Chains`]: every target checked before any bus is written, a stop reaching
 //! every chain and reporting each, its budget the sum of theirs. A serial servo's `LeRobot`
 //! calibration is per unit and is supplied as [`ServoCalibrations`] to [`open_calibrated`];
-//! [`open`] supplies none, so it refuses a body with serial servos.
+//! [`open`] supplies none, so it refuses a body with serial servos it would open.
+//!
+//! A port the registry marks provisional (bindings not yet verified on the robot: the static
+//! upper body's neck and grippers) is left closed: its bridge is not opened and its axes are
+//! not in the body, so a station drives the verified rest. A supervised bring-up opens one
+//! through [`open_with`] and [`OpenOptions::allow_provisional`], which names each port it
+//! takes responsibility for.
 //!
 //! Each named bridge is opened once through a [`PortSource`]: two CAN port names on one serial
 //! share one bridge, as the B601-DM's arm and gripper can; a serial bus shares its bridge with
@@ -288,22 +294,43 @@ impl Opener {
             .ok_or_else(|| OpenError::Body(drive.embodiment.clone()))
     }
 
-    /// Each port in the order its chain is composed, with the bus its bindings put on it.
-    fn buses(self, drive: &InstanceDrive) -> Result<Vec<(String, ActuatorBus)>, OpenError> {
+    /// Each port in the order its chain is composed, with the bus its bindings put on it and
+    /// whether the registry marks it provisional.
+    fn buses(self, drive: &InstanceDrive) -> Result<Vec<(String, ActuatorBus, bool)>, OpenError> {
         match self {
             // Seeed's controller puts the arm and the gripper behind their own bridge; one
             // bridge carrying both is commissioned as the same serial under both names.
             Self::B601 => Ok(["arm", "gripper"]
                 .into_iter()
-                .map(|port| (port.to_owned(), DAMIAO_CAN))
+                .map(|port| (port.to_owned(), DAMIAO_CAN, false))
                 .collect()),
             Self::Buses(bindings) => Ok(BodyBindings::parse(bindings)?
                 .calibrated(drive)?
                 .buses()?
                 .into_iter()
-                .map(|bus| (bus.port, bus.kind))
+                .map(|bus| (bus.port, bus.kind, bus.provisional))
                 .collect()),
         }
+    }
+
+    /// The provisional ports `options` leaves closed, refusing an opt-in for a port that is
+    /// not one of this body's provisional ports.
+    fn closed(self, drive: &InstanceDrive, options: OpenOptions) -> Result<Vec<String>, OpenError> {
+        let buses = self.buses(drive)?;
+        if let Some(port) = options.allow_provisional.iter().find(|port| {
+            !buses
+                .iter()
+                .any(|(name, _, provisional)| *provisional && name == *port)
+        }) {
+            return Err(OpenError::NotProvisional((*port).to_owned()));
+        }
+        Ok(buses
+            .into_iter()
+            .filter(|(port, _, provisional)| {
+                *provisional && !options.allow_provisional.contains(&port.as_str())
+            })
+            .map(|(port, _, _)| port)
+            .collect())
     }
 
     /// Compose every bus's chain without a bridge, refusing a drive whose joints are not the
@@ -313,6 +340,7 @@ impl Opener {
         self,
         drive: &InstanceDrive,
         calibrations: &ServoCalibrations,
+        closed: &[String],
     ) -> Result<Vec<(String, Part, Wire)>, OpenError> {
         let Self::Buses(_) = self else {
             b601::b601(drive)?;
@@ -323,9 +351,11 @@ impl Opener {
             port: port.to_owned(),
             bus: kind.wire(),
         };
-        self.buses(drive)?
+        let parts: Vec<(String, Part, Wire)> = self
+            .buses(drive)?
             .into_iter()
-            .map(|(port, kind)| {
+            .filter(|(port, _, _)| !closed.contains(port))
+            .map(|(port, kind, _)| {
                 let (part, wire) = if kind == DAMIAO_CAN {
                     let body = DamiaoBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
                     body.axes(drive)?;
@@ -347,7 +377,11 @@ impl Opener {
                 };
                 Ok((port, part, wire))
             })
-            .collect()
+            .collect::<Result<_, OpenError>>()?;
+        if parts.is_empty() {
+            return Err(OpenError::Provisional(closed.to_vec()));
+        }
+        Ok(parts)
     }
 }
 
@@ -361,8 +395,27 @@ pub fn ports(drive: &InstanceDrive) -> Result<Vec<String>, OpenError> {
     Ok(Opener::of(drive)?
         .buses(drive)?
         .into_iter()
-        .map(|(port, _)| port)
+        .map(|(port, _, _)| port)
         .collect())
+}
+
+/// How a body is opened beyond its drive, commissioning and calibrations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OpenOptions<'a> {
+    /// Provisional ports to open anyway, for a supervised bring-up only: a port whose
+    /// bindings the registry has not verified on the robot (its ids, side, sign or zero).
+    /// Every provisional port not named here is left closed, its axes outside the body.
+    pub allow_provisional: &'a [&'a str],
+}
+
+/// The provisional ports opening `drive`'s body with `options` leaves closed, in state order.
+///
+/// # Errors
+///
+/// Returns [`OpenError::Body`] when no opener composes the drive's body, and
+/// [`OpenError::NotProvisional`] for an opt-in naming a port that is not provisional.
+pub fn closed_ports(drive: &InstanceDrive, options: OpenOptions) -> Result<Vec<String>, OpenError> {
+    Opener::of(drive)?.closed(drive, options)
 }
 
 /// A chain of one bus, behind the one error and feedback type every bus shares.
@@ -407,6 +460,31 @@ pub fn open_calibrated(
     calibrations: &ServoCalibrations,
     source: &mut dyn PortSource,
 ) -> Result<Body, OpenError> {
+    open_with(
+        drive,
+        commissioning,
+        calibrations,
+        OpenOptions::default(),
+        source,
+    )
+}
+
+/// [`open_calibrated`], opening also the provisional ports `options` opts in to. Every other
+/// provisional port is left closed: its bridge is not opened, it needs no calibration, and its
+/// axes are not in the body, so the body's axes are its verified ones in native state order.
+///
+/// # Errors
+///
+/// What [`open_calibrated`] refuses; [`OpenError::NotProvisional`] for an opt-in naming a port
+/// that is not provisional, and [`OpenError::Provisional`] when every port is provisional and
+/// left closed.
+pub fn open_with(
+    drive: &InstanceDrive,
+    commissioning: &Commissioning,
+    calibrations: &ServoCalibrations,
+    options: OpenOptions,
+    source: &mut dyn PortSource,
+) -> Result<Body, OpenError> {
     if commissioning.instance != drive.instance {
         return Err(OpenError::Instance {
             expected: drive.instance.clone(),
@@ -414,19 +492,20 @@ pub fn open_calibrated(
         });
     }
     let opener = Opener::of(drive)?;
-    let parts = opener.parts(drive, calibrations)?;
+    let closed = opener.closed(drive, options)?;
+    let parts = opener.parts(drive, calibrations, &closed)?;
     let declared: Vec<(String, Wire)> = match opener {
         Opener::B601 => opener
             .buses(drive)?
             .into_iter()
-            .map(|(port, _)| (port, Wire::Can))
+            .map(|(port, _, _)| (port, Wire::Can))
             .collect(),
         Opener::Buses(_) => parts
             .iter()
             .map(|(port, _, wire)| (port.clone(), *wire))
             .collect(),
     };
-    let mut links = bridges(&declared, commissioning, source)?.into_iter();
+    let mut links = bridges(&declared, &closed, commissioning, source)?.into_iter();
     let mut next = || links.next().ok_or(OpenError::MissingPort(String::new()));
     if let Opener::B601 = opener {
         let (Link::Can(arm), Link::Can(gripper)) = (next()?, next()?) else {
@@ -461,13 +540,14 @@ enum Link {
 /// bridge another port also names.
 fn bridges(
     declared: &[(String, Wire)],
+    closed: &[String],
     commissioning: &Commissioning,
     source: &mut dyn PortSource,
 ) -> Result<Vec<Link>, OpenError> {
     if let Some(extra) = commissioning
         .ports
         .keys()
-        .find(|name| !declared.iter().any(|(port, _)| port == *name))
+        .find(|name| !declared.iter().any(|(port, _)| port == *name) && !closed.contains(name))
     {
         return Err(OpenError::UndeclaredPort(extra.clone()));
     }
@@ -522,6 +602,10 @@ pub enum OpenError {
     Bus { port: String, bus: &'static str },
     #[error("the servo at bus_id {bus_id} on port {port} has no calibration supplied")]
     Uncalibrated { port: String, bus_id: u16 },
+    #[error("port {0} is not one of this body's provisional ports, so there is nothing to opt in")]
+    NotProvisional(String),
+    #[error("every port of this body is provisional and left closed: {0:?}")]
+    Provisional(Vec<String>),
     #[error("commissioning names port {0}, which this body's opener does not declare")]
     UndeclaredPort(String),
     #[error("this body's opener needs port {0}, which commissioning does not name")]

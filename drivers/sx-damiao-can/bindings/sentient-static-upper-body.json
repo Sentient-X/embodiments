@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "32eb8c6c4e69ef39bdc7a42be1657bee8586163c827eacbf9544ab6b41085a68",
+  "id": "bd8756977dae4d9562440d6e28ecc75791b12ca2e2b9e287c11cb4ace9eefbb6",
   "axes": [
     {
       "joint": "torso_joint",
@@ -9,6 +9,7 @@
       "model": "damiao_dm8009",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 31,
       "sign": 1,
       "reduction": 1.0
@@ -20,6 +21,7 @@
       "model": "damiao_dm8009",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 24,
       "sign": 1,
       "reduction": 1.0
@@ -31,6 +33,7 @@
       "model": "damiao_dm8009",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 25,
       "sign": 1,
       "reduction": 1.0
@@ -42,6 +45,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 26,
       "sign": 1,
       "reduction": 1.0
@@ -53,6 +57,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 27,
       "sign": 1,
       "reduction": 1.0
@@ -64,6 +69,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 28,
       "sign": 1,
       "reduction": 1.0
@@ -75,6 +81,7 @@
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 29,
       "sign": 1,
       "reduction": 1.0
@@ -86,6 +93,7 @@
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 30,
       "sign": 1,
       "reduction": 1.0
@@ -97,6 +105,7 @@
       "model": "damiao_dm8009",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 9,
       "sign": 1,
       "reduction": 1.0
@@ -108,6 +117,7 @@
       "model": "damiao_dm8009",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 16,
       "sign": 1,
       "reduction": 1.0
@@ -119,6 +129,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 17,
       "sign": 1,
       "reduction": 1.0
@@ -130,6 +141,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 18,
       "sign": 1,
       "reduction": 1.0
@@ -141,6 +153,7 @@
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 19,
       "sign": 1,
       "reduction": 1.0
@@ -152,6 +165,7 @@
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 20,
       "sign": 1,
       "reduction": 1.0
@@ -163,6 +177,7 @@
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
+      "provisional": false,
       "bus_id": 21,
       "sign": 1,
       "reduction": 1.0
@@ -174,6 +189,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "left_gripper",
+      "provisional": true,
       "bus_id": 3,
       "sign": 1,
       "reduction": 1.0
@@ -185,6 +201,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "left_gripper",
+      "provisional": true,
       "bus_id": 4,
       "sign": 1,
       "reduction": 1.0
@@ -196,6 +213,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "right_gripper",
+      "provisional": true,
       "bus_id": 1,
       "sign": 1,
       "reduction": 1.0
@@ -207,6 +225,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "right_gripper",
+      "provisional": true,
       "bus_id": 2,
       "sign": 1,
       "reduction": 1.0
@@ -218,6 +237,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 1,
       "sign": 1,
       "reduction": 1.0
@@ -229,6 +249,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 2,
       "sign": 1,
       "reduction": 1.0
@@ -240,6 +261,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 3,
       "sign": 1,
       "reduction": 1.0
@@ -251,6 +273,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 4,
       "sign": 1,
       "reduction": 1.0
@@ -262,6 +285,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 5,
       "sign": 1,
       "reduction": 1.0
@@ -273,6 +297,7 @@
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
+      "provisional": true,
       "bus_id": 6,
       "sign": 1,
       "reduction": 1.0

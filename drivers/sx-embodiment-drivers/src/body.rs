@@ -27,6 +27,9 @@ pub struct BodyBindings {
     /// The body's content id when it was rendered.
     pub id: String,
     pub axes: Vec<BoundAxis>,
+    /// The ports whose bindings the registry marks provisional (`ActuatorBinding.provisional`):
+    /// not yet verified on the robot, so not driven unless a supervised bring-up opts in.
+    pub provisional: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +49,8 @@ struct Axis {
     model: String,
     bus: String,
     port: String,
+    #[serde(default)]
+    provisional: bool,
     bus_id: u16,
     sign: i8,
     reduction: f64,
@@ -84,6 +89,8 @@ pub enum BodyError {
         embodiment: String,
         ports: Vec<String>,
     },
+    #[error("{embodiment}'s port {port} has both provisional and verified bindings")]
+    MixedProvisional { embodiment: String, port: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]
     Joints {
         embodiment: String,
@@ -99,6 +106,8 @@ pub struct Bus {
     pub port: String,
     pub kind: ActuatorBus,
     pub axes: Vec<BoundAxis>,
+    /// Whether the registry marks this bus's bindings provisional.
+    pub provisional: bool,
 }
 
 impl BodyBindings {
@@ -115,6 +124,24 @@ impl BodyBindings {
             axes,
         } = serde_json::from_str(document)
             .map_err(|error| BodyError::Document(error.to_string()))?;
+        let mut provisional: Vec<String> = Vec::new();
+        let mut verified: Vec<String> = Vec::new();
+        for axis in &axes {
+            let (marks, others) = if axis.provisional {
+                (&mut provisional, &verified)
+            } else {
+                (&mut verified, &provisional)
+            };
+            if others.contains(&axis.port) {
+                return Err(BodyError::MixedProvisional {
+                    embodiment: embodiment.clone(),
+                    port: axis.port.clone(),
+                });
+            }
+            if !marks.contains(&axis.port) {
+                marks.push(axis.port.clone());
+            }
+        }
         let axes = axes
             .into_iter()
             .map(|axis| {
@@ -148,6 +175,7 @@ impl BodyBindings {
             embodiment,
             id,
             axes,
+            provisional,
         })
     }
 
@@ -182,6 +210,7 @@ impl BodyBindings {
                 port: axis.port.clone(),
                 kind: axis.binding.bus,
                 axes: vec![axis.clone()],
+                provisional: self.provisional.contains(&axis.port),
             });
         }
         Ok(buses)
@@ -318,6 +347,33 @@ mod tests {
         let can = body.clone().on(ActuatorBus::new("damiao_can"));
         assert_eq!(can.axes.len(), 2);
         assert_eq!(can.id, body.id);
+    }
+
+    #[test]
+    fn a_provisional_port_is_named_and_a_half_provisional_port_refused() {
+        let provisional = |joint: &str, id: u16| {
+            axis(joint, "feetech_serial", "neck", id)
+                .replace("\"bus_id\"", "\"provisional\": true, \"bus_id\"")
+        };
+        let body = BodyBindings::parse(&document(&[
+            axis("j1", "damiao_can", "can", 1),
+            provisional("n1", 1),
+            provisional("n2", 2),
+        ]))
+        .expect("parses");
+        assert_eq!(body.provisional, ["neck"]);
+        let buses = body.buses().expect("buses");
+        assert_eq!(
+            buses.iter().map(|bus| bus.provisional).collect::<Vec<_>>(),
+            [false, true]
+        );
+        assert!(matches!(
+            BodyBindings::parse(&document(&[
+                provisional("n1", 1),
+                axis("n2", "feetech_serial", "neck", 2),
+            ])),
+            Err(BodyError::MixedProvisional { port, .. }) if port == "neck"
+        ));
     }
 
     #[test]

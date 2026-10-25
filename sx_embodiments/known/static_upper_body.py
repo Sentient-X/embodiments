@@ -44,27 +44,33 @@ The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_
 ``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
 published as one side-by-side ``head`` track (:data:`STATIC_UPPER_BODY_RIG`).
 
-**The neck, from a read-only probe on 2026-10-25.** The received file has no entry for the
+**The neck and grippers are provisional, in data.** Each of their bindings is marked
+``provisional`` (:class:`~sx_embodiments.layout.ActuatorBinding`): no driver moves them unless
+a person bringing the robot up opts in for their port, and the station's normal path drives
+the fifteen Damiao axes with them left off.
+
+*The neck, from a read-only probe on 2026-10-25.* The received file has no entry for the
 SO-101 neck either. A probe that wrote nothing found it on its own USB serial bus (a WCH
 CH343, 1,000,000 baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order,
 the sixth the camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are
-bound here on a serial bus named ``neck``, identity drive map. Still provisional: the
-identity sign and that each joint's zero is its servo's mid-range, as LeRobot's degree mode
-assumes, are unconfirmed, and the servos' calibration registers are a unit's facts, not the
-design's, so the station's opener refuses to open the neck until that unit's LeRobot
-calibration is supplied, and then refuses any servo whose registers disagree with it. The
-probe found ids 2, 3, 4 and 6 resting outside their calibrated ranges: a first command must
-be slewed from the observed position, never snapped into range.
+bound here on a serial bus named ``neck``, identity drive map. Unverified: each joint's sign
+and zero. The degree normalization puts each joint's zero at its servo's calibrated
+mid-range, and the declared ranges are lopsided about zero (shoulder lift -0.03..3.63 rad,
+elbow flex -3.40..0.09), so that cannot be right for every joint: governed from where the
+probe found it, the first motion would carry shoulder lift about +1.76 rad, elbow flex
+-1.48 and camera tilt +2.32 toward that unverified zero. The servos' calibration registers
+are a unit's facts, not the design's, and are supplied at open. The probe found ids 2, 3, 4
+and 6 resting outside their calibrated ranges.
 
-**The grippers, from the same probe.** They are not in the received motor table either, and
-are not Dynamixel: each finger has its own Feetech STS3215 (model 777, firmware 3.10), and each
-gripper's two are on a USB serial bus of their own (a CH343, 1,000,000 baud), one bus answering
-at ids 1 and 2 and the other at 3 and 4. Which bus is the left gripper and which the right, and
-which id drives which finger, is not yet checked on the robot: they are bound provisionally,
-the bus at ids 1 and 2 as the right gripper (as the right arm has the lower CAN ids) on port
-``right_gripper``, the other as ``left_gripper``, the lower id as the left finger, identity
-drive map, and each finger's declared range as its servo's calibrated range. Like the neck,
-they are refused at open until each unit's LeRobot calibration is supplied.
+*The grippers, from the same probe.* Not in the received motor table, and not Dynamixel: each
+finger has its own Feetech STS3215 (model 777, firmware 3.10), and each gripper's two are on a
+USB serial bus of their own (a CH343, 1,000,000 baud), one bus answering at ids 1 and 2 and
+the other at 3 and 4. Which bus is which side, and which id drives which finger, is
+unverified; the choice here is a guess, stated plainly: the bus at ids 1 and 2 is
+``right_gripper`` (by analogy with the right arm's lower CAN ids), the other ``left_gripper``,
+and the lower id is the left finger. An earlier commissioning fixture guessed the opposite
+sides; neither was checked. Each finger's declared range is taken as its servo's calibrated
+range, also unverified.
 """
 
 from typing import Final
@@ -231,13 +237,15 @@ STATIC_UPPER_BODY_NECK_PORT: Final = BusPort("neck")
 
 
 def _sts3215(bus_id: int, port: BusPort) -> DirectDrive:
-    """One STS3215 on one of the body's Feetech buses, identity drive map. Provisional."""
+    """One STS3215 on one of the body's Feetech buses, identity drive map, marked provisional:
+    no driver moves it until a supervised bring-up opts in for its port."""
     return DirectDrive(
         ActuatorBinding(
             model=ActuatorModel.FEETECH_STS3215,
             bus=ActuatorBus.FEETECH_SERIAL,
             bus_id=bus_id,
             port=port,
+            provisional=True,
         )
     )
 

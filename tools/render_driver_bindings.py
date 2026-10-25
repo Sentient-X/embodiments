@@ -287,6 +287,7 @@ def render(name: str) -> str:
                 "model": binding.model.value,
                 "bus": binding.bus.value,
                 "port": binding.bus_port,
+                "provisional": binding.provisional,
                 "bus_id": binding.bus_id,
                 "sign": binding.sign,
                 "reduction": binding.reduction,
