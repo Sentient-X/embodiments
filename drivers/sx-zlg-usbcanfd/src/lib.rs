@@ -18,6 +18,9 @@ pub mod timing;
 pub mod usb;
 pub mod wire;
 
-pub use device::{Channel, ChannelOptions, Found, Options, Probe, UsbCanFd, ZlgError, list};
-pub use engine::{ChannelStats, DeviceStats};
+pub use device::{
+    Channel, ChannelOptions, Found, LinkError, Options, Probe, ReceiveWait, Recovery, UsbCanFd,
+    ZlgError, list,
+};
+pub use engine::{ChannelStats, DeviceStats, Stall, TxBudget, TxFailure};
 pub use timing::Bitrate;

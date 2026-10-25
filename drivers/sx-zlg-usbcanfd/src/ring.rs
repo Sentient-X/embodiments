@@ -54,6 +54,12 @@ impl<T: Copy> Ring<T> {
         Ok(())
     }
 
+    /// The oldest value, left in place.
+    #[must_use]
+    pub fn peek(&self) -> Option<&T> {
+        (self.len > 0).then(|| &self.slots[self.head])
+    }
+
     /// The oldest value.
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
@@ -99,6 +105,7 @@ mod tests {
         ring.push(2).expect("room");
         ring.push(3).expect("room");
         assert_eq!(ring.push(4), Err(4));
+        assert_eq!(ring.peek(), Some(&1));
         assert_eq!(ring.free(), 0);
         let mut out = [0; 2];
         assert_eq!(ring.drain_into(&mut out), 2);

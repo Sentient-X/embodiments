@@ -22,7 +22,7 @@ use thiserror::Error;
 
 use crate::engine::{
     Buffers, ChannelStats, DeviceStats, Engine, EngineConfig, RX_RING, RX_TRANSFER_LEN,
-    RX_TRANSFERS, Shared, TX_QUEUE, ThreadWaker, TxFailure, lock,
+    RX_TRANSFERS, Shared, Stall, ThreadWaker, TxBudget, TxFailure, TxSide, TxState, lock,
 };
 use crate::timing::{Bitrate, TimingError};
 use crate::usb::{BulkPipe, CommandError, Commands, control_in};
@@ -117,12 +117,25 @@ impl Default for Options {
     }
 }
 
+/// How a caller waiting for a frame waits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub enum ReceiveWait {
+    /// Sleep until the I/O thread delivers a frame: no CPU while waiting.
+    #[default]
+    Block,
+    /// Poll without sleeping, a CPU core per waiting caller, for whatever the wake-up costs.
+    /// Opt-in only; the README gives the measured difference.
+    Spin,
+}
+
 /// How a channel is opened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelOptions {
     pub bitrate: Bitrate,
     /// The channel's 120 Ω termination; the reference enables it (§3.4).
     pub termination: bool,
+    /// How [`CanPort::receive_until`] waits.
+    pub receive_wait: ReceiveWait,
 }
 
 impl Default for ChannelOptions {
@@ -130,7 +143,84 @@ impl Default for ChannelOptions {
         Self {
             bitrate: Bitrate::CLASSIC_1M,
             termination: true,
+            receive_wait: ReceiveWait::Block,
         }
+    }
+}
+
+/// How a stalled channel was brought back (§3.8: there is no per-channel reset; stop, then
+/// initialise and start again).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum Recovery {
+    /// Channel stop, initialise, transmit timeout, termination, start.
+    ChannelRestart,
+    /// Channel stop, device close, device open, then the channel's open again; tried when a
+    /// restart did not hold and no other channel is open.
+    DeviceReopen,
+}
+
+/// What the transmit side reports to a sender, inside the [`io::Error`] its `send` returns
+/// (`error.get_ref()` downcasts to it).
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum LinkError {
+    /// `WouldBlock`: the queue already holds its bus-time budget; nothing was queued.
+    #[error(
+        "ZLG channel {channel}: the transmit queue is full: it holds {queued:?} of bus time, its budget being {budget:?} (half the device transmit timeout); the frame was not queued, send it once the bus has drained"
+    )]
+    QueueFull {
+        channel: u8,
+        queued: Duration,
+        budget: Duration,
+    },
+    /// `Other`: a batch failed since the last send; reported once.
+    #[error("ZLG channel {channel}: {failure}")]
+    BatchFailed { channel: u8, failure: TxFailure },
+    /// `Interrupted`: the channel had stalled and was recovered without a replug; its queue
+    /// was dropped and this frame was not sent.
+    #[error(
+        "ZLG channel {channel}: {cause}; recovered by {action:?} without a replug, {dropped} queued frames were dropped and this frame was not sent: send again"
+    )]
+    Recovered {
+        channel: u8,
+        cause: Stall,
+        action: Recovery,
+        dropped: u64,
+    },
+    /// `WouldBlock`: another caller is recovering the channel.
+    #[error("ZLG channel {channel}: the channel is being recovered; send again")]
+    Recovering { channel: u8 },
+    /// `NotConnected`: recovery failed or did not hold; only a power cycle helps.
+    #[error(
+        "ZLG channel {channel}: {cause}, and recovery failed: {detail}. The adapter must be power-cycled: unplug it and plug it back in"
+    )]
+    PowerCycle {
+        channel: u8,
+        cause: Stall,
+        detail: String,
+    },
+}
+
+impl LinkError {
+    #[must_use]
+    pub const fn kind(&self) -> io::ErrorKind {
+        match self {
+            Self::QueueFull { .. } | Self::Recovering { .. } => io::ErrorKind::WouldBlock,
+            Self::BatchFailed { .. } => io::ErrorKind::Other,
+            Self::Recovered { .. } => io::ErrorKind::Interrupted,
+            Self::PowerCycle { .. } => io::ErrorKind::NotConnected,
+        }
+    }
+
+    /// The link error inside `error`, if it carries one.
+    #[must_use]
+    pub fn of(error: &io::Error) -> Option<&Self> {
+        error.get_ref()?.downcast_ref()
+    }
+}
+
+impl From<LinkError> for io::Error {
+    fn from(error: LinkError) -> Self {
+        Self::new(error.kind(), error)
     }
 }
 
@@ -183,6 +273,16 @@ impl Drop for Core {
         if let Some(thread) = lock(&self.io).take() {
             let _ = thread.join();
         }
+    }
+}
+
+impl Core {
+    fn transmit_timeout(&self) -> Duration {
+        Duration::from_millis(u64::from(self.options.transmit_timeout_ms.clamp(1, 4000)))
+    }
+
+    fn budget(&self, bitrate: Bitrate) -> TxBudget {
+        TxBudget::new(bitrate, self.transmit_timeout(), self.probe.batch_limit)
     }
 }
 
@@ -271,7 +371,7 @@ impl UsbCanFd {
         if index >= channels {
             return Err(ZlgError::NoChannel { index, channels });
         }
-        let (nominal, data) = options.bitrate.timings(core.probe.clock_hz)?;
+        options.bitrate.timings(core.probe.clock_hz)?;
         let mut lifecycle = lock(&core.lifecycle);
         let slot = usize::from(index);
         if lifecycle.open[slot] {
@@ -284,30 +384,15 @@ impl UsbCanFd {
         let state = &core.shared.channels[slot];
         lock(&state.rx).ring.clear();
         lock(&state.rx).unreported_loss = 0;
-        lock(&state.tx).clear();
-        *lock(&state.tx_failure) = None;
+        *lock(&state.tx) = TxSide::new(options.bitrate, core.budget(options.bitrate));
         state.open.store(true, Ordering::Relaxed);
-        let timeout = core.options.transmit_timeout_ms.clamp(1, 4000);
-        let termination = if options.termination { 0x55 } else { 0xAA };
-        let steps: [(Command, u8, &[u8]); 4] = [
-            (
-                Command::ChannelInit,
-                index,
-                &init_payload(core.probe.clock_hz, 0, nominal, data),
-            ),
-            (Command::TransmitTimeout, 0, &timeout.to_le_bytes()),
-            (Command::Termination, index, &[termination]),
-            (Command::ChannelStart, index, &[]),
-        ];
-        for (command, argument, payload) in steps {
-            if let Err(error) = lifecycle.commands.run(command, argument, payload) {
-                state.open.store(false, Ordering::Relaxed);
-                let _ = lifecycle.commands.run(Command::ChannelStop, index, &[]);
-                if first {
-                    let _ = lifecycle.commands.run(Command::DeviceClose, 0, &[]);
-                }
-                return Err(error.into());
+        if let Err(error) = start(&mut lifecycle.commands, core, index, options) {
+            state.open.store(false, Ordering::Relaxed);
+            let _ = lifecycle.commands.run(Command::ChannelStop, index, &[]);
+            if first {
+                let _ = lifecycle.commands.run(Command::DeviceClose, 0, &[]);
             }
+            return Err(error);
         }
         lifecycle.open[slot] = true;
         Ok(Channel {
@@ -316,6 +401,32 @@ impl UsbCanFd {
             options,
         })
     }
+}
+
+/// Initialise and start channel `index` (§3.8 steps 3–6).
+fn start(
+    commands: &mut Commands,
+    core: &Core,
+    index: u8,
+    options: ChannelOptions,
+) -> Result<(), ZlgError> {
+    let (nominal, data) = options.bitrate.timings(core.probe.clock_hz)?;
+    let timeout = core.options.transmit_timeout_ms.clamp(1, 4000);
+    let termination = if options.termination { 0x55 } else { 0xAA };
+    let steps: [(Command, u8, &[u8]); 4] = [
+        (
+            Command::ChannelInit,
+            index,
+            &init_payload(core.probe.clock_hz, 0, nominal, data),
+        ),
+        (Command::TransmitTimeout, 0, &timeout.to_le_bytes()),
+        (Command::Termination, index, &[termination]),
+        (Command::ChannelStart, index, &[]),
+    ];
+    for (command, argument, payload) in steps {
+        commands.run(command, argument, payload)?;
+    }
+    Ok(())
 }
 
 /// Select the device's one configuration when the host left it unconfigured. macOS leaves a
@@ -421,7 +532,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         packet_sizes,
         configured_on_open,
     };
-    let shared = Arc::new(Shared::new(channels, RX_RING, TX_QUEUE));
+    let shared = Arc::new(Shared::new(channels, RX_RING));
     let packet = rx.max_packet_size().max(1);
     let rx_request = RX_TRANSFER_LEN.div_ceil(packet) * packet;
     let in_flight = options.in_flight.clamp(1, 2);
@@ -433,6 +544,9 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         reply_timeout: Duration::from_millis(
             1000 + u64::from(options.transmit_timeout_ms.clamp(1, 4000)),
         ),
+        transmit_timeout: Duration::from_millis(u64::from(
+            options.transmit_timeout_ms.clamp(1, 4000),
+        )),
         in_flight,
     };
     let buffers = Buffers {
@@ -583,26 +697,151 @@ impl Channel {
         lock(&self.state().rx).last_error
     }
 
+    /// The bus-time budget this channel's transmits are held to.
+    #[must_use]
+    pub fn budget(&self) -> TxBudget {
+        lock(&self.state().tx).budget
+    }
+
     /// Queue `frame` (classic or FD) for transmission.
     ///
     /// # Errors
     ///
-    /// As [`CanPort::send`].
+    /// As [`CanPort::send`]; every refusal carries a [`LinkError`].
     pub fn send_frame(&mut self, frame: TxFrame) -> io::Result<()> {
         self.usable()?;
         let state = self.state();
-        if let Some(failure) = lock(&state.tx_failure).take() {
-            return Err(io::Error::other(describe(failure)));
+        let mut tx = lock(&state.tx);
+        match &tx.state {
+            TxState::Running | TxState::Held { .. } => {}
+            TxState::Stalled(cause) => {
+                let cause = *cause;
+                drop(tx);
+                return Err(self.recover(cause).into());
+            }
+            TxState::Recovering => {
+                return Err(LinkError::Recovering {
+                    channel: self.index,
+                }
+                .into());
+            }
+            TxState::Dead { cause, detail } => {
+                return Err(LinkError::PowerCycle {
+                    channel: self.index,
+                    cause: *cause,
+                    detail: detail.clone(),
+                }
+                .into());
+            }
         }
-        if lock(&state.tx).push(frame).is_err() {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                format!("ZLG channel {}: the transmit queue is full", self.index),
-            ));
+        if let Some(failure) = tx.failure.take() {
+            return Err(LinkError::BatchFailed {
+                channel: self.index,
+                failure,
+            }
+            .into());
         }
+        if tx.push(frame).is_err() {
+            state.counters.tx_queue_full.fetch_add(1, Ordering::Relaxed);
+            return Err(LinkError::QueueFull {
+                channel: self.index,
+                queued: tx.queued,
+                budget: tx.budget.queue,
+            }
+            .into());
+        }
+        drop(tx);
         state.counters.tx_queued.fetch_add(1, Ordering::Relaxed);
         self.core.shared.wake();
         Ok(())
+    }
+
+    /// Mark the channel stalled as if its adapter had stopped replying, so the next send runs
+    /// the real recovery against the adapter: a hardware check of [`Recovery`] that sends only
+    /// the channel lifecycle's commands.
+    #[doc(hidden)]
+    pub fn inject_stall(&self) {
+        self.state().stall(Stall::NoReply { frames: 0 });
+    }
+
+    /// Bring a stalled channel back without a replug (§3.8): first a channel restart; if the
+    /// channel stalls again before any batch is accepted, a device close and open (only when no
+    /// other channel is open, since it stops them too); after that, or when the adapter does not
+    /// answer the commands, the channel is dead until the adapter is power-cycled.
+    fn recover(&self, cause: Stall) -> LinkError {
+        let core = &self.core;
+        let mut lifecycle = lock(&core.lifecycle);
+        let state = self.state();
+        let attempt = {
+            let mut tx = lock(&state.tx);
+            if tx.state != TxState::Stalled(cause) {
+                return LinkError::Recovering {
+                    channel: self.index,
+                };
+            }
+            tx.state = TxState::Recovering;
+            tx.recoveries_since_success
+        };
+        let alone = lifecycle
+            .open
+            .iter()
+            .enumerate()
+            .all(|(slot, open)| !open || slot == usize::from(self.index));
+        let action = match attempt {
+            0 => Some(Recovery::ChannelRestart),
+            1 if alone => Some(Recovery::DeviceReopen),
+            _ => None,
+        };
+        let result = match action {
+            None => Err(format!(
+                "the channel stalled again after {attempt} recoveries with no batch accepted between them"
+            )),
+            Some(action) => {
+                let commands = &mut lifecycle.commands;
+                let mut run = || -> Result<(), ZlgError> {
+                    commands.run(Command::ChannelStop, self.index, &[])?;
+                    if action == Recovery::DeviceReopen {
+                        commands.run(Command::DeviceClose, 0, &[])?;
+                        commands.run(Command::DeviceOpen, 0, &[])?;
+                    }
+                    start(commands, core, self.index, self.options)
+                };
+                run().map_err(|error| format!("{action:?}: {error}"))
+            }
+        };
+        let mut tx = lock(&state.tx);
+        let dropped = tx.clear() as u64;
+        state
+            .counters
+            .tx_dropped
+            .fetch_add(dropped, Ordering::Relaxed);
+        tx.failure = None;
+        tx.refusals = 0;
+        match (result, action) {
+            (Ok(()), Some(action)) => {
+                tx.state = TxState::Running;
+                tx.recoveries_since_success += 1;
+                state.counters.recoveries.fetch_add(1, Ordering::Relaxed);
+                LinkError::Recovered {
+                    channel: self.index,
+                    cause,
+                    action,
+                    dropped,
+                }
+            }
+            (result, _) => {
+                let detail = result.err().unwrap_or_default();
+                tx.state = TxState::Dead {
+                    cause,
+                    detail: detail.clone(),
+                };
+                LinkError::PowerCycle {
+                    channel: self.index,
+                    cause,
+                    detail,
+                }
+            }
+        }
     }
 
     /// The next received frame of any format.
@@ -623,6 +862,55 @@ impl Channel {
         Ok(rx.ring.pop())
     }
 
+    /// The next received frame of any format before `deadline`, waiting as the channel's
+    /// [`ReceiveWait`] says: asleep until the I/O thread delivers one, or polling.
+    ///
+    /// # Errors
+    ///
+    /// As [`Channel::receive_frame`].
+    pub fn receive_frame_until(
+        &mut self,
+        deadline: Instant,
+    ) -> io::Result<Option<crate::wire::RxFrame>> {
+        if self.options.receive_wait == ReceiveWait::Spin {
+            loop {
+                if let Some(frame) = self.receive_frame()? {
+                    return Ok(Some(frame));
+                }
+                if Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                std::hint::spin_loop();
+            }
+        }
+        let state = &self.core.shared.channels[usize::from(self.index)];
+        let mut rx = lock(&state.rx);
+        loop {
+            if let Some(reason) = lock(&self.core.shared.fatal).as_ref() {
+                return Err(io::Error::new(io::ErrorKind::NotConnected, reason.clone()));
+            }
+            if rx.unreported_loss > 0 {
+                let lost = std::mem::take(&mut rx.unreported_loss);
+                return Err(io::Error::other(format!(
+                    "ZLG channel {}: {lost} received frames were lost to a full receive ring",
+                    self.index
+                )));
+            }
+            if let Some(frame) = rx.ring.pop() {
+                return Ok(Some(frame));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            rx = state
+                .rx_ready
+                .wait_timeout(rx, deadline - now)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+    }
+
     fn state(&self) -> &crate::engine::ChannelShared {
         &self.core.shared.channels[usize::from(self.index)]
     }
@@ -631,27 +919,6 @@ impl Channel {
         match lock(&self.core.shared.fatal).as_ref() {
             Some(reason) => Err(io::Error::new(io::ErrorKind::NotConnected, reason.clone())),
             None => Ok(()),
-        }
-    }
-}
-
-fn describe(failure: TxFailure) -> String {
-    match failure {
-        TxFailure::Refused { status, frames } => format!(
-            "the adapter refused a batch of {frames} frames with status {status} (meaning undocumented); they were not sent"
-        ),
-        TxFailure::Timeout { frames } => {
-            format!(
-                "no transmit reply came for a batch of {frames} frames; they may not have been sent"
-            )
-        }
-        TxFailure::Usb { failure, frames } => {
-            format!(
-                "a batch of {frames} frames failed on USB ({failure:?}); they may not have been sent"
-            )
-        }
-        TxFailure::Reply { frames } => {
-            format!("the transmit reply for a batch of {frames} frames could not be read")
         }
     }
 }
@@ -673,6 +940,21 @@ impl CanPort for Channel {
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
         loop {
             let Some(frame) = self.receive_frame()? else {
+                return Ok(None);
+            };
+            if frame.remote || frame.len > 8 {
+                continue;
+            }
+            let mut data = [0_u8; 8];
+            data.copy_from_slice(&frame.data[..8]);
+            return Ok(Some(CanFrame { id: frame.id, data }));
+        }
+    }
+
+    /// As `receive`, waiting until `deadline` for a classic frame.
+    fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
+        loop {
+            let Some(frame) = self.receive_frame_until(deadline)? else {
                 return Ok(None);
             };
             if frame.remote || frame.len > 8 {

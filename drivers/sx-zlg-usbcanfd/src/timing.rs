@@ -1,5 +1,7 @@
 //! Bit timing for a channel's nominal and data phases (`docs/PROTOCOL.md` §3.3).
 
+use std::time::Duration;
+
 use thiserror::Error;
 
 use crate::wire::Timing;
@@ -158,6 +160,42 @@ fn search(
     first.ok_or(refused)
 }
 
+/// The longest one frame can hold the bus, worst-case bit stuffing included: what the transmit
+/// path budgets for it. Classic CAN: `34 + 8n` stuffable bits (standard id; `54 + 8n` extended),
+/// at most one stuff bit per four after the first, then 13 fixed bits (CRC delimiter, ACK slot
+/// and delimiter, end of frame, interframe space). An 8-byte standard frame is 135 bits, 135 µs
+/// at 1 Mbit/s. CAN FD: the arbitration fields and the 13 tail bits at the nominal rate, the
+/// control, data, stuff count and CRC at the data rate when the frame switches bit rate.
+#[must_use]
+pub fn frame_time(bitrate: Bitrate, extended: bool, fd: bool, brs: bool, len: u8) -> Duration {
+    let data = 8 * u64::from(len);
+    let (nominal_rate, data_rate) = match bitrate {
+        Bitrate::Classic(rate) => (rate, rate),
+        Bitrate::Fd { nominal, data } => (nominal, data),
+    };
+    let ns = |bits: u64, rate: u32| bits * 1_000_000_000 / u64::from(rate.max(1));
+    if !fd {
+        let stuffable = if extended { 54 } else { 34 } + data;
+        let bits = stuffable + (stuffable - 1) / 4 + 13;
+        return Duration::from_nanos(ns(bits, nominal_rate));
+    }
+    let arbitration = if extended { 36 } else { 17 };
+    let crc = if len > 16 { 21 } else { 17 };
+    // ESI, DLC and the data stuff dynamically; the stuff count and CRC carry fixed stuff bits.
+    let dynamic = 5 + data;
+    let phase = dynamic + (dynamic - 1) / 4 + 4 + crc + crc.div_ceil(4) + 1;
+    let nominal_bits = arbitration + (arbitration - 1) / 4 + 13;
+    let rate = if brs { data_rate } else { nominal_rate };
+    Duration::from_nanos(ns(nominal_bits, nominal_rate) + ns(phase, rate))
+}
+
+/// The bus time of the frame [`frame_time`] budgets most for at this bit rate among classic
+/// ones: an 8-byte standard-id data frame, the Damiao bus's every frame.
+#[must_use]
+pub fn classic_frame_time(bitrate: Bitrate) -> Duration {
+    frame_time(bitrate, false, false, false, 8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +243,27 @@ mod tests {
         }
         assert!(nominal(80_000_000, 0).is_err());
         assert!(data_phase(80_000_000, 7_000_000).is_err());
+    }
+
+    #[test]
+    fn bus_time_is_the_worst_case_stuffed_frame() {
+        let one_m = Bitrate::CLASSIC_1M;
+        assert_eq!(classic_frame_time(one_m), Duration::from_micros(135));
+        assert_eq!(
+            frame_time(one_m, false, false, false, 0),
+            Duration::from_micros(34 + 8 + 13)
+        );
+        assert_eq!(
+            frame_time(one_m, true, false, false, 8),
+            Duration::from_micros(118 + 29 + 13)
+        );
+        let fd = Bitrate::Fd {
+            nominal: 1_000_000,
+            data: 5_000_000,
+        };
+        let switched = frame_time(fd, false, true, true, 64);
+        let unswitched = frame_time(fd, false, true, false, 64);
+        assert!(switched < unswitched / 3, "{switched:?} {unswitched:?}");
+        assert!(switched > Duration::from_micros(100) && switched < Duration::from_micros(200));
     }
 }
