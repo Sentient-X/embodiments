@@ -80,8 +80,9 @@ def test_the_arm_bindings_are_the_hardware_profile() -> None:
 
 
 def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None:
-    """Every source joint renders with its origin and axis; the four reversed wrist axes carry
-    the donor's motor-coordinate limits negated, every other joint its limits unchanged."""
+    """Every source joint but the neck's renders with its origin and axis; the four reversed
+    wrist axes carry the donor's motor-coordinate limits negated, every other joint its limits
+    unchanged."""
     asset = ROOT / "assets/sentient_static_upper_body"
     source = {
         j.attrib["name"]: j
@@ -97,8 +98,11 @@ def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None
         "right_wrist_pitch_joint",
         "right_wrist_roll_joint",
     }
+    neck = {name for name in source if name.startswith("so101_") and name != "so101_mount_joint"}
     assert set(source) <= set(rendered)
     for name, joint in source.items():
+        if name in neck or name == "zed2i_left_optical_joint" or name == "so101_mount_joint":
+            continue  # the official neck's, below
         ours = rendered[name]
         for tag in ("origin", "axis", "parent", "child"):
             theirs, mine = joint.find(tag), ours.find(tag)
@@ -112,6 +116,28 @@ def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None
         lower, upper = float(theirs.attrib["lower"]), float(theirs.attrib["upper"])
         expected = (-upper, -lower) if name in reversed_axes else (lower, upper)
         assert (float(mine.attrib["lower"]), float(mine.attrib["upper"])) == expected, name
+
+
+def test_every_link_off_the_neck_draws_allisa_bots_meshes_where_it_does() -> None:
+    asset = ROOT / "assets/sentient_static_upper_body"
+
+    def visuals(path: Path) -> dict[str, list[tuple[str, dict[str, str]]]]:
+        out: dict[str, list[tuple[str, dict[str, str]]]] = {}
+        for link in ET.parse(path).getroot().findall("link"):
+            parts: list[tuple[str, dict[str, str]]] = []
+            for visual in link.findall("visual"):
+                mesh, origin = visual.find("geometry/mesh"), visual.find("origin")
+                assert mesh is not None and origin is not None
+                parts.append((mesh.attrib["filename"].rsplit("/", 1)[-1], dict(origin.attrib)))
+            out[link.attrib["name"]] = parts
+        return out
+
+    source = visuals(asset / "source/allisa_bot.urdf")
+    rendered = visuals(asset / "sentient_static_upper_body.urdf")
+    for name, parts in source.items():
+        if name.startswith("so101_") or name == "camera_link":
+            continue  # the official neck, carrying allisa_bot's base, holder, bracket and ZED
+        assert rendered[name] == parts, name
 
 
 def test_the_neck_is_bound_provisionally_as_an_so101_on_its_own_port() -> None:
@@ -149,3 +175,46 @@ def test_each_gripper_is_two_feetech_servos_on_a_bus_of_its_own() -> None:
             b is not None and b.model is ActuatorModel.FEETECH_STS3215 and b.bus_port == port
             for b in bindings
         )
+
+
+def test_the_neck_is_the_official_new_calibration_so101() -> None:
+    """Below its base the neck is TheRobotStudio's so101_new_calib chain under our names, so a
+    LeRobot degree reading is its joint angle; the camera tilt keeps the official origin and
+    axis and declares the free arc its camera rests in."""
+    asset = ROOT / "assets/sentient_static_upper_body"
+    official = {
+        j.attrib["name"]: j
+        for j in ET.parse(asset / "source/so101_new_calib.urdf").getroot().findall("joint")
+    }
+    ours = {
+        j.attrib["name"]: j
+        for j in ET.parse(asset / "sentient_static_upper_body.urdf").getroot().findall("joint")
+    }
+    names = {
+        "shoulder_pan": "so101_shoulder_pan_joint",
+        "shoulder_lift": "so101_shoulder_lift_joint",
+        "elbow_flex": "so101_elbow_flex_joint",
+        "wrist_flex": "so101_wrist_flex_joint",
+        "wrist_roll": "so101_wrist_roll_joint",
+        "gripper": "so101_camera_tilt_joint",
+    }
+
+    def numbers(joint: ET.Element, tag: str, keys: tuple[str, ...]) -> list[float]:
+        element = joint.find(tag)
+        assert element is not None, tag
+        return [float(v) for key in keys for v in element.attrib[key].split()]
+
+    from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_NECK
+
+    bounds = {axis.name: axis.bounds for axis in STATIC_UPPER_BODY_NECK.layout.axes}
+    for upstream, name in names.items():
+        theirs, mine = official[upstream], ours[name]
+        tags = [("origin", ("xyz", "rpy")), ("axis", ("xyz",))]
+        if upstream != "gripper":
+            tags.append(("limit", ("lower", "upper")))
+        for tag, keys in tags:
+            assert numbers(mine, tag, keys) == pytest.approx(
+                numbers(theirs, tag, keys), abs=1e-6
+            ), (name, tag)
+        lower, upper = numbers(mine, "limit", ("lower", "upper"))
+        assert bounds[name] == Bounds(lower, upper), name

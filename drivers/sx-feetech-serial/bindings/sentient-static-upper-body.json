@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "8a28f53d33c93d4027fb65a6ecd1bdf059346fe06d4cb4f56a7845ec6ac7ae69",
+  "id": "1621b1776def6eda728085ff0c29aefa9b769241a1ffccac277fe6d7e8657030",
   "axes": [
     {
       "joint": "torso_joint",
@@ -232,8 +232,8 @@
     },
     {
       "joint": "so101_shoulder_pan_joint",
-      "lower": -2.12930168743,
-      "upper": 2.12930168743,
+      "lower": -1.91986,
+      "upper": 1.91986,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -244,8 +244,8 @@
     },
     {
       "joint": "so101_shoulder_lift_joint",
-      "lower": -0.0349065850399,
-      "upper": 3.63028484415,
+      "lower": -1.74533,
+      "upper": 1.74533,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -256,8 +256,8 @@
     },
     {
       "joint": "so101_elbow_flex_joint",
-      "lower": -3.40339204139,
-      "upper": 0.0872664625997,
+      "lower": -1.69,
+      "upper": 1.69,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -268,8 +268,8 @@
     },
     {
       "joint": "so101_wrist_flex_joint",
-      "lower": -3.28121899375,
-      "upper": 0.401425727959,
+      "lower": -1.65806,
+      "upper": 1.65806,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -280,8 +280,8 @@
     },
     {
       "joint": "so101_wrist_roll_joint",
-      "lower": -3.00196631343,
-      "upper": 2.86233997327,
+      "lower": -2.74385,
+      "upper": 2.84121,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -292,8 +292,8 @@
     },
     {
       "joint": "so101_camera_tilt_joint",
-      "lower": -0.106465084372,
-      "upper": 2.04203522483,
+      "lower": -3.14159265,
+      "upper": -0.261799388,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",

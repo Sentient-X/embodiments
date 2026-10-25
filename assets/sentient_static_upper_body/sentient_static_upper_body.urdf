@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <robot name="sentient_static_upper_body">
+  <material name="3d_printed">
+    <color rgba="1.0 0.82 0.12 1.0" />
+  </material>
+  <material name="sts3215">
+    <color rgba="0.1 0.1 0.1 1.0" />
+  </material>
   <link name="base_link">
     <inertial>
       <origin xyz="0.0295608982 0.00545673078 0.155512257" rpy="0 0 0" />
@@ -2849,12 +2855,12 @@
   </joint>
   <link name="so101_base_link">
     <inertial>
-      <origin xyz="0.0239830408 -0.0315722284 0.0224106282" rpy="0 0 0" />
+      <origin xyz="0.0100920409 0.000183770523 0.0275996281" rpy="0 0 0" />
       <mass value="0.288892" />
-      <inertia ixx="0.000259924" ixy="1.67998e-06" ixz="3.60339e-05" iyy="0.00030609" iyz="1.05773e-08" izz="0.000358837" />
+      <inertia ixx="0.000259924" ixy="1.67998e-06" ixz="3.60339e-05" iyy="0.00030609" iyz="1.05776e-08" izz="0.000358837" />
     </inertial>
     <visual name="so101_base_link_visual_0">
-      <origin xyz="0.00749973573294 -0.0318495030663 -0.00759982886141" rpy="1.57078846585 3.52223899935e-06 1.57078615362" />
+      <origin xyz="-0.00639126427 -9.35030663e-05 -0.00241082886" rpy="1.57078847 3.522239e-06 1.57078615" />
       <geometry>
         <mesh filename="meshes/Base_08p_step__Body4_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2863,7 +2869,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_1">
-      <origin xyz="0.00749973674415 -0.0317501030664 -0.00759982921152" rpy="1.57078846585 3.52223899935e-06 1.57078615362" />
+      <origin xyz="-0.00639126326 5.8969336e-06 -0.00241082921" rpy="1.57078847 3.522239e-06 1.57078615" />
       <geometry>
         <mesh filename="meshes/base_link_1.stl" scale="1 1 1" />
       </geometry>
@@ -2872,7 +2878,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_2">
-      <origin xyz="-0.0207189000161 -0.0231094702207 0.0489505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.00864652978 0.0541395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/SOD323_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2881,7 +2887,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_3">
-      <origin xyz="-0.0207189000161 -0.0204935902207 0.0565855650559" rpy="-3.14159 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0112624098 0.0617745651" rpy="-3.14159 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/X2564WV_03_N0SN_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2890,7 +2896,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_4">
-      <origin xyz="-0.0191189000161 -0.00995949022066 0.0257005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0330099 0.0217965098 0.0308895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Board_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2899,7 +2905,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_5">
-      <origin xyz="-0.0131189000161 -0.0124594902207 0.0562005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0270099 0.0192965098 0.0613895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/M2_5_FF_TORRETTA_PASSANTE_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2908,7 +2914,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_6">
-      <origin xyz="-0.0131189000161 -0.0124594902207 0.0282005650559" rpy="1.5708 6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0270099 0.0192965098 0.0333895651" rpy="1.5708 6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/M2_5_FF_TORRETTA_PASSANTE_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2917,7 +2923,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_7">
-      <origin xyz="-0.0207189000161 -0.0387215602207 0.0379555650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 -0.00696556022 0.0431445651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/User_Library_QFN_16_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2926,7 +2932,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_8">
-      <origin xyz="-0.0207189000161 -0.0124594902207 0.0282005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0192965098 0.0333895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/DIN_EN_ISO_7045___M2_5_x_4___H_Steel_4_6_Plain_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2935,7 +2941,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_9">
-      <origin xyz="-0.0207188000161 -0.0494594902207 0.0282005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0346098 -0.0177034902 0.0333895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/DIN_EN_ISO_7045___M2_5_x_4___H_Steel_4_6_Plain_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2944,7 +2950,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_10">
-      <origin xyz="-0.0207189000161 -0.0309814302207 0.0378465650559" rpy="-1.5708 8.74227001901e-08 1.5708" />
+      <origin xyz="-0.0346099 0.000774569779 0.0430355651" rpy="-1.5708 8.74227002e-08 1.5708" />
       <geometry>
         <mesh filename="meshes/User_Library_sop_8_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2953,7 +2959,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_11">
-      <origin xyz="-0.0207188000161 -0.0494714902207 0.0562005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0346098 -0.0177154902 0.0613895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/DIN_EN_ISO_7045___M2_5_x_4___H_Steel_4_6_Plain_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2962,7 +2968,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_12">
-      <origin xyz="-0.0207189000161 -0.0388095002207 0.0347005650559" rpy="4.37113e-08 8.74228001102e-08 1.5708" />
+      <origin xyz="-0.0346099 -0.00705350022 0.0398895651" rpy="4.37113e-08 8.74228001e-08 1.5708" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2971,7 +2977,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_13">
-      <origin xyz="-0.0207189000161 -0.0283490802207 0.0454455650559" rpy="4.37113e-08 8.74228001102e-08 1.5708" />
+      <origin xyz="-0.0346099 0.00340691978 0.0506345651" rpy="4.37113e-08 8.74228001e-08 1.5708" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2980,7 +2986,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_14">
-      <origin xyz="-0.0131188000161 -0.0494594902207 0.0282005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0270098 -0.0177034902 0.0333895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/M2_5_FF_TORRETTA_PASSANTE_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2989,7 +2995,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_15">
-      <origin xyz="-0.0207443000161 -0.0477778902207 0.0379505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 -0.0160218902 0.0431395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_2_1_200_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -2998,7 +3004,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_16">
-      <origin xyz="-0.0207443000161 -0.0477778902207 0.0379505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 -0.0160218902 0.0431395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_3_1_2_A_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3007,7 +3013,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_17">
-      <origin xyz="-0.0207443000161 -0.0477778902207 0.0379505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 -0.0160218902 0.0431395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_1_1_20001_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3016,7 +3022,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_18">
-      <origin xyz="-0.0207189000161 -0.0124594902207 0.0562005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0192965098 0.0613895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/DIN_EN_ISO_7045___M2_5_x_4___H_Steel_4_6_Plain_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3025,7 +3031,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_19">
-      <origin xyz="-0.0207189000161 -0.0355094602207 0.0379505650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0346099 -0.00375346022 0.0431395651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3034,7 +3040,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_20">
-      <origin xyz="-0.0207189000161 -0.0273490302207 0.0488955650559" rpy="3.14159265353 -1.57079265355 -1.57079265352" />
+      <origin xyz="-0.0346099 0.00440696978 0.0540845651" rpy="3.14159265 -1.57079265 -1.57079265" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3043,7 +3049,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_21">
-      <origin xyz="-0.0207189000161 -0.0271594602207 0.0395005650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.00459653978 0.0446895651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/SOD323_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3052,7 +3058,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_22">
-      <origin xyz="-0.0262189000161 -0.0196684902207 0.0251945650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0401099 0.0120875098 0.0303835651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/dc_005_5a_20_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3061,7 +3067,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_23">
-      <origin xyz="-0.0207443000161 -0.0193043902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 0.0124516098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_2_1_200_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3070,7 +3076,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_24">
-      <origin xyz="-0.0207443000161 -0.0193043902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 0.0124516098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_3_1_2_A_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3079,7 +3085,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_25">
-      <origin xyz="-0.0207443000161 -0.0193043902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346353 0.0124516098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_1_1_20001_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3088,7 +3094,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_26">
-      <origin xyz="-0.0207189000161 -0.0283094702207 0.0432005650559" rpy="-1.5708 8.74227001901e-08 1.5708" />
+      <origin xyz="-0.0346099 0.00344652978 0.0483895651" rpy="-1.5708 8.74227002e-08 1.5708" />
       <geometry>
         <mesh filename="meshes/SOD323_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3097,7 +3103,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_27">
-      <origin xyz="-0.0207189000161 -0.0291990402207 0.0488955650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0346099 0.00255695978 0.0540845651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3106,7 +3112,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_28">
-      <origin xyz="-0.0185189000161 -0.0430675902207 0.0571255650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0113115902 0.0623145651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3115,7 +3121,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_29">
-      <origin xyz="-0.0207189000161 -0.0443507902207 0.0571155650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 -0.0125947902 0.0623045651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3124,7 +3130,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_30">
-      <origin xyz="-0.0185189000161 -0.0430675902207 0.0571255650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0113115902 0.0623145651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3133,7 +3139,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_31">
-      <origin xyz="-0.0185189000161 -0.0405276302207 0.0571255650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.00877163022 0.0623145651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3142,7 +3148,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_32">
-      <origin xyz="-0.0207189000161 -0.0418107902207 0.0571155650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 -0.0100547902 0.0623045651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3151,7 +3157,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_33">
-      <origin xyz="-0.0185189000161 -0.0456075902207 0.0571255650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0138515902 0.0623145651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3160,7 +3166,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_34">
-      <origin xyz="-0.0207189000161 -0.0418594502207 0.0379505650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0346099 -0.0101034502 0.0431395651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3169,7 +3175,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_35">
-      <origin xyz="-0.0207189000161 -0.0178042902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.0139517098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3178,7 +3184,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_36">
-      <origin xyz="-0.0207189000161 -0.0178042902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.0139517098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3187,7 +3193,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_37">
-      <origin xyz="-0.0207189000161 -0.0178042902207 0.0448155650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.0139517098 0.0500045651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3196,7 +3202,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_38">
-      <origin xyz="-0.0207443000161 -0.0253595402207 0.0490005650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346353 0.00639645978 0.0541895651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_3_1_2_A_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3205,7 +3211,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_39">
-      <origin xyz="-0.0207443000161 -0.0253595402207 0.0490005650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346353 0.00639645978 0.0541895651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_200_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3214,7 +3220,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_40">
-      <origin xyz="-0.0207443000161 -0.0253595402207 0.0490005650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346353 0.00639645978 0.0541895651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_1_1_20001_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3223,7 +3229,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_41">
-      <origin xyz="-0.0207639000161 -0.0223543702207 0.0448125650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346549 0.00940162978 0.0500015651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3232,7 +3238,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_42">
-      <origin xyz="-0.0207189000161 -0.0216416902207 0.0438745650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0101143098 0.0490635651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3241,7 +3247,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_43">
-      <origin xyz="-0.0207189000161 -0.0230308702207 0.0457285650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.00872512978 0.0509175651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3250,7 +3256,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_44">
-      <origin xyz="-0.0207189000161 -0.0216416902207 0.0457545650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0101143098 0.0509435651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3259,7 +3265,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_45">
-      <origin xyz="-0.0207189000161 -0.0230308702207 0.0438495650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.00872512978 0.0490385651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3268,7 +3274,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_46">
-      <origin xyz="-0.0207189000161 -0.0216416902207 0.0448145650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0101143098 0.0500035651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3277,7 +3283,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_47">
-      <origin xyz="-0.0207189000161 -0.0364095002207 0.0431505650559" rpy="4.37113e-08 8.74228001102e-08 1.5708" />
+      <origin xyz="-0.0346099 -0.00465350022 0.0483395651" rpy="4.37113e-08 8.74228001e-08 1.5708" />
       <geometry>
         <mesh filename="meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3286,7 +3292,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_48">
-      <origin xyz="-0.0207189000161 -0.0457762902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0140202902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3295,7 +3301,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_49">
-      <origin xyz="-0.0207189000161 -0.0457762902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0140202902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3304,7 +3310,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_50">
-      <origin xyz="-0.0207189000161 -0.0457762902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0140202902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3313,7 +3319,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_51">
-      <origin xyz="-0.0207189000161 -0.0271595902207 0.0359505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.00459640978 0.0411395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3322,7 +3328,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_52">
-      <origin xyz="-0.0207189000161 -0.0271595902207 0.0359505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.00459640978 0.0411395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3331,7 +3337,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_53">
-      <origin xyz="-0.0207189000161 -0.0271595902207 0.0359505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.00459640978 0.0411395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3340,7 +3346,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_54">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0498505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0550395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3349,7 +3355,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_55">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0498505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0550395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3358,7 +3364,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_56">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0498505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0550395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3367,7 +3373,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_57">
-      <origin xyz="-0.0207189000161 -0.0437595902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0120035902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3376,7 +3382,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_58">
-      <origin xyz="-0.0207189000161 -0.0437595902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0120035902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3385,7 +3391,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_59">
-      <origin xyz="-0.0207189000161 -0.0437595902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 -0.0120035902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3394,7 +3400,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_60">
-      <origin xyz="-0.0207189000161 -0.0154808902207 0.0457285650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0162751098 0.0509175651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3403,7 +3409,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_61">
-      <origin xyz="-0.0207189000161 -0.0154808902207 0.0438495650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0162751098 0.0490385651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3412,7 +3418,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_62">
-      <origin xyz="-0.0207639000161 -0.0148043902207 0.0448125650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346549 0.0169516098 0.0500015651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3421,7 +3427,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_63">
-      <origin xyz="-0.0207189000161 -0.0140916902207 0.0457545650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0176643098 0.0509435651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3430,7 +3436,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_64">
-      <origin xyz="-0.0207189000161 -0.0140916902207 0.0448145650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0176643098 0.0500035651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3439,7 +3445,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_65">
-      <origin xyz="-0.0207189000161 -0.0140916902207 0.0438745650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 0.0176643098 0.0490635651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3448,7 +3454,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_66">
-      <origin xyz="-0.0131188000161 -0.0494714902207 0.0562005650559" rpy="1.5708 -5.77315972805e-15 -1.57079" />
+      <origin xyz="-0.0270098 -0.0177154902 0.0613895651" rpy="1.5708 -5.77315973e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/M2_5_FF_TORRETTA_PASSANTE_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3457,7 +3463,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_67">
-      <origin xyz="-0.0207189000161 -0.0326094532207 0.0432005650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 -0.000853453221 0.0483895651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOD323_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3466,7 +3472,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_68">
-      <origin xyz="-0.0207188000161 -0.0498094902207 0.0351505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346098 -0.0180534902 0.0403395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/User_Library_LED_0603_R_Pocket001_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3475,7 +3481,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_69">
-      <origin xyz="-0.0207188000161 -0.0498094902207 0.0351505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346098 -0.0180534902 0.0403395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/User_Library_LED_0603_R_Pocket002_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -3484,7 +3490,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_70">
-      <origin xyz="-0.0207188000161 -0.0498094902207 0.0351505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346098 -0.0180534902 0.0403395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/User_Library_LED_0603_R_Pad_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3493,7 +3499,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_71">
-      <origin xyz="-0.0207188000161 -0.0498094902207 0.0351505650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346098 -0.0180534902 0.0403395651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/User_Library_LED_0603_R_Fillet_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3502,7 +3508,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_72">
-      <origin xyz="-0.0207188000161 -0.0498094902207 0.0351505650559" rpy="3.14159265359 -1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346098 -0.0180534902 0.0403395651" rpy="-3.14159265 -1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/User_Library_LED_0603_R_Pad004_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3511,7 +3517,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_73">
-      <origin xyz="-0.0207189000161 -0.0456177902207 0.0441055650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 -0.0138617902 0.0492945651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3520,7 +3526,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_74">
-      <origin xyz="-0.0185189000161 -0.0443345902207 0.0415755650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0125785902 0.0467645651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3529,7 +3535,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_75">
-      <origin xyz="-0.0185189000161 -0.0468745902207 0.0415755650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0151185902 0.0467645651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_2_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3538,7 +3544,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_76">
-      <origin xyz="-0.0185189000161 -0.0443345902207 0.0466555650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0125785902 0.0518445651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3547,7 +3553,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_77">
-      <origin xyz="-0.0207189000161 -0.0456177902207 0.0466455650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 -0.0138617902 0.0518345651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3556,7 +3562,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_78">
-      <origin xyz="-0.0185189000161 -0.0468745902207 0.0466555650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0151185902 0.0518445651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3565,7 +3571,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_79">
-      <origin xyz="-0.0185189000161 -0.0468745902207 0.0441155650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0151185902 0.0493045651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3574,7 +3580,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_80">
-      <origin xyz="-0.0207189000161 -0.0456177902207 0.0415655650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0346099 -0.0138617902 0.0467545651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3583,7 +3589,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_81">
-      <origin xyz="-0.0185189000161 -0.0443345902207 0.0441155650559" rpy="1.5708 -6.2172489379e-15 -1.57079" />
+      <origin xyz="-0.0324099 -0.0125785902 0.0493045651" rpy="1.5708 -6.21724894e-15 -1.57079" />
       <geometry>
         <mesh filename="meshes/Extruded_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3592,7 +3598,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_82">
-      <origin xyz="-0.0207189000161 -0.0253543002207 0.0457655650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.00640169978 0.0509545651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3601,7 +3607,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_83">
-      <origin xyz="-0.0207189000161 -0.0253543002207 0.0457655650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.00640169978 0.0509545651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3610,7 +3616,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_84">
-      <origin xyz="-0.0207189000161 -0.0253543002207 0.0457655650559" rpy="3.14159265359 -1.57079265358 -3.14159053659" />
+      <origin xyz="-0.0346099 0.00640169978 0.0509545651" rpy="-3.14159265 -1.57079265 -3.14159054" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3619,7 +3625,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_85">
-      <origin xyz="-0.0207189000161 -0.0166545902207 0.0491155650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0346099 0.0151014098 0.0543045651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/SOT_23_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3628,7 +3634,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_86">
-      <origin xyz="-0.0207189000161 -0.0324275832207 0.0565855650559" rpy="-3.14159 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 -0.000671583221 0.0617745651" rpy="-3.14159 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/X2564WV_03_N0SN_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3637,7 +3643,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_87">
-      <origin xyz="-0.0215189000161 -0.0344541002207 0.0477235650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0354099 -0.00269810022 0.0529125651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_TO_223_5_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3646,7 +3652,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_88">
-      <origin xyz="-0.0215189000161 -0.0344541002207 0.0477235650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0354099 -0.00269810022 0.0529125651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_TO_223_1_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3655,7 +3661,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_89">
-      <origin xyz="-0.0215189000161 -0.0344541002207 0.0477235650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0354099 -0.00269810022 0.0529125651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_TO_223_3_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3664,7 +3670,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_90">
-      <origin xyz="-0.0215189000161 -0.0344541002207 0.0477235650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0354099 -0.00269810022 0.0529125651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_TO_223_2_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3673,7 +3679,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_91">
-      <origin xyz="-0.0215189000161 -0.0344541002207 0.0477235650559" rpy="3.14159265354 1.57079265355 -1.57079734645" />
+      <origin xyz="-0.0354099 -0.00269810022 0.0529125651" rpy="3.14159265 1.57079265 -1.57079735" />
       <geometry>
         <mesh filename="meshes/User_Library_TO_223_4_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3682,7 +3688,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_92">
-      <origin xyz="-0.0207189000161 -0.0308063502207 0.0285495650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.000949649779 0.0337385651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/User_Library_DG350_3_5_02P_step__Body5_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3691,7 +3697,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_93">
-      <origin xyz="-0.0207189000161 -0.0308063502207 0.0285495650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.000949649779 0.0337385651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/User_Library_DG350_3_5_02P_step__Body4_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3700,7 +3706,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_94">
-      <origin xyz="-0.0207189000161 -0.0308063502207 0.0285495650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.000949649779 0.0337385651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/User_Library_DG350_3_5_02P_step__Body2_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3709,7 +3715,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_95">
-      <origin xyz="-0.0207189000161 -0.0308063502207 0.0285495650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.000949649779 0.0337385651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/User_Library_DG350_3_5_02P_step__Body3_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3718,7 +3724,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_96">
-      <origin xyz="-0.0207189000161 -0.0308063502207 0.0285495650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.000949649779 0.0337385651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/User_Library_DG350_3_5_02P_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3727,7 +3733,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_97">
-      <origin xyz="-0.0207188000161 -0.0498095902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346098 -0.0180535902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3736,7 +3742,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_98">
-      <origin xyz="-0.0207188000161 -0.0498095902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346098 -0.0180535902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3745,7 +3751,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_99">
-      <origin xyz="-0.0207188000161 -0.0498095902207 0.0379505650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346098 -0.0180535902 0.0431395651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3754,7 +3760,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_100">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0483505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0535395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3763,7 +3769,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_101">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0483505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0535395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3772,7 +3778,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_102">
-      <origin xyz="-0.0207189000161 -0.0203095902207 0.0483505650559" rpy="1.5708 -1.74845999901e-07 -1.57079" />
+      <origin xyz="-0.0346099 0.0114464098 0.0535395651" rpy="1.5708 -1.74846e-07 -1.57079" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3781,7 +3787,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_103">
-      <origin xyz="-0.0207189000161 -0.0135045902207 0.0491155650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.0182514098 0.0543045651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_5_1_2_3_400_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3790,7 +3796,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_104">
-      <origin xyz="-0.0207189000161 -0.0135045902207 0.0491155650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.0182514098 0.0543045651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3799,7 +3805,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_105">
-      <origin xyz="-0.0207189000161 -0.0135045902207 0.0491155650559" rpy="-3.14159265359 1.57079265361 -2.65358979326e-06" />
+      <origin xyz="-0.0346099 0.0182514098 0.0543045651" rpy="3.14159265 1.57079265 -2.65358979e-06" />
       <geometry>
         <mesh filename="meshes/_7_1_2_AF0_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3808,7 +3814,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_106">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_19_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3817,7 +3823,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_107">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_21_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3826,7 +3832,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_108">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_7_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3835,7 +3841,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_109">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_2_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3844,7 +3850,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_110">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_6_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3853,7 +3859,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_111">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_16_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3862,7 +3868,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_112">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_8_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3871,7 +3877,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_113">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_4_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3880,7 +3886,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_114">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_9_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3889,7 +3895,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_115">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_18_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3898,7 +3904,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_116">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_14_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3907,7 +3913,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_117">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_1_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3916,7 +3922,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_118">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_15_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3925,7 +3931,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_119">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_13_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3934,7 +3940,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_120">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3943,7 +3949,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_121">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -3952,7 +3958,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_122">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_10_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3961,7 +3967,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_123">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_12_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3970,7 +3976,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_124">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_17_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3979,7 +3985,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_125">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_20_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3988,7 +3994,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_126">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_11_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -3997,7 +4003,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_127">
-      <origin xyz="-0.00921890001605 -0.0260322902207 0.0205625650559" rpy="-3.14159 7.57172102794e-14 -1.57079" />
+      <origin xyz="-0.0231099 0.00572370978 0.0257515651" rpy="-3.14159 7.57172103e-14 -1.57079" />
       <geometry>
         <mesh filename="meshes/SOLID_5_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4006,7 +4012,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_128">
-      <origin xyz="-0.0171182667168 -0.0309583957293 0.0421998774223" rpy="1.57079111942 -1.50855392622e-07 1.57078244839" />
+      <origin xyz="-0.0310092667 0.000797604271 0.0473888774" rpy="1.57079112 -1.50855393e-07 1.57078245" />
       <geometry>
         <mesh filename="meshes/WaveShare_Mounting_Plate_SO101_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4015,7 +4021,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_129">
-      <origin xyz="0.0276112954678 -0.0318761234524 0.0484088184695" rpy="1.57080367259 -0.00872671704922 -3.14159" />
+      <origin xyz="0.0137202955 -0.000120123452 0.0535978185" rpy="1.57080367 -0.00872671705 -3.14159" />
       <geometry>
         <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4024,7 +4030,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_130">
-      <origin xyz="0.0274118939761 -0.0331262073706 0.0255598230736" rpy="1.56206993294 -3.67245305766e-06 -1.57078996795" />
+      <origin xyz="0.013520894 -0.00137020737 0.0307488231" rpy="1.56206993 -3.67245306e-06 -1.57078997" />
       <geometry>
         <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4033,7 +4039,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_131">
-      <origin xyz="0.0276112954678 -0.0318761234524 0.0484088184695" rpy="1.57080367259 -0.00872671704922 -3.14159" />
+      <origin xyz="0.0137202955 -0.000120123452 0.0535978185" rpy="1.57080367 -0.00872671705 -3.14159" />
       <geometry>
         <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4042,7 +4048,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_132">
-      <origin xyz="0.0426791721438 -0.0318762720644 -0.00117518254042" rpy="-1.57080367259 0.00872671704741 2.16070985452e-06" />
+      <origin xyz="0.0287881721 -0.000120272064 0.00401381746" rpy="-1.57080367 0.00872671705 2.16070985e-06" />
       <geometry>
         <mesh filename="meshes/_________step__Body1_1__1.stl" scale="1 1 1" />
       </geometry>
@@ -4051,7 +4057,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_133">
-      <origin xyz="0.0276112954678 -0.0318761234524 0.0484088184695" rpy="1.57080367259 -0.00872671704922 -3.14159" />
+      <origin xyz="0.0137202955 -0.000120123452 0.0535978185" rpy="1.57080367 -0.00872671705 -3.14159" />
       <geometry>
         <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4060,7 +4066,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_134">
-      <origin xyz="0.0276112954678 -0.0318761234524 0.0484088184695" rpy="1.57080367259 -0.00872671704922 -3.14159" />
+      <origin xyz="0.0137202955 -0.000120123452 0.0535978185" rpy="1.57080367 -0.00872671705 -3.14159" />
       <geometry>
         <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4069,7 +4075,7 @@
       </material>
     </visual>
     <visual name="so101_base_link_visual_135">
-      <origin xyz="0.0530579550507 -0.0318760904868 0.0421868167634" rpy="-3.14159163459 -0.00872671704922 -3.14159" />
+      <origin xyz="0.0391669551 -0.000120090487 0.0473758168" rpy="-3.14159163 -0.00872671705 -3.14159" />
       <geometry>
         <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4085,547 +4091,230 @@
     </collision>
   </link>
   <joint name="so101_mount_joint" type="fixed">
-    <origin xyz="-0.0916244982412 0.123363123582 0.0523846737825" rpy="0 0 0" />
+    <origin xyz="-0.0347334982 0.0916071236 0.0471956738" rpy="0 -0 3.14159265" />
     <parent link="chest_link" />
     <child link="so101_base_link" />
   </joint>
-  <link name="so101_shoulder_pan_link">
-    <inertial>
-      <origin xyz="-0.0244761111 0.000299677376 -0.00668656002" rpy="0 0 0" />
-      <mass value="0.134995" />
-      <inertia ixx="0.00012767" ixy="-3.67563e-07" ixz="-1.25779e-05" iyy="0.000136939" iyz="7.54222e-07" izz="5.15378e-05" />
-    </inertial>
-    <visual name="so101_shoulder_pan_link_visual_0">
-      <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="-1.57079265355 -1.57079265361 3.14159265356" />
-      <geometry>
-        <mesh filename="meshes/Motor_holder_SO101_Base_2_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_1">
-      <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 0 1.33957625082e-18" />
-      <geometry>
-        <mesh filename="meshes/Rotation_Pitch_SO101_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_2">
-      <origin xyz="-0.0303994958147 0.0101132105919 -0.0641999067543" rpy="-1.3374161841 -1.57079483095 -1.80418379253" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_3">
-      <origin xyz="-0.0316495343801 0.0155631852365 -0.0286999086733" rpy="-9.46202360388e-07 2.64595108046e-08 3.14158582128" />
-      <geometry>
-        <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_4">
-      <origin xyz="-0.0303996480228 -0.00128680043972 -0.0541995951908" rpy="0.233384316046 -1.57079483088 -1.80418379263" />
-      <geometry>
-        <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_5">
-      <origin xyz="-0.0303996727203 -0.00728683950584 -0.0287001338756" rpy="-1.3374161841 -1.57079483095 -1.80418379253" />
-      <geometry>
-        <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_6">
-      <origin xyz="-0.0303996727203 -0.00728683950584 -0.0287001338756" rpy="-1.3374161841 -1.57079483095 -1.80418379253" />
-      <geometry>
-        <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_7">
-      <origin xyz="-0.0303996727203 -0.00728683950584 -0.0287001338756" rpy="-1.3374161841 -1.57079483095 -1.80418379253" />
-      <geometry>
-        <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_8">
-      <origin xyz="-0.0303996727203 -0.00728683950584 -0.0287001338756" rpy="-1.3374161841 -1.57079483095 -1.80418379253" />
-      <geometry>
-        <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_pan_link_visual_9">
-      <origin xyz="-0.00999833362035 0.000182550859356 0.0270000000003" rpy="-1.57079632679 0 -0.0182561" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <collision name="so101_shoulder_pan_link_hull">
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/collision/so101_shoulder_pan_link.stl" />
-      </geometry>
-    </collision>
-  </link>
   <joint name="so101_shoulder_pan_joint" type="revolute">
-    <origin xyz="0.053194105349 -0.0318758054314 0.0577853490004" rpy="-3.14142530718 -0.00872519 3.12334" />
+    <origin xyz="0.0388353 -8.97657e-09 0.0624" rpy="3.14159 4.18253e-17 -3.14159" />
     <parent link="so101_base_link" />
     <child link="so101_shoulder_pan_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-2.129301687433082" upper="2.1293016874330815" effort="1" velocity="1" />
+    <limit effort="10" velocity="10" lower="-1.91986" upper="1.91986" />
   </joint>
-  <link name="so101_shoulder_lift_link">
-    <inertial>
-      <origin xyz="-0.0663659128 -0.00531494632 0.0161708515" rpy="0 0 0" />
-      <mass value="0.194153" />
-      <inertia ixx="8.59728e-05" ixy="-1.91169e-05" ixz="-1.22695e-05" iyy="0.000338222" iyz="-5.09203e-06" izz="0.000313837" />
-    </inertial>
-    <visual name="so101_shoulder_lift_link_visual_0">
-      <origin xyz="-0.125744781384 0.0153401514855 0.00981521037498" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body2_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_1">
-      <origin xyz="-0.125744781384 0.0153401514855 0.00981521037498" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body3_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_2">
-      <origin xyz="-0.125744781384 0.0153401514855 0.00981521037498" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_3">
-      <origin xyz="-0.125637438743 0.0152736238571 -0.00211811141538" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_4">
-      <origin xyz="-0.125637438743 0.0152736238571 -0.00211811141538" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body2_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_5">
-      <origin xyz="-0.125637438743 0.0152736238571 -0.00211811141538" rpy="0.883539380738 -1.56021154973 2.58702172004" />
-      <geometry>
-        <mesh filename="meshes/_50375033wbm000_01_step__Body3_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_6">
-      <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 0 -2.77555788388e-17" />
-      <geometry>
-        <mesh filename="meshes/Upper_arm_SO101_0_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_7">
-      <origin xyz="-0.112570875463 -0.00249983929472 -0.00295477791169" rpy="-1.5708055619 4.58184583629e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_8">
-      <origin xyz="-0.111320873567 -0.00250012201702 0.0198951864728" rpy="-1.57079694273 -5.15423698322e-06 3.5924387452e-05" />
-      <geometry>
-        <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_9">
-      <origin xyz="-0.112569780663 -0.0379995239611 0.0144453439607" rpy="-1.5708055619 4.58184583629e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_10">
-      <origin xyz="-0.112570875463 -0.00249983929472 -0.00295477791169" rpy="-1.5708055619 4.58184583629e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_11">
-      <origin xyz="-0.112570875463 -0.00249983929472 -0.00295477791169" rpy="-1.5708055619 4.58184583629e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_12">
-      <origin xyz="-0.112569812351 -0.0280003957519 0.00304534388356" rpy="-5.56190020492e-06 4.58184583674e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_13">
-      <origin xyz="-0.112570875463 -0.00249983929472 -0.00295477791169" rpy="-1.5708055619 4.58184583629e-06 1.57083523937" />
-      <geometry>
-        <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_shoulder_lift_link_visual_14">
-      <origin xyz="-0.00331238917533 0.00943546914314 0.0450100228889" rpy="1.57079632679 2.22044604925e-16 -1.2331800109" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1__1.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <collision name="so101_shoulder_lift_link_hull">
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/collision/so101_shoulder_lift_link.stl" />
-      </geometry>
-    </collision>
-  </link>
   <joint name="so101_shoulder_lift_joint" type="revolute">
-    <origin xyz="-0.0303991433191 -0.00284688859968 -0.0541999999998" rpy="1.57079632678 0.337616266773 3.14158898038" />
+    <origin xyz="-0.0303992 -0.0182778 -0.0542" rpy="-1.5708 -1.5708 0" />
     <parent link="so101_shoulder_pan_link" />
     <child link="so101_shoulder_lift_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.03490658503988664" upper="3.6302848441482056" effort="1" velocity="1" />
+    <limit effort="10" velocity="10" lower="-1.74533" upper="1.74533" />
   </joint>
-  <link name="so101_elbow_flex_link">
-    <inertial>
-      <origin xyz="-0.0703895929 0.00237657881 0.012408744" rpy="0 0 0" />
-      <mass value="0.180313" />
-      <inertia ixx="8.56165e-05" ixy="9.27912e-06" ixz="-3.36845e-05" iyy="0.000369051" iyz="1.83162e-06" izz="0.000311452" />
-    </inertial>
-    <visual name="so101_elbow_flex_link_visual_0">
-      <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.44249065418e-15 -2.77589653748e-17" />
-      <geometry>
-        <mesh filename="meshes/Motor_holder_SO101_Wrist_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_1">
-      <origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 0 -2.77555743704e-17" />
-      <geometry>
-        <mesh filename="meshes/Under_arm_SO101_1_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_2">
-      <origin xyz="-0.109400209612 0.00520135654096 -0.0200904654783" rpy="-1.57079699074 1.55187273454e-06 4.78694912777e-05" />
-      <geometry>
-        <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_3">
-      <origin xyz="-0.109400209612 0.00520135654096 -0.0200904654783" rpy="-1.57079699074 1.55187273454e-06 4.78694912777e-05" />
-      <geometry>
-        <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_4">
-      <origin xyz="-0.109399934287 0.00395096019231 0.00275954349208" rpy="-1.57079588631 -9.84513510272e-07 -1.57074796321" />
-      <geometry>
-        <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_5">
-      <origin xyz="-0.109400209612 0.00520135654096 -0.0200904654783" rpy="-1.57079699074 1.55187273454e-06 4.78694912777e-05" />
-      <geometry>
-        <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_6">
-      <origin xyz="-0.109400209612 0.00520135654096 -0.0200904654783" rpy="-1.57079699074 1.55187273454e-06 4.78694912777e-05" />
-      <geometry>
-        <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_7">
-      <origin xyz="-0.144900051572 0.00519936170444 -0.00269037380003" rpy="-1.57079699074 1.55187273454e-06 4.78694912777e-05" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_8">
-      <origin xyz="-0.134900227888 0.00520025409863 -0.0140904011712" rpy="-4.29073980188e-06 1.55187273454e-06 4.78694912778e-05" />
-      <geometry>
-        <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_elbow_flex_link_visual_9">
-      <origin xyz="0.000155698723426 -0.0099988202476 0.0273858474257" rpy="1.57079626962 -1.01917029105e-06 1.58636690358" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1__1.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <collision name="so101_elbow_flex_link_hull">
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/collision/so101_elbow_flex_link.stl" />
-      </geometry>
-    </collision>
-  </link>
   <joint name="so101_elbow_flex_joint" type="revolute">
-    <origin xyz="-0.11257 -0.028 0.0191075992233" rpy="8.69253632799e-16 4.4408920985e-16 3.12605992077" />
+    <origin xyz="-0.11257 -0.028 1.73763e-16" rpy="-3.63608e-16 8.74301e-16 1.5708" />
     <parent link="so101_shoulder_lift_link" />
     <child link="so101_elbow_flex_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-3.403392041388943" upper="0.08726646259971617" effort="1" velocity="1" />
+    <limit effort="10" velocity="10" lower="-1.69" upper="1.69" />
   </joint>
-  <link name="so101_wrist_flex_link">
-    <inertial>
-      <origin xyz="-0.000788660588 -0.0273928865 0.0234743808" rpy="0 0 0" />
-      <mass value="0.0703263" />
-      <inertia ixx="4.5764e-05" ixy="-4.92192e-07" ixz="-1.24199e-07" iyy="2.452e-05" iyz="5.12135e-06" izz="3.15244e-05" />
-    </inertial>
-    <visual name="so101_wrist_flex_link_visual_0">
-      <origin xyz="-5.55111512313e-17 -0.028 0.0181" rpy="1.57079265351 -1.57079265358 -3.14159265351" />
-      <geometry>
-        <mesh filename="meshes/Wrist_Roll_Pitch_SO100_4_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_1">
-      <origin xyz="-0.000146030536252 -0.0519055151934 0.0436017796472" rpy="-0.00121070203537 -1.56508149377 -3.14038096489" />
-      <geometry>
-        <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_2">
-      <origin xyz="-0.00139578958589 -0.0290556259618 0.0435947609411" rpy="-9.14033560758e-06 0.00571420140551 3.14158911031" />
-      <geometry>
-        <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_3">
-      <origin xyz="-0.000146030536252 -0.0519055151934 0.0436017796472" rpy="-0.00121070203537 -1.56508149377 -3.14038096489" />
-      <geometry>
-        <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_4">
-      <origin xyz="-0.000146030536252 -0.0519055151934 0.0436017796472" rpy="-0.00121070203537 -1.56508149377 -3.14038096489" />
-      <geometry>
-        <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_5">
-      <origin xyz="-0.000146030536252 -0.0519055151934 0.0436017796472" rpy="-0.00121070203537 -1.56508149377 -3.14038096489" />
-      <geometry>
-        <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_6">
-      <origin xyz="-3.05577209037e-07 -0.0459052523034 0.0181022037992" rpy="1.56958129796 -1.56508149377 -3.14038096489" />
-      <geometry>
-        <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_flex_link_visual_7">
-      <origin xyz="0.00969069221243 0.0024678906872 0.0581924030448" rpy="1.57079632679 0 -2.89222722153" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1__1.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <collision name="so101_wrist_flex_link_hull">
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/collision/so101_wrist_flex_link.stl" />
-      </geometry>
-    </collision>
-  </link>
   <joint name="so101_wrist_flex_joint" type="revolute">
-    <origin xyz="-0.1349 0.0052 -0.0288327991411" rpy="1.83316892365e-15 -3.5527136788e-15 -0.249320445083" />
+    <origin xyz="-0.1349 0.0052 3.62355e-17" rpy="4.02456e-15 8.67362e-16 -1.5708" />
     <parent link="so101_elbow_flex_link" />
     <child link="so101_wrist_flex_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-3.2812189937493397" upper="0.4014257279586958" effort="1" velocity="1" />
+    <limit effort="10" velocity="10" lower="-1.65806" upper="1.65806" />
   </joint>
+  <joint name="so101_wrist_roll_joint" type="revolute">
+    <origin xyz="5.55112e-17 -0.0611 0.0181" rpy="1.5708 0.0486795 3.14159" />
+    <parent link="so101_wrist_flex_link" />
+    <child link="so101_wrist_roll_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-2.74385" upper="2.84121" />
+  </joint>
+  <joint name="so101_camera_tilt_joint" type="revolute">
+    <origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.24284e-08 -1.41553e-15" />
+    <parent link="so101_wrist_roll_link" />
+    <child link="camera_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="10" lower="-3.14159265" upper="-0.261799388" />
+  </joint>
+  <link name="so101_shoulder_pan_link">
+    <inertial>
+      <origin xyz="-0.0307604 -1.66727e-05 -0.0252713" rpy="0 0 0" />
+      <mass value="0.100006" />
+      <inertia ixx="8.3759e-05" ixy="7.55525e-08" ixz="-1.16342e-06" iyy="8.10403e-05" iyz="1.54663e-07" izz="2.39783e-05" />
+    </inertial>
+    <visual name="so101_shoulder_pan_link_visual_0">
+      <origin xyz="-0.0303992 0.000422241 -0.0417" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+      <material name="sts3215" />
+    </visual>
+    <collision>
+      <origin xyz="-0.0303992 0.000422241 -0.0417" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_shoulder_pan_link_visual_1">
+      <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/motor_holder_so101_base_v1.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/motor_holder_so101_base_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_shoulder_pan_link_visual_2">
+      <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0" />
+      <geometry>
+        <mesh filename="meshes/so101/rotation_pitch_so101_v1.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0" />
+      <geometry>
+        <mesh filename="meshes/so101/rotation_pitch_so101_v1.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="so101_shoulder_lift_link">
+    <inertial>
+      <origin xyz="-0.0898471 -0.00838224 0.0184089" rpy="0 0 0" />
+      <mass value="0.103" />
+      <inertia ixx="4.08002e-05" ixy="-1.97819e-05" ixz="-4.03016e-08" iyy="0.000147318" iyz="8.97326e-09" izz="0.000142487" />
+    </inertial>
+    <visual name="so101_shoulder_lift_link_visual_0">
+      <origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+      <material name="sts3215" />
+    </visual>
+    <collision>
+      <origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_shoulder_lift_link_visual_1">
+      <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30" />
+      <geometry>
+        <mesh filename="meshes/so101/upper_arm_so101_v1.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30" />
+      <geometry>
+        <mesh filename="meshes/so101/upper_arm_so101_v1.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="so101_elbow_flex_link">
+    <inertial>
+      <origin xyz="-0.0980701 0.00324376 0.0182831" rpy="0 0 0" />
+      <mass value="0.104" />
+      <inertia ixx="2.87438e-05" ixy="7.41152e-06" ixz="1.26409e-06" iyy="0.000159844" iyz="-4.90188e-08" izz="0.00014529" />
+    </inertial>
+    <visual name="so101_elbow_flex_link_visual_0">
+      <origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 -0 6.67202e-31" />
+      <geometry>
+        <mesh filename="meshes/so101/under_arm_so101_v1.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 -0 6.67202e-31" />
+      <geometry>
+        <mesh filename="meshes/so101/under_arm_so101_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_elbow_flex_link_visual_1">
+      <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30" />
+      <geometry>
+        <mesh filename="meshes/so101/motor_holder_so101_wrist_v1.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30" />
+      <geometry>
+        <mesh filename="meshes/so101/motor_holder_so101_wrist_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_elbow_flex_link_visual_2">
+      <origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+      <material name="sts3215" />
+    </visual>
+    <collision>
+      <origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="so101_wrist_flex_link">
+    <inertial>
+      <origin xyz="-0.000103312 -0.0386143 0.0281156" rpy="0 0 0" />
+      <mass value="0.079" />
+      <inertia ixx="3.68263e-05" ixy="1.7893e-08" ixz="-5.28128e-08" iyy="2.5391e-05" iyz="3.6412e-06" izz="2.1e-05" />
+    </inertial>
+    <visual name="so101_wrist_flex_link_visual_0">
+      <origin xyz="8.32667e-17 -0.0424 0.0306" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_no_horn_v1.stl" />
+      </geometry>
+      <material name="sts3215" />
+    </visual>
+    <collision>
+      <origin xyz="8.32667e-17 -0.0424 0.0306" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_no_horn_v1.stl" />
+      </geometry>
+    </collision>
+    <visual name="so101_wrist_flex_link_visual_1">
+      <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/wrist_roll_pitch_so101_v2.stl" />
+      </geometry>
+      <material name="3d_printed" />
+    </visual>
+    <collision>
+      <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/so101/wrist_roll_pitch_so101_v2.stl" />
+      </geometry>
+    </collision>
+  </link>
   <link name="so101_wrist_roll_link">
     <inertial>
-      <origin xyz="0.00240256315 -0.000218641896 -0.0183019906" rpy="0 0 0" />
-      <mass value="0.0509793" />
-      <inertia ixx="1.37189e-05" ixy="-2.34699e-07" ixz="-3.22755e-07" iyy="1.61607e-05" iyz="4.15817e-07" izz="1.92194e-05" />
+      <origin xyz="0.000213627 0.000245138 -0.025187" rpy="0 0 0" />
+      <mass value="0.087" />
+      <inertia ixx="2.75087e-05" ixy="-3.35241e-07" ixz="-5.7352e-06" iyy="4.33657e-05" iyz="-5.17847e-08" izz="3.45059e-05" />
     </inertial>
     <visual name="so101_wrist_roll_link_visual_0">
-      <origin xyz="-0.0052990123113 0.0127544468018 -0.0233798681681" rpy="3.14157865096 -0.000852332670436 3.14158531484" />
+      <origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16" />
       <geometry>
-        <mesh filename="meshes/SG_ZIJI_15_step__NONE.stl" scale="1 1 1" />
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
       </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
+      <material name="sts3215" />
     </visual>
+    <collision>
+      <origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16" />
+      <geometry>
+        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+      </geometry>
+    </collision>
     <visual name="so101_wrist_roll_link_visual_1">
-      <origin xyz="-0.00529795243531 0.0127565021554 -0.0233799070242" rpy="-3.14157571822 -0.000846007804843 3.14158045776" />
-      <geometry>
-        <mesh filename="meshes/PCB_CHAZUO_92_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_2">
-      <origin xyz="0.0202017956073 0.00675621750648 -0.0234010012732" rpy="-1.57078041104 -0.000846007804843 3.14158045776" />
-      <geometry>
-        <mesh filename="meshes/GE_27_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_3">
-      <origin xyz="0.0102013968626 -0.0366936832035 -0.0233924195213" rpy="3.14157664237 0.000846077198269 -1.08255695752e-05" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1__1.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_4">
-      <origin xyz="-0.00529795243531 0.0127565021554 -0.0233799070242" rpy="-3.14157571822 -0.000846007804843 3.14158045776" />
-      <geometry>
-        <mesh filename="meshes/XG_ZIJI_16_step__NONE.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_5">
-      <origin xyz="-0.005297980541 -0.0100935334056 -0.0221292516611" rpy="-0.0106377752788 -1.56995041865 0.0106320631086" />
-      <geometry>
-        <mesh filename="meshes/MOTOR_1723_3_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_6">
-      <origin xyz="-0.00529795243531 0.0127565021554 -0.0233799070242" rpy="-3.14157571822 -0.000846007804843 3.14158045776" />
-      <geometry>
-        <mesh filename="meshes/ZK_122_step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="so101_wrist_roll_link_visual_7">
       <origin xyz="1.66533453694e-16 -0.000218214 0.000949706" rpy="-3.14159 0 6.93893072986e-18" />
       <geometry>
         <mesh filename="meshes/Wrist_Roll_Follower_SO101_5__Fillet1.stl" scale="1 1 1" />
@@ -4634,37 +4323,21 @@
         <color rgba="0.792157 0.819608 0.933333 1" />
       </material>
     </visual>
-    <visual name="so101_wrist_roll_link_visual_8">
-      <origin xyz="0.000404649460476 -0.00999162996196 0.0269996959828" rpy="-1.57079617816 6.32378634058e-06 1.61127265246" />
+    <collision name="so101_wrist_roll_link_holder">
+      <origin xyz="1.66533453694e-16 -0.000218214 0.000949706" rpy="-3.14159 0 6.93893072986e-18" />
       <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <collision name="so101_wrist_roll_link_hull">
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/collision/so101_wrist_roll_link.stl" />
+        <mesh filename="meshes/Wrist_Roll_Follower_SO101_5__Fillet1.stl" />
       </geometry>
     </collision>
   </link>
-  <joint name="so101_wrist_roll_joint" type="revolute">
-    <origin xyz="-1.14828424547e-09 -0.0615054204925 0.0181000014874" rpy="1.57079999957 0.0461946780963 3.14158999086" />
-    <parent link="so101_wrist_flex_link" />
-    <child link="so101_wrist_roll_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-3.001966313430247" upper="2.8623399732707" effort="1" velocity="1" />
-  </joint>
   <link name="camera_link">
     <inertial>
-      <origin xyz="-0.0233730369 -0.0335316738 0.0194183156" rpy="0 0 0" />
+      <origin xyz="0.0286609701 0.0291413918 0.0160623717" rpy="0 0 0" />
       <mass value="0.264253" />
-      <inertia ixx="0.000562444" ixy="-2.56613e-05" ixz="1.90463e-07" iyy="0.000581154" iyz="8.3219e-07" izz="0.000140933" />
+      <inertia ixx="0.000554492" ixy="-2.11298e-05" ixz="-3.27156e-07" iyy="0.000589107" iyz="-7.88369e-07" izz="0.000140933" />
     </inertial>
     <visual name="camera_link_visual_0">
-      <origin xyz="-0.0226539263737 -0.0364121906016 0.0105811694767" rpy="2.44874904926 1.57078814881 -0.692850191864" />
+      <origin xyz="0.0284346556 0.0321016879 0.00722524256" rpy="2.44874931 1.57078815 2.28039521" />
       <geometry>
         <mesh filename="meshes/Camera_Component___Body___ZED_2i___4_6mm___Cover_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4673,7 +4346,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_1">
-      <origin xyz="0 -5.55111512313e-17 0.01955" rpy="-5.20417042793e-18 0 -1.11022302463e-16" />
+      <origin xyz="0 0 0.0161940731" rpy="2.723994e-12 -8.11081693e-17 2.97324515" />
       <geometry>
         <mesh filename="meshes/Moving_Jaw_SO101__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4682,7 +4355,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_2">
-      <origin xyz="-0.0221537363964 -0.0364116818228 0.0105811431695" rpy="-0.174668286059 1.57079319961 2.96692510055" />
+      <origin xyz="0.0279414516 0.0321849948 0.00722521625" rpy="-0.174669144 1.5707932 -0.343015915" />
       <geometry>
         <mesh filename="meshes/Rear_case___ZED_2i_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4691,7 +4364,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_3">
-      <origin xyz="-0.0220537585043 -0.0364119184814 0.0105810719478" rpy="-0.174668286059 1.57079319961 2.96692510055" />
+      <origin xyz="0.0278429268 0.0322019798 0.00722514503" rpy="-0.174669144 1.5707932 -0.343015915" />
       <geometry>
         <mesh filename="meshes/Front_case___ZED_2i_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4700,7 +4373,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_4">
-      <origin xyz="-0.00726965238265 -0.0385044519306 0.0195851731557" rpy="-2.85199889092 -1.57079059333 -0.289600487388" />
+      <origin xyz="0.0136184348 0.036742059 0.0162292462" rpy="-2.85199844 -1.57079059 2.68364421" />
       <geometry>
         <mesh filename="meshes/USB_Type_C_Port_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4709,7 +4382,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_5">
-      <origin xyz="-0.021154224431 -0.0431010094979 -0.0404503913869" rpy="-1.57079470694 -1.95369679323e-07 1.57078982008" />
+      <origin xyz="0.0280768896 0.0389472271 -0.0438063183" rpy="-1.57079471 -1.95372403e-07 -1.73915034" />
       <geometry>
         <mesh filename="meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4718,7 +4391,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_6">
-      <origin xyz="-0.042618375912 -0.0431014867165 0.0795496787795" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492376822 0.0353513051 0.0761937519" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______0_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4727,7 +4400,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_7">
-      <origin xyz="-0.042618375912 -0.0431014867165 0.0795496787795" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492376822 0.0353513051 0.0761937519" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4736,7 +4409,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_8">
-      <origin xyz="-0.042618375912 -0.0431014867165 0.0795496787795" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492376822 0.0353513051 0.0761937519" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/Narrow_lens_4_6mm_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4745,7 +4418,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_9">
-      <origin xyz="-0.019653031905 -0.0331008434906 0.0920496313341" rpy="-0.174668286059 1.57079319961 2.96692510055" />
+      <origin xyz="0.0249213572 0.0293399635 0.0886937044" rpy="-0.174669144 1.5707932 -0.343015915" />
       <geometry>
         <mesh filename="meshes/PCB_ZED2i_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4754,7 +4427,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_10">
-      <origin xyz="-0.0426184611736 -0.0431011356468 -0.040450341245" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492377075 0.0353509447 -0.0438062682" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/Narrow_lens_4_6mm_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4763,7 +4436,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_11">
-      <origin xyz="-0.0426184611736 -0.0431011356468 -0.040450341245" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492377075 0.0353509447 -0.0438062682" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4772,7 +4445,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_12">
-      <origin xyz="-0.0426184611736 -0.0431011356468 -0.040450341245" rpy="-2.28563362846e-06 1.61616006111e-06 -3.10958235088e-06" />
+      <origin xyz="0.0492377075 0.0353509447 -0.0438062682" rpy="-2.2856309e-06 1.61616006e-06 2.97324204" />
       <geometry>
         <mesh filename="meshes/DSL958R_650_F2_0______0_step__NONE.stl" scale="1 1 1" />
       </geometry>
@@ -4781,7 +4454,7 @@
       </material>
     </visual>
     <visual name="camera_link_visual_13">
-      <origin xyz="-0.0211537269543 -0.0431004504476 0.0795495866816" rpy="1.57079621191 -4.86255307797e-07 -1.57080276413" />
+      <origin xyz="0.0280763055 0.0389467593 0.0761936598" rpy="1.57079621 -4.86252584e-07 1.40244238" />
       <geometry>
         <mesh filename="meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl" scale="1 1 1" />
       </geometry>
@@ -4796,18 +4469,11 @@
       </geometry>
     </collision>
   </link>
-  <joint name="so101_camera_tilt_joint" type="revolute">
-    <origin xyz="0.0202 0.0221559269193 -0.023399987673" rpy="1.57080005267 0.168347452146 6.24283662386e-07" />
-    <parent link="so101_wrist_roll_link" />
-    <child link="camera_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-0.10646508437165425" upper="2.0420352248333655" effort="1" velocity="1" />
-  </joint>
   <link name="zed2i_left_optical_frame" />
   <joint name="zed2i_left_optical_joint" type="fixed">
     <parent link="camera_link" />
     <child link="zed2i_left_optical_frame" />
-    <origin xyz="-0.0426184 -0.0431015 0.0795497" rpy="3.14159265359 1.57079632679 0" />
+    <origin xyz="0.0492377082 0.0353513141 0.0761937731" rpy="-2.63392831 1.57079633 -2.80227582" />
   </joint>
   <link name="ZED_camera" />
   <joint name="zed2i_left_optical_frame_to_ZED_camera" type="fixed">

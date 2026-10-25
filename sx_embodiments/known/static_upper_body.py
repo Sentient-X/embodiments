@@ -67,20 +67,26 @@ the fifteen Damiao axes with them left off.
 A read-only probe on 2026-10-25 found it on its own USB serial bus (a WCH CH343, 1,000,000
 baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order, the sixth the
 camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are bound here on
-a serial bus named ``neck``, identity drive map. The neck's kinematics are the CAD assembly's:
-its joint zeros are where the parts sat in the assembly, not LeRobot's calibrated mid-range
-(TheRobotStudio's ``so101_new_calib`` puts its zeros there), so each joint reads with a unit
-offset. Registered part by part against ``so101_new_calib``, the source's zeros sit at official
-angles of +1.1 deg (pan), -109.4 deg (lift), +89.1 deg (elbow), +75.7 deg (wrist flex) and about
-0 deg (wrist roll), and its lift, elbow and wrist-flex links sit 15, 19 and 29 mm off the
-official ones along their axes. Read with offsets that undo those, a recording at the moment of
-the side photo of 2026-10-25 reproduces the photo, and the front and rear photos, only with the
-pan turned a further half turn: the CAD mounts the SO-101's base facing the robot's front, and
-the robot has it facing back (driver board forward, lift axis behind the pan axis). The pan's
-declared range (+/-122 deg) cannot reach that, so the base's mounting in the source is wrong;
-the hardware owner is asked to confirm it. The camera tilt's mount angle on its horn fits the
-photo a half turn from the CAD's. The robot rests folded outside the declared ranges, and the
-servos' calibration registers are a unit's facts, supplied at open.
+a serial bus named ``neck``, identity drive map, each read in LeRobot's degree normalization.
+
+**The neck is not allisa_bot's.** allisa_bot's SO-101 is the CAD export the feedback file had:
+arbitrary joint zeros, links 15..29 mm off along their pitch axes, a base mounted facing the
+wrong way, and at its own zero pose it penetrates the robot (9 mm into ``base_link``, 41 mm
+for the camera); the owner, watching it live, reported it breaking apart. From
+``so101_shoulder_pan_joint`` down the neck is TheRobotStudio's ``so101_new_calib`` chain
+(SO-ARM100 ``5f6d2b8``, Apache-2.0, vendored as ``source/so101_new_calib.urdf`` and
+``meshes/so101/``) under our names: joint origins, axes and limits, inertials and meshes. Its
+zeros are LeRobot's calibrated mid-range, so the readings are the joint angles with no offset.
+allisa_bot's base, its custom holder for the camera servo, the camera bracket and the ZED 2i
+meshes ride on it, placed by registering each official part onto allisa_bot's CAD. The base is
+turned half a turn, as the robot is built: with it, a recording taken at the side photo of
+2026-10-25 reproduces that photo and the front and rear ones with zero offsets. How the bracket
+sits on the tilt servo's horn is fitted to the side photo (about 15 deg), so the camera tilt
+alone carries a fitted angle, in the description. Its declared range is the free arc it rests
+in: the official joint's limits are the jaw's, and the camera meets the wrist between about
++10 and +130 deg. The robot rests folded just outside the other ranges (shoulder lift -102 deg,
+wrist flex -105 deg), and the servos' calibration registers are a unit's facts, supplied at
+open.
 
 *The grippers.* Each finger has its own Feetech STS3215 (model 777), each gripper's two on a USB
 serial bus of their own (a CH343, 1,000,000 baud). humanoid_pkg's Feetech record
@@ -128,8 +134,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="03e2ff203125733dd1750ee96ead2ac101afb8c22d86b2aa68f666f1aef80622",
-    size_bytes=241725,
+    sha256="7c80406b2e341bbc01a49c72bca255049b8428fa96fd2bab1192b9262a06de7c",
+    size_bytes=220784,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -291,26 +297,15 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
             )
         ),
         units=(CoordinateUnit.RADIAN,) * 6,
-        lower=(
-            -2.12930168743,
-            -0.0349065850399,
-            -3.40339204139,
-            -3.28121899375,
-            -3.00196631343,
-            -0.106465084372,
-        ),
-        upper=(
-            2.12930168743,
-            3.63028484415,
-            0.0872664625997,
-            0.401425727959,
-            2.86233997327,
-            2.04203522483,
-        ),
+        # The official new-calibration SO-101's limits; the camera tilt's is the free arc it
+        # rests in (the official joint's limits are its jaw's, and the camera meets the wrist).
+        lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385, -3.14159265),
+        upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121, -0.261799388),
         actuations=tuple(_sts3215(bus_id, STATIC_UPPER_BODY_NECK_PORT) for bus_id in range(1, 7)),
         observations=(ActuatorFeedback(),) * 6,
     ),
-    home=(0.0,) * 6,
+    # Zero but the camera tilt, which rests where the robot was recorded holding it.
+    home=(0.0, 0.0, 0.0, 0.0, 0.0, -2.2),
 )
 
 
