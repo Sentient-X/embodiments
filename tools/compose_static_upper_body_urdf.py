@@ -86,13 +86,11 @@ Vec = NDArray[np.float64]
 #
 # * Where the base sits on the chest. allisa_bot's ``so101_base_link`` frame is the official
 #   base frame translated by ``SO101_BASE_IN_RECEIVED`` (axes parallel within 0.05 deg), and its
-#   meshes (base, pan servo, driver board as built) stay, moved into the official frame. On the
-#   robot the base faces the other way: the side photo of 2026-10-25 shows the driver board and
-#   pan servo body toward the robot's front and the lift axis 3 cm behind the pan axis, and with
-#   the base turned the recorded readings reproduce that photo, and the front and rear ones,
-#   with zero offsets. The base is turned half a turn about the centre of its plate
-#   (``SO101_BASE_PLATE_CENTRE``), on the assumption that it sits on the same footprint; the
-#   side photo puts the pan axis within about a centimetre of that.
+#   meshes (base, pan servo, driver board as built) stay, moved into the official frame, on the
+#   received footprint and facing the received way. An earlier half turn of the base about its
+#   plate centre, fitted to a side photo, put the base facing backwards; the operator at the robot
+#   corrected it on 2026-10-26 (the base faces as allisa_bot places it). Turning about the
+#   vertical is invisible to gravity, so the IMU check below cannot see this one; eyes can.
 # * How the camera sits on the last servo. allisa_bot's ``so101_wrist_roll_link`` frame is the
 #   official ``gripper_link`` frame (within 0.4 mm and 0.3 deg), so its custom holder for the
 #   camera servo (``RECEIVED_CAMERA_HOLDER``), which replaces the official fixed jaw, keeps its
@@ -102,8 +100,11 @@ Vec = NDArray[np.float64]
 #   jaw's frame (allisa_bot's tilt axis is the official jaw's, 3.4 mm further along it). The
 #   bracket is not the jaw, so how it sits on the servo horn is this build's fact, which no
 #   upstream file states: ``CAMERA_MOUNT_TILT`` is allisa_bot's tilt angle that the official
-#   zero takes, fitted (to about 15 deg) to the bracket's pose in the side photo with the tilt
-#   read in LeRobot degrees like the other five servos.
+#   zero takes, measured with the ZED 2i's IMU on 2026-10-26: half a turn plus 141.56 deg puts
+#   the model's camera on gravity within 2.3 deg (the residual is roll the tilt axis cannot
+#   explain) at one neck pose and 0.35 deg in pitch at a second, with the tilt read in LeRobot
+#   degrees like the other five servos. A step of +114 ticks on the tilt servo moved the IMU
+#   9.8 deg further nose down, so the reading's scale is one to one.
 NECK_LINKS = {
     "base_link": "so101_base_link",
     "shoulder_link": "so101_shoulder_pan_link",
@@ -129,9 +130,7 @@ NECK_DROPPED_MESHES = ("wrist_roll_follower_so101_v1.stl",)
 #: The received holder that carries the camera tilt servo where the official fixed jaw was.
 RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
-#: The centre of the official base plate (``base_so101_v2``'s footprint), in its frame.
-SO101_BASE_PLATE_CENTRE = (0.0215, 0.0, 0.0)
-CAMERA_MOUNT_TILT = math.pi
+CAMERA_MOUNT_TILT = math.pi + math.radians(141.56)
 #: The camera tilt's range. The official joint's limits are its jaw's; with the bracket on the
 #: horn the camera meets the wrist between about +10 and +130 deg (a MuJoCo sweep of the
 #: rendered collisions from the recorded rest), so the range is the free arc it rests in, kept
@@ -212,11 +211,8 @@ def _graft_neck(robot: ET.Element) -> None:
     received_in_base = np.linalg.inv(base_in_received)
     for visual in links["so101_base_link"].findall("visual"):
         _set_origin(visual, received_in_base @ _matrix(visual.find("origin")))
-    turn = np.eye(4)
-    turn[:3, 3] = SO101_BASE_PLATE_CENTRE
-    turn = turn @ _rz(math.pi) @ np.linalg.inv(turn)
     mount = joints["so101_mount_joint"]
-    _set_origin(mount, _matrix(mount.find("origin")) @ base_in_received @ turn)
+    _set_origin(mount, _matrix(mount.find("origin")) @ base_in_received)
 
     # The camera mount on the official jaw frame, from the received tilt joint (whose parent
     # frame is the official gripper_link's) at the angle the official zero takes.
