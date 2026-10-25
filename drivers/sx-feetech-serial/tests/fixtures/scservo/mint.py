@@ -52,9 +52,8 @@ minted from).
   0, ``Maximum_Acceleration`` 254, ``Acceleration`` 254, ``Phase`` read, and written back with
   bit 4 cleared where the answer had it, as servo 6's does), then per servo ``Operating_Mode``
   0, ``P_Coefficient`` 16, ``I_Coefficient`` 0, ``D_Coefficient`` 32, and on the gripper
-  ``Max_Torque_Limit`` 500, ``Protection_Current`` 250 and ``Overload_Torque`` 25; then the
-  chain's departure: per servo ``Acceleration`` 3 and ``Goal_Speed`` 3 (0.25 rad/s and
-  0.5 rad/s^2 in the vendor's steps, rounded down), then each read back.
+  ``Max_Torque_Limit`` 500, ``Protection_Current`` 250 and ``Overload_Torque`` 25. The SO-101
+  declares no servo-side approach limit, so open writes none.
 
 Run with both sources checked out at their pinned commits:
 
@@ -217,9 +216,6 @@ SIGN_BIT = 15  # sms_sts.py scs_toscs(position, 15)
 # What each servo's Present_Position answers at open and after a stop: servos 2 and 4 rest
 # below the so101 calibration's minimum, as the static upper body's neck was found resting.
 PRESENT_POSITIONS = [2050, 700, 3100, 700, 2045, 2500]
-# The chain's bring-up approach limit (BRING_UP_APPROACH): rad/s and rad/s^2.
-APPROACH_SPEED = 0.25
-APPROACH_ACCELERATION = 0.5
 
 
 class Calibration:
@@ -515,41 +511,6 @@ def main() -> None:
             configure.append(write(scs_id, "Max_Torque_Limit", 500, width=2))
             configure.append(write(scs_id, "Protection_Current", 250, width=2))
             configure.append(write(scs_id, "Overload_Torque", 25))
-    # The chain's departure at the end of open: each servo's approach limit, the bring-up
-    # 0.25 rad/s and 0.5 rad/s^2 in the vendor's steps (sms_sts/write.py: speed 0.732 rpm,
-    # acceleration 8.7 deg/s^2), rounded down, written and read back.
-    speed_steps = math.floor(APPROACH_SPEED / (0.732 * 2 * math.pi / 60))
-    acceleration_steps = math.floor(APPROACH_ACCELERATION / math.radians(8.7))
-    for scs_id in ids:
-        configure.append(
-            exchange(
-                port,
-                status(scs_id, []),
-                lambda i=scs_id: handler.write1ByteTxRx(i, scs.SMS_STS_ACC, acceleration_steps),
-            )
-        )
-        configure.append(
-            exchange(
-                port,
-                status(scs_id, []),
-                lambda i=scs_id: handler.write2ByteTxRx(i, scs.SMS_STS_GOAL_SPEED_L, speed_steps),
-            )
-        )
-    for scs_id in ids:
-        configure.append(
-            exchange(
-                port,
-                status(scs_id, [acceleration_steps]),
-                lambda i=scs_id: handler.read1ByteTxRx(i, scs.SMS_STS_ACC),
-            )
-        )
-        configure.append(
-            exchange(
-                port,
-                status(scs_id, [handler.scs_lobyte(speed_steps), handler.scs_hibyte(speed_steps)]),
-                lambda i=scs_id: handler.read2ByteTxRx(i, scs.SMS_STS_GOAL_SPEED_L),
-            )
-        )
     # The chain's position read, at open and after a stop, and the joints LeRobot's own
     # _normalize makes of it (unclamped for degrees; the gripper's reading lies in its range).
     bus = Bus(axes, CALIBRATIONS["so101"])

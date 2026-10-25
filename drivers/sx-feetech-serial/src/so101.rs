@@ -17,8 +17,8 @@ use sx_embodiment_drivers::serial::SerialPort;
 
 use crate::body::{FeetechBody, ServoSetup};
 use crate::chain::{
-    BRING_UP_APPROACH, FeetechChain, FeetechChainError, FeetechServo, MotorCalibration,
-    MotorNormMode, ServoConfiguration, TorqueProtection,
+    FeetechChain, FeetechChainError, FeetechServo, MotorCalibration, MotorNormMode,
+    ServoConfiguration, TorqueProtection,
 };
 
 /// The registry's SO-101 axes, rendered.
@@ -34,7 +34,7 @@ pub const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
     i_coefficient: 0,
     d_coefficient: 32,
     protection: None,
-    approach: BRING_UP_APPROACH,
+    approach: None,
 };
 /// The gripper's limits: half of its torque and current, and 25 % torque when overloaded.
 pub const GRIPPER_PROTECTION: TorqueProtection = TorqueProtection {

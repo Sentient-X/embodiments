@@ -66,15 +66,17 @@
 //!
 //! What this chain adds over those calls, and why:
 //!
-//! - **The servo bounds its own approach speed.** At the end of open, with torque still off,
-//!   each servo's `Acceleration` (41) and `Goal_Speed` (46, `sms_sts.py`'s memory table) are
+//! - **The servo bounds its own approach speed, where its body declares one.** At the end of
+//!   open, with torque still off, the `Acceleration` (41) and `Goal_Speed` (46, `sms_sts.py`'s
+//!   memory table) of each servo whose [`ServoConfiguration`] carries an approach limit are
 //!   written from its [`ApproachLimit`] (the joint's rad/s and rad/s², through the binding's
 //!   reduction, in the vendor's units of 0.732 rpm and 8.7 °/s² per step, rounded down) and
 //!   read back; open refuses a servo that does not hold them. `LeRobot` leaves `Goal_Speed` at
 //!   0, which the servo reads as its full speed, and writes `Acceleration` 254; here they
 //!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
 //!   where it rests, is approached at the limit: [`ActuatorChain::approach_speed_limited`]
-//!   reports it.
+//!   reports it. A servo without one (the SO-101 follower's) keeps `LeRobot`'s registers and
+//!   reports `false`, so a governor refuses to move it from outside its range.
 //! - **Enabling never drives toward a stale goal.** Before `Torque_Enable` 1, each servo's
 //!   `Present_Position` is read and written to its `Goal_Position`, so the instant torque comes
 //!   on it holds where it rests; `LeRobot` enables with whatever goal the register last held.
@@ -182,7 +184,9 @@ pub struct ServoConfiguration {
     pub i_coefficient: u8,
     pub d_coefficient: u8,
     pub protection: Option<TorqueProtection>,
-    pub approach: ApproachLimit,
+    /// The speed the servo itself approaches any goal at, for a body that declares one;
+    /// `None` leaves `LeRobot`'s registers (`Goal_Speed` 0, full speed; `Acceleration` 254).
+    pub approach: Option<ApproachLimit>,
 }
 
 /// The fastest a servo moves toward any goal, written to its own `Goal_Speed` and
@@ -393,8 +397,8 @@ pub struct FeetechChain<P> {
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
     observed: Option<Vec<f64>>,
-    /// Every servo's approach limit was written and read back at open.
-    approach_limited: bool,
+    /// Per servo, whether its approach limit was written and read back.
+    approach_limited: Vec<bool>,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no flags.
@@ -445,8 +449,7 @@ impl<P: SerialPort> FeetechChain<P> {
             if servo
                 .configuration
                 .approach
-                .registers(binding.reduction)
-                .is_none()
+                .is_some_and(|approach| approach.registers(binding.reduction).is_none())
             {
                 return Err(FeetechChainError::ApproachLimit(binding.bus_id));
             }
@@ -470,7 +473,7 @@ impl<P: SerialPort> FeetechChain<P> {
             stop_pending: false,
             faults: Vec::new(),
             observed: None,
-            approach_limited: false,
+            approach_limited: Vec::new(),
         };
         chain.is_calibrated()?;
         chain.configure()?;
@@ -577,20 +580,22 @@ impl<P: SerialPort> FeetechChain<P> {
         Ok(())
     }
 
-    /// Write every servo's `Acceleration` and `Goal_Speed` from its approach limit and read
-    /// both back, so the servo itself moves slowly toward whatever goal it is given.
+    /// Write the `Acceleration` and `Goal_Speed` of every servo that declares an approach limit
+    /// and read both back, so the servo itself moves slowly toward whatever goal it is given.
     fn limit_approach(&mut self) -> Result<(), FeetechChainError> {
+        self.approach_limited = vec![false; self.servos.len()];
         let limits: Vec<(u16, u8, (u16, u8))> = self
             .servos
             .iter()
-            .map(|servo| {
+            .filter_map(|servo| {
                 let binding = servo.axis.binding;
-                let registers = servo
-                    .configuration
-                    .approach
-                    .registers(binding.reduction)
-                    .ok_or(FeetechChainError::ApproachLimit(binding.bus_id))?;
-                Ok((binding.bus_id, servo.scs_id(), registers))
+                let approach = servo.configuration.approach?;
+                Some(
+                    approach
+                        .registers(binding.reduction)
+                        .map(|registers| (binding.bus_id, servo.scs_id(), registers))
+                        .ok_or(FeetechChainError::ApproachLimit(binding.bus_id)),
+                )
             })
             .collect::<Result<_, FeetechChainError>>()?;
         for (bus_id, scs_id, (speed, acceleration)) in &limits {
@@ -615,7 +620,9 @@ impl<P: SerialPort> FeetechChain<P> {
                 });
             }
         }
-        self.approach_limited = true;
+        for (servo, limited) in self.servos.iter().zip(&mut self.approach_limited) {
+            *limited = servo.configuration.approach.is_some();
+        }
         Ok(())
     }
 
@@ -834,9 +841,9 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         report
     }
 
-    /// Every servo's, once its approach limit was confirmed at open.
+    /// A servo's, once the approach limit it declares was confirmed.
     fn approach_speed_limited(&self, axis: usize) -> bool {
-        self.approach_limited && axis < self.servos.len()
+        self.approach_limited.get(axis).copied().unwrap_or(false)
     }
 
     /// Where every servo was read at open or after the last stop, when no command has been

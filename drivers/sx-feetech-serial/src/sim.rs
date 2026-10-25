@@ -37,6 +37,8 @@ pub struct SimState {
     pub written: Vec<Vec<u8>>,
     /// Every byte the host has read.
     pub read: usize,
+    /// (servo, address) pairs whose writes the firmware does not take.
+    pub ignored: BTreeSet<(u8, u8)>,
 }
 
 impl SimState {
@@ -221,8 +223,10 @@ impl SimState {
                 status(*id, &registers[start..start + usize::from(*count)])
             }
             (INST_WRITE, [address, data @ ..]) => {
-                let start = usize::from(*address);
-                registers[start..start + data.len()].copy_from_slice(data);
+                if !self.ignored.contains(&(*id, *address)) {
+                    let start = usize::from(*address);
+                    registers[start..start + data.len()].copy_from_slice(data);
+                }
                 status(*id, &[])
             }
             _ => return,
@@ -294,6 +298,72 @@ mod tests {
         assert!((1..=6).all(|id| bus.state().torque(id) == 0));
         bus.kill(3);
         assert_eq!(chain.stop().unproven, [3]);
+    }
+
+    /// Six servos set up as the static upper body's neck is: with the bring-up approach.
+    fn neck_like() -> Vec<crate::FeetechServo> {
+        let calibration = MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 800,
+            range_max: 3200,
+        };
+        let mut servos = so101([calibration; 6]).expect("composes");
+        for servo in &mut servos {
+            servo.configuration.approach = Some(crate::BRING_UP_APPROACH);
+        }
+        servos
+    }
+
+    fn calibrated_bus() -> SimBus {
+        let calibration = MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 800,
+            range_max: 3200,
+        };
+        SimBus::sts3215(&(1..=6).map(|id| (id, calibration)).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn a_declared_approach_limit_is_written_read_back_and_claimed() {
+        let bus = calibrated_bus();
+        let chain = crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
+        assert!((0..6).all(|axis| chain.approach_speed_limited(axis)));
+        let state = bus.state();
+        assert!(
+            state
+                .servos
+                .values()
+                .all(|r| (r[41], r[46], r[47]) == (3, 3, 0))
+        );
+    }
+
+    #[test]
+    fn an_approach_limit_the_servo_does_not_hold_or_cannot_carry_is_refused() {
+        let bus = calibrated_bus();
+        bus.state()
+            .ignored
+            .insert((4, crate::scservo_sdk::SMS_STS_GOAL_SPEED_L));
+        assert!(matches!(
+            crate::FeetechChain::open(bus.clone(), neck_like()),
+            Err(crate::FeetechChainError::ApproachUnconfirmed {
+                bus_id: 4,
+                speed: 0,
+                acceleration: 3
+            })
+        ));
+        let mut crawling = neck_like();
+        crawling[0].configuration.approach = Some(crate::ApproachLimit {
+            speed: 0.01,
+            acceleration: 0.5,
+        });
+        let written = bus.state().written.len();
+        assert!(matches!(
+            crate::FeetechChain::open(bus.clone(), crawling),
+            Err(crate::FeetechChainError::ApproachLimit(1))
+        ));
+        assert_eq!(bus.state().written.len(), written, "refused before the bus");
     }
 
     /// The bytes one command puts on the line once torque is on: the `Goal_Position` SYNC

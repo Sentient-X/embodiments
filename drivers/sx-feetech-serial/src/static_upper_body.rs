@@ -9,11 +9,12 @@
 //! - [`NECK`], port `neck`: ids 1..6 in SO-101 order, the sixth the camera tilt where the
 //!   SO-101's gripper servo was. Each servo is set up as [`crate::so101`]'s arm joints are:
 //!   `LeRobot`'s `DEGREES` normalization and `SOFollower.configure`'s position loop, the camera
-//!   tilt included, since it is a revolute joint and not a jaw.
+//!   tilt included, since it is a revolute joint and not a jaw; and, beyond the SO-101, the
+//!   bring-up approach limit on the servo itself ([`crate::chain::BRING_UP_APPROACH`]).
 //! - [`RIGHT_GRIPPER`] and [`LEFT_GRIPPER`], ports `right_gripper` (ids 1 and 2) and
 //!   `left_gripper` (ids 3 and 4), one servo per finger, each set up as the SO-101's gripper is:
 //!   `RANGE_0_100` over the finger's declared range, and `SOFollower.configure`'s torque and
-//!   current limits.
+//!   current limits, and the same approach limit.
 //!
 //! **Provisional.** Which gripper bus is which side, which id is which finger, that each neck
 //! joint's zero is its servo's mid-range, and that each finger's declared range is its
@@ -25,7 +26,7 @@
 //! slewed from there.
 
 use crate::body::{FeetechBody, ServoSetup};
-use crate::chain::{MotorNormMode, ServoConfiguration};
+use crate::chain::{BRING_UP_APPROACH, MotorNormMode, ServoConfiguration};
 use crate::so101::{GRIPPER_PROTECTION, LEROBOT_BAUD, POSITION_LOOP};
 
 /// The registry's static upper-body axes, rendered.
@@ -35,7 +36,10 @@ const fn degrees(joint: &'static str) -> ServoSetup {
     ServoSetup {
         joint,
         norm_mode: MotorNormMode::Degrees,
-        configuration: POSITION_LOOP,
+        configuration: ServoConfiguration {
+            approach: Some(BRING_UP_APPROACH),
+            ..POSITION_LOOP
+        },
     }
 }
 
@@ -45,6 +49,7 @@ const fn finger(joint: &'static str) -> ServoSetup {
         norm_mode: MotorNormMode::Range0100,
         configuration: ServoConfiguration {
             protection: Some(GRIPPER_PROTECTION),
+            approach: Some(BRING_UP_APPROACH),
             ..POSITION_LOOP
         },
     }
