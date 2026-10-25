@@ -213,19 +213,34 @@ fn frame(camera: &mut Camera, width: u32, height: u32) -> Result<RawFrame, Captu
         wall: SystemTime::now(),
     };
     let rows = height as usize;
-    if rows == 0 || data.len() % rows != 0 {
-        return Err(CaptureError::Device(format!(
-            "a {} byte frame is not {rows} whole rows",
-            data.len()
-        )));
-    }
+    let (stride, data) = rows_of(data, width as usize, rows)?;
     Ok(RawFrame {
         width,
         height,
-        stride: data.len() / rows,
+        stride,
         data,
         captured,
     })
+}
+
+/// The row stride of one raw YUYV frame, and the frame trimmed to its rows. Rows may be padded
+/// (a size that divides into whole rows of at least `width × 2` bytes), or the platform may hand
+/// over trailing bytes after packed rows: `AVFoundation` delivers the ZED 2i's 1344×376 mode as
+/// 1,013,376 bytes, 377 packed rows (measured on macOS, 2026-10-25), so the last row is dropped.
+fn rows_of(mut data: Vec<u8>, width: usize, rows: usize) -> Result<(usize, Vec<u8>), CaptureError> {
+    let packed = width * 2;
+    if rows > 0 && data.len().is_multiple_of(rows) && data.len() / rows >= packed {
+        let stride = data.len() / rows;
+        return Ok((stride, data));
+    }
+    if rows > 0 && data.len() >= packed * rows && data.len() - packed * rows < packed * 2 {
+        data.truncate(packed * rows);
+        return Ok((packed, data));
+    }
+    Err(CaptureError::Device(format!(
+        "a {} byte frame is not {rows} rows of at least {packed} bytes",
+        data.len()
+    )))
 }
 
 /// Open the device `request` names at its mode and capture it.
