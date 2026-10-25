@@ -24,8 +24,8 @@
 //! width is even in every mode) and its chroma averaged over row pairs into I420, so luma and
 //! chroma pass through unconverted, in the camera's own range.
 //!
-//! Depth, the IMU (the ZED's HID interface) and the ZED SDK's rectification are not here: the
-//! camera is two image streams, and a unit's factory calibration is the registry's
+//! Depth and the ZED SDK's rectification are not here, nor the IMU (the ZED's HID sensor module,
+//! `sx-stereolabs-sensors`): the camera is two image streams, and a unit's factory calibration is the registry's
 //! (`sx_embodiments.factory_intrinsics.zed_factory_calibration`).
 
 #[cfg(feature = "capture")]

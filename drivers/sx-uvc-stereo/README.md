@@ -7,7 +7,7 @@ views.
 
 | Product | Registry id | USB id | Eye modes (side by side) |
 |---|---|---|---|
-| Stereolabs ZED 2i | `zed_2i` | `2b03:f880` (video; `f881` is its IMU HID, unused) | 2208x1242 @ 15, 1920x1080 @ 30/15, 1280x720 @ 60/30/15, 672x376 @ 100/60/30/15 ([Stereolabs video modes](https://docs.stereolabs.com/docs/video/camera-controls)); USB 2 carries VGA alone |
+| Stereolabs ZED 2i | `zed_2i` | `2b03:f880` (video; `f881` is its sensor module, read by `sx-stereolabs-sensors`) | 2208x1242 @ 15, 1920x1080 @ 30/15, 1280x720 @ 60/30/15, 672x376 @ 100/60/30/15 ([Stereolabs video modes](https://docs.stereolabs.com/docs/video/camera-controls)); USB 2 carries VGA alone |
 
 ## Use
 
@@ -35,7 +35,7 @@ threads) into a two-frame queue. A process without camera permission (macOS) get
 * **Exposure time.** `nokhwa` carries no UVC timestamp, so a frame is stamped when the host has it,
   later than the exposure by its readout and transfer. V4L2's own buffer timestamps would close
   that on Linux.
-* **Depth, IMU, rectification.** The ZED SDK is not used. A unit's intrinsics and its eyes' relative
+* **Depth, rectification.** The ZED SDK is not used; the IMU is `sx-stereolabs-sensors`. A unit's intrinsics and its eyes' relative
   pose are its factory calibration, which Stereolabs publishes per serial
   (`https://calib.stereolabs.com/?SN=<serial>`) and the registry reads
   (`sx_embodiments.factory_intrinsics.zed_factory_calibration`); `tests/fixtures/zed-2i-30371653.conf`
