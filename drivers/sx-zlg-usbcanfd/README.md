@@ -89,13 +89,20 @@ cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 
 ## macOS
 
-On macOS the adapter enumerates and answers every standard read (device, configuration and
-string descriptors), but nothing configures it: no macOS driver matches a vendor-class device,
-and asking for configuration 1 from userspace fails with `kIOReturnNotResponding`
-(`0xe00002ed`). Measured on the USBCANFD-200U, serial A30F115DD0120A949B80, firmware bcdDevice
-0x0200, on 2026-10-25: through the robot's hub and on a direct port, with no other user client
-holding the device, through this crate (`nusb`) and through libusb alike. A port reset leaves
-the adapter off the bus until it is power-cycled, so the driver never resets it. The driver
-still selects the configuration when it finds the device unconfigured, which is all that other
-hosts need; on Linux the kernel configures the device at enumeration and the driver opens it
-over usbfs. Driving this adapter from macOS is therefore not supported; run on Linux.
+macOS leaves this vendor-class adapter unconfigured when it is plugged in: no macOS driver
+matches it, so it has no interface to claim. The legacy `IOUSBDeviceInterface::SetConfiguration`
+(what `nusb` and libusb call) fails on it with `kIOReturnNotResponding` (`0xe00002ed`), and after
+one failed request the adapter's control pipe stays broken until it is replugged. Apple's
+IOUSBHost framework configures it: `IOUSBHostDevice` opened with no options, then
+`configureWithValue: 1 matchInterfaces: YES`, which works as a normal user (no root) on a freshly
+plugged adapter (USBCANFD-200U, serial A30F115DD0120A949B80, firmware 0x0245, 2026-10-25).
+
+So on macOS `UsbCanFd::open` first looks in the I/O Registry, which sends nothing to the
+device, for an `IOUSBHostInterface` below the adapter. If there is none it configures the
+adapter through IOUSBHost (`src/macos.rs`, the crate's only unsafe code, on
+`objc2-io-usb-host`), releases it, waits for interface 0 to register, and only then opens it
+with `nusb`. `nusb`'s `set_configuration` is never called on macOS and the adapter is never
+reset (a port reset can leave it off the bus until it is power-cycled). The adapter stays
+configured until it is unplugged; `Probe::configured_on_open` says whether this open was the
+one that configured it. On Linux the kernel configures the device at enumeration and the
+driver opens it over usbfs.

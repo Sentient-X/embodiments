@@ -16,9 +16,24 @@ sx-embodiment-drivers.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# Pure-Rust USB: IOKit on macOS, usbfs on Linux; no libusb, no unsafe in this crate.
+# Pure-Rust USB: IOKit on macOS, usbfs on Linux; no libusb.
 nusb = "0.2"
 sx-socketcan = { path = "../sx-socketcan", optional = true }
 
-[lints]
-workspace = true
+# macOS leaves this vendor-class adapter unconfigured, and the legacy IOUSBDeviceInterface's
+# SetConfiguration that nusb uses fails on it; Apple's IOUSBHost framework configures it.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-io-kit = { version = "0.3", default-features = false, features = ["std", "libc"] }
+objc2-io-usb-host = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-io-kit", "objc2-core-foundation", "IOUSBHostDefinitions", "IOUSBHostDevice", "IOUSBHostObject"] }
+
+# The workspace's lints, except that unsafe code is denied rather than forbidden, so the one
+# macOS module that calls IOUSBHost (src/macos.rs) can allow it; nothing else may.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }

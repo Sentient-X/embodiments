@@ -156,6 +156,9 @@ pub struct Probe {
     pub usb_speed: Option<String>,
     /// wMaxPacketSize of 0x01, 0x81, 0x02, 0x82, 0x83.
     pub packet_sizes: [usize; 5],
+    /// Whether this open found the device unconfigured and selected its configuration (on
+    /// macOS through `IOUSBHost`, the first open after each plug-in).
+    pub configured_on_open: bool,
 }
 
 /// The channels' lifecycle state, behind the command lock.
@@ -315,10 +318,26 @@ impl UsbCanFd {
     }
 }
 
-/// Select the device's one configuration when the host left it unconfigured. Linux configures
-/// a device when it enumerates; macOS leaves a vendor-class device that no driver matches
-/// unconfigured, so it has no interface to claim (see the README's macOS section). The adapter
-/// is never reset here: a port reset on macOS can drop it off the bus until it is power-cycled.
+/// Select the device's one configuration when the host left it unconfigured. macOS leaves a
+/// vendor-class device that no driver matches unconfigured; the legacy `SetConfiguration` `nusb`
+/// would send fails on this adapter and breaks its control pipe until it is replugged, so on
+/// macOS `IOUSBHost` selects it ([`crate::macos`]) before `nusb` opens the device, and `nusb`'s
+/// `set_configuration` is never called. The adapter is never reset.
+#[cfg(target_os = "macos")]
+fn configure_before_open(info: &nusb::DeviceInfo) -> Result<bool, String> {
+    crate::macos::ensure_configured(info.registry_entry_id())
+        .map(|done| done == crate::macos::Configured::Now)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(clippy::unnecessary_wraps)]
+const fn configure_before_open(_info: &nusb::DeviceInfo) -> Result<bool, String> {
+    Ok(false)
+}
+
+/// Elsewhere (Linux configures a device when it enumerates) select the configuration through
+/// `nusb` only if the device is somehow unconfigured.
+#[cfg(not(target_os = "macos"))]
 fn configure(device: &nusb::Device) -> Result<(), String> {
     if device.active_configuration().is_ok() {
         return Ok(());
@@ -334,6 +353,12 @@ fn configure(device: &nusb::Device) -> Result<(), String> {
         .map_err(|error| format!("set configuration {value}: {error}"))
 }
 
+#[cfg(target_os = "macos")]
+#[allow(clippy::unnecessary_wraps)]
+const fn configure(_device: &nusb::Device) -> Result<(), String> {
+    Ok(())
+}
+
 /// Probe an adapter (§1.3), claim its endpoints and start its I/O thread.
 fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
     let usb_serial = info.serial_number().map(str::to_owned);
@@ -344,6 +369,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         serial: name.clone(),
         detail,
     };
+    let configured_on_open = configure_before_open(info).map_err(usb)?;
     let device = info.open().wait().map_err(|error| usb(error.to_string()))?;
     configure(&device).map_err(usb)?;
     let interface = device.claim_interface(0).wait().map_err(|error| {
@@ -393,6 +419,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         lin_ports: information.lin_ports.min(2),
         usb_speed: device.speed().map(speed_name),
         packet_sizes,
+        configured_on_open,
     };
     let shared = Arc::new(Shared::new(channels, RX_RING, TX_QUEUE));
     let packet = rx.max_packet_size().max(1);

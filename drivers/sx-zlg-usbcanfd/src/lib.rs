@@ -11,6 +11,8 @@ pub mod bench;
 pub mod crc;
 pub mod device;
 pub mod engine;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod ring;
 pub mod timing;
 pub mod usb;
