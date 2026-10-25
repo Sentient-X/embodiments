@@ -8,6 +8,7 @@
 //! this crate for the surface it builds against.
 
 pub mod chain;
+pub mod scan;
 pub mod scservo_sdk;
 pub mod so101;
 

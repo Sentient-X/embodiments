@@ -16,6 +16,7 @@ pub mod body;
 pub mod chain;
 pub mod dm_can;
 pub mod humanoid;
+pub mod scan;
 #[cfg(any(test, feature = "sim"))]
 pub mod sim;
 pub mod static_upper_body;

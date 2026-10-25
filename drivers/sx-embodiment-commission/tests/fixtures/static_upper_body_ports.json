@@ -1,0 +1,281 @@
+{
+  "embodiment": "sentient-static-upper-body",
+  "id": "fixture",
+  "axes": [
+    {
+      "joint": "torso_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 31,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_shoulder_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 24,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_shoulder_roll_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 25,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_upper_arm_yaw_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 26,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_elbow_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 27,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_forearm_yaw_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 28,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_wrist_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 29,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_wrist_roll_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 30,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_shoulder_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 9,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_shoulder_roll_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm8009",
+      "bus": "damiao_can",
+      "bus_id": 16,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_upper_arm_yaw_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 17,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_elbow_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 18,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_forearm_yaw_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4340",
+      "bus": "damiao_can",
+      "bus_id": 19,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_wrist_pitch_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 20,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_wrist_roll_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "damiao_dm4310",
+      "bus": "damiao_can",
+      "bus_id": 21,
+      "port": "can",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "neck_pan",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 1,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "neck_lift",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 2,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "neck_elbow",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 3,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "neck_wrist_flex",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 4,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "neck_wrist_roll",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 5,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "camera_tilt",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 6,
+      "port": "neck",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_gripper_left_finger_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 1,
+      "port": "left_gripper",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "left_gripper_right_finger_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 2,
+      "port": "left_gripper",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_gripper_left_finger_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 3,
+      "port": "right_gripper",
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "right_gripper_right_finger_joint",
+      "lower": -1.0,
+      "upper": 1.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "bus_id": 4,
+      "port": "right_gripper",
+      "sign": 1,
+      "reduction": 1.0
+    }
+  ]
+}

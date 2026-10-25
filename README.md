@@ -274,8 +274,26 @@ driver's chain.
 |---|---|---|---|
 | `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601`, `humanoid::open_humanoid_upper_body` and `body::DamiaoBody::open` (any single-bus body: the humanoid and static upper bodies) |
 | `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to the bridge's USB serial, or a board CAN interface's name), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0), feature `socketcan` finds `SocketCAN` interfaces by their adapter's serial; `system::SystemPorts` looks a commissioned identity up across every transport compiled in, opens the one bridge carrying it and refuses two (`OpenError::Ambiguous`), so the station names no transport | the `sx` station's `StationRobot::open_actuator`, over `SystemPorts::system()` |
+| `sx-embodiment-commission` | any of the above, read-only | none: it enumerates every USB device (through [`nusb`](https://github.com/kevinmehall/nusb), Apache-2.0 or MIT; ttys through `serialport`, `SocketCAN` through sysfs), scans each bus with its vendor crate's read-only `scan`, and matches each port a body's bindings declare to the one bridge its units answer on | a person or agent commissioning a station, through the `sx-commission` binary |
 | `sx-socketcan` | any CAN bus | none: Linux `SocketCAN` (`CAN_RAW`) as a `can::CanPort`, through `libc`, holding a per-interface `flock` so a second of our processes cannot open the bus (a foreign driver is not excluded); the one crate allowed `unsafe`, in its socket and lock modules | `sx-embodiment-bodies`'s `socketcan::SocketCanPorts` and `system::SystemPorts` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
+
+A robot is commissioned with `sx-commission`, never by an ad-hoc probe script. It only reads:
+every scan speaks through its crate's read-only port (`sx_feetech_serial::scan::ReadOnlyPort`
+passes only PING and READ; `sx_damiao_can::scan::ReadOnlyCanPort` only register reads), which
+refuses any other packet or frame before the link sees a byte, so it cannot write a register or
+enable torque.
+
+```bash
+cargo run -p sx-embodiment-commission -- probe            # every bridge and what answers on it
+cargo run -p sx-embodiment-commission -- commission \
+  --bindings drivers/sx-damiao-can/bindings/sentient-static-upper-body.json \
+  --instance <instance id> --pod <pod id> --revision <n>  # dry run: the document and calibrations
+#  ... --write <dir>   writes commissioning.json and <port>.calibration.json
+```
+
+`commission` refuses a port with no answering bridge, with several, or with a unit of another
+model, naming every candidate; `--json` prints the same for a machine.
 
 Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's
 `MediaPlan` names each track's views and the camera unit placed in each, and a camera crate

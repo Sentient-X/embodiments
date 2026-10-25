@@ -22,6 +22,7 @@ it on an SO-101's serial adapter once a serial device binding exists there.
 | Per-unit calibration | `sx_feetech_serial::MotorCalibration` (`drive_mode`, `homing_offset`, `range_min`, `range_max`), one per servo, as `LeRobot` records it; open refuses a servo whose registers disagree |
 | Configuration | `sx_feetech_serial::ServoConfiguration` (PID, and a `TorqueProtection` for the gripper), written at open as `SOFollower.configure` does |
 | Stop budget | `ActuatorChain::stop_budget()`: the port's `timeout()` times three exchanges (torque off, unlock, read-back) per servo |
+| A read-only scan | `sx_feetech_serial::scan::scan(port, ids)`: pings each id and reads model, firmware, the calibration (`MotorCalibration`), mode, PID, torque limit, torque enable, position, voltage and temperature into a `BusScan`; it speaks through `scan::ReadOnlyPort`, which refuses every packet but an addressed PING or READ (`scan::is_read_only`) before the link. The port is opened at `scan::STS3215_BAUD`. `sx-commission` is its consumer |
 
 - **Sequencing** is `LeRobot` 0.6.0's Feetech bus, the driver the SO-101 runs with today:
   at open, the model check, `is_calibrated` and `configure` with torque disabled;
