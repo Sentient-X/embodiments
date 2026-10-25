@@ -338,6 +338,14 @@ impl Encoder {
     pub fn clear_input(&self) -> Result<(), serialport::Error> {
         serialport::SerialPort::clear(&self.0, serialport::ClearBuffer::Input)
     }
+    /// Reset the encoder's ESP32 through its USB-serial bridge: DTR released, EN held low
+    /// through RTS for `pulse`, then released so it boots. Only the verified line is pulsed.
+    pub fn pulse_reset(&mut self, pulse: Duration) -> Result<(), serialport::Error> {
+        serialport::SerialPort::write_data_terminal_ready(&mut self.0, false)?;
+        serialport::SerialPort::write_request_to_send(&mut self.0, true)?;
+        thread::sleep(pulse);
+        serialport::SerialPort::write_request_to_send(&mut self.0, false)
+    }
 }
 #[cfg(target_os = "linux")]
 impl std::io::Read for Encoder {
