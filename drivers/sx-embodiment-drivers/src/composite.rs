@@ -139,6 +139,15 @@ where
         self.first.stop_budget() + self.second.stop_budget()
     }
 
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        let first = self.first.axes().len();
+        if axis < first {
+            self.first.approach_speed_limited(axis)
+        } else {
+            self.second.approach_speed_limited(axis - first)
+        }
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = self.first.last_observed()?;
         observed.extend(self.second.last_observed()?);

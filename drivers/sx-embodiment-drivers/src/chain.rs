@@ -177,6 +177,14 @@ pub trait ActuatorChain {
         None
     }
 
+    /// Whether the device itself limits how fast axis `axis` (index in native state order)
+    /// moves toward a target, so a target far from where it rests is approached at the device's
+    /// own pace rather than stepped to. A chain that cannot promise this says `false`.
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        let _ = axis;
+        false
+    }
+
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
     fn clear_faults(&mut self) {}

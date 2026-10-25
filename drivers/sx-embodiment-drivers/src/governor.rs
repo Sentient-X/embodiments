@@ -9,9 +9,18 @@
 //!   at most `max_speed` times the time since the last accepted command, that time capped at
 //!   [`MAX_STEP_INTERVAL`] so a caller that stalls earns no larger step. The result is held
 //!   inside the chain's commandable range. The first command after the chain was opened,
-//!   stopped or failed starts from where the body rests: the chain's own
-//!   [`ActuatorChain::last_observed`], or, for a chain that observes nothing, a position given
-//!   with [`Governor::start_at`]. With neither, the command is refused.
+//!   stopped or failed starts from where the body rests: a position given with
+//!   [`Governor::start_at`], else the chain's own [`ActuatorChain::last_observed`]. With
+//!   neither, the command is refused.
+//! - **Resting outside the range.** Holding the first step inside the range must not become a
+//!   jump to its edge: an axis that rests outside its commandable range by more than its
+//!   `max_tracking_error` refuses the command, sends nothing, and latches
+//!   [`GovernorError::RestingOutside`] until the operator recovers it — [`Governor::start_at`]
+//!   after moving the joint back by hand, or [`ActuatorChain::clear_faults`] once the chain
+//!   observes it inside again. Only an axis whose chain declares that the device limits its
+//!   approach speed ([`ActuatorChain::approach_speed_limited`]) is instead sent the in-range
+//!   position nearest where it rests, held there while the device brings it in, with its
+//!   tracking check suspended until it is observed inside; then it slews as any other axis.
 //! - **Tracking error.** When a command's receipt carries observed positions, each must lie
 //!   within `max_tracking_error` of what was just sent. One that does not stops the chain and
 //!   latches a fault: every later command is refused until [`ActuatorChain::clear_faults`].
@@ -84,7 +93,16 @@ pub enum GovernorError<E> {
         limit: f64,
         stop: StopReport,
     },
-    #[error("a tracking fault is latched; clear it before commanding")]
+    #[error(
+        "joint {joint} rests at {observed}, outside its commandable range {lower}..{upper}; nothing was sent and the fault is latched until the joint is recovered"
+    )]
+    RestingOutside {
+        joint: String,
+        observed: f64,
+        lower: f64,
+        upper: f64,
+    },
+    #[error("a fault is latched; recover the body and clear it before commanding")]
     Latched,
 }
 
@@ -92,16 +110,27 @@ impl<E: ChainError> ChainError for GovernorError<E> {
     fn failure(&self) -> ChainFailure {
         match self {
             Self::Chain(error) => error.failure(),
-            Self::Target(_) | Self::NoStart | Self::Latched => ChainFailure::Refused,
+            Self::Target(_) | Self::NoStart | Self::Latched | Self::RestingOutside { .. } => {
+                ChainFailure::Refused
+            }
             Self::Tracking { .. } => ChainFailure::Fault,
         }
     }
 }
 
-/// The position last sent, and when.
+/// The position last sent, and when; and which axes are still being brought into range by
+/// their device.
 struct Held {
     position: Vec<f64>,
     at: Option<Instant>,
+    approaching: Vec<bool>,
+}
+
+/// Why commands are refused until the operator acts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Latch {
+    Tracking,
+    RestingOutside,
 }
 
 /// A chain whose commands are slewed and whose tracking is checked; see the module docs.
@@ -111,7 +140,7 @@ pub struct Governor<C, K = MonotonicClock> {
     clock: K,
     held: Option<Held>,
     start: Option<Vec<f64>>,
-    latched: bool,
+    latched: Option<Latch>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -153,12 +182,16 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             clock,
             held: None,
             start: None,
-            latched: false,
+            latched: None,
         })
     }
 
-    /// Where the body rests, for a chain that observes nothing: the next command after open,
-    /// a stop or a failure starts from it. A chain's own observation wins over it.
+    /// Where the body rests, as the operator states it: the next command after open, a stop,
+    /// a failure or a resting-outside fault starts from it, ahead of the chain's own
+    /// observation. It is how a chain that observes nothing is started, and how a joint moved
+    /// back into range by hand is recovered: it releases a [`GovernorError::RestingOutside`]
+    /// latch (not a tracking fault). A start that is itself outside the range is refused at the
+    /// next command as any other.
     ///
     /// # Errors
     ///
@@ -166,6 +199,10 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     pub fn start_at(&mut self, joints: Vec<f64>) -> Result<(), TargetError> {
         check_targets(self.chain.axes(), &joints)?;
         self.start = Some(joints);
+        self.held = None;
+        if self.latched == Some(Latch::RestingOutside) {
+            self.latched = None;
+        }
         Ok(())
     }
 
@@ -179,15 +216,48 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         &mut self.chain
     }
 
+    /// Where the next command starts: the operator's start, else the chain's observation.
+    /// An axis resting outside its range beyond its tracking bound refuses and latches, unless
+    /// its device limits its approach, which then starts from the nearest in-range position.
     fn seed(&mut self) -> Result<Held, GovernorError<C::Error>> {
         let width = self.chain.axes().len();
-        let position = self
-            .chain
-            .last_observed()
-            .filter(|observed| observed.len() == width)
-            .or_else(|| self.start.take())
-            .ok_or(GovernorError::NoStart)?;
-        Ok(Held { position, at: None })
+        let mut position = match self.start.take() {
+            Some(start) => start,
+            None => self
+                .chain
+                .last_observed()
+                .filter(|observed| observed.len() == width)
+                .ok_or(GovernorError::NoStart)?,
+        };
+        let mut approaching = vec![false; width];
+        for (index, ((value, range), limit)) in position
+            .iter_mut()
+            .zip(self.chain.commandable())
+            .zip(&self.limits)
+            .enumerate()
+        {
+            let slack = limit.max_tracking_error;
+            if (range.lower - slack..=range.upper + slack).contains(value) {
+                continue;
+            }
+            if self.chain.approach_speed_limited(index) && value.is_finite() {
+                *value = value.clamp(range.lower, range.upper);
+                approaching[index] = true;
+                continue;
+            }
+            self.latched = Some(Latch::RestingOutside);
+            return Err(GovernorError::RestingOutside {
+                joint: self.chain.axes()[index].joint.clone(),
+                observed: *value,
+                lower: range.lower,
+                upper: range.upper,
+            });
+        }
+        Ok(Held {
+            position,
+            at: None,
+            approaching,
+        })
     }
 }
 
@@ -214,7 +284,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
-        if self.latched {
+        if self.latched.is_some() {
             return Err(GovernorError::Latched);
         }
         check_targets(self.chain.axes(), joints)?;
@@ -226,18 +296,26 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         let elapsed = held.at.map_or(MAX_STEP_INTERVAL, |at| {
             now.saturating_duration_since(at).min(MAX_STEP_INTERVAL)
         });
+        let mut approaching = held.approaching;
+        // An axis its device is still bringing into range holds the in-range position nearest
+        // where it rested; every other axis slews.
         let next: Vec<f64> = held
             .position
             .iter()
             .zip(joints)
             .zip(self.limits.iter().zip(self.chain.commandable()))
-            .map(|((value, target), (limit, range))| {
-                slew(
-                    *value,
-                    *target,
-                    limit.max_speed * elapsed.as_secs_f64(),
-                    *range,
-                )
+            .zip(&approaching)
+            .map(|(((value, target), (limit, range)), approaching)| {
+                if *approaching {
+                    *value
+                } else {
+                    slew(
+                        *value,
+                        *target,
+                        limit.max_speed * elapsed.as_secs_f64(),
+                        *range,
+                    )
+                }
             })
             .collect();
         let receipt = match self.chain.command(&next) {
@@ -245,11 +323,24 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
             // Where the body is after a failed command is the chain's to report again.
             Err(error) => return Err(GovernorError::Chain(error)),
         };
+        for ((approaching, observed), (range, limit)) in approaching
+            .iter_mut()
+            .zip(&receipt.observed)
+            .zip(self.chain.commandable().iter().zip(&self.limits))
+        {
+            let slack = limit.max_tracking_error;
+            if *approaching && (range.lower - slack..=range.upper + slack).contains(observed) {
+                *approaching = false;
+            }
+        }
         let strayed = receipt
             .observed
             .iter()
             .zip(&next)
             .zip(self.limits.iter().zip(self.chain.axes()))
+            .zip(&approaching)
+            .filter(|(_, approaching)| !**approaching)
+            .map(|(pair, _)| pair)
             .find(|((observed, sent), (limit, _))| {
                 !within(**observed, **sent, limit.max_tracking_error)
             })
@@ -262,7 +353,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
                 )
             });
         if let Some((joint, commanded, observed, limit)) = strayed {
-            self.latched = true;
+            self.latched = Some(Latch::Tracking);
             let stop = self.chain.stop();
             return Err(GovernorError::Tracking {
                 joint,
@@ -275,6 +366,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.held = Some(Held {
             position: next,
             at: Some(now),
+            approaching,
         });
         Ok(receipt)
     }
@@ -292,8 +384,12 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.chain.last_observed()
     }
 
+    fn approach_speed_limited(&self, axis: usize) -> bool {
+        self.chain.approach_speed_limited(axis)
+    }
+
     fn clear_faults(&mut self) {
-        self.latched = false;
+        self.latched = None;
         self.held = None;
         self.chain.clear_faults();
     }
@@ -328,6 +424,12 @@ mod tests {
         sent: Vec<Vec<f64>>,
         stops: usize,
         fail: bool,
+        /// Axes whose device limits its own approach speed.
+        approach_limited: [bool; 2],
+        /// When set, the device moves each axis toward what was sent by at most this per
+        /// command, from `rest`, and reports where it is.
+        device_step: Option<f64>,
+        actual: Option<Vec<f64>>,
     }
 
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
@@ -363,6 +465,9 @@ mod tests {
             sent: Vec::new(),
             stops: 0,
             fail: false,
+            approach_limited: [false; 2],
+            device_step: None,
+            actual: None,
         }
     }
 
@@ -390,10 +495,20 @@ mod tests {
                 return Err(FakeError);
             }
             self.sent.push(joints.to_vec());
+            let reached: Vec<f64> = match self.device_step {
+                Some(step) => {
+                    let actual = self.actual.get_or_insert_with(|| self.rest.clone());
+                    for (at, target) in actual.iter_mut().zip(joints) {
+                        *at += (target - *at).clamp(-step, step);
+                    }
+                    actual.clone()
+                }
+                None => joints.to_vec(),
+            };
             Ok(Receipt {
                 evidence: crate::chain::Evidence::BusObservedComplete,
                 observed: if self.observes {
-                    joints.iter().map(|joint| joint + self.lag).collect()
+                    reached.iter().map(|joint| joint + self.lag).collect()
                 } else {
                     Vec::new()
                 },
@@ -412,6 +527,10 @@ mod tests {
 
         fn last_observed(&self) -> Option<Vec<f64>> {
             self.observes.then(|| self.rest.clone())
+        }
+
+        fn approach_speed_limited(&self, axis: usize) -> bool {
+            self.approach_limited[axis]
         }
     }
 
@@ -578,5 +697,115 @@ mod tests {
                 Err(LimitsError::NotPositive(joint)) if joint == "b"
             ));
         }
+    }
+
+    #[test]
+    fn an_axis_resting_outside_its_range_refuses_sends_nothing_and_latches() {
+        let mut chain = fake(true);
+        // The joint rests 1.5 rad below its range, far past its 0.2 rad tracking bound.
+        chain.rest = vec![-2.4, 0.0];
+        let (mut governor, clock) = governed(chain);
+        match governor.command(&[0.0, 0.0]) {
+            Err(GovernorError::RestingOutside {
+                joint,
+                observed,
+                lower,
+                ..
+            }) => {
+                assert_eq!(joint, "a");
+                assert!((observed + 2.4).abs() < 1e-12);
+                assert!((lower + 0.9).abs() < 1e-12);
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(
+            governor.chain().sent.is_empty(),
+            "no jump to the range's edge"
+        );
+        assert!(matches!(
+            governor.command(&[0.0, 0.0]),
+            Err(GovernorError::Latched)
+        ));
+        // Clearing while the chain still observes it outside refuses again.
+        governor.clear_faults();
+        assert!(matches!(
+            governor.command(&[0.0, 0.0]),
+            Err(GovernorError::RestingOutside { .. })
+        ));
+        // Recovered by hand and stated by the operator: commands start from there.
+        governor.start_at(vec![-0.5, 0.0]).expect("a start");
+        clock.advance(Duration::from_millis(20));
+        governor.command(&[0.0, 0.0]).expect("after recovery");
+        assert!(close(&governor.chain().sent[0], &[-0.495, 0.0]));
+        assert!(
+            governor
+                .chain()
+                .sent
+                .iter()
+                .flatten()
+                .all(|v| v.abs() <= 0.9)
+        );
+        // Or cleared once the chain observes it inside again.
+        governor.stop();
+        governor.chain_mut().rest = vec![-2.4, 0.0];
+        assert!(governor.command(&[0.0, 0.0]).is_err());
+        governor.chain_mut().rest = vec![-0.7, 0.0];
+        governor.clear_faults();
+        governor
+            .command(&[0.0, 0.0])
+            .expect("observed inside again");
+        assert!(close(&governor.chain().sent[1], &[-0.695, 0.0]));
+    }
+
+    #[test]
+    fn a_device_limited_axis_is_sent_the_nearest_edge_until_it_is_inside() {
+        let mut chain = fake(true);
+        chain.rest = vec![-2.4, 0.0];
+        chain.approach_limited = [true, false];
+        chain.device_step = Some(0.3);
+        let (mut governor, clock) = governed(chain);
+        // The device closes 0.3 rad per command: observed -2.1, -1.8, -1.5, -1.2, then -0.9.
+        for round in 0..5 {
+            clock.advance(Duration::from_millis(20));
+            governor
+                .command(&[0.5, 0.0])
+                .unwrap_or_else(|error| panic!("round {round}: {error}"));
+            let sent = governor.chain().sent.last().expect("sent").clone();
+            assert!(
+                (sent[0] + 0.9).abs() < 1e-12,
+                "round {round}: the edge, held"
+            );
+            assert!(sent[1].abs() < 1e-12);
+        }
+        // Inside: it slews from the edge, one step, and its tracking is checked again.
+        clock.advance(Duration::from_millis(20));
+        governor.command(&[0.5, 0.0]).expect("inside");
+        assert!(close(&governor.chain().sent[5], &[-0.895, 0.0]));
+        governor.chain_mut().lag = 0.3;
+        clock.advance(Duration::from_millis(20));
+        assert!(matches!(
+            governor.command(&[0.5, 0.0]),
+            Err(GovernorError::Tracking { joint, .. }) if joint == "a"
+        ));
+    }
+
+    #[test]
+    fn only_device_limited_axes_approach_and_a_slight_overshoot_still_slews() {
+        // The other axis of the same chain rests outside without the capability: refused.
+        let mut chain = fake(true);
+        chain.rest = vec![0.0, 1.5];
+        chain.approach_limited = [true, false];
+        let (mut governor, _) = governed(chain);
+        assert!(matches!(
+            governor.command(&[0.0, 0.0]),
+            Err(GovernorError::RestingOutside { joint, .. }) if joint == "b"
+        ));
+        assert!(governor.chain().sent.is_empty());
+        // Within the tracking bound of the edge (a joint against its stop) it slews as before.
+        let mut chain = fake(true);
+        chain.rest = vec![1.05, 0.0];
+        let (mut governor, _) = governed(chain);
+        governor.command(&[0.0, 0.0]).expect("a slight overshoot");
+        assert!(close(&governor.chain().sent[0], &[0.9, 0.0]));
     }
 }
