@@ -70,3 +70,40 @@ def test_the_bindings_are_the_received_motor_table() -> None:
         assert (binding.sign, motor["encoder_turns"]) == (1, "0"), axis.name
         assert motor["direction_confirmed"] == motor["limits_confirmed"] == "true", axis.name
         assert axis.bounds == Bounds(float(motor["lower"]), float(motor["upper"])), axis.name
+
+
+def test_the_neck_is_bound_provisionally_as_an_so101_on_its_own_port() -> None:
+    from sx_embodiments.known.static_upper_body import (
+        STATIC_UPPER_BODY_NECK,
+        STATIC_UPPER_BODY_NECK_PORT,
+    )
+    from sx_embodiments.layout import ActuatorBus, ActuatorModel
+
+    bindings = [axis.actuator for axis in STATIC_UPPER_BODY_NECK.layout.axes]
+    assert [binding.bus_id for binding in bindings if binding is not None] == [1, 2, 3, 4, 5, 6]
+    for binding in bindings:
+        assert binding is not None
+        assert binding.model is ActuatorModel.FEETECH_STS3215
+        assert binding.bus is ActuatorBus.FEETECH_SERIAL
+        assert binding.bus_port == STATIC_UPPER_BODY_NECK_PORT == "neck"
+    robot = embodiment_from_definition(DEVELOPMENT_EMBODIMENTS[STATIC_UPPER_BODY_SPEC.name].spec)
+    assert all(c.axis.actuator is not None for c in robot.state.coordinates)
+
+
+def test_each_gripper_is_two_feetech_servos_on_a_bus_of_its_own() -> None:
+    from sx_embodiments.known.static_upper_body import (
+        STATIC_UPPER_BODY_LEFT_GRIPPER,
+        STATIC_UPPER_BODY_RIGHT_GRIPPER,
+    )
+    from sx_embodiments.layout import ActuatorModel
+
+    for gripper, port, ids in (
+        (STATIC_UPPER_BODY_RIGHT_GRIPPER, "right_gripper", [1, 2]),
+        (STATIC_UPPER_BODY_LEFT_GRIPPER, "left_gripper", [3, 4]),
+    ):
+        bindings = [axis.actuator for axis in gripper.layout.axes]
+        assert [b.bus_id for b in bindings if b is not None] == ids
+        assert all(
+            b is not None and b.model is ActuatorModel.FEETECH_STS3215 and b.bus_port == port
+            for b in bindings
+        )

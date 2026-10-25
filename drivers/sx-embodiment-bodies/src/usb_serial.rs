@@ -4,15 +4,19 @@
 //! the station's inventory reports devices by, never by a device path: `/dev/ttyACM0` names
 //! whichever bridge enumerated first. The kernel's `sysfs` tree is read for the USB device
 //! whose `serial` is the commissioned one, and its one tty interface is opened raw. Damiao's
-//! USB2CAN bridge is opened at the rate Seeed's controller uses, 921600 baud.
+//! USB2CAN bridge is opened at the rate Seeed's controller uses, 921600 baud; a serial-servo
+//! adapter (Feetech, Dynamixel) at the rate its body's bus runs at, as a [`ServoLink`].
 
 use std::fs;
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use serialport::ClearBuffer;
 use sx_damiao_can::usb2can::Usb2CanPort;
+use sx_embodiment_drivers::serial::SerialPort;
 
-use crate::{OpenError, Port, PortSource};
+use crate::{OpenError, Port, PortSource, SerialLink};
 
 /// The rate Seeed's `reBotArm_control_py` opens the USB2CAN bridge at.
 pub const USB2CAN_BAUD: u32 = 921_600;
@@ -128,6 +132,75 @@ impl PortSource for UsbSerialPorts {
     fn open(&mut self, serial: &str) -> Result<Port, OpenError> {
         open_tty(&self.tty(serial)?, serial)
     }
+
+    fn open_serial(&mut self, serial: &str, baud: u32) -> Result<SerialLink, OpenError> {
+        open_servo_tty(&self.tty(serial)?, serial, baud)
+    }
+}
+
+/// The longest a serial-servo link waits for one status packet. Feetech's `scservo_sdk` waits
+/// a packet's transmit time plus 50 ms (`LATENCY_TIMER`, `port_handler.py`); ROBOTIS's
+/// `DynamixelSDK` its transmit time plus 34 ms. Every status packet a chain here asks for is a
+/// few dozen bytes, under a millisecond at 1 Mbaud, so one fixed 50 ms bounds both.
+pub const SERVO_PACKET_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// A serial-servo adapter's tty as the vendor drivers' `PortHandler`.
+pub struct ServoLink {
+    stream: Box<dyn serialport::SerialPort>,
+    deadline: Instant,
+}
+
+impl SerialPort for ServoLink {
+    fn clear_port(&mut self) -> io::Result<()> {
+        self.stream
+            .clear(ClearBuffer::Input)
+            .map_err(io::Error::other)
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        self.stream.write_all(packet)?;
+        self.stream.flush()?;
+        Ok(packet.len())
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        let waiting = usize::try_from(self.stream.bytes_to_read().map_err(io::Error::other)?)
+            .unwrap_or(usize::MAX);
+        let mut buffer = vec![0_u8; length.min(waiting)];
+        if buffer.is_empty() {
+            return Ok(buffer);
+        }
+        let read = self.stream.read(&mut buffer)?;
+        buffer.truncate(read);
+        Ok(buffer)
+    }
+
+    fn timeout(&self) -> Duration {
+        SERVO_PACKET_TIMEOUT
+    }
+
+    fn set_packet_timeout(&mut self, _packet_length: usize) {
+        self.deadline = Instant::now() + SERVO_PACKET_TIMEOUT;
+    }
+
+    fn is_packet_timeout(&mut self) -> bool {
+        Instant::now() > self.deadline
+    }
+}
+
+/// A serial-servo adapter on `tty`, commissioned as `serial`, at `baud`.
+pub(crate) fn open_servo_tty(tty: &Path, serial: &str, baud: u32) -> Result<SerialLink, OpenError> {
+    let stream = serialport::new(tty.to_string_lossy(), baud)
+        .timeout(READ_TIMEOUT)
+        .open()
+        .map_err(|error| OpenError::Port {
+            serial: serial.to_owned(),
+            reason: error.to_string(),
+        })?;
+    Ok(Box::new(ServoLink {
+        stream,
+        deadline: Instant::now(),
+    }))
 }
 
 /// Damiao's USB2CAN bridge on `tty`, commissioned as `serial`.

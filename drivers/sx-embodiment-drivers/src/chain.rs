@@ -214,6 +214,7 @@ mod tests {
     fn targets_are_checked_against_width_and_bounds() {
         let axes = [BoundAxis {
             joint: "joint1".into(),
+            port: "can".into(),
             lower: -1.0,
             upper: 1.0,
             binding: ActuatorBinding {

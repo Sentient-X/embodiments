@@ -17,8 +17,9 @@
 //! The axes and their bindings are the registry's (`sx_embodiments/known/static_upper_body.py`,
 //! a development body), read from `bindings/sentient-static-upper-body.json`, which
 //! `tools/render_driver_bindings.py` renders: the torso yaw and both seven-joint arms, identity
-//! sign, every commandable range the confirmed limits. The grippers and the SO-101 neck have
-//! no motor entry and are in no chain. No bound, address, model, sign or reduction is spelled
+//! sign, every commandable range the confirmed limits. The grippers and the SO-101 neck are
+//! Feetech servos on serial buses of their own, the same document's other ports, composed by
+//! `sx-feetech-serial`, not here. No bound, address, model, sign or reduction is spelled
 //! here; what is added is controller configuration, keyed by joint name.
 
 use std::time::Duration;

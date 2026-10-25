@@ -30,6 +30,7 @@ from sx_embodiments.layout import (
     UNDOCUMENTED_DRIVE_REASON,
     UNDOCUMENTED_OBSERVATION_REASON,
     Bounds,
+    BusPort,
     CoordinateUnit,
     JointAxis,
     JointLayout,
@@ -140,6 +141,59 @@ def test_duplicate_bus_addresses_within_one_layout_are_rejected() -> None:
     other = JointAxis("b", CoordinateUnit.RADIAN, Bounds(-1.0, 1.0), _sts(1))
     with pytest.raises(LayoutError, match="bus addresses must be unique"):
         JointLayout((axis, other))
+
+
+def test_a_named_port_is_written_and_read_and_the_default_is_never_spelled() -> None:
+    robot = development_embodiments["sentient-static-upper-body"]
+    assert Embodiment.from_json(robot.to_json()) == robot
+    ports = {
+        coordinate.axis.name: binding.bus_port
+        for coordinate in robot.state.coordinates
+        if (binding := coordinate.axis.actuator) is not None
+    }
+    assert ports["torso_joint"] == "can"
+    assert ports["so101_camera_tilt_joint"] == "neck"
+    # An unnamed port is not on the wire, so a body naming none keeps its identity.
+    assert '"port"' not in embodiments["so101"].to_json()
+    assert '"neck"' in robot.to_json()
+    with pytest.raises(LayoutError, match="default for its bus"):
+        ActuatorBinding(ActuatorModel.DAMIAO_DM4310, ActuatorBus.DAMIAO_CAN, 1, port=BusPort("can"))
+    for spelled in ("", "Neck", "neck bus", "1neck"):
+        with pytest.raises(LayoutError, match="port must be"):
+            ActuatorBinding(
+                ActuatorModel.FEETECH_STS3215, ActuatorBus.FEETECH_SERIAL, 1, port=BusPort(spelled)
+            )
+
+
+def test_a_provisional_binding_is_written_only_when_marked() -> None:
+    robot = development_embodiments["sentient-static-upper-body"]
+    assert Embodiment.from_json(robot.to_json()) == robot
+    marked = {
+        coordinate.axis.name: binding.provisional
+        for coordinate in robot.state.coordinates
+        if (binding := coordinate.axis.actuator) is not None
+    }
+    assert not marked["torso_joint"]
+    assert marked["so101_camera_tilt_joint"]
+    assert marked["left_gripper_left_finger_joint"]
+    assert '"provisional"' not in embodiments["so101"].to_json()
+    wire = copy.deepcopy(embodiments["so101"].to_dict())
+    components = wire["components"]
+    assert isinstance(components, list)
+    components[0]["attachment"]["part"]["layout"][0]["actuation"]["actuator"]["provisional"] = False
+    with pytest.raises(EmbodimentSchemaError, match="written only as true"):
+        Embodiment.from_dict(wire)
+
+
+def test_one_address_may_recur_on_two_ports_of_one_layout() -> None:
+    def neck(bus_id: int, port: str) -> ActuatorBinding:
+        return ActuatorBinding(
+            ActuatorModel.FEETECH_STS3215, ActuatorBus.FEETECH_SERIAL, bus_id, port=BusPort(port)
+        )
+
+    a = JointAxis("a", CoordinateUnit.RADIAN, Bounds(-1.0, 1.0), neck(1, "left"))
+    b = JointAxis("b", CoordinateUnit.RADIAN, Bounds(-1.0, 1.0), neck(1, "right"))
+    assert JointLayout((a, b)).width == 2
 
 
 def test_duplicate_bus_addresses_within_one_mounted_chain_are_an_authoring_error() -> None:

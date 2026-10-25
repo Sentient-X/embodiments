@@ -599,6 +599,7 @@ mod tests {
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
         BoundAxis {
             joint: joint.to_owned(),
+            port: "can".to_owned(),
             lower: -1.0,
             upper: 1.0,
             binding: ActuatorBinding {

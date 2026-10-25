@@ -1,8 +1,10 @@
 """Canonical joint layouts and the derived native body-state order."""
 
 import math
+import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final, NewType
 
 from sx_contracts import ComponentId
 
@@ -65,12 +67,21 @@ class ActuatorModel(StrEnum):
     bench and safe-stop and torque-off on the station. This enum is the product's "clear
     motor restrictions": a body whose every actuated axis uses a tested model can be
     driven by construction; anything else is refused at authoring.
+
+    The Dynamixel members are the exception, added untested on the bench on 2026-10-25 so
+    the static upper body's grippers can be bound once the robot is probed: the
+    ``sx-dynamixel-serial`` driver is ported from ROBOTIS's DynamixelSDK and checked against
+    the SDK's own packets, never against a servo. A Dynamixel model is qualified when one
+    servo of it has been driven on the bench through that driver and has safe-stopped with
+    its torque read back off; until then no registered body binds one.
     """
 
     FEETECH_STS3215 = "feetech_sts3215"
     DAMIAO_DM4310 = "damiao_dm4310"
     DAMIAO_DM4340 = "damiao_dm4340"
     DAMIAO_DM8009 = "damiao_dm8009"
+    DYNAMIXEL_XL330_M288 = "dynamixel_xl330_m288"
+    DYNAMIXEL_XM430_W350 = "dynamixel_xm430_w350"
 
 
 class ActuatorBus(StrEnum):
@@ -78,6 +89,21 @@ class ActuatorBus(StrEnum):
 
     FEETECH_SERIAL = "feetech_serial"
     DAMIAO_CAN = "damiao_can"
+    DYNAMIXEL_SERIAL = "dynamixel_serial"
+
+
+#: The name commissioning records one physical bus's bridge under, such as ``can`` or
+#: ``neck``: lowercase letters, digits, ``_`` and ``-``, starting with a letter.
+BusPort = NewType("BusPort", str)
+
+_BUS_PORT: Final = re.compile(r"[a-z][a-z0-9_-]*")
+
+#: The port of a body's one bus of each kind, when its bindings name none.
+DEFAULT_PORTS: Final[dict[ActuatorBus, BusPort]] = {
+    ActuatorBus.FEETECH_SERIAL: BusPort("serial"),
+    ActuatorBus.DAMIAO_CAN: BusPort("can"),
+    ActuatorBus.DYNAMIXEL_SERIAL: BusPort("dynamixel"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +116,16 @@ class ActuatorBinding:
     own axis where the drive is not identity: ``actuator = sign * (joint - zero) *
     reduction``. The zero is measured per motor, so it is a joint calibration of the unit,
     never a fact of the design.
+
+    ``port`` names the physical bus the actuator is wired to, as commissioning records that
+    bus's bridge: a body whose actuators of one kind share one bus leaves it ``None``, the
+    kind's :data:`DEFAULT_PORTS` entry, and a body with more buses names each one beyond
+    that. Spelling the default is refused, so one wiring has one form, and an unnamed port
+    is not serialized, so a body's identity changes only when it names one.
+
+    ``provisional`` marks a binding not yet verified on the robot it describes (its address,
+    side, drive map or zero), so no driver moves it unless a person bringing the robot up opts
+    in for its port. It is serialized only when set.
     """
 
     model: ActuatorModel
@@ -97,6 +133,8 @@ class ActuatorBinding:
     bus_id: int
     sign: int = 1
     reduction: float = 1.0
+    port: BusPort | None = None
+    provisional: bool = False
 
     def __post_init__(self) -> None:
         if type(self.bus_id) is not int or self.bus_id < 1:
@@ -105,6 +143,22 @@ class ActuatorBinding:
             raise LayoutError("actuator", "sign must be +1 or -1")
         if not math.isfinite(self.reduction) or self.reduction <= 0.0:
             raise LayoutError("actuator", "reduction must be a positive finite ratio")
+        if type(self.provisional) is not bool:
+            raise LayoutError("actuator", "provisional must be a bool")
+        if self.port is not None:
+            if not _BUS_PORT.fullmatch(self.port):
+                raise LayoutError(
+                    "actuator", "port must be lowercase letters, digits, _ or -, from a letter"
+                )
+            if self.port == DEFAULT_PORTS[self.bus]:
+                raise LayoutError(
+                    "actuator", f"port {self.port!r} is the default for its bus; leave it unset"
+                )
+
+    @property
+    def bus_port(self) -> BusPort:
+        """The physical bus this actuator is on: its named port, or its kind's default."""
+        return self.port if self.port is not None else DEFAULT_PORTS[self.bus]
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,7 +316,7 @@ class JointLayout:
         if len(set(names)) != len(names):
             raise LayoutError("joint", "axis names must be unique")
         addresses = [
-            (axis.actuator.bus, axis.actuator.bus_id)
+            (axis.actuator.bus, axis.actuator.bus_port, axis.actuator.bus_id)
             for axis in self.axes
             if axis.actuator is not None
         ]

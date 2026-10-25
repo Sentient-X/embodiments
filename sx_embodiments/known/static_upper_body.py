@@ -38,12 +38,39 @@ that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that 
 a qualification. The right forearm yaw's entry contradicts itself: it flags
 ``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
 calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
-as received until the hardware owner settles which holds. The grippers and the SO-101 neck
-have no motor entry, so they stay undocumented drives.
+as received until the hardware owner settles which holds.
 
 The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_left`` and
 ``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
 published as one side-by-side ``head`` track (:data:`STATIC_UPPER_BODY_RIG`).
+
+**The neck and grippers are provisional, in data.** Each of their bindings is marked
+``provisional`` (:class:`~sx_embodiments.layout.ActuatorBinding`): no driver moves them unless
+a person bringing the robot up opts in for their port, and the station's normal path drives
+the fifteen Damiao axes with them left off.
+
+*The neck, from a read-only probe on 2026-10-25.* The received file has no entry for the
+SO-101 neck either. A probe that wrote nothing found it on its own USB serial bus (a WCH
+CH343, 1,000,000 baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order,
+the sixth the camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are
+bound here on a serial bus named ``neck``, identity drive map. Unverified: each joint's sign
+and zero. The degree normalization puts each joint's zero at its servo's calibrated
+mid-range, and the declared ranges are lopsided about zero (shoulder lift -0.03..3.63 rad,
+elbow flex -3.40..0.09), so that cannot be right for every joint: governed from where the
+probe found it, the first motion would carry shoulder lift about +1.76 rad, elbow flex
+-1.48 and camera tilt +2.32 toward that unverified zero. The servos' calibration registers
+are a unit's facts, not the design's, and are supplied at open. The probe found ids 2, 3, 4
+and 6 resting outside their calibrated ranges.
+
+*The grippers, from the same probe.* Not in the received motor table, and not Dynamixel: each
+finger has its own Feetech STS3215 (model 777, firmware 3.10), and each gripper's two are on a
+USB serial bus of their own (a CH343, 1,000,000 baud), one bus answering at ids 1 and 2 and
+the other at 3 and 4. Which bus is which side, and which id drives which finger, is
+unverified; the choice here is a guess, stated plainly: the bus at ids 1 and 2 is
+``right_gripper`` (by analogy with the right arm's lower CAN ids), the other ``left_gripper``,
+and the lower id is the left finger. An earlier commissioning fixture guessed the opposite
+sides; neither was checked. Each finger's declared range is taken as its servo's calibrated
+range, also unverified.
 """
 
 from typing import Final
@@ -64,6 +91,7 @@ from ..layout import (
     ActuatorBus,
     ActuatorFeedback,
     ActuatorModel,
+    BusPort,
     CoordinateUnit,
     DirectDrive,
 )
@@ -204,6 +232,24 @@ STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
     ),
 )
 
+#: The neck's serial bus, as commissioning names its bridge. Provisional, as the module says.
+STATIC_UPPER_BODY_NECK_PORT: Final = BusPort("neck")
+
+
+def _sts3215(bus_id: int, port: BusPort) -> DirectDrive:
+    """One STS3215 on one of the body's Feetech buses, identity drive map, marked provisional:
+    no driver moves it until a supervised bring-up opts in for its port."""
+    return DirectDrive(
+        ActuatorBinding(
+            model=ActuatorModel.FEETECH_STS3215,
+            bus=ActuatorBus.FEETECH_SERIAL,
+            bus_id=bus_id,
+            port=port,
+            provisional=True,
+        )
+    )
+
+
 #: The SO-101 on the chest, its gripper replaced by a camera tilt joint carrying the ZED.
 STATIC_UPPER_BODY_NECK: Final = ChainSpec(
     part_id=PartId("sentient-static-upper-body-neck"),
@@ -236,14 +282,26 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
             2.86233997327,
             2.04203522483,
         ),
+        actuations=tuple(_sts3215(bus_id, STATIC_UPPER_BODY_NECK_PORT) for bus_id in range(1, 7)),
+        observations=(ActuatorFeedback(),) * 6,
     ),
     home=(0.0,) * 6,
 )
 
 
+#: Each gripper's serial bus, as commissioning names its bridge, and its two servos' ids, the
+#: left finger's first. Provisional, as the module says: which bus is which side, and which id
+#: which finger, is not yet checked on the robot.
+STATIC_UPPER_BODY_GRIPPER_BUSES: Final = {
+    "right": (BusPort("right_gripper"), (1, 2)),
+    "left": (BusPort("left_gripper"), (3, 4)),
+}
+
+
 def _gripper(side: str, left_finger: float, right_finger: float) -> GripperSpec:
-    """Two revolute fingers the description moves independently; no source says whether one
-    motor couples them, so neither a mimic nor an aperture is declared."""
+    """Two revolute fingers, each on its own STS3215; no source says how their travel couples,
+    so neither a mimic nor an aperture is declared."""
+    port, ids = STATIC_UPPER_BODY_GRIPPER_BUSES[side]
     return GripperSpec(
         part_id=PartId(f"sentient-static-upper-body-{side}-gripper"),
         layout=bounded_layout(
@@ -251,6 +309,8 @@ def _gripper(side: str, left_finger: float, right_finger: float) -> GripperSpec:
             units=(CoordinateUnit.RADIAN,) * 2,
             lower=(left_finger, 0.0),
             upper=(0.0, right_finger),
+            actuations=tuple(_sts3215(bus_id, port) for bus_id in ids),
+            observations=(ActuatorFeedback(),) * 2,
         ),
     )
 

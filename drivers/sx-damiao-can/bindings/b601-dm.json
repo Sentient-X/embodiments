@@ -8,6 +8,8 @@
       "upper": 2.8,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 1,
       "sign": 1,
       "reduction": 1.0
@@ -18,6 +20,8 @@
       "upper": 0.0,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 2,
       "sign": 1,
       "reduction": 1.0
@@ -28,6 +32,8 @@
       "upper": 0.0,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 3,
       "sign": 1,
       "reduction": 1.0
@@ -38,6 +44,8 @@
       "upper": 1.57,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 4,
       "sign": 1,
       "reduction": 1.0
@@ -48,6 +56,8 @@
       "upper": 1.57,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 5,
       "sign": 1,
       "reduction": 1.0
@@ -58,6 +68,8 @@
       "upper": 3.14,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 6,
       "sign": 1,
       "reduction": 1.0
@@ -68,6 +80,8 @@
       "upper": 0.0715,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 7,
       "sign": -1,
       "reduction": 111.11111111111111

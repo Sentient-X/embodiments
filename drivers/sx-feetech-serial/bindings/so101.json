@@ -8,6 +8,8 @@
       "upper": 1.91986,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 1,
       "sign": 1,
       "reduction": 1.0
@@ -18,6 +20,8 @@
       "upper": 1.74533,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 2,
       "sign": 1,
       "reduction": 1.0
@@ -28,6 +32,8 @@
       "upper": 1.69,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 3,
       "sign": 1,
       "reduction": 1.0
@@ -38,6 +44,8 @@
       "upper": 1.65806,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 4,
       "sign": 1,
       "reduction": 1.0
@@ -48,6 +56,8 @@
       "upper": 2.84121,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 5,
       "sign": 1,
       "reduction": 1.0
@@ -58,6 +68,8 @@
       "upper": 2.0944,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
+      "port": "serial",
+      "provisional": false,
       "bus_id": 6,
       "sign": 1,
       "reduction": 1.0

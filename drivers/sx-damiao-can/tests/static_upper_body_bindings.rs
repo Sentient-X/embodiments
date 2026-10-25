@@ -7,7 +7,7 @@
 
 use serde_json::Value;
 use sx_damiao_can::body::DamiaoBody;
-use sx_damiao_can::chain::{DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009, motor_type};
+use sx_damiao_can::chain::{DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009, motor_type};
 use sx_damiao_can::static_upper_body::{BINDINGS, MASTER_ID_OFFSET, STATIC_UPPER_BODY};
 use sx_embodiment_drivers::{BodyBindings, BodyError, InstanceDrive};
 
@@ -36,7 +36,9 @@ fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
     assert_eq!(chain.len(), 15);
     assert_eq!(STATIC_UPPER_BODY.joints.len(), 15);
     let axes: Vec<_> = chain.iter().map(|motor| motor.axis.clone()).collect();
-    assert_eq!(axes, body.axes);
+    // The neck and grippers are the same document's Feetech servos, on their own ports.
+    assert_eq!(axes, body.clone().on(DAMIAO_CAN).axes);
+    assert_eq!(body.axes.len(), 25);
     // The received table's send ids and models, torso then left then right.
     let table: [(&str, u16, _); 15] = [
         ("torso_joint", 0x1F, DAMIAO_DM8009),

@@ -34,6 +34,9 @@ struct Golden {
     homing_offsets: Vec<HomingOffset>,
     read_calibration: Vec<Exchange>,
     configure: Vec<Exchange>,
+    present_position: Vec<Exchange>,
+    present_joints: Vec<f64>,
+    sync_read: Exchange,
 }
 
 #[derive(Deserialize)]
@@ -123,7 +126,13 @@ impl SerialPort for FakePort {
 
     fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
         self.written.push(packet.to_vec());
-        if packet.get(2) == Some(&0xFE) {
+        // A broadcast has no answer unless an expectation names it (a SYNC READ).
+        if packet.get(2) == Some(&0xFE)
+            && self
+                .expected
+                .front()
+                .is_none_or(|(request, _)| request.as_slice() != packet)
+        {
             return Ok(packet.len());
         }
         if let Some((request, response)) = self.expected.pop_front() {
@@ -181,13 +190,20 @@ fn open(exchanges: &[Exchange], calibration: &str) -> FeetechChain<FakePort> {
     .expect("open")
 }
 
-/// Everything open says to the bus: identify, the calibration check, and configure.
+/// Everything open says to the bus: identify, the calibration check, configure, and the
+/// position read.
 fn opening(golden: &Golden) -> Vec<Exchange> {
     with(&[
         &golden.identify,
         &golden.read_calibration,
         &golden.configure,
+        &golden.present_position,
     ])
+}
+
+/// A stop and the position read that follows it.
+fn stopping(golden: &Golden, stop: &[Exchange]) -> Vec<Exchange> {
+    with(&[stop, &golden.present_position])
 }
 
 fn with(parts: &[&[Exchange]]) -> Vec<Exchange> {
@@ -249,7 +265,11 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
     assert!(golden.goal_positions.len() >= 8);
     for case in &golden.goal_positions {
         let mut chain = open(
-            &with(&[&opening(&golden), &golden.torque_enable]),
+            &with(&[
+                &opening(&golden),
+                &golden.torque_enable,
+                std::slice::from_ref(&golden.sync_read),
+            ]),
             &case.calibration,
         );
         let ticks: Vec<u16> = chain
@@ -261,19 +281,40 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
         assert_eq!(ticks, case.ticks, "{} {:?}", case.calibration, case.radians);
         let receipt = chain.command(&case.radians).expect("command");
         assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
-        assert!(receipt.observed.is_empty() && receipt.feedback.is_empty());
-        assert!(chain.port().expected.is_empty(), "torque was enabled first");
+        assert!(
+            receipt.observed.len() == 6 && receipt.observed.iter().all(|joint| joint.is_finite())
+        );
+        assert!(receipt.feedback.is_empty());
+        assert!(
+            chain.port().expected.is_empty(),
+            "torque was enabled first, then the read"
+        );
+        let written = chain.port().written.len();
         assert_eq!(
-            chain.port().written.last().map(|packet| hex(packet)),
+            chain
+                .port()
+                .written
+                .get(written - 2)
+                .map(|packet| hex(packet)),
             Some(case.packet.clone()),
             "{} {:?}",
             case.calibration,
             case.radians
         );
-        // An enabled chain sends the SYNC WRITE alone.
+        assert_eq!(
+            chain.port().written.last().map(|packet| hex(packet)),
+            Some(golden.sync_read.request.clone()),
+            "the SYNC READ follows it"
+        );
+        // An enabled chain sends the SYNC WRITE and the SYNC READ alone. Nothing answers this
+        // read: every axis is unobserved, NaN, and the chain will enable afresh.
         let before = chain.port().written.len();
-        chain.command(&case.radians).expect("second command");
-        assert_eq!(chain.port().written.len(), before + 1);
+        let observed = chain
+            .command(&case.radians)
+            .expect("second command")
+            .observed;
+        assert_eq!(chain.port().written.len(), before + 2);
+        assert!(observed.iter().all(|joint| joint.is_nan()));
     }
 }
 
@@ -284,22 +325,35 @@ fn a_stop_disables_torque_proves_it_and_the_next_command_re_enables() {
         &with(&[
             &opening(&golden),
             &golden.torque_enable,
-            &golden.safe_stop,
+            &stopping(&golden, &golden.safe_stop),
             &golden.torque_enable,
         ]),
         "so101",
     );
-    // Three exchanges per servo (torque off, unlock, read-back), each within the link's
-    // 10 ms timeout.
+    // Four exchanges per servo (torque off, unlock, read-back, position), each within the
+    // link's 10 ms timeout.
     assert_eq!(
         chain.stop_budget(),
-        Duration::from_millis(10) * 3 * u32::try_from(golden.motors.len()).unwrap()
+        Duration::from_millis(10) * 4 * u32::try_from(golden.motors.len()).unwrap()
+    );
+    assert_eq!(
+        chain.last_observed().as_deref(),
+        Some(golden.present_joints.as_slice())
     );
     let radians = &golden.goal_positions[1].radians;
     chain.command(radians).expect("command");
+    assert_eq!(
+        chain.last_observed(),
+        None,
+        "a command may have moved every servo"
+    );
     let report = chain.stop();
     assert_eq!(report, StopReport::default());
     assert!(report.prove().is_ok());
+    assert_eq!(
+        chain.last_observed().as_deref(),
+        Some(golden.present_joints.as_slice())
+    );
     chain.command(radians).expect("command after a proven stop");
     assert!(chain.port().expected.is_empty(), "torque was enabled again");
 }
@@ -528,7 +582,11 @@ fn a_servo_whose_registers_disagree_with_its_calibration_is_refused_at_open() {
 fn a_configure_write_the_servo_flags_refuses_open() {
     let golden = golden();
     let mut configure = golden.configure.clone();
-    let last = configure.last_mut().expect("overload torque");
+    // The gripper's Overload_Torque (36) write, the last of SOFollower.configure's.
+    let last = configure
+        .iter_mut()
+        .rfind(|exchange| bytes(&exchange.request)[4..6] == [0x03, 36])
+        .expect("overload torque");
     answer(last, 0x08, &[]);
     let exchanges = with(&[&golden.identify, &golden.read_calibration, &configure]);
     assert!(matches!(
@@ -549,8 +607,8 @@ fn faults_a_proven_stop_reported_refuse_motion_until_cleared() {
     let mut chain = open(
         &with(&[
             &opening(&golden),
-            &stop,
-            &golden.safe_stop,
+            &stopping(&golden, &stop),
+            &stopping(&golden, &golden.safe_stop),
             &golden.torque_enable,
         ]),
         "so101",
@@ -743,5 +801,102 @@ fn a_line_that_keeps_delivering_foreign_bytes_still_times_out() {
             bus_id: 1,
             result: CommResult::RxCorrupt | CommResult::RxTimeout
         })
+    ));
+}
+
+#[test]
+fn the_so101_keeps_lerobots_speed_registers_and_claims_no_approach_limit() {
+    let golden = golden();
+    let chain = open(&opening(&golden), "so101");
+    assert!((0..6).all(|axis| !chain.approach_speed_limited(axis)));
+    // Nothing writes Goal_Speed (46); Acceleration (41) is configure_motors' 254 alone.
+    let writes = |address: u8| {
+        golden
+            .configure
+            .iter()
+            .filter(|exchange| bytes(&exchange.request)[4..6] == [0x03, address])
+            .map(|exchange| bytes(&exchange.request)[6])
+            .collect::<Vec<u8>>()
+    };
+    assert!(writes(46).is_empty());
+    assert_eq!(writes(41), [254; 6]);
+}
+
+#[test]
+fn enabling_first_holds_every_servo_where_it_rests() {
+    let golden = golden();
+    let mut chain = open(&with(&[&opening(&golden), &golden.torque_enable]), "so101");
+    chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command");
+    // Each servo's Present_Position was read and written to Goal_Position before any
+    // Torque_Enable 1.
+    let written: Vec<Vec<u8>> = chain.port().written[opening(&golden).len()..].to_vec();
+    let first_enable = written
+        .iter()
+        .position(|packet| packet[4..7] == [0x03, 40, 1])
+        .expect("an enable");
+    let holds = written[..first_enable]
+        .iter()
+        .filter(|packet| packet[4..6] == [0x03, 42])
+        .count();
+    assert_eq!(holds, 6);
+}
+
+#[test]
+fn every_command_observes_every_servo_through_one_sync_read() {
+    let golden = golden();
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &golden.torque_enable,
+            std::slice::from_ref(&golden.sync_read),
+        ]),
+        "so101",
+    );
+    let receipt = chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command");
+    assert_eq!(receipt.observed, golden.present_joints);
+    assert!(
+        chain.port().expected.is_empty(),
+        "the vendor's SYNC READ, byte for byte"
+    );
+    // Servo 4's answer corrupted: that axis alone is NaN.
+    let mut corrupt = golden.sync_read.clone();
+    let mut response = bytes(&corrupt.response);
+    let at = 3 * 24 + 23; // servo 4's checksum
+    response[at] ^= 0xFF;
+    corrupt.response = hex(&response);
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &golden.torque_enable,
+            std::slice::from_ref(&corrupt),
+        ]),
+        "so101",
+    );
+    let observed = chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command")
+        .observed;
+    assert!(observed[3].is_nan());
+    for (index, (seen, rested)) in observed.iter().zip(&golden.present_joints).enumerate() {
+        if index != 3 {
+            assert_eq!(seen.to_bits(), rested.to_bits());
+        }
+    }
+}
+
+#[test]
+fn a_chain_of_servos_on_two_ports_is_refused_before_the_bus() {
+    let golden = golden();
+    let mut split = servos(&golden, "so101");
+    split[5].axis.port = "elsewhere".to_owned();
+    split[5].axis.binding.bus_id = 1;
+    let port = FakePort::default();
+    assert!(matches!(
+        FeetechChain::open(port, split),
+        Err(FeetechChainError::Ports(ports)) if ports == ["serial", "elsewhere"]
     ));
 }

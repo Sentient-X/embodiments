@@ -8,6 +8,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm8009",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 15,
       "sign": 1,
       "reduction": 1.0
@@ -18,6 +20,8 @@
       "upper": 3.14159265359,
       "model": "damiao_dm8009",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 16,
       "sign": 1,
       "reduction": 1.0
@@ -28,6 +32,8 @@
       "upper": 0.356919832033,
       "model": "damiao_dm8009",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 17,
       "sign": 1,
       "reduction": 1.0
@@ -38,6 +44,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 18,
       "sign": 1,
       "reduction": 1.0
@@ -48,6 +56,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 19,
       "sign": 1,
       "reduction": 1.0
@@ -58,6 +68,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 20,
       "sign": 1,
       "reduction": 1.0
@@ -68,6 +80,8 @@
       "upper": 3.14159265359,
       "model": "damiao_dm8009",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 24,
       "sign": 1,
       "reduction": 1.0
@@ -78,6 +92,8 @@
       "upper": 3.14159265359,
       "model": "damiao_dm8009",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 25,
       "sign": 1,
       "reduction": 1.0
@@ -88,6 +104,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 26,
       "sign": 1,
       "reduction": 1.0
@@ -98,6 +116,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 27,
       "sign": 1,
       "reduction": 1.0
@@ -108,6 +128,8 @@
       "upper": 1.570796326795,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
+      "port": "can",
+      "provisional": false,
       "bus_id": 28,
       "sign": 1,
       "reduction": 1.0

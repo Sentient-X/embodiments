@@ -1,8 +1,8 @@
 //! A Damiao body on one bus, opened from data: its rendered bindings, its answer-id
 //! convention and each joint's controller configuration.
 //!
-//! Every body whose directly driven motors share one CAN bus, each answering on its send id
-//! plus one offset, is one [`DamiaoBody`] constant: the humanoid upper body
+//! Every body whose Damiao motors share one CAN bus, each answering on its send id plus one
+//! offset, is one [`DamiaoBody`] constant: the humanoid upper body
 //! ([`crate::humanoid::HUMANOID_UPPER_BODY`]) and the static upper body
 //! ([`crate::static_upper_body::STATIC_UPPER_BODY`]). No bound, address, model, sign or reduction
 //! is spelled in Rust; the bindings are the registry's, rendered by
@@ -15,7 +15,7 @@ use std::time::Duration;
 use sx_embodiment_drivers::can::CanPort;
 use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, InstanceDrive};
 
-use crate::chain::{DamiaoAxis, DamiaoChain, DamiaoChainError};
+use crate::chain::{DAMIAO_CAN, DamiaoAxis, DamiaoChain, DamiaoChainError};
 
 /// One joint's MIT controller configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,17 +69,21 @@ impl DamiaoBody {
         Ok(None)
     }
 
-    /// The rendered body, refused unless its driven joints are the ones configured here, then
-    /// calibrated by `drive`.
+    /// The rendered body's Damiao axes, calibrated by `drive`, refused unless they are on one
+    /// bus and are the joints configured here. A body with other buses (the static upper
+    /// body's Feetech neck) leaves those to the crates that drive them.
     ///
     /// # Errors
     ///
-    /// Refuses other joints and a drive of another body.
+    /// Refuses other joints, Damiao axes on more than one port, and a drive of another body.
     pub fn body(&self, drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
-        let body = BodyBindings::parse(self.bindings)?;
+        let body = BodyBindings::parse(self.bindings)?
+            .calibrated(drive)?
+            .on(DAMIAO_CAN);
         let joints: Vec<&str> = self.joints.iter().map(|gains| gains.joint).collect();
         body.require_joints(&joints)?;
-        body.calibrated(drive)
+        body.one_bus()?;
+        Ok(body)
     }
 
     /// Every motor, in native state order, as `drive`'s robot drives it.
@@ -139,7 +143,9 @@ mod tests {
         for body in BODIES {
             let bindings = BodyBindings::parse(body.bindings).expect("bindings");
             let joints: Vec<&str> = body.joints.iter().map(|gains| gains.joint).collect();
-            bindings.require_joints(&joints).expect("joints");
+            let damiao = bindings.clone().on(DAMIAO_CAN);
+            damiao.require_joints(&joints).expect("joints");
+            assert_eq!(damiao.one_bus().expect("one bus").port, "can");
             assert_eq!(
                 DamiaoBody::of(&bindings.id)
                     .expect("parses")

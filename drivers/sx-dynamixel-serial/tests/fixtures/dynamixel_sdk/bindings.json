@@ -1,0 +1,28 @@
+{
+  "embodiment": "dynamixel-test-pair",
+  "id": "0000000000000000000000000000000000000000000000000000000000000000",
+  "axes": [
+    {
+      "joint": "finger",
+      "lower": -0.8,
+      "upper": 0.9,
+      "model": "dynamixel_xl330_m288",
+      "bus": "dynamixel_serial",
+      "port": "dynamixel",
+      "bus_id": 1,
+      "sign": 1,
+      "reduction": 1.0
+    },
+    {
+      "joint": "wrist",
+      "lower": -1.5,
+      "upper": 1.5,
+      "model": "dynamixel_xm430_w350",
+      "bus": "dynamixel_serial",
+      "port": "dynamixel",
+      "bus_id": 2,
+      "sign": -1,
+      "reduction": 1.0
+    }
+  ]
+}

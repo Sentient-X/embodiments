@@ -19,11 +19,13 @@ use sx_embodiment_commission::probe::{Ids, probe};
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::serial::SerialPort;
 
-const BINDINGS: &str = include_str!("fixtures/static_upper_body_ports.json");
+/// The registry's own rendering of the static upper body, with its ports.
+const BINDINGS: &str =
+    include_str!("../../sx-feetech-serial/bindings/sentient-static-upper-body.json");
 
 const NECK_SERIAL: &str = "5A7C118709";
-const LEFT_SERIAL: &str = "5B91028463";
-const RIGHT_SERIAL: &str = "5AB0158173";
+const LEFT_SERIAL: &str = "5AB0158173";
+const RIGHT_SERIAL: &str = "5B91028463";
 const ZLG_SERIAL: &str = "A30F115DD0120A949B80";
 
 /// Each bus's servos as the probe read them: id, `range_min`, `range_max`, `homing_offset`.
@@ -35,8 +37,8 @@ const NECK: [(u8, u16, u16, i16); 6] = [
     (5, 0, 4095, 1605),
     (6, 1760, 2909, -42),
 ];
-const LEFT: [(u8, u16, u16, i16); 2] = [(1, 1720, 2302, 480), (2, 1813, 2358, -273)];
-const RIGHT: [(u8, u16, u16, i16); 2] = [(3, 1712, 2322, -466), (4, 1756, 2342, 482)];
+const LEFT: [(u8, u16, u16, i16); 2] = [(3, 1712, 2322, -466), (4, 1756, 2342, 482)];
+const RIGHT: [(u8, u16, u16, i16); 2] = [(1, 1720, 2302, 480), (2, 1813, 2358, -273)];
 
 const DAMIAO: [(u16, DmMotorType); 15] = [
     (0x1F, DmMotorType::DM8009),
@@ -310,9 +312,9 @@ fn every_port_finds_its_one_bridge() {
         ports,
         vec![
             ("can", ZLG_SERIAL, "can1"),
+            ("left_gripper", LEFT_SERIAL, "/dev/cu.usbmodem5AB01581731"),
+            ("right_gripper", RIGHT_SERIAL, "/dev/cu.usbmodem5B910284631"),
             ("neck", NECK_SERIAL, "/dev/cu.usbmodem5A7C1187091"),
-            ("left_gripper", LEFT_SERIAL, "/dev/cu.usbmodem5B910284631"),
-            ("right_gripper", RIGHT_SERIAL, "/dev/cu.usbmodem5AB01581731"),
         ]
     );
 
@@ -334,19 +336,19 @@ fn a_feetech_port_carries_lerobots_calibration() {
     let mut robot = Robot::found(true);
     let found = probe(&mut robot, &Ids::default()).unwrap();
     let matched = commission(&body(), &found).unwrap();
-    let neck = calibration(&matched[1]).unwrap();
+    let neck = calibration(&matched[3]).unwrap();
     assert_eq!(
-        neck["neck_pan"],
+        neck["so101_shoulder_pan_joint"],
         serde_json::json!({"id": 1, "drive_mode": 0, "homing_offset": -791, "range_min": 979, "range_max": 3052})
     );
-    assert_eq!(neck["camera_tilt"]["range_min"], 1760);
+    assert_eq!(neck["so101_camera_tilt_joint"]["range_min"], 1760);
     assert_eq!(neck.as_object().unwrap().len(), 6);
-    let right = calibration(&matched[3]).unwrap();
+    let right = calibration(&matched[2]).unwrap();
     assert_eq!(
         right["right_gripper_left_finger_joint"]["homing_offset"],
-        -466
+        480
     );
-    assert_eq!(right["right_gripper_right_finger_joint"]["id"], 4);
+    assert_eq!(right["right_gripper_right_finger_joint"]["id"], 2);
     assert!(calibration(&matched[0]).is_none());
 }
 
@@ -416,7 +418,7 @@ fn a_missing_gripper_is_never_taken_from_the_necks_bus() {
     };
     assert_eq!(
         (port.as_str(), ids.as_slice()),
-        ("left_gripper", [1, 2].as_slice())
+        ("right_gripper", [1, 2].as_slice())
     );
     // The neck's bus also answers 1 and 2; it is named, not taken.
     assert_eq!(partial.len(), 1);
@@ -455,7 +457,7 @@ fn a_damiao_motor_of_another_model_is_refused_as_that() {
 #[test]
 fn extra_devices_and_extra_ids_are_ignored() {
     let mut robot = Robot::found(true);
-    // An unrelated servo bus, an empty adapter, and a stray id on the right gripper's bus.
+    // An unrelated servo bus, an empty adapter, and a stray id on the left gripper's bus.
     robot.servo_bus("ABCDEF0001", servos(&[(10, 0, 4095, 0), (11, 0, 4095, 0)]));
     robot.servo_bus("ABCDEF0002", BTreeMap::new());
     robot
@@ -465,8 +467,8 @@ fn extra_devices_and_extra_ids_are_ignored() {
         .insert(12, image(777, 0, 4095, 0));
     let found = probe(&mut robot, &Ids::default()).unwrap();
     let matched = commission(&body(), &found).unwrap();
-    assert_eq!(matched[3].identity, RIGHT_SERIAL);
-    assert_eq!(matched[3].servos.len(), 2);
+    assert_eq!(matched[1].identity, LEFT_SERIAL);
+    assert_eq!(matched[1].servos.len(), 2);
 }
 
 #[test]

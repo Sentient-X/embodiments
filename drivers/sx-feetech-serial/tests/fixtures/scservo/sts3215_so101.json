@@ -43,6 +43,44 @@
    "upper": 2.0944
   }
  ],
+ "sync_read": {
+  "request": "fffffe0a82281201020304050626",
+  "response": "ffff01140001fe00000000000000000000000000000208e1ffff02140001fe0000000000000000000000000000520395ffff03140001fe00000000000000000000000000001c0cc1ffff04140001fe0000000000000000000000000000700375ffff05140001fe0000000000000000000000000000fd07e3ffff06140001fe0000000000000000000000000000c40919"
+ },
+ "present_position": [
+  {
+   "request": "ffff0104023802be",
+   "response": "ffff0104000208f0"
+  },
+  {
+   "request": "ffff0204023802bd",
+   "response": "ffff0204005203a4"
+  },
+  {
+   "request": "ffff0304023802bc",
+   "response": "ffff0304001c0cd0"
+  },
+  {
+   "request": "ffff0404023802bb",
+   "response": "ffff040400700384"
+  },
+  {
+   "request": "ffff0504023802ba",
+   "response": "ffff050400fd07f2"
+  },
+  {
+   "request": "ffff0604023802b9",
+   "response": "ffff060400c40928"
+  }
+ ],
+ "present_joints": [
+  0.0,
+  -1.8412264636423696,
+  1.6494320403462897,
+  -1.7875240251194673,
+  0.0,
+  0.5660215208333335
+ ],
  "calibrations": {
   "so101": [
    {
@@ -384,6 +422,54 @@
   }
  ],
  "torque_enable": [
+  {
+   "request": "ffff0104023802be",
+   "response": "ffff0104000208f0"
+  },
+  {
+   "request": "ffff0105032a0208c2",
+   "response": "ffff010200fc"
+  },
+  {
+   "request": "ffff0204023802bd",
+   "response": "ffff0204005203a4"
+  },
+  {
+   "request": "ffff0205032a520376",
+   "response": "ffff020200fb"
+  },
+  {
+   "request": "ffff0304023802bc",
+   "response": "ffff0304001c0cd0"
+  },
+  {
+   "request": "ffff0305032a1c0ca2",
+   "response": "ffff030200fa"
+  },
+  {
+   "request": "ffff0404023802bb",
+   "response": "ffff040400700384"
+  },
+  {
+   "request": "ffff0405032a700356",
+   "response": "ffff040200f9"
+  },
+  {
+   "request": "ffff0504023802ba",
+   "response": "ffff050400fd07f2"
+  },
+  {
+   "request": "ffff0505032afd07c4",
+   "response": "ffff050200f8"
+  },
+  {
+   "request": "ffff0604023802b9",
+   "response": "ffff060400c40928"
+  },
+  {
+   "request": "ffff0605032ac409fa",
+   "response": "ffff060200f7"
+  },
   {
    "request": "ffff0104032801ce",
    "response": "ffff010200fc"

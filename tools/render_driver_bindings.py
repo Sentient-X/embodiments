@@ -9,7 +9,10 @@ humanoid upper body and static upper body, ``sx-feetech-serial``'s SO-101) embed
 document, rendered here from the direct-driven coordinates of ``robot.state`` in native state
 order (a joint driven any other way, such as the humanoid's waist linkage, is outside every
 driver's chain), and parses it with ``sx_embodiment_drivers::BodyBindings``: no bound,
-address, model, sign or reduction is spelled in Rust. A body is looked up in ``embodiments`` and
+address, port, model, sign or reduction is spelled in Rust. Every axis carries the port its
+bus is commissioned under (``ActuatorBinding.bus_port``), so a body spanning several buses,
+such as the static upper body's Damiao CAN bus and Feetech neck, is opened per port; each
+crate driving one of its buses embeds the same document. A body is looked up in ``embodiments`` and
 then in ``development_embodiments``, so a body still under construction (the static upper body)
 is driven from the same registry facts its promotion will keep. ``vocabulary.json`` is the
 registry's ``ActuatorModel`` and ``ActuatorBus``, which the driver crate's own lists are held
@@ -80,6 +83,10 @@ BINDINGS: dict[Path, str] = {
         "sentient-static-upper-body"
     ),
     ROOT / "drivers/sx-feetech-serial/bindings/so101.json": "so101",
+    # The static upper body's neck is a Feetech chain on its own port of the same body.
+    ROOT / "drivers/sx-feetech-serial/bindings/sentient-static-upper-body.json": (
+        "sentient-static-upper-body"
+    ),
 }
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
 DRIVES = ROOT / "drivers/sx-damiao-can/tests/fixtures/drives.json"
@@ -279,6 +286,8 @@ def render(name: str) -> str:
                 "upper": coordinate.upper,
                 "model": binding.model.value,
                 "bus": binding.bus.value,
+                "port": binding.bus_port,
+                "provisional": binding.provisional,
                 "bus_id": binding.bus_id,
                 "sign": binding.sign,
                 "reduction": binding.reduction,

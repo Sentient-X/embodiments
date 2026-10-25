@@ -8,7 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# Open commissioned USB serial bridges (Damiao's USB2CAN) on Linux, found by their USB serial
+# Open commissioned USB serial bridges (Damiao's USB2CAN, and Feetech and Dynamixel servo
+# adapters) on Linux, found by their USB serial
 # number in sysfs. Without it the crate builds anywhere and a port source is the caller's.
 usb-serial = ["dep:serialport"]
 # Open commissioned SocketCAN interfaces (`can1`) on Linux, found by their USB adapter's serial
@@ -18,6 +19,8 @@ socketcan = ["dep:sx-socketcan"]
 [dependencies]
 sx-embodiment-drivers.workspace = true
 sx-damiao-can = { path = "../sx-damiao-can" }
+sx-feetech-serial = { path = "../sx-feetech-serial" }
+sx-dynamixel-serial = { path = "../sx-dynamixel-serial" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -26,6 +29,7 @@ sx-socketcan = { path = "../sx-socketcan", optional = true }
 
 [dev-dependencies]
 sx-damiao-can = { path = "../sx-damiao-can", features = ["sim"] }
+sx-feetech-serial = { path = "../sx-feetech-serial", features = ["sim"] }
 
 [lints]
 workspace = true
