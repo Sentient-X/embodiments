@@ -15,6 +15,9 @@ usb-serial = ["dep:serialport"]
 # Open commissioned SocketCAN interfaces (`can1`) on Linux, found by their USB adapter's serial
 # number, or their own name for a controller on the board. Off Linux only the lookup builds.
 socketcan = ["dep:sx-socketcan"]
+# Open commissioned ZLG USBCANFD channels (`<USB serial>:<channel>`) in userspace over USB, on
+# Linux and macOS.
+zlg = ["dep:sx-zlg-usbcanfd"]
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
@@ -26,6 +29,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 serialport = { version = "4.7", default-features = false, optional = true }
 sx-socketcan = { path = "../sx-socketcan", optional = true }
+sx-zlg-usbcanfd = { path = "../sx-zlg-usbcanfd", optional = true }
 
 [dev-dependencies]
 sx-damiao-can = { path = "../sx-damiao-can", features = ["sim"] }

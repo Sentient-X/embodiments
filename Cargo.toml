@@ -12,6 +12,7 @@ members = [
     "drivers/sx-uvc-stereo",
     "drivers/sx-stereolabs-sensors",
     "drivers/sx-socketcan",
+    "drivers/sx-zlg-usbcanfd",
     "drivers/sx-embodiment-bodies",
     "drivers/sx-embodiment-commission",
 ]

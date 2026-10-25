@@ -321,6 +321,31 @@ impl Write for ReplayStream {
     }
 }
 
+/// The disable frame `DM_CAN.py` writes for a motor: `FF..FD` on its command id.
+fn disable_frame(id: u16) -> String {
+    hex(&sx_damiao_can::usb2can::send_data_frame(&CanFrame {
+        id: u32::from(id),
+        data: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD],
+    }))
+}
+
+/// A recorded session as this crate drives it: the chain first disables every motor it names,
+/// each with the vendor's 0.01 s disable wait and no answer read, so a motor left enabled by an
+/// earlier run is released before bring-up writes it (`DamiaoChain::open`). The vendor's
+/// recorded traffic follows unchanged.
+fn opened_after_disables(motors: &[DamiaoAxis], events: &[Value]) -> Vec<Value> {
+    motors
+        .iter()
+        .flat_map(|motor| {
+            [
+                serde_json::json!({"write": disable_frame(motor.axis.binding.bus_id), "respond": []}),
+                serde_json::json!({"sleep": 0.01}),
+            ]
+        })
+        .chain(events.iter().cloned())
+        .collect()
+}
+
 fn session(name: &str) -> Value {
     transcripts()["sessions"]
         .as_array()
@@ -405,9 +430,13 @@ fn feedback(step: &Value) -> Vec<MotorFeedback> {
 /// Run the chain through a recorded session and hold every step to the recorded outcome.
 fn replay(name: &str) {
     let session = session(name);
-    let stream = ReplayStream::new(session["events"].as_array().unwrap());
+    let motors = chain_of(&session);
+    let stream = ReplayStream::new(&opened_after_disables(
+        &motors,
+        session["events"].as_array().unwrap(),
+    ));
     let steps = session["steps"].as_array().unwrap();
-    let mut chain = DamiaoChain::open(stream.port(), chain_of(&session)).expect("open");
+    let mut chain = DamiaoChain::open(stream.port(), motors).expect("open");
     assert_eq!(steps[0]["step"], "open");
     assert_eq!(chain.limits(), limits(&steps[0]).as_slice());
     for step in &steps[1..] {
@@ -459,8 +488,11 @@ fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
 #[test]
 fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     let session = session("limit_mismatch");
-    let stream = ReplayStream::with_epilogue(session["events"].as_array().unwrap());
     let motors = b601(&nominal()).expect("the B601-DM composes");
+    let stream = ReplayStream::with_epilogue(&opened_after_disables(
+        &motors,
+        session["events"].as_array().unwrap(),
+    ));
     let ids: Vec<u16> = motors
         .iter()
         .map(|motor| motor.axis.binding.bus_id)
@@ -484,15 +516,9 @@ fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
     assert_eq!(stream.remaining(), 0);
     // Beyond the vendor: every motor the chain names is sent its disable, since one brought up
     // before the refusal may hold torque.
-    let disable = |id: u16| {
-        sx_damiao_can::usb2can::send_data_frame(&CanFrame {
-            id: u32::from(id),
-            data: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD],
-        })
-    };
     assert_eq!(
         stream.epilogue(),
-        ids.iter().map(|id| hex(&disable(*id))).collect::<Vec<_>>()
+        ids.iter().map(|id| disable_frame(*id)).collect::<Vec<_>>()
     );
 }
 
@@ -501,12 +527,9 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
     let session = session("session");
     let events = session["events"].as_array().unwrap();
     let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
-    let stream = ReplayStream::new(&events[..opened]);
-    let mut chain = DamiaoChain::open(
-        stream.port(),
-        b601(&nominal()).expect("the B601-DM composes"),
-    )
-    .expect("open");
+    let motors = b601(&nominal()).expect("the B601-DM composes");
+    let stream = ReplayStream::new(&opened_after_disables(&motors, &events[..opened]));
+    let mut chain = DamiaoChain::open(stream.port(), motors).expect("open");
     let mut targets = vec![0.0; 7];
     targets[1] = 0.1; // joint2 stops at 0
     assert!(matches!(
@@ -576,8 +599,9 @@ fn every_recorded_stop_waits_inside_the_chains_stop_budget() {
         let session = session(name);
         let events = session["events"].as_array().unwrap();
         let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
-        let stream = ReplayStream::new(&events[..opened]);
-        DamiaoChain::open(stream.port(), chain_of(&session))
+        let motors = chain_of(&session);
+        let stream = ReplayStream::new(&opened_after_disables(&motors, &events[..opened]));
+        DamiaoChain::open(stream.port(), motors)
             .expect("open")
             .stop_budget()
     };

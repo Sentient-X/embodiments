@@ -40,6 +40,7 @@ pub const HUMANOID_UPPER_BODY: DamiaoBody = DamiaoBody {
     master_id_offset: MASTER_ID_OFFSET,
     // `sentient_can` leaves the motors' TIMEOUT register as it finds it.
     can_timeout: None,
+    reports_enable_state: true,
     joints: &[
         JointGains::new("torso_joint", 350.0, 5.0),
         JointGains::new("right_shoulder_pitch_joint", 100.0, 5.0),

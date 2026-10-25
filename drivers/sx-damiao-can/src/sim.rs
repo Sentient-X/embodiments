@@ -27,6 +27,10 @@ pub struct SimMotor {
     pub registers: BTreeMap<u8, [u8; 4]>,
     /// Registers whose writes are echoed but not held, as firmware without them answers.
     pub ignored: BTreeSet<u8>,
+    /// Whether feedback carries the enable state; firmware that does not answers state 1
+    /// enabled or disabled ([`DamiaoAxis::reports_enable_state`]). A fault code is reported
+    /// either way.
+    pub reports_enable_state: bool,
 }
 
 /// The bus's motors and what crossed it.
@@ -63,6 +67,7 @@ impl Sim {
                         q: 0.0,
                         registers: BTreeMap::new(),
                         ignored: BTreeSet::new(),
+                        reports_enable_state: true,
                     },
                 )
             })
@@ -73,14 +78,15 @@ impl Sim {
         })))
     }
 
-    /// The bus a chain of `axes` drives, each motor of its bound model.
+    /// The bus a chain of `axes` drives, each motor of its bound model and reporting its enable
+    /// state as the axis says its firmware does.
     ///
     /// # Panics
     ///
     /// When an axis binds a model this crate does not drive.
     #[must_use]
     pub fn for_axes(axes: &[DamiaoAxis]) -> Self {
-        Self::of(
+        let sim = Self::of(
             &axes
                 .iter()
                 .map(|axis| {
@@ -91,7 +97,13 @@ impl Sim {
                     )
                 })
                 .collect::<Vec<_>>(),
-        )
+        );
+        for axis in axes {
+            if let Some(motor) = sim.state().motors.get_mut(&axis.axis.binding.bus_id) {
+                motor.reports_enable_state = axis.reports_enable_state;
+            }
+        }
+        sim
     }
 
     /// The reBot B601-DM's motors among `ids`: DM4340P on 0x01..0x03 and DM4310 on 0x04..0x07,
@@ -167,10 +179,15 @@ pub fn feedback(id: u16, motor: &SimMotor) -> CanFrame {
     let dq = float_to_uint(0.0, -dq_max, dq_max, 12).expect("dq");
     let tau = float_to_uint(0.0, -tau_max, tau_max, 12).expect("tau");
     let low = u8::try_from(id & 0x0f).expect("id");
+    let state = if motor.reports_enable_state || motor.state > 1 {
+        motor.state
+    } else {
+        1
+    };
     CanFrame {
         id: u32::from(motor.master),
         data: [
-            (motor.state << 4) | low,
+            (state << 4) | low,
             (q >> 8).to_le_bytes()[0],
             q.to_le_bytes()[0],
             (dq >> 4).to_le_bytes()[0],

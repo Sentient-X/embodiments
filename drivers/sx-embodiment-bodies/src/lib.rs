@@ -68,7 +68,7 @@ use thiserror::Error;
 
 #[cfg(feature = "socketcan")]
 pub mod socketcan;
-#[cfg(any(feature = "usb-serial", feature = "socketcan"))]
+#[cfg(any(feature = "usb-serial", feature = "socketcan", feature = "zlg"))]
 pub mod system;
 #[cfg(feature = "usb-serial")]
 pub mod usb_serial;

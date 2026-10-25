@@ -5,7 +5,7 @@
 
 use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// What a chain budgets for one frame it sends and the answer it reads when the link names
 /// nothing longer: a USB serial bridge's, under 0.6 ms of serial time for the transmit packet
@@ -36,6 +36,25 @@ pub trait CanPort: Send {
     /// Returns the link's I/O error.
     fn receive(&mut self) -> io::Result<Option<CanFrame>>;
 
+    /// The next frame received before `deadline`, waiting for one; `None` once it passes.
+    /// A link that can block until a frame arrives does, instead of polling; this default polls
+    /// [`CanPort::receive`] without sleeping, as a control loop would.
+    ///
+    /// # Errors
+    ///
+    /// Returns the link's I/O error.
+    fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
+        loop {
+            if let Some(frame) = self.receive()? {
+                return Ok(Some(frame));
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            std::hint::spin_loop();
+        }
+    }
+
     /// Wait as the vendor driver's command sequencing waits. A link replaying a transcript
     /// records the wait instead of sleeping.
     fn sleep(&mut self, duration: Duration) {
@@ -58,6 +77,10 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
         (**self).receive()
+    }
+
+    fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
+        (**self).receive_until(deadline)
     }
 
     fn sleep(&mut self, duration: Duration) {
@@ -100,6 +123,14 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
             .lock()
             .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
             .receive()
+    }
+
+    /// Holds the link while it waits, as `sleep` does.
+    fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
+            .receive_until(deadline)
     }
 
     fn sleep(&mut self, duration: Duration) {
