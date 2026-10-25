@@ -16,7 +16,7 @@ capture = ["dep:nokhwa"]
 [dependencies]
 sx-embodiment-drivers.workspace = true
 thiserror.workspace = true
-nokhwa = { version = "=0.10.11", default-features = false, features = ["input-native"], optional = true }
+nokhwa = { version = "=0.10.11", default-features = false, features = ["input-v4l", "input-avfoundation"], optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
