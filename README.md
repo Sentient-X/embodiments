@@ -325,6 +325,23 @@ cargo test -p sx-uvc-stereo --features capture --test hardware -- --ignored
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's
 `just check-rust` runs them on the pinned commit, and that is the only enforcement.
 
+## Shared pod hardware
+
+The Quest/PICO app and Linux laptop pod consume the hardware sources here directly:
+
+- [`drivers/sx-yubi`](drivers/sx-yubi): Rust factory identity, encoder parsing and camera settings.
+- [`drivers/sx-capture-usb`](drivers/sx-capture-usb): usbfs/UVC and CDC transport, with caller-supplied clocks and exposure bounds.
+- [`drivers/sx-capture-linux`](drivers/sx-capture-linux): discovery, verified device opening, V4L2 and serial I/O.
+- [`android/capture`](android/capture): Camera2, camera permissions and USB bridge sources, compiled into the app's existing AAR.
+- [`xr/quest`](xr/quest) and [`xr/pico`](xr/pico): Unity SDK readers, consumed as local packages by the one app's platform builds.
+
+Recording policy, files, MCAP sealing, identity/authentication, delivery, activity and recovery
+stay in the superproject's `packages/sx-pod-{core,runtime,uplink}` and their app consumers.
+These hardware packages do not depend on pod services. Rust and Python YUBI parsers retain
+their existing, different framing and tolerance contracts; this extraction does not unify
+those contracts or qualify a physical device. Source attribution is recorded beside each
+adapter and in [`xr/source-moves.json`](xr/source-moves.json).
+
 ## Quest capture device I/O
 
 `sx_embodiments.quest_capture.QuestLink` owns the existing OpenQuestCapture USB/adb

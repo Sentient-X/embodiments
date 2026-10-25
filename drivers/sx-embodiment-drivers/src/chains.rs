@@ -167,6 +167,23 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         report
     }
 
+    /// Every chain's fresh read, in native state order, or `None` when any chain has none.
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        let mut observed = Vec::with_capacity(self.axes.len());
+        for (index, chain) in self.members.iter_mut().enumerate() {
+            let Some(positions) = chain.read_positions().map_err(|error| ChainsError::Chain {
+                index,
+                applied: false,
+                error,
+            })?
+            else {
+                return Ok(None);
+            };
+            observed.extend(positions);
+        }
+        Ok(Some(observed))
+    }
+
     /// Every chain's, in native state order, or `None` when any chain has none.
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = Vec::with_capacity(self.axes.len());
@@ -227,6 +244,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn stop_budget(&self) -> Duration {
         (**self).stop_budget()
+    }
+
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        (**self).read_positions()
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {
@@ -356,6 +377,33 @@ mod tests {
         fn last_observed(&self) -> Option<Vec<f64>> {
             self.answers.then(|| vec![0.25; self.axes.len()])
         }
+
+        fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Failed> {
+            if let Some(failure) = self.fails {
+                return Err(Failed(failure));
+            }
+            Ok(self.answers.then(|| vec![0.5; self.axes.len()]))
+        }
+    }
+
+    #[test]
+    fn a_read_joins_every_chain_and_commands_nothing() {
+        let mut chains = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], true)]);
+        assert_eq!(chains.read_positions().expect("read"), Some(vec![0.5; 3]));
+        assert!(chains.chains().iter().all(|chain| chain.sent.is_empty()));
+        let mut partial = Chains::new(vec![fake("can", &[1], true), fake("neck", &[1], false)]);
+        assert_eq!(partial.read_positions().expect("read"), None);
+        let mut failing = fake("neck", &[1], true);
+        failing.fails = Some(ChainFailure::Timeout);
+        let mut broken = Chains::new(vec![fake("can", &[1], true), failing]);
+        assert!(matches!(
+            broken.read_positions(),
+            Err(ChainsError::Chain {
+                index: 1,
+                applied: false,
+                ..
+            })
+        ));
     }
 
     #[test]

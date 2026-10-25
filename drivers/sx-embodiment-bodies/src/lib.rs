@@ -721,6 +721,10 @@ where
         self.0.stop_budget()
     }
 
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, BusError> {
+        self.0.read_positions().map_err(Into::into)
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.0.last_observed()
     }
@@ -768,6 +772,13 @@ impl ActuatorChain for Body {
             Self::B601(chain) => chain.commandable(),
             Self::Buses(chain) => chain.commandable(),
         }
+    }
+
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        Ok(match self {
+            Self::B601(chain) => chain.read_positions()?,
+            Self::Buses(chain) => chain.read_positions()?,
+        })
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
