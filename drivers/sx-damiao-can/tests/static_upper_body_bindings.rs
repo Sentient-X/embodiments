@@ -1,5 +1,5 @@
 //! The static upper body's chain is composed from exactly the registry's rendered bindings and
-//! the received motor table's ids and gains, calibrated by the instance drive the registry
+//! the hardware profile's ids and gains, calibrated by the instance drive the registry
 //! resolves.
 
 // Equal means bit-for-bit equal: both sides are the same f64 values.
@@ -23,7 +23,7 @@ fn drive(body: &str, which: &str) -> InstanceDrive {
 }
 
 #[test]
-fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
+fn the_chain_is_the_registrys_bindings_with_the_hardware_profile() {
     let body = BodyBindings::parse(BINDINGS).expect("bindings");
     assert_eq!(body.embodiment, "sentient-static-upper-body");
     let found = DamiaoBody::of(&body.id)
@@ -39,7 +39,7 @@ fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
     // The neck and grippers are the same document's Feetech servos, on their own ports.
     assert_eq!(axes, body.clone().on(DAMIAO_CAN).axes);
     assert_eq!(body.axes.len(), 25);
-    // The received table's send ids and models, torso then left then right.
+    // The hardware profile's send ids and models, torso then left then right.
     let table: [(&str, u16, _); 15] = [
         ("torso_joint", 0x1F, DAMIAO_DM8009),
         ("left_shoulder_pitch_joint", 0x18, DAMIAO_DM8009),
@@ -68,9 +68,11 @@ fn the_chain_is_the_registrys_bindings_with_the_received_motor_table() {
         assert_eq!(MASTER_ID_OFFSET, 0x20);
         assert_eq!(motor.master_id, id + MASTER_ID_OFFSET);
         assert_eq!((motor.kp, motor.kd), (gains.kp, gains.kd));
+        // allisa_bot turns both wrist axes against their motors.
+        let sign = if joint.contains("_wrist_") { -1 } else { 1 };
         assert_eq!(
             (motor.axis.binding.sign, motor.axis.binding.reduction),
-            (1, 1.0)
+            (sign, 1.0)
         );
         // The forearm yaws span more than one turn: each is commanded within one turn of zero.
         let range = motor.commandable();

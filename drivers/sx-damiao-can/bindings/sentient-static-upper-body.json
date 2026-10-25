@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "bd8756977dae4d9562440d6e28ecc75791b12ca2e2b9e287c11cb4ace9eefbb6",
+  "id": "8a28f53d33c93d4027fb65a6ecd1bdf059346fe06d4cb4f56a7845ec6ac7ae69",
   "axes": [
     {
       "joint": "torso_joint",
@@ -76,26 +76,26 @@
     },
     {
       "joint": "left_wrist_pitch_joint",
-      "lower": -2.1280613412680243,
-      "upper": 2.4408712901503016,
+      "lower": -2.4408712901503016,
+      "upper": 2.1280613412680243,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
       "provisional": false,
       "bus_id": 29,
-      "sign": 1,
+      "sign": -1,
       "reduction": 1.0
     },
     {
       "joint": "left_wrist_roll_joint",
-      "lower": -2.096017395284962,
-      "upper": 2.0967803463797967,
+      "lower": -2.0967803463797967,
+      "upper": 2.096017395284962,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
       "provisional": false,
       "bus_id": 30,
-      "sign": 1,
+      "sign": -1,
       "reduction": 1.0
     },
     {
@@ -160,26 +160,26 @@
     },
     {
       "joint": "right_wrist_pitch_joint",
-      "lower": -2.308880750743878,
-      "upper": 2.255855649652858,
+      "lower": -2.255855649652858,
+      "upper": 2.308880750743878,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
       "provisional": false,
       "bus_id": 20,
-      "sign": 1,
+      "sign": -1,
       "reduction": 1.0
     },
     {
       "joint": "right_wrist_roll_joint",
-      "lower": -2.112039368276493,
-      "upper": 2.0986877241168838,
+      "lower": -2.0986877241168838,
+      "upper": 2.112039368276493,
       "model": "damiao_dm4310",
       "bus": "damiao_can",
       "port": "can",
       "provisional": false,
       "bus_id": 21,
-      "sign": 1,
+      "sign": -1,
       "reduction": 1.0
     },
     {

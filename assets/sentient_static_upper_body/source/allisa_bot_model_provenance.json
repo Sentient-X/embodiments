@@ -1,0 +1,1227 @@
+{
+  "source": "/home/sentientx/Documents/allisa_bot/urdf/allisa_bot.urdf",
+  "source_urdf_sha256": "623305bb43845a70386c0f35d42606574f2b2c1bd4e253c14f4509e62a832ade",
+  "limits_source": "urdf/allisa_feedback.urdf",
+  "limits_source_sha256": "6f799a2798c2f3fda459423c8a61792a7003d5f49e6c16e8f9a242443a0148bb",
+  "output_urdf_sha256": "039b0b7d98893030d5ca80c50eea779ef8fad5b720b8c110685ce010c03b2571",
+  "limit_joint_names": [
+    "torso_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_upper_arm_yaw_joint",
+    "left_elbow_pitch_joint",
+    "left_forearm_yaw_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_roll_joint",
+    "left_gripper_left_finger_joint",
+    "left_gripper_right_finger_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_upper_arm_yaw_joint",
+    "right_elbow_pitch_joint",
+    "right_forearm_yaw_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_roll_joint",
+    "right_gripper_left_finger_joint",
+    "right_gripper_right_finger_joint",
+    "so101_shoulder_pan_joint",
+    "so101_shoulder_lift_joint",
+    "so101_elbow_flex_joint",
+    "so101_wrist_flex_joint",
+    "so101_wrist_roll_joint",
+    "so101_camera_tilt_joint"
+  ],
+  "axes_differing_from_limit_donor": [
+    "left_wrist_pitch_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_roll_joint"
+  ],
+  "mesh_tool": "fast-simplification 0.1.12",
+  "mesh_target_triangles": 4000,
+  "meshes": {
+    "meshes/base_link.stl": {
+      "source_sha256": "075087672727365615e204bda0ca8724df4b692637ff824b66668a4212175710",
+      "display_sha256": "9b7bb13bd53afdf2ef54c723fb39aea322b8f89473d9d213125f07d8f394e170",
+      "source_triangles": 510942,
+      "display_triangles": 26686,
+      "bounds_delta_max_m": 1.254222027846641e-06
+    },
+    "meshes/torso_yaw_base_adapter.stl": {
+      "source_sha256": "0bbc6a60f4df6f6d2502d20c7e31fc3823a9bb1a06f99cf8e568b36990f8d2c1",
+      "display_sha256": "f57dfbebea42fa7bc241640120b2daabea87e90588ab9e589254206d0f0a7af4",
+      "source_triangles": 174590,
+      "display_triangles": 44794,
+      "bounds_delta_max_m": 1.1142810825356952e-06
+    },
+    "meshes/_________step__Body1_1_.stl": {
+      "source_sha256": "54e23636a54af7c3b7871528eb61ab0f72db85384b9c2e7e0f703230a3c4385e",
+      "display_sha256": "790850826bf55572a6b5d2dc6c06e59b4051ee3d0c166868eefce9ff4c2ef5f4",
+      "source_triangles": 6696,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00038493760253776113
+    },
+    "meshes/bearing_rb5013uucc0p5.stl": {
+      "source_sha256": "a79cfa32ddf6600da1e5275b3a71ee4370c77fdb69e0a07bce3b6385f37323a0",
+      "display_sha256": "51ca2c342f52b3605ce2796e4fde3ba84854e3f9d9a64b5ff95d566f1a02f744",
+      "source_triangles": 51368,
+      "display_triangles": 48536,
+      "bounds_delta_max_m": 0.0001136648438933921
+    },
+    "meshes/J8009P_2EC_RAU_5005______20240809_stp__NONE.stl": {
+      "source_sha256": "f5b893a4cd0a291a33c8b7983d008c65d3effa4c9a0a5319c4ba4966d0eff6e7",
+      "display_sha256": "905db0dd5265f199ab09654151b0b057d0a38fba141fea4f9716938f24fb618e",
+      "source_triangles": 115566,
+      "display_triangles": 93158,
+      "bounds_delta_max_m": 0.0009708176979775218
+    },
+    "meshes/lower_torso_side_plate.stl": {
+      "source_sha256": "2f1f30635b291551fbcdd75fd6005ca60ac4cab961aae0e3a2232b81711e229a",
+      "display_sha256": "9a39a44e688327254897d28fe9be8ce52769ad4092cf79d908f99877892ab1fa",
+      "source_triangles": 10362,
+      "display_triangles": 10362,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/torso_yaw_output_bracket.stl": {
+      "source_sha256": "ca7b978be67c9a77a5157c962a08d2fcff184eb40dd42d60603ed89497a4d075",
+      "display_sha256": "ca7b978be67c9a77a5157c962a08d2fcff184eb40dd42d60603ed89497a4d075",
+      "source_triangles": 22180,
+      "display_triangles": 22180,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/chest_mount_rail_flat.stl": {
+      "source_sha256": "be370a8a83f3ca8649d18a7193fcefecc52491bb2920f955ed52d374ac45d944",
+      "display_sha256": "92c982fa3e59d96488760a1828575c834e323ea52fa1374eb3a61b9e1b609eb3",
+      "source_triangles": 34008,
+      "display_triangles": 5522,
+      "bounds_delta_max_m": 1.9660572996016423e-10
+    },
+    "meshes/chest_mount_rail_scalloped.stl": {
+      "source_sha256": "7159856f1bb7bbe89fc59f4489f7d91329323125546de7213053e0dff76344be",
+      "display_sha256": "9880194c2020d0de42a9cc7145f61fc7f6dfe8a5771afc323790226913c29fda",
+      "source_triangles": 33078,
+      "display_triangles": 5606,
+      "bounds_delta_max_m": 6.816019012759883e-07
+    },
+    "meshes/chest_plate.stl": {
+      "source_sha256": "60109031eef67a29f4e27a4cbb82cb2c07b56d567e244d0c23ad97178621d89e",
+      "display_sha256": "ffee475e32c631abbbe303d1226053d18b9c7f4834889e897c5b8725cc928e01",
+      "source_triangles": 26800,
+      "display_triangles": 24712,
+      "bounds_delta_max_m": 6.534622687767722e-05
+    },
+    "meshes/chest_plate_7065.stl": {
+      "source_sha256": "5fbcf3944fe351329e368f372b6355b26c85b20354a60ad3c2e3fefbfb534162",
+      "display_sha256": "4d898f50ded28498242fa85d1fbe3353f1208a80026c225192ba57a504d6e06b",
+      "source_triangles": 27908,
+      "display_triangles": 25558,
+      "bounds_delta_max_m": 0.00010576743586665494
+    },
+    "meshes/chest_to_torso_mount.stl": {
+      "source_sha256": "05736500f2ef1975f0a5dceaaca8aa6e8aa4bb315969abd5cc63f77a951c9e91",
+      "display_sha256": "8dd0bf8e74f5b4b5e6ecb3d3fa806fa376cf7bc7264abcca69c0faadaae387a3",
+      "source_triangles": 234068,
+      "display_triangles": 64000,
+      "bounds_delta_max_m": 6.275569885260887e-05
+    },
+    "meshes/j8009p_mechanical_stop.stl": {
+      "source_sha256": "bfe0f7093bfd748a46cc54ca40b0cd7ece373ced199eb985417ab104db4afa4e",
+      "display_sha256": "bfe0f7093bfd748a46cc54ca40b0cd7ece373ced199eb985417ab104db4afa4e",
+      "source_triangles": 2816,
+      "display_triangles": 2816,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/Shoulder_Holder_R2__Save_Bodies4_1_.stl": {
+      "source_sha256": "e528c71dc9ae38f1e45f6bbc46ca2039bd3dddedf8eaff02126b76515e159b25",
+      "display_sha256": "4e0e3f8a9e3a043faba866fab39b384d1511bfb864339fef5423cce8dadd57eb",
+      "source_triangles": 310116,
+      "display_triangles": 64000,
+      "bounds_delta_max_m": 1.4736956556266056e-05
+    },
+    "meshes/Shoulder_Holder_R2__Save_Bodies4_2_.stl": {
+      "source_sha256": "abc3a7fe6cfe041b695c23394455377ea8dc57c8388eb17d6cf4d4339efc119c",
+      "display_sha256": "829013756a1abd930f32ffe45f09f39adecf112d094348d80736769315c46586",
+      "source_triangles": 201410,
+      "display_triangles": 36964,
+      "bounds_delta_max_m": 6.811703978648609e-13
+    },
+    "meshes/bearing_rb2008uucc0p5.stl": {
+      "source_sha256": "7f75fd7b6ebe66fa8d12c288da694416e0fdc90962f0e7cb7bc84cf1671380a4",
+      "display_sha256": "4b14ab0d641f73b77e5c473c7124d5203184d5bb9117a661677921955d8af108",
+      "source_triangles": 50520,
+      "display_triangles": 26318,
+      "bounds_delta_max_m": 6.608510433513126e-05
+    },
+    "meshes/right_shoulder_pitch_to_roll_bearing_bracket.stl": {
+      "source_sha256": "055717b4426cd2d16744d4410f90c64e203d224acc68d2268fea5dcfa84e564e",
+      "display_sha256": "c575ea66eadf2a20289575f8a4398c8f35b0c3a44b79c5ba74a88f26f1b32ad7",
+      "source_triangles": 95528,
+      "display_triangles": 13972,
+      "bounds_delta_max_m": 6.974377531068776e-06
+    },
+    "meshes/shoulder_pitch_to_roll_bearing_retainer.stl": {
+      "source_sha256": "1e595c30490f8f0669908657614139b2b57d22043b37bf986768c6f6d67e0c3a",
+      "display_sha256": "55a8575e1a8269128e863798a7a519e959dce0a305b832453e9a8e726aa49087",
+      "source_triangles": 34572,
+      "display_triangles": 8386,
+      "bounds_delta_max_m": 0.0002652030772322799
+    },
+    "meshes/shoulder_pitch_to_roll_bracket_2.stl": {
+      "source_sha256": "7046dffea72208038bd86f2775d0b12a9c0623d90ee5a4e37155a159318a929b",
+      "display_sha256": "36c50c1234bc2a9718a858debef9cd58f32916f12836592ecb1644391bc609b2",
+      "source_triangles": 5808,
+      "display_triangles": 5540,
+      "bounds_delta_max_m": 0.0004378918694799769
+    },
+    "meshes/shoulder_pitch_to_roll_bracket_3.stl": {
+      "source_sha256": "15db7f8c7b1e2b699773760cad9bf095a1382d2b7145c5abd8406fb5291f3068",
+      "display_sha256": "3260f32da65a1dae104440649d9e1df95ae614596348d823ed2f0804eebe7b73",
+      "source_triangles": 5800,
+      "display_triangles": 5600,
+      "bounds_delta_max_m": 4.763773096613105e-05
+    },
+    "meshes/shoulder_pitch_to_roll_link.stl": {
+      "source_sha256": "dca26fd5a122ed51c229acda176b89eaa3cc76999776dbaef9adf76c9255ad4f",
+      "display_sha256": "14201e2e2a32cadb7a5e1ca09a571363001f8eeb750305288bb806e5c78d8565",
+      "source_triangles": 216128,
+      "display_triangles": 15999,
+      "bounds_delta_max_m": 0.0003475960476130042
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__10_.stl": {
+      "source_sha256": "ac72e4bea88f1360c2ca39b26f031d736c08d87c26312fdac43170a17d7f4c89",
+      "display_sha256": "6871d47b61a0b1b900dde0ebccf3780f3b539d3c92c5cb173dbba09ba47c9b4c",
+      "source_triangles": 80302,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0004393116192685127
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__11_.stl": {
+      "source_sha256": "d8d23319f275ba468c5b518f30e502ec21606f28d7bae996d0bd6cf80d6e9ae9",
+      "display_sha256": "d9a1b132a8e8119b240761429542ae97530140e6b0f9b47b6a4b01515fcd1eb2",
+      "source_triangles": 53562,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 9.442942594148525e-05
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__12_.stl": {
+      "source_sha256": "3cd41868f92e5e50014a2f15b30ba3873c72a6138eee75de6482605d06fd830c",
+      "display_sha256": "6a3a5efe171f671391d8909ada6de4b70b64ef6366018ff8e2b5058b3cf2eba5",
+      "source_triangles": 53556,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 3.5893748392913996e-05
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__13_.stl": {
+      "source_sha256": "38118795a7f140bfe030469f61f911a1ec0c2e0f0f1e557f00a107f257f09f7e",
+      "display_sha256": "75678d13e6c364935e934ff0e4ef991fdd6440e75b276eb69e78668699ee931a",
+      "source_triangles": 53564,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 9.106694234968862e-05
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__14_.stl": {
+      "source_sha256": "a03542d45cf997c6c16b90ee74bfe42c5cc6c35d0a34826432ccf94e683bc905",
+      "display_sha256": "d8f450cf3e380ddbe6f0bdc2f2936b9ce58c099eb063b4289ffa3c346ffa6047",
+      "source_triangles": 53570,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00013620271462536082
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__15_.stl": {
+      "source_sha256": "13c02f9fd64fab3b26b5464635dd1e513c924b496b349184be762567e8b60e84",
+      "display_sha256": "c443fe5cd61cfcba79a20501d3106e6de1b4b1c1e0e6490f0cc54aec8a3f17df",
+      "source_triangles": 81780,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0007544971740975591
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__16_.stl": {
+      "source_sha256": "6d3f9cfa07289d0490d5ad103ac354397c1d864f3229592b9402fafb65a9d95a",
+      "display_sha256": "69838546e803995a71df7183b7fa785a8df39a0720b1afd62a7223b22dd2ad89",
+      "source_triangles": 81790,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00012066674310982559
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__17_.stl": {
+      "source_sha256": "2a703917d81ebe38fdfa72604f347c392bc944817706a873f3e2415b34494f93",
+      "display_sha256": "dca45e4ed006bd6c439c849b752828f6af3a2ddb671ad32a03ab35d464a0ffcc",
+      "source_triangles": 81792,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0001494809189454601
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__18_.stl": {
+      "source_sha256": "24ae1421a6f24a45556eac020275a50ab113aa0d59e6d6c450249baffde4593d",
+      "display_sha256": "85fd31f2326ea30988c8cd32e3e9de95884af83d9c834e63b623b89de18286a7",
+      "source_triangles": 81782,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00020036588998954136
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__1_.stl": {
+      "source_sha256": "13abed944bb4081a14194c5528be4c1c79abe888baf83519720581f90bfedbbc",
+      "display_sha256": "38b6b6a4e1e2f6741539f4daf098426f838ca537550c75d909b1ad62364067b9",
+      "source_triangles": 33218,
+      "display_triangles": 32000,
+      "bounds_delta_max_m": 1.2045584899672557e-06
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__2_.stl": {
+      "source_sha256": "f09b556b7275052597c34f4b2ef6b9797d349253a99cadfb01cb4714efd01c73",
+      "display_sha256": "f2bd21f8536afb1b2fffeb052135dc74e4b18c1557152f68f0eeca797fff3a00",
+      "source_triangles": 30152,
+      "display_triangles": 11024,
+      "bounds_delta_max_m": 0.0007648284597059768
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__3_.stl": {
+      "source_sha256": "93038049deeec016887f96ff26bea6ef883bb4937adb01a0962df04ef7b038c3",
+      "display_sha256": "b3fbd6956ab9defba75432513832e9ab91f4b9850d0edd7b89d9a25117b9bc41",
+      "source_triangles": 15894,
+      "display_triangles": 4770,
+      "bounds_delta_max_m": 0.00032206874885449405
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__4_.stl": {
+      "source_sha256": "80dd2ff503a60611c69e491bd210ca866101e55601ba2569244c9f29e9792817",
+      "display_sha256": "fc76f8db658b1af3d7aef0550390a64ead68d7b472201c554bec51613cb2fa1f",
+      "source_triangles": 151186,
+      "display_triangles": 57590,
+      "bounds_delta_max_m": 0.0008142220141450184
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__5_.stl": {
+      "source_sha256": "225f3f6f57c01a1e1d899ff344dda6c4a45b9d69bfae8bb15ae84afd62243b5f",
+      "display_sha256": "5c72988552e1e2f3ea24cc156a071725d91a6942f74b809eeac9c1ea85e4fbbf",
+      "source_triangles": 80300,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.000838326000995173
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__6_.stl": {
+      "source_sha256": "1a16e9696764d3224de8c2bb8357337e5f14e652f15c1dead43e2fb494fda2a9",
+      "display_sha256": "237c28e822c44a0b7b55ecba68dbc0586b037cc97e47de0c80b3f0030121db1f",
+      "source_triangles": 80300,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0003778107400251255
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__7_.stl": {
+      "source_sha256": "f4486ac82969e6b6487be3f4549e365463a1cab3996f15bd4cce503d724cb9c2",
+      "display_sha256": "82fc22a4c5778b45bbf859675ce80e3163dbc2496eae62606665dbf615890d8d",
+      "source_triangles": 80300,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00036886968831193606
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__8_.stl": {
+      "source_sha256": "1d974d7fb07eee7595f9323aaeefc710e69a889e080437cf636ddde5b43c6b79",
+      "display_sha256": "7049f9b17234dba510a03e279b4fbea243efa957e9610e964a7e12461ed28143",
+      "source_triangles": 80302,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0005816607529223784
+    },
+    "meshes/dm_4340P_20250407_1_stp__dm_4340P_20250407_1_stp_1__9_.stl": {
+      "source_sha256": "fe07b4192d4d0823c6641561ea689fda13beb2bdb61c1de36d3dd76dd90425af",
+      "display_sha256": "3aa56c3a0e0f8c4beb503f3ce3038be4812a4fb06b9ed86e440d0071c1fbb286",
+      "source_triangles": 80300,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0003624468399329346
+    },
+    "meshes/right_shoulder_roll_to_bicep_yaw_motor_bracket.stl": {
+      "source_sha256": "034002c5503291aeb4305ad4aed12fa819a9660a433ef979c02270668e201729",
+      "display_sha256": "bd5cff2932e545a1d9b859411717befc5efd62013b800f7b4d79af53f229968f",
+      "source_triangles": 64774,
+      "display_triangles": 16000,
+      "bounds_delta_max_m": 9.820571893293106e-05
+    },
+    "meshes/shoulder_roll_to_bicep_yaw_bracket_2.stl": {
+      "source_sha256": "b6d4adafbbc503b92120954e8e5a1adcb3c2f61a34df11b4f8bf1fc336c249ba",
+      "display_sha256": "8188090a1f4a1f0c9ac932bff277b36a74d8c2d2157aa5770263e12b235792bb",
+      "source_triangles": 20474,
+      "display_triangles": 7456,
+      "bounds_delta_max_m": 0.00018549611334965285
+    },
+    "meshes/shoulder_roll_to_bicep_yaw_bracket_3.stl": {
+      "source_sha256": "34aaff294b3c40cb66ae29951596a92ca986478ac5069a480a1f678917e14c07",
+      "display_sha256": "31526121640efdeddecb799ca1991e4d3019121c989b2f2ee6c5c201c02f736d",
+      "source_triangles": 25632,
+      "display_triangles": 13894,
+      "bounds_delta_max_m": 0.0005588760347814102
+    },
+    "meshes/bicep_yaw_to_elbow_bracket_1.stl": {
+      "source_sha256": "8a44cd5a0d28c5f32faf52488a8440e8b2581905851ecf733c971249f3d039a2",
+      "display_sha256": "16d94b47b0a73446eb15058be50e2fbbdbff3e556126f32b34372636873eb407",
+      "source_triangles": 101842,
+      "display_triangles": 11788,
+      "bounds_delta_max_m": 6.0419695431645354e-05
+    },
+    "meshes/bicep_yaw_to_elbow_bracket_2.stl": {
+      "source_sha256": "b217202a70c9434ea4257f1ea3d492a001e52691aa74729cc1f8c5f91eccb436",
+      "display_sha256": "64fd4d109a37c00ac43232c29563d5e69d136f497b1815a9a5b8fc786fe67665",
+      "source_triangles": 105048,
+      "display_triangles": 7974,
+      "bounds_delta_max_m": 0.0002063065767288208
+    },
+    "meshes/bicep_yaw_to_elbow_bracket_3.stl": {
+      "source_sha256": "9ec5c0bb598cd8bf2e676f54a7bd8ea96c7a22fb5cdb25b54cf3c06e87ad1a0b",
+      "display_sha256": "c7e74c1f987dd5c270026ac811e7a906493782cf1ba0289e1831d6d45416737c",
+      "source_triangles": 5168,
+      "display_triangles": 4490,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/bearing_fl6803zz.stl": {
+      "source_sha256": "8900f2218bcddbc03cdc5e854feb2b40c641e7844048ad25a2725343fda34384",
+      "display_sha256": "8900f2218bcddbc03cdc5e854feb2b40c641e7844048ad25a2725343fda34384",
+      "source_triangles": 1728,
+      "display_triangles": 1728,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/elbow_to_forearm_yaw_bracket_1.stl": {
+      "source_sha256": "c9b3640e8dcb409b96268b2a304496f2fb62407ac2d9fbc21fafc97fb8beec97",
+      "display_sha256": "09990508a4434ce55a69d1782df68350dcc9b58f364125e31716391138b70003",
+      "source_triangles": 50346,
+      "display_triangles": 5834,
+      "bounds_delta_max_m": 0.00011944639786426112
+    },
+    "meshes/elbow_to_forearm_yaw_bracket_2.stl": {
+      "source_sha256": "d34cb6957e19539c63bed944534311c13ec6dbe6dde981251d5948e9cd61d275",
+      "display_sha256": "28873a202014795a219b43addf19abcf7365ce9f6eb1ea71f95f5a2ed561db21",
+      "source_triangles": 184102,
+      "display_triangles": 11780,
+      "bounds_delta_max_m": 1.2907607339803119e-05
+    },
+    "meshes/elbow_to_forearm_yaw_bracket_3.stl": {
+      "source_sha256": "fcd408cf75ca6b8d300efcca4ef28abeff857ffdc52be85756eaaf33253e4ef8",
+      "display_sha256": "5edf27a25612964ccfaf19fe14894e3dc81a5af68a1bcd662b99b6cebe60f2a8",
+      "source_triangles": 8382,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 2.231116454128393e-05
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__10_.stl": {
+      "source_sha256": "2bf33e5df267c59fc457dfa622e29093732f0e8f3e3f28a103876d16dc5bafab",
+      "display_sha256": "b76d33c0de1c61edaac907ec8473641231e04dee1372616458532ba5d63da110",
+      "source_triangles": 87962,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0006742222487245726
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__1_.stl": {
+      "source_sha256": "90d191fedc88af1e028cefc9627e41e1ceed50ec0c54d6170e90bd9613d7e5bc",
+      "display_sha256": "de7d8b13536805023beb8d0c68d8744ff95a2fee430a6f12b39dd4acef323a18",
+      "source_triangles": 234666,
+      "display_triangles": 11288,
+      "bounds_delta_max_m": 0.0001484187826553691
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__2_.stl": {
+      "source_sha256": "9eb69cbe7e73b30b625d78bf5adfec0f7a1bf948522c08497d8f4385728c0899",
+      "display_sha256": "029d9a3b8267fb188ee9028701d09fd0ab83cd296f4bcc8b1c333dec04825306",
+      "source_triangles": 30752,
+      "display_triangles": 11202,
+      "bounds_delta_max_m": 0.000764845876140393
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__3_.stl": {
+      "source_sha256": "4f96cd5811d993673001fa4c41bdcc85fef65fe4af8a492a2ddd28f204859690",
+      "display_sha256": "53b2c52efd4002abf403c6670084c7e8d9672c0eb8580b4a06c2784c481cc7a3",
+      "source_triangles": 151004,
+      "display_triangles": 57262,
+      "bounds_delta_max_m": 0.0008074460324386142
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__4_.stl": {
+      "source_sha256": "26a8b4e9fe1df81f9b1fd59c7482e532ae58aa71d24bb16177fc30578c7ac7c3",
+      "display_sha256": "194ad4ffb8de9bcf20fc1798aa99c489f7ac417973f7573431296fc885183fab",
+      "source_triangles": 247904,
+      "display_triangles": 12058,
+      "bounds_delta_max_m": 0.0006903480209019784
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__5_.stl": {
+      "source_sha256": "2d537d6d9d0d904fbda9ebe4873429f0ab6f2309e532dc0775c1bb27465ccd4f",
+      "display_sha256": "7f37f2eb117b6a792431bd188ea8d48556fbcd23c8289ce9fa556ada7d84bdd8",
+      "source_triangles": 87932,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0005546910921194852
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__6_.stl": {
+      "source_sha256": "00c186781cbf07311b7b91b659c0d0a25d21f82a718218c5de5e7260db743c6d",
+      "display_sha256": "93ead00e668b829aaad76d5f11d3586769034e9f5c004cb2df6f0326c209fb87",
+      "source_triangles": 87956,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0005212483079193864
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__7_.stl": {
+      "source_sha256": "a8164b95ef5698bb273816070de9fa377a63688664c159590c7bca796719d80d",
+      "display_sha256": "f523cb7f27fe71fde34cbedee71d3a2d86b7e7a8407eac7bab0348433446888c",
+      "source_triangles": 87978,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.000765137937919636
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__8_.stl": {
+      "source_sha256": "e05243274dbedaf8edabeaca9e93cffe42a01b6ebbe05820a0d231352c710fa9",
+      "display_sha256": "8bcc200f9c0fd9823ae92fff4191807f0f52330e119e5046c874b6be0f34d5de",
+      "source_triangles": 87918,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00042394264993195555
+    },
+    "meshes/DM_J4310_2EC_V1_1__3d_20240822_1__DM_J4310_2EC_V1_1__3d_20240822_1_stp_1__9_.stl": {
+      "source_sha256": "23242fb990d9527db9d278b1d8f00cb431c6771766e8f10c500fb0160a54b539",
+      "display_sha256": "01905ca54b83a355d119fb9c27317751a7e04da5fcf44a9e63ba525b16d96db4",
+      "source_triangles": 87956,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.000573348045411455
+    },
+    "meshes/forearm_yaw_to_wrist_bracket_1.stl": {
+      "source_sha256": "af8429d4e6881aad9c71fc85d86922d40b6365880f12c97599a1cefecd715646",
+      "display_sha256": "939637b8c158a1343988d522800076a5e17c12c37be3d87b5736074a300b4182",
+      "source_triangles": 17872,
+      "display_triangles": 7402,
+      "bounds_delta_max_m": 5.204170427930421e-18
+    },
+    "meshes/forearm_yaw_to_wrist_bracket_2.stl": {
+      "source_sha256": "a3d4be6d369a5da08bd11d0945f3bd02f1b5e715a6b8119dd6f6aebeae58b4b6",
+      "display_sha256": "b6d2cbe3b1cd56c61a9d8cc2ff2cec8a4c1e104e9cfa9ed31722b1405fa958bf",
+      "source_triangles": 12142,
+      "display_triangles": 6648,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/forearm_yaw_to_wrist_bracket_3.stl": {
+      "source_sha256": "7bd92825094d4a60aecbcee7ba99cafc51db72f99755f5d2c15415de7e051d6b",
+      "display_sha256": "1a37c3e9978cef86658b2909b321f72c0450c2c52529ed2da286ef6005bd3e99",
+      "source_triangles": 13370,
+      "display_triangles": 5630,
+      "bounds_delta_max_m": 0.0008761426525811383
+    },
+    "meshes/J8_A_v2_1__Body1.stl": {
+      "source_sha256": "13e68519e83aba8891d81466b6105c00fcd4c6b2c06c79c88afcf1db1e5ebacf",
+      "display_sha256": "37d0c993c8781e3c5ba7626749b1fa8300733c3fd84ef583789962e9976bd699",
+      "source_triangles": 13130,
+      "display_triangles": 12904,
+      "bounds_delta_max_m": 5.538498452797999e-13
+    },
+    "meshes/J8_B_v3_1__Body1.stl": {
+      "source_sha256": "2935afe310f401c99691e2ce958cdcb83810e86eb6ab248a15740b2b192442c5",
+      "display_sha256": "d494556f1a8cf3dd3e1caf32c89daf60cd4b2fb6b62bdd2b99caa0be9a7fb2da",
+      "source_triangles": 8728,
+      "display_triangles": 8188,
+      "bounds_delta_max_m": 2.2731881547142733e-24
+    },
+    "meshes/bottom_plate_feetech__Cut_Extrude3.stl": {
+      "source_sha256": "7a07a61b9b94e61ccfede283197da98e3d543012cb99d08aa9a5399cefdf1722",
+      "display_sha256": "5166a3741a32703fe8ec7b4f966db0866e2f8d2130e44de3c95da24610d13759",
+      "source_triangles": 34060,
+      "display_triangles": 21736,
+      "bounds_delta_max_m": 1.942890293094024e-16
+    },
+    "meshes/BRACKET_CAMERA.stl": {
+      "source_sha256": "2d2cec6cfbd87beff3fccec60ab15fe3bc4cc9284e3d516dc74f1863c8a59ce8",
+      "display_sha256": "525c04273b59aac9045e026d3c32de3678ed1c644619810944554edf22c516be",
+      "source_triangles": 5044,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0007755097783501835
+    },
+    "meshes/motor_mountfeetech__CBORE_for_M2_5_Cross_Recess_Pan_Head_Screw5.stl": {
+      "source_sha256": "2f10c0e762333d86089ba2d887b51c65a06c2d87a51b0c6b9921440276cf2c03",
+      "display_sha256": "03e8672f802b96e9d50330790de91eaedd70b6176cc3a8d0b93dfdc71783991e",
+      "source_triangles": 30702,
+      "display_triangles": 19638,
+      "bounds_delta_max_m": 4.9722140039037965e-05
+    },
+    "meshes/top_plateFEETECHchopstick__NONE.stl": {
+      "source_sha256": "b994aa0414c3f9e5ee7a4657536813de0369743d2b11b433afb45269472162ef",
+      "display_sha256": "3e368f19f2725ef222817206dda7703dd9a8f2061c6975e8c7e72cb3c1cd156c",
+      "source_triangles": 53480,
+      "display_triangles": 32000,
+      "bounds_delta_max_m": 5.616645199525705e-07
+    },
+    "meshes/USB_CAMERA__USB_CAMERA_ELP_USBFHD01M_L180.stl": {
+      "source_sha256": "d8a418119a594990786deb4585c9d2ef7e34db5868f091da7a2eb7aab8658f4e",
+      "display_sha256": "95300c274512e5cae0df211f99cce114a10a26140c741ade8c478eb0c9ca3a7a",
+      "source_triangles": 5382,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 1.825120165799797e-05
+    },
+    "meshes/XG_ZIJI_16_2_step__NONE.stl": {
+      "source_sha256": "8143c32baf23e240222a451c650a7298328197e1b0ccab04de0011f41dc5c74d",
+      "display_sha256": "2510925e1cb5b4e03882572660d7b6e2073a4658d672725836bd96c483e45f84",
+      "source_triangles": 64186,
+      "display_triangles": 15790,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/ZK_122_2_step____1_1_.stl": {
+      "source_sha256": "1040b848870bd12ddd4c1dd0e2ebe9ce53979fee5583090a4feb00fbadf9fdf4",
+      "display_sha256": "b9360b53780fd59d40cfee82af29aa5be89aba842fa9e77eebc0f4ef29896fb9",
+      "source_triangles": 16798,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00033868669258686757
+    },
+    "meshes/GE_27_2_step____1_1_.stl": {
+      "source_sha256": "72da6779a143025ebac88f72f3544b47a292621b689498b770aa68bc08ffa7e5",
+      "display_sha256": "507323743ec64947ec625d5e54e867b01d5a030aabb03b2658e3ed6f8d3a9df0",
+      "source_triangles": 102952,
+      "display_triangles": 18878,
+      "bounds_delta_max_m": 0.0001227423473737204
+    },
+    "meshes/_________2_step____1_1__1.stl": {
+      "source_sha256": "f4ca8568108a395fd99956f65f598b78577da47177a1a01b9d321bc637c4a193",
+      "display_sha256": "18b83fece50b08e597364dad06d22d2cae93b59f92cdf509dc1d3860ab01528a",
+      "source_triangles": 4944,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00030536882464837073
+    },
+    "meshes/PCB_CHAZUO_92_2_step____1_1_.stl": {
+      "source_sha256": "3e53cf0c645ee6e32bc1b75ce7a20560a29f32796275a523a11c444256ee56c6",
+      "display_sha256": "3e53cf0c645ee6e32bc1b75ce7a20560a29f32796275a523a11c444256ee56c6",
+      "source_triangles": 2256,
+      "display_triangles": 2256,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/MOTOR_1723_3_2_step____1_1_.stl": {
+      "source_sha256": "b441e31c8d46c61007173655f3a11a0d0868e2b218e2a7934f36d22958a9e9d7",
+      "display_sha256": "4a9935e4f1ec5714a448208b12d48e5f30d5cdacd284181f3af4db7ea2218467",
+      "source_triangles": 46988,
+      "display_triangles": 4188,
+      "bounds_delta_max_m": 9.897693610753933e-06
+    },
+    "meshes/SG_ZIJI_15_2_step__NONE.stl": {
+      "source_sha256": "b9a4b4ad72ff0d4305cf4275c4be31a2b19e67a158d9d531253183139a276967",
+      "display_sha256": "192f0e0f53393aa192f96696ddc436c292dcce69b9bb8c8aebcf6db803cce00c",
+      "source_triangles": 67116,
+      "display_triangles": 19320,
+      "bounds_delta_max_m": 0.00023618304518250102
+    },
+    "meshes/chopstick_left_finger__Stock_Assem1_1.stl": {
+      "source_sha256": "56f1378c3fafa06ccbf3e16e549f528b345d448c8cb4fb5a3a4767cf0c34dcff",
+      "display_sha256": "9acaec0c984aafeb3f5bc286537562b922244e9d3fe32618af3969d53b80c447",
+      "source_triangles": 68264,
+      "display_triangles": 16000,
+      "bounds_delta_max_m": 0.0006499768802059602
+    },
+    "meshes/_________2_step____1_1_.stl": {
+      "source_sha256": "9833a95908bfe51044e9b675b4a065b901423a31d5320987fe94327d2c5a1792",
+      "display_sha256": "45390a69f821897c00bbf357d0baa280f622f29addc3b288b2f78ee82925970a",
+      "source_triangles": 6696,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00038493760253776113
+    },
+    "meshes/chopstick_right_finger1__Stock_Assem1_1.stl": {
+      "source_sha256": "9bb2c7b323940bb8902f51e2053d2db63a47afde8ce6cffabcc02acddd908a7d",
+      "display_sha256": "7f940a2756fdc5e5062c67d0a418fd2bf44d2ad9bd37ee34407416d1d8d134dd",
+      "source_triangles": 68286,
+      "display_triangles": 10498,
+      "bounds_delta_max_m": 0.0005891198505585948
+    },
+    "meshes/left_shoulder_pitch_to_roll_bearing_bracket.stl": {
+      "source_sha256": "5813417fa2ab5601ea84babc81a1ecd8174c06c0237077264b53e98632eef00b",
+      "display_sha256": "1095e869415bb1d72ab1d58f1f114f2913ff2d1c7ff4dbaacbb1c82835831a3a",
+      "source_triangles": 85212,
+      "display_triangles": 13836,
+      "bounds_delta_max_m": 0.0002929770301382806
+    },
+    "meshes/left_shoulder_roll_to_bicep_yaw_motor_bracket.stl": {
+      "source_sha256": "47a6fa1f0651ed0d19c598127285c929873bbefb0b29a1902fe0d9ef2c5ae3cf",
+      "display_sha256": "6859cdbea790cdeaaa2e8fe518e72f87519c644d00cda1d99ecd48bb8ca3de32",
+      "source_triangles": 176302,
+      "display_triangles": 16000,
+      "bounds_delta_max_m": 9.808130478031023e-05
+    },
+    "meshes/Base_08p_step__Body4_1_.stl": {
+      "source_sha256": "a6923f89555d8cc1fdff12ad5bfea6602bb0093fd72330da0b35851136290bab",
+      "display_sha256": "270ef32aae854229587fb04c758bdb55cf6026df5766f777e0010e5e0265785c",
+      "source_triangles": 135868,
+      "display_triangles": 18482,
+      "bounds_delta_max_m": 6.816395334244274e-06
+    },
+    "meshes/base_link_1.stl": {
+      "source_sha256": "e00e7a721dcf757091876f73b91a48d6bffbcf15b13e0a3f668a8ae23c860c37",
+      "display_sha256": "6ae65f62a8d592ea3a5729850bd49b9ee03f66343b4b4f9da9ce582caadeba90",
+      "source_triangles": 122016,
+      "display_triangles": 32000,
+      "bounds_delta_max_m": 0.00048733038892806045
+    },
+    "meshes/SOD323_step__Body1_1_.stl": {
+      "source_sha256": "c469db2b2858992e4a155fde9eab300267e2187f31cf9a1a45f1acfa4a5608f8",
+      "display_sha256": "c8661ecc6d869bbd622e2a7fef13ba16bddb8d9272c804b1222b877d9065d351",
+      "source_triangles": 64872,
+      "display_triangles": 31160,
+      "bounds_delta_max_m": 0.0001103448518612707
+    },
+    "meshes/X2564WV_03_N0SN_step__Body1_1_.stl": {
+      "source_sha256": "8803ca0cae776c39eec17ac34252cb1ffc12164d860aa8f897f1607c779e6850",
+      "display_sha256": "47066df8480043cf4aa690cb20e91a22964c3a66f1bdb95ff534564acb00d557",
+      "source_triangles": 6456,
+      "display_triangles": 5974,
+      "bounds_delta_max_m": 0.00016095389392967435
+    },
+    "meshes/Board_step__Body1_1_.stl": {
+      "source_sha256": "b286133e5760abe952d248a8d1f4bc0bf8b09f58d5af73d7dcd45ee9aa46700f",
+      "display_sha256": "20317403d0b94a0c59d7abf8f6e7db34c9499da13cd70ddf6aca12091e3bb22e",
+      "source_triangles": 18772,
+      "display_triangles": 16834,
+      "bounds_delta_max_m": 4.336808689942018e-19
+    },
+    "meshes/M2_5_FF_TORRETTA_PASSANTE_step__Body1_1_.stl": {
+      "source_sha256": "cd24089b76687e0f44d53f047503717ce5bc3a4ba8d55029c3e1482c9d48c26c",
+      "display_sha256": "cd24089b76687e0f44d53f047503717ce5bc3a4ba8d55029c3e1482c9d48c26c",
+      "source_triangles": 2640,
+      "display_triangles": 2640,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_QFN_16_step__Body1_1_.stl": {
+      "source_sha256": "9fead341cb2338ef4a829b6498e68f4c7b2739f3ce98c9c884e0a8657e47706d",
+      "display_sha256": "9fead341cb2338ef4a829b6498e68f4c7b2739f3ce98c9c884e0a8657e47706d",
+      "source_triangles": 1026,
+      "display_triangles": 1026,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/DIN_EN_ISO_7045___M2_5_x_4___H_Steel_4_6_Plain_step__Body1_1_.stl": {
+      "source_sha256": "8d935afe855c194246c0c9891fc47d37b60f6308f2aabd8a864aa5f096157b2d",
+      "display_sha256": "31b87bfddf5fee0b94a958a582b5a30db6b093ec9b3b2fbe696b04d66b5b429d",
+      "source_triangles": 21278,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 3.5101246865709354e-06
+    },
+    "meshes/User_Library_sop_8_step__Body1_1_.stl": {
+      "source_sha256": "eda24dd10710f864a0f8cf1147d2889442ececdde9eb867d02bc6eac747889fd",
+      "display_sha256": "e85a0749b18a190bc0c41f1f86defe204ff5e51f81fa8a3a6921d427e3770781",
+      "source_triangles": 13574,
+      "display_triangles": 8000,
+      "bounds_delta_max_m": 1.974619214540543e-06
+    },
+    "meshes/User_Library_0603_SMD_Capacitor_step__Body1_1_.stl": {
+      "source_sha256": "22b214b851a2096133f95cf2eca5048e0f09cd2564fe4662b00f5dd0001a8afc",
+      "display_sha256": "37fdb7ffe6408e6e04afea38994a042bee351f06e16b5c950d75e721a62f92d3",
+      "source_triangles": 26780,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 1.5415417460324515e-09
+    },
+    "meshes/_2_1_200_step__Body1_1_.stl": {
+      "source_sha256": "54a3013c2f9ec352809798a54a53e107976ae06ab5d49b7616597156588fb677",
+      "display_sha256": "3a60a60ed3b7b3d2554b64065a998a05119ef63fa82f66aedb9c21e9d065c736",
+      "source_triangles": 10956,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/_3_1_2_A_step__Body1_1_.stl": {
+      "source_sha256": "712098804056f4963bf50a969b5271698a0876a6bd3f5ac116c8ac1976462054",
+      "display_sha256": "3c04c0811b93a0470e94ab2e2e0b8b1be3d3aeed683043cb5712d528c4560308",
+      "source_triangles": 15786,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 7.52850141175741e-10
+    },
+    "meshes/_1_1_20001_step__Body1_1_.stl": {
+      "source_sha256": "e479cde075499dfe699b16d36bf8879deee1ee171d115538a7cf3f67ca82b433",
+      "display_sha256": "cce168cab837150e4333ce086744c08abb107bf2aa1226ad87336c4d09e08caf",
+      "source_triangles": 9228,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 3.650049296350429e-08
+    },
+    "meshes/dc_005_5a_20_step__Body1_1_.stl": {
+      "source_sha256": "ac8be313a7e05b87a37162e7b2aa61faa5a9e3c380de997cdadb0cc4369ade16",
+      "display_sha256": "b2450514fc1bfef1bcec1f9d805062612acf98eeee88b66b92d89f813f99752c",
+      "source_triangles": 54688,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 5.732463222442481e-05
+    },
+    "meshes/Extruded_3_step__Body1_1_.stl": {
+      "source_sha256": "45fce4705b2e206ebc79b263f7c313ecaf5d31cd133d540e81b63a38aa41d3f1",
+      "display_sha256": "45fce4705b2e206ebc79b263f7c313ecaf5d31cd133d540e81b63a38aa41d3f1",
+      "source_triangles": 64,
+      "display_triangles": 64,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/Extruded_4_step__Body1_1_.stl": {
+      "source_sha256": "81d4c93ce9018653a69eb84ef26a523c47a0ae63dfe93d8ec194c8e986506bd5",
+      "display_sha256": "81d4c93ce9018653a69eb84ef26a523c47a0ae63dfe93d8ec194c8e986506bd5",
+      "source_triangles": 64,
+      "display_triangles": 64,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/_5_1_2_3_400_step__Body1_1_.stl": {
+      "source_sha256": "f16f864de9502c27952ff0c736335d72c50bee0ee7e6b6e93ffb1e2a9640cf45",
+      "display_sha256": "f16f864de9502c27952ff0c736335d72c50bee0ee7e6b6e93ffb1e2a9640cf45",
+      "source_triangles": 36,
+      "display_triangles": 36,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/_2_1_2_3_4_AF0_step__Body1_1_.stl": {
+      "source_sha256": "d643f1654e1a42fa5ab90bf7dad82a876e796c503218d10bc2fd145c7546950f",
+      "display_sha256": "6b066de5bbac559eb09069be728800e725966c6ad3c9f89fa4e2da5b06ebe488",
+      "source_triangles": 5898,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 2.1765117794374156e-11
+    },
+    "meshes/_7_1_2_AF0_step__Body1_1_.stl": {
+      "source_sha256": "d39239975f850e9529eefd290f4dc5149ee1790c38866f9be1b33845b9f9d01a",
+      "display_sha256": "9d3f734ad3f954f3a3af0579c2ef1efe8df23ca351e45bceb6a047da6592eb78",
+      "source_triangles": 9936,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 6.4352559862412666e-09
+    },
+    "meshes/Extruded_1_step__Body1_1_.stl": {
+      "source_sha256": "2ab563bcde8617e510154866f150aec03a2af0f134a7624a155eded05fb541fa",
+      "display_sha256": "2ab563bcde8617e510154866f150aec03a2af0f134a7624a155eded05fb541fa",
+      "source_triangles": 12,
+      "display_triangles": 12,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/Extruded_step__Body1_1_.stl": {
+      "source_sha256": "e03559fd9eca16fc816a85c7550a618df8096987b70e63d0abb96256ba567633",
+      "display_sha256": "e03559fd9eca16fc816a85c7550a618df8096987b70e63d0abb96256ba567633",
+      "source_triangles": 12,
+      "display_triangles": 12,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_LED_0603_R_Pocket001_step__Body1_1_.stl": {
+      "source_sha256": "55423c3d6e2c080bd92414529b74cd98aa9a0ad00de3737ae43311af62bdf5f7",
+      "display_sha256": "55423c3d6e2c080bd92414529b74cd98aa9a0ad00de3737ae43311af62bdf5f7",
+      "source_triangles": 304,
+      "display_triangles": 304,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_LED_0603_R_Pocket002_step__NONE.stl": {
+      "source_sha256": "aeaa088c403c163eb813cee1beac903dd9ba75f721bab4fe316fd932d8033dde",
+      "display_sha256": "aeaa088c403c163eb813cee1beac903dd9ba75f721bab4fe316fd932d8033dde",
+      "source_triangles": 738,
+      "display_triangles": 738,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_LED_0603_R_Pad_step__Body1_1_.stl": {
+      "source_sha256": "35a865035e33503a0f6c45fef8d3455b5c94fcb9b0ad9e02732dbc97628e6bdd",
+      "display_sha256": "35a865035e33503a0f6c45fef8d3455b5c94fcb9b0ad9e02732dbc97628e6bdd",
+      "source_triangles": 12,
+      "display_triangles": 12,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_LED_0603_R_Fillet_step__Body1_1_.stl": {
+      "source_sha256": "6bd6dfa871b34b69d3364e3d1790a1b05af72e886b6749e72ca9b7650ff6571e",
+      "display_sha256": "6bd6dfa871b34b69d3364e3d1790a1b05af72e886b6749e72ca9b7650ff6571e",
+      "source_triangles": 568,
+      "display_triangles": 568,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_LED_0603_R_Pad004_step__Body1_1_.stl": {
+      "source_sha256": "ca0eeefdbaaed53015e76a8e1acbf5627f46ba18ebc838626d3510d98d41e16a",
+      "display_sha256": "ca0eeefdbaaed53015e76a8e1acbf5627f46ba18ebc838626d3510d98d41e16a",
+      "source_triangles": 28,
+      "display_triangles": 28,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/Extruded_2_step__Body1_1_.stl": {
+      "source_sha256": "4dc417c40a28cb96d247fbaad458fcd6bb02a0d8612386ed52d1732b44f24c7a",
+      "display_sha256": "4dc417c40a28cb96d247fbaad458fcd6bb02a0d8612386ed52d1732b44f24c7a",
+      "source_triangles": 64,
+      "display_triangles": 64,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOT_23_step__Body1_1_.stl": {
+      "source_sha256": "0e330dab00712f2635d3bac69ab1daa88f53c681da22fbb50a0e33d9b308ac30",
+      "display_sha256": "10459124ac465682391282153d03f1db763e02c3cba6362086a7399ce080e5d8",
+      "source_triangles": 32968,
+      "display_triangles": 6752,
+      "bounds_delta_max_m": 0.00039456516969949007
+    },
+    "meshes/User_Library_TO_223_5_1_step__Body1_1_.stl": {
+      "source_sha256": "7c0e8893d76300c66438d7e7c13f5614b0ea080bc915298a6560eb206519e0f0",
+      "display_sha256": "7c0e8893d76300c66438d7e7c13f5614b0ea080bc915298a6560eb206519e0f0",
+      "source_triangles": 316,
+      "display_triangles": 316,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_TO_223_1_1_step__Body1_1_.stl": {
+      "source_sha256": "7867cff234c372234e28ec733e06751b21b9dc5d416551d03267fb8918e272cf",
+      "display_sha256": "7867cff234c372234e28ec733e06751b21b9dc5d416551d03267fb8918e272cf",
+      "source_triangles": 20,
+      "display_triangles": 20,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_TO_223_3_1_step__Body1_1_.stl": {
+      "source_sha256": "8ecfdabb3d7922a85446b8d3c93f2d3b5985b485504c1e1ebbc7058d8313eaa3",
+      "display_sha256": "8ecfdabb3d7922a85446b8d3c93f2d3b5985b485504c1e1ebbc7058d8313eaa3",
+      "source_triangles": 316,
+      "display_triangles": 316,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_TO_223_2_1_step__Body1_1_.stl": {
+      "source_sha256": "62c5a6f6a3349d9b5609688e0e6d2becc295c793e02465f5e8f2cd0b65919899",
+      "display_sha256": "62c5a6f6a3349d9b5609688e0e6d2becc295c793e02465f5e8f2cd0b65919899",
+      "source_triangles": 296,
+      "display_triangles": 296,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_TO_223_4_1_step__Body1_1_.stl": {
+      "source_sha256": "7bfa27e3f4cf29f11d12a26a9c41d73fcf56d5161f1e99f078978f2c901f7369",
+      "display_sha256": "7bfa27e3f4cf29f11d12a26a9c41d73fcf56d5161f1e99f078978f2c901f7369",
+      "source_triangles": 316,
+      "display_triangles": 316,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_DG350_3_5_02P_step__Body5_1_.stl": {
+      "source_sha256": "1d556c3ce4d81287a5ac7c9ff6d055c6ecf5faddf76d2fed12158481aa497bec",
+      "display_sha256": "1d556c3ce4d81287a5ac7c9ff6d055c6ecf5faddf76d2fed12158481aa497bec",
+      "source_triangles": 3664,
+      "display_triangles": 3664,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_DG350_3_5_02P_step__Body4_1_.stl": {
+      "source_sha256": "3dd1f82aef6646be87d15b944d82e9a4718b9e654509d8a45b3eb5ac763e5ed2",
+      "display_sha256": "3dd1f82aef6646be87d15b944d82e9a4718b9e654509d8a45b3eb5ac763e5ed2",
+      "source_triangles": 590,
+      "display_triangles": 590,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_DG350_3_5_02P_step__Body2_1_.stl": {
+      "source_sha256": "098eb6b7566ebf609ff03857d7eb7228ee3ca89fe8d6aa195a6979215a21fe93",
+      "display_sha256": "098eb6b7566ebf609ff03857d7eb7228ee3ca89fe8d6aa195a6979215a21fe93",
+      "source_triangles": 692,
+      "display_triangles": 692,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_DG350_3_5_02P_step__Body3_1_.stl": {
+      "source_sha256": "5482587908e4f404b34b8e31fed85b2acff0c1ae6b5c8e0318eb68d9b466c59a",
+      "display_sha256": "5482587908e4f404b34b8e31fed85b2acff0c1ae6b5c8e0318eb68d9b466c59a",
+      "source_triangles": 590,
+      "display_triangles": 590,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/User_Library_DG350_3_5_02P_step__Body1_1_.stl": {
+      "source_sha256": "a6515eb838a71b285a235b9a2b55b301d5b9145d65a9981859b5da36588f0841",
+      "display_sha256": "a6515eb838a71b285a235b9a2b55b301d5b9145d65a9981859b5da36588f0841",
+      "source_triangles": 692,
+      "display_triangles": 692,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_19_step__Body1_1_.stl": {
+      "source_sha256": "ebb0ac460545ee8115067a4ba9aac5c3762bf63bbb7a9a08c8b3a1c33bf6b82d",
+      "display_sha256": "ebb0ac460545ee8115067a4ba9aac5c3762bf63bbb7a9a08c8b3a1c33bf6b82d",
+      "source_triangles": 2348,
+      "display_triangles": 2348,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_21_step__Body1_1_.stl": {
+      "source_sha256": "e0dc176cd48d2f0d18a780174fe1c0f5cb903dffaadb97420049f90a81319d72",
+      "display_sha256": "d69fa44d0503973c8301d62647111d737bb8b39a19dfd2a393396f7340520270",
+      "source_triangles": 28400,
+      "display_triangles": 20204,
+      "bounds_delta_max_m": 3.6363559197436814e-05
+    },
+    "meshes/SOLID_7_step__Body1_1_.stl": {
+      "source_sha256": "95471afad2d80f8fcf534aada71c2e79fcea2679ec3fdc2a0f41b67e2511222f",
+      "display_sha256": "95471afad2d80f8fcf534aada71c2e79fcea2679ec3fdc2a0f41b67e2511222f",
+      "source_triangles": 940,
+      "display_triangles": 940,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_2_step__Body1_1_.stl": {
+      "source_sha256": "00f3d15872c6dcb2960c300a64901d60b47b53d76bbbac0939a73544ef435860",
+      "display_sha256": "00f3d15872c6dcb2960c300a64901d60b47b53d76bbbac0939a73544ef435860",
+      "source_triangles": 608,
+      "display_triangles": 608,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_6_step__Body1_1_.stl": {
+      "source_sha256": "e3a6a4377581fba5a71697b7ef3da2646dd6e28bdb27e7c5c3a17cff69a9aef5",
+      "display_sha256": "e3a6a4377581fba5a71697b7ef3da2646dd6e28bdb27e7c5c3a17cff69a9aef5",
+      "source_triangles": 948,
+      "display_triangles": 948,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_16_step__Body1_1_.stl": {
+      "source_sha256": "a93fadab9f033579996761e852791d8ff9302260b897b2a13ffc62c23344ba62",
+      "display_sha256": "a93fadab9f033579996761e852791d8ff9302260b897b2a13ffc62c23344ba62",
+      "source_triangles": 1444,
+      "display_triangles": 1444,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_8_step__Body1_1_.stl": {
+      "source_sha256": "b46b6bf0402f80b50e911213bfc9ebba6859f2d3979f0f91c0c40a0c28f33a96",
+      "display_sha256": "b46b6bf0402f80b50e911213bfc9ebba6859f2d3979f0f91c0c40a0c28f33a96",
+      "source_triangles": 940,
+      "display_triangles": 940,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_4_step__Body1_1_.stl": {
+      "source_sha256": "f3e91665cd58e5edc4a744db592c3fa0120798fa47a91dae90444efbfd0f39ab",
+      "display_sha256": "f3e91665cd58e5edc4a744db592c3fa0120798fa47a91dae90444efbfd0f39ab",
+      "source_triangles": 616,
+      "display_triangles": 616,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_9_step__Body1_1_.stl": {
+      "source_sha256": "065ae2c4e57324ef7b4f8a7d0fc94473e4079871dd956fe4b6f5b0cab694f5fd",
+      "display_sha256": "065ae2c4e57324ef7b4f8a7d0fc94473e4079871dd956fe4b6f5b0cab694f5fd",
+      "source_triangles": 328,
+      "display_triangles": 328,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_18_step__Body1_1_.stl": {
+      "source_sha256": "12e15041a2063d41e9d6e299c031ed4d4ce8c0459e68940eea6d70335ad89e79",
+      "display_sha256": "12e15041a2063d41e9d6e299c031ed4d4ce8c0459e68940eea6d70335ad89e79",
+      "source_triangles": 336,
+      "display_triangles": 336,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_14_step__Body1_1_.stl": {
+      "source_sha256": "0ee77d15b28514c68d75e7b69467ffa9a05baf0ba88a548d95fc15a1812dc021",
+      "display_sha256": "0ee77d15b28514c68d75e7b69467ffa9a05baf0ba88a548d95fc15a1812dc021",
+      "source_triangles": 1412,
+      "display_triangles": 1412,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_1_step__Body1_1_.stl": {
+      "source_sha256": "a2e4e17c48f0dc8389c2ab6956e6e6211b3b5179cab1df18d9f3cf996ffb2b96",
+      "display_sha256": "a2e4e17c48f0dc8389c2ab6956e6e6211b3b5179cab1df18d9f3cf996ffb2b96",
+      "source_triangles": 608,
+      "display_triangles": 608,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_15_step__Body1_1_.stl": {
+      "source_sha256": "35072e66a6063389ebf57ba1a1f5d8ac391b444f0c315e4e011d97df7d6934d1",
+      "display_sha256": "35072e66a6063389ebf57ba1a1f5d8ac391b444f0c315e4e011d97df7d6934d1",
+      "source_triangles": 782,
+      "display_triangles": 782,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_13_step__Body1_1_.stl": {
+      "source_sha256": "a8cecff33ac420f13cfeee168f25cb16e3c1f2ca738df014b8514b637543a1d5",
+      "display_sha256": "a8cecff33ac420f13cfeee168f25cb16e3c1f2ca738df014b8514b637543a1d5",
+      "source_triangles": 778,
+      "display_triangles": 778,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_3_step__Body1_1_.stl": {
+      "source_sha256": "d34e6650ad898986d0e8ce494dd00e5e1c25638352fdf531cd84ae23c1cae472",
+      "display_sha256": "d34e6650ad898986d0e8ce494dd00e5e1c25638352fdf531cd84ae23c1cae472",
+      "source_triangles": 616,
+      "display_triangles": 616,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_step__NONE.stl": {
+      "source_sha256": "55eb6831808d51293fdad0cf7521e7fc70ef29c92e41050e7be381e58b0c0713",
+      "display_sha256": "3507911c44fced3ea8b923af1e26d832f8979806f52e4e3d6a7c7b44e6a3f78b",
+      "source_triangles": 22512,
+      "display_triangles": 8494,
+      "bounds_delta_max_m": 8.922815322875977e-05
+    },
+    "meshes/SOLID_10_step__Body1_1_.stl": {
+      "source_sha256": "7c6bbaf26b918ff94c2fa51a674269a40eef3e83dabf289d5d25d5a438258a5f",
+      "display_sha256": "7c6bbaf26b918ff94c2fa51a674269a40eef3e83dabf289d5d25d5a438258a5f",
+      "source_triangles": 328,
+      "display_triangles": 328,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_12_step__Body1_1_.stl": {
+      "source_sha256": "403cb31621cf449d55b684d06e37d921bc7e9b4796e867afc20d377aaf7103f7",
+      "display_sha256": "403cb31621cf449d55b684d06e37d921bc7e9b4796e867afc20d377aaf7103f7",
+      "source_triangles": 1408,
+      "display_triangles": 1408,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_17_step__Body1_1_.stl": {
+      "source_sha256": "28bc852d3063dedece4b412c12acd1dbd59096275c1e6dda43ddf86eec0326fe",
+      "display_sha256": "28bc852d3063dedece4b412c12acd1dbd59096275c1e6dda43ddf86eec0326fe",
+      "source_triangles": 336,
+      "display_triangles": 336,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_20_step__Body1_1_.stl": {
+      "source_sha256": "3957b29fd589893694257e3f84d06593dcedde833f871d9d0f14df7fd662ab0e",
+      "display_sha256": "3957b29fd589893694257e3f84d06593dcedde833f871d9d0f14df7fd662ab0e",
+      "source_triangles": 2336,
+      "display_triangles": 2336,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_11_step__Body1_1_.stl": {
+      "source_sha256": "26ab9b4b916095a296c742d267a7885660d13851412343e719d1d58e6782071e",
+      "display_sha256": "26ab9b4b916095a296c742d267a7885660d13851412343e719d1d58e6782071e",
+      "source_triangles": 1454,
+      "display_triangles": 1454,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/SOLID_5_step__Body1_1_.stl": {
+      "source_sha256": "cf074d33fc8487ce1555208ee531ae297d1eed7d00311b8582bfd67150c024c8",
+      "display_sha256": "cf074d33fc8487ce1555208ee531ae297d1eed7d00311b8582bfd67150c024c8",
+      "source_triangles": 948,
+      "display_triangles": 948,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/WaveShare_Mounting_Plate_SO101_step__Body1_1_.stl": {
+      "source_sha256": "80f267991fb3ddee075fa1688f9aa6e8237400d45077bf9e2f45b5fd147ea7c5",
+      "display_sha256": "80f267991fb3ddee075fa1688f9aa6e8237400d45077bf9e2f45b5fd147ea7c5",
+      "source_triangles": 2406,
+      "display_triangles": 2406,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/ZK_122_step__Body1_1_.stl": {
+      "source_sha256": "1838a17d08b83e30dc1128e9657201615b722d42347ed3e7886b8ea8c105d1af",
+      "display_sha256": "3a2f8306e48042ce63057c447b8f2a0fcbf1c9678346146b5c77af95941f4199",
+      "source_triangles": 16798,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00033868669258686757
+    },
+    "meshes/MOTOR_1723_3_step__Body1_1_.stl": {
+      "source_sha256": "2f9c9730b3441f5f8977cbe0345033ef4dd31f2738569cc01185b7401c40deef",
+      "display_sha256": "4a9935e4f1ec5714a448208b12d48e5f30d5cdacd284181f3af4db7ea2218467",
+      "source_triangles": 46988,
+      "display_triangles": 4188,
+      "bounds_delta_max_m": 9.897693610753933e-06
+    },
+    "meshes/SG_ZIJI_15_step__NONE.stl": {
+      "source_sha256": "3fe0f9e9b90d4882bdc3c65677c8bb857082faa6184bff39839862a59fedd162",
+      "display_sha256": "bfb8ddd8f62592f36e1760a21535e4363d7a486c739f3da9b4ae3a4ed6dac539",
+      "source_triangles": 67122,
+      "display_triangles": 19332,
+      "bounds_delta_max_m": 0.00023618304518250102
+    },
+    "meshes/_________step__Body1_1__1.stl": {
+      "source_sha256": "751b15d09b98e2e9d8602dd57d27a639be65b647593aeca65d02bed46da68727",
+      "display_sha256": "18b83fece50b08e597364dad06d22d2cae93b59f92cdf509dc1d3860ab01528a",
+      "source_triangles": 4944,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.00030536882464837073
+    },
+    "meshes/PCB_CHAZUO_92_step__Body1_1_.stl": {
+      "source_sha256": "7ad7d3baf0a2f157476135dbca72aebab5a729b60d06ea3393e869f56a4108c2",
+      "display_sha256": "7ad7d3baf0a2f157476135dbca72aebab5a729b60d06ea3393e869f56a4108c2",
+      "source_triangles": 2256,
+      "display_triangles": 2256,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/XG_ZIJI_16_step__NONE.stl": {
+      "source_sha256": "ac6c8adb871a2c93d62a923e63c782415c05fce8e9ca143ab9e5eaed9215df53",
+      "display_sha256": "e6764ef675d3f7e139b334ddad2cc8e60428ad06382d88c45751ccf8b31c9059",
+      "source_triangles": 64186,
+      "display_triangles": 15790,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/GE_27_step__Body1_1_.stl": {
+      "source_sha256": "c71635862e50af31b2ea2a9d1f4ae188322a866f3b4658bcea015cb690c045d7",
+      "display_sha256": "ee33f4f13b6fc529191f4792c99a599bf0cb50e8d2728e07ca6065413ddb18f1",
+      "source_triangles": 102972,
+      "display_triangles": 18082,
+      "bounds_delta_max_m": 0.00011975087502738915
+    },
+    "meshes/Motor_holder_SO101_Base_2_step__Body1_1_.stl": {
+      "source_sha256": "0d90013b55fce4ac7836c3826325a14caadafde7531b12ad31e2798f4e6d8542",
+      "display_sha256": "ba31846ca758b38fa0552b0d7c41126069fc862da8cfdcc5b06882cccba830ee",
+      "source_triangles": 79478,
+      "display_triangles": 15240,
+      "bounds_delta_max_m": 0.0005106394965814567
+    },
+    "meshes/Rotation_Pitch_SO101_step__Body1_1_.stl": {
+      "source_sha256": "75b4cf1c0410be8ad110b6bec3cff3b0e74ef415b3987a58290dbd2699765563",
+      "display_sha256": "74e50b218133cf493720b59c3c78fb795acd8540888d11610c0f34aaf099e2b6",
+      "source_triangles": 50874,
+      "display_triangles": 18206,
+      "bounds_delta_max_m": 9.828985960242752e-05
+    },
+    "meshes/_50375033wbm000_01_step__Body2_1_.stl": {
+      "source_sha256": "cbd4f6c6df7c440f5d0fe3217902ccb696fc102636d644c7314ae8acf98fa778",
+      "display_sha256": "cbd4f6c6df7c440f5d0fe3217902ccb696fc102636d644c7314ae8acf98fa778",
+      "source_triangles": 12,
+      "display_triangles": 12,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/_50375033wbm000_01_step__Body3_1_.stl": {
+      "source_sha256": "2538a66ed0c8c802dcb66914522b0c7de70dc17d183ba155cd1c659c25ac3214",
+      "display_sha256": "2538a66ed0c8c802dcb66914522b0c7de70dc17d183ba155cd1c659c25ac3214",
+      "source_triangles": 12,
+      "display_triangles": 12,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/_50375033wbm000_01_step__Body1_1_.stl": {
+      "source_sha256": "66c7a6ffc47a8ead0f797a1585be30e8ce3bd9162a9feff48eda93854eefe469",
+      "display_sha256": "f0af39acbb543558f16271e2b2f3270b0e34220f0beea9c31d5302f4e0ef716d",
+      "source_triangles": 8540,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 1.308626003581649e-06
+    },
+    "meshes/Upper_arm_SO101_0_step__Body1_1_.stl": {
+      "source_sha256": "ef24dea178c7f05b63fdde9afb4f820bfbea3c066173478e0324d2497a61ad41",
+      "display_sha256": "949230fd66ee82a1d0bb1738eff0018351bc68be501682cb0fa45231ae71e223",
+      "source_triangles": 82420,
+      "display_triangles": 32000,
+      "bounds_delta_max_m": 0.000584210578058332
+    },
+    "meshes/Motor_holder_SO101_Wrist_3_step__Body1_1_.stl": {
+      "source_sha256": "4f519bd315a257cbc9738d6a755e39bb6f390a7929bf9a4552c99ec14472f8d9",
+      "display_sha256": "0a56f448c689622bd3f584bafdb75fd257befb97a39b2fed0d4a06152554fce3",
+      "source_triangles": 71696,
+      "display_triangles": 13642,
+      "bounds_delta_max_m": 0.0005106394965814567
+    },
+    "meshes/Under_arm_SO101_1_step__Body1_1_.stl": {
+      "source_sha256": "c60a2df8139b11826b0f0d7e9b4fa15385a854f0837071a7a907383a6add5fac",
+      "display_sha256": "c5e740368bcc40e741af4c0bf399af614546434b5e9cbcc2b74fa9283cb17282",
+      "source_triangles": 132588,
+      "display_triangles": 24656,
+      "bounds_delta_max_m": 8.720240308977834e-06
+    },
+    "meshes/Wrist_Roll_Pitch_SO100_4_step__Body1_1_.stl": {
+      "source_sha256": "49219977efe20649068894cfe6f2b84a0f3b3e605130b373125eb1f59b3ebb98",
+      "display_sha256": "bb3a6caea0c5a0984148b8c119e1272cf3ad9e4667accd4d332c85491d3855e0",
+      "source_triangles": 163704,
+      "display_triangles": 49674,
+      "bounds_delta_max_m": 0.0005087491043770029
+    },
+    "meshes/Wrist_Roll_Follower_SO101_5__Fillet1.stl": {
+      "source_sha256": "2a958a08456c223f548ad8f1d9b671bde8a31a4e43b9f5c727c4d7da620d9f75",
+      "display_sha256": "e31328634290cd03f3c67893bf81c0d505cbb5b26ed38773baace22cdabb4263",
+      "source_triangles": 33192,
+      "display_triangles": 15220,
+      "bounds_delta_max_m": 0.00022930540554978035
+    },
+    "meshes/Camera_Component___Body___ZED_2i___4_6mm___Cover_step__ZED2i_step_1_.stl": {
+      "source_sha256": "3582dab177fd0857440488a52dad2e32cf5f8ee4f4aa928513691e13691060dc",
+      "display_sha256": "3be1605d6231082f5a962d07dcd3f0e0f2c44106f20ab8a1e012685589d4609a",
+      "source_triangles": 5444,
+      "display_triangles": 5112,
+      "bounds_delta_max_m": 1.0523767363185277e-05
+    },
+    "meshes/Moving_Jaw_SO101__NONE.stl": {
+      "source_sha256": "0568e46fecd4354ef049b5e44982f123a340ebbf6031bdbcad0eb3903cd6ca1c",
+      "display_sha256": "00b55304c251c63d0d601c6e9acf268e5a038e63ea6e15047a819009191db0aa",
+      "source_triangles": 86966,
+      "display_triangles": 26780,
+      "bounds_delta_max_m": 0.00027220854319992376
+    },
+    "meshes/Rear_case___ZED_2i_step__ZED2i_step_1_.stl": {
+      "source_sha256": "821a81aa005f33186d41525b08ed09e27c68f44d1a5e67320e031efed224dd28",
+      "display_sha256": "33a86cdc60dba76c62365509b5a9307c90c13d75c2c27d8990756f36d096cc9c",
+      "source_triangles": 39932,
+      "display_triangles": 32000,
+      "bounds_delta_max_m": 1.9056298170685992e-05
+    },
+    "meshes/Front_case___ZED_2i_step__NONE.stl": {
+      "source_sha256": "c6a133a33825c070211a98387e9bc8246ba4c73e6e42ed30a6111f1e575037a2",
+      "display_sha256": "6457bb94a499d2bafc60860747776ec6bc655772a9d4025894dca67acc4b9c42",
+      "source_triangles": 75494,
+      "display_triangles": 57830,
+      "bounds_delta_max_m": 5.3204493230214756e-05
+    },
+    "meshes/USB_Type_C_Port_step__ZED2i_step_1_.stl": {
+      "source_sha256": "3591aa1f953501573bf8795c327fdba6309d71b0398cbeb617091d0e8e075137",
+      "display_sha256": "bd5bebb2b99890833ce82ffd1b93d32e2b6afdd0d8c18dcbad3ad4d58af8d997",
+      "source_triangles": 85618,
+      "display_triangles": 15380,
+      "bounds_delta_max_m": 0.00015504973882047917
+    },
+    "meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl": {
+      "source_sha256": "fac2d81cf7c7063fef60c30f62ed1e8b091c870b93d7ded4ae74be5902809075",
+      "display_sha256": "26f4337e5106c29be09a5e8a8ffca39d0290955d1d2040057f1713224bff21ab",
+      "source_triangles": 4080,
+      "display_triangles": 4000,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/DSL958R_650_F2_0______0_step__NONE.stl": {
+      "source_sha256": "48b7afe68126f8eca929eaf097eaaf94f0ff52e54ceb72fc55eb1c38e5de7551",
+      "display_sha256": "48b7afe68126f8eca929eaf097eaaf94f0ff52e54ceb72fc55eb1c38e5de7551",
+      "source_triangles": 2582,
+      "display_triangles": 2582,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/DSL958R_650_F2_0______step__NONE.stl": {
+      "source_sha256": "eff5aeb9bac8cb27f75402731d88150373f68df9c4f59b44ea7e0881bad3f276",
+      "display_sha256": "eff5aeb9bac8cb27f75402731d88150373f68df9c4f59b44ea7e0881bad3f276",
+      "source_triangles": 144,
+      "display_triangles": 144,
+      "bounds_delta_max_m": 0.0
+    },
+    "meshes/Narrow_lens_4_6mm_step__ZED2i_step_1_.stl": {
+      "source_sha256": "93f6ff8bc0fcb95e1da54503f025acc6caefa920b173b1a6ad13eccfae2cfff9",
+      "display_sha256": "565eb87111da5fc611d43d105895c194cac57c0eeddd045c123f04a212d2e535",
+      "source_triangles": 25920,
+      "display_triangles": 21678,
+      "bounds_delta_max_m": 0.0006475428213996047
+    },
+    "meshes/PCB_ZED2i_step__ZED2i_step_1_.stl": {
+      "source_sha256": "be1f513f60cd52b99836a3054f029b7d8ce6cf01f9b47835009e41baa76837e8",
+      "display_sha256": "be1f513f60cd52b99836a3054f029b7d8ce6cf01f9b47835009e41baa76837e8",
+      "source_triangles": 7346,
+      "display_triangles": 7346,
+      "bounds_delta_max_m": 0.0
+    }
+  }
+}

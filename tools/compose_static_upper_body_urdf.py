@@ -1,11 +1,29 @@
 #!/usr/bin/env python3
-"""Build the Sentient static upper body URDF from its received description.
+"""Build the Sentient static upper body URDF from its source description.
 
-The source is ``assets/sentient_static_upper_body/source/received.urdf``, the description as
-received on 2026-10-25 with its Damiao motor table, byte for byte. Every change below is a
-gap in that file for simulation or retargeting; ``known/static_upper_body.py`` says why each
-one is made and what evidence would replace it. Joint limits pass through unchanged: the
-motor table marks each driven joint's limits as confirmed on the robot.
+The source is ``assets/sentient_static_upper_body/source/allisa_bot.urdf``, byte for byte: the
+description the robot's operator selected on 2026-10-25, as Subraj's ``humanoid_pkg`` ships it
+(``urdf/allisa_bot.urdf``, sha256 ``039b0b7d…``). That file is allisa_bot's CAD export (source
+sha256 ``623305bb…``) with each of its 25 movable joints given the exact limits of the earlier
+``allisa_feedback`` description, which "the operator rejected" for its geometry and keeps only
+as a joint-limit donor (``source/allisa_bot_integration.md`` and
+``source/allisa_bot_model_provenance.json``, copied beside it). Its meshes are the package's
+display meshes, decimated from the CAD with original units and frames (the provenance file
+records each one's source and display sha256 and bounds change).
+
+The rendering is the source plus only what simulation and the registry need; the changes, and
+the evidence that would replace each, are in ``known/static_upper_body.py``:
+
+* every link with geometry gets its visual meshes' convex hull as its collision (the source
+  has none) and that hull's mass properties at one density (it has no inertials);
+* visual names are made unique and meshes are referenced as ``meshes/<name>.stl``;
+* the four wrist pitch and roll joints' limits are negated: allisa_bot reverses those axes
+  against the motors, whose confirmed limits the donor carries in motor coordinates, and the
+  hardware profile reads each of those motors with sign -1;
+* the ``<sensor>`` elements (Gazebo's, not URDF's) are removed; the registry declares the ZED;
+* a ``ZED_camera`` frame (Stereolabs' ROS convention, x out of the lenses, y left) and both
+  eyes' optical frames, 60 mm either side of it, are added on the source's
+  ``zed2i_left_optical_frame``, so the left eye's frame is the source's own.
 
 Run from the package root:
 ``uv run --with numpy --with scipy python tools/compose_static_upper_body_urdf.py``.
@@ -29,16 +47,20 @@ from sx_embodiments.known.zed import EYES, OPTICAL_RPY, eye_offset, optical_fram
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "assets/sentient_static_upper_body"
-SOURCE = ASSET / "source/received.urdf"
+SOURCE = ASSET / "source/allisa_bot.urdf"
 TARGET = ASSET / "sentient_static_upper_body.urdf"
-SOURCE_MESH_PREFIX = (
-    # The received package's model folder; incidental, not the robot's name.
-    "package://humanoid_pkg/models/allisa_current/meshes_preview/"
-)
+SOURCE_MESH_PREFIX = "package://humanoid_pkg/meshes/allisa_bot/"
+#: The source's frame on the ZED's left eye, optical convention (z out of the lens).
+SOURCE_ZED_EYE = "zed2i_left_optical_frame"
 #: The neck's camera frame, a ZED 2i in Stereolabs' ROS convention (x out of the lenses, y left).
 ZED_FRAME = "ZED_camera"
-#: Driver configuration inside the description; the body's actuator bindings carry it.
-MOTOR_TAGS = ("motor_configuration", "motor_parameters")
+#: The joints allisa_bot turns against their motors; their donor limits are motor coordinates.
+REVERSED_JOINTS = (
+    "left_wrist_pitch_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_roll_joint",
+)
 
 # One density for every link's convex hull. The hulls overstate solid volume, so this is
 # below aluminium; it is an estimate for simulation until the CAD's mass properties arrive.
@@ -63,6 +85,30 @@ def _rpy(rpy: Vec) -> Vec:
             [-sp, cp * sr, cp * cr],
         ]
     )
+
+
+def _negated(number: str) -> str:
+    """``-number``, spelled with the source's digits."""
+    return number.removeprefix("-") if number.startswith("-") else f"-{number}"
+
+
+def _matrix(pose: Pose) -> Vec:
+    out = np.eye(4)
+    out[:3, :3] = _rpy(np.array(pose.rpy, dtype=np.float64))
+    out[:3, 3] = pose.xyz
+    return out
+
+
+def _set_origin(element: ET.Element, matrix: Vec) -> None:
+    """Write ``matrix`` as ``element``'s origin, URDF's fixed-axis roll, pitch, yaw."""
+    r = matrix[:3, :3]
+    rpy = (
+        math.atan2(r[2, 1], r[2, 2]),
+        -math.asin(max(-1.0, min(1.0, r[2, 0]))),
+        math.atan2(r[1, 0], r[0, 0]),
+    )
+    xyz = np.where(np.abs(matrix[:3, 3]) < 1e-12, 0.0, matrix[:3, 3])
+    ET.SubElement(element, "origin", {"xyz": _fmt(xyz), "rpy": _fmt(np.array(rpy))})
 
 
 def _read_stl(path: Path) -> Vec:
@@ -145,16 +191,14 @@ def render() -> dict[Path, bytes]:
     robot.set("name", "sentient_static_upper_body")
     outputs: dict[Path, bytes] = {}
 
-    # The base is clamped to a table edge; the table, not the description, places it.
-    for parent in robot.iter():
-        for child in [c for c in parent if c.tag in MOTOR_TAGS]:
-            parent.remove(child)
+    for sensor in robot.findall("sensor"):
+        robot.remove(sensor)
     for joint in robot.findall("joint"):
-        if joint.get("name") == "world_to_base":
-            robot.remove(joint)
-    for link in robot.findall("link"):
-        if link.get("name") == "world":
-            robot.remove(link)
+        limit = joint.find("limit")
+        if joint.get("name") in REVERSED_JOINTS and limit is not None:
+            lower, upper = limit.get("lower", ""), limit.get("upper", "")
+            limit.set("lower", _negated(upper))
+            limit.set("upper", _negated(lower))
 
     for link in robot.findall("link"):
         name = link.get("name", "")
@@ -194,9 +238,17 @@ def render() -> dict[Path, bytes]:
             _write_stl(path, vertices, faces)
             outputs[path] = path.read_bytes()
 
-    # The ZED's two eyes as optical frames on its frame, where the declared cameras mount.
-    if robot.find(f"link[@name='{ZED_FRAME}']") is None:
-        raise ValueError(f"the source no longer carries {ZED_FRAME}")
+    # The ZED's frame, placed so its left eye's optical frame is the source's, and both eyes.
+    if robot.find(f"link[@name='{SOURCE_ZED_EYE}']") is None:
+        raise ValueError(f"the source no longer carries {SOURCE_ZED_EYE}")
+    left = _matrix(Pose((0.0, eye_offset("left"), 0.0), OPTICAL_RPY))
+    ET.SubElement(robot, "link", {"name": ZED_FRAME})
+    joint = ET.SubElement(
+        robot, "joint", {"name": f"{SOURCE_ZED_EYE}_to_{ZED_FRAME}", "type": "fixed"}
+    )
+    _set_origin(joint, np.linalg.inv(left))
+    ET.SubElement(joint, "parent", {"link": SOURCE_ZED_EYE})
+    ET.SubElement(joint, "child", {"link": ZED_FRAME})
     for eye in EYES:
         name = optical_frame(eye)
         ET.SubElement(

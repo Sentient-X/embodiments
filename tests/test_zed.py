@@ -144,3 +144,14 @@ def test_the_placed_zed_is_one_head_track_of_its_factory_eyes() -> None:
         resolve(
             body, RobotInstance.of(body.id, units, (vga.left, vga.right)), (vga.left, vga.right)
         )
+
+
+def test_the_left_eye_is_the_sources_left_optical_frame() -> None:
+    """The ZED frame is placed so the registry's left eye is allisa_bot's own optical frame."""
+    body = _body()
+    kinematics = Kinematics.of(body.urdf_bytes)
+    zero = {
+        name: 0.0 for name, joint in kinematics.joints.items() if joint.type is not JointType.FIXED
+    }
+    pose = kinematics.pose("zed2i_left_optical_frame", FRAMES[0], zero)
+    assert pose == pytest.approx((1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1), abs=1e-8)

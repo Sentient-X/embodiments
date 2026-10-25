@@ -1,6 +1,7 @@
 """The static upper body is its generator's rendering of the received file and its motor table."""
 
 import importlib.util
+import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -41,35 +42,76 @@ def test_the_body_is_a_table_clamped_development_body() -> None:
     assert len(robot.joint_names) == 25
 
 
-def test_the_bindings_are_the_received_motor_table() -> None:
-    source = ET.parse(ROOT / "assets/sentient_static_upper_body/source/received.urdf").getroot()
-    table = {
-        values["name"]: values
-        for values in (
-            {p.attrib["name"]: p.attrib["value"] for p in motor}
-            for motor in source.iter("motor_parameters")
+def test_the_arm_bindings_are_the_hardware_profile() -> None:
+    """Ids, models and signs are humanoid_pkg's hardware profile for allisa_bot; each arm
+    joint's range is the rendered description's limit."""
+    source = ROOT / "assets/sentient_static_upper_body/source"
+    motors = json.loads((source / "humanoid_allisa_bot_hardware.json").read_text())["hardware"][
+        "motors"
+    ]
+    limits = {
+        joint.attrib["name"]: joint.find("limit")
+        for joint in ET.parse(
+            ROOT / "assets/sentient_static_upper_body/sentient_static_upper_body.urdf"
         )
+        .getroot()
+        .findall("joint")
     }
     axes = [
         axis
-        for chain in (
-            STATIC_UPPER_BODY_TORSO,
-            STATIC_UPPER_BODY_LEFT_ARM,
-            STATIC_UPPER_BODY_RIGHT_ARM,
-        )
+        for chain in (STATIC_UPPER_BODY_LEFT_ARM, STATIC_UPPER_BODY_RIGHT_ARM)
         for axis in chain.layout.axes
     ]
-    assert sorted(axis.name for axis in axes) == sorted(table)
+    assert sorted(axis.name for axis in axes) == sorted(motors)
     for axis in axes:
-        motor = table[axis.name]
+        motor = motors[axis.name]
         assert isinstance(axis.actuation, DirectDrive) and isinstance(axis.bounds, Bounds)
         binding = axis.actuation.actuator
-        assert binding.model.value == f"damiao_{motor['model'].lower()}", axis.name
-        assert binding.bus_id == int(motor["send_id"], 16), axis.name
-        assert int(motor["recv_id"], 16) == binding.bus_id + STATIC_UPPER_BODY_MASTER_ID_OFFSET
-        assert (binding.sign, motor["encoder_turns"]) == (1, "0"), axis.name
-        assert motor["direction_confirmed"] == motor["limits_confirmed"] == "true", axis.name
-        assert axis.bounds == Bounds(float(motor["lower"]), float(motor["upper"])), axis.name
+        assert binding.model.value == f"damiao_{motor['model_candidate'].lower()}", axis.name
+        assert binding.bus_id == motor["send_id"], axis.name
+        assert motor["recv_id"] == binding.bus_id + STATIC_UPPER_BODY_MASTER_ID_OFFSET
+        assert (binding.sign, motor["zero_rad"]) == (motor["sign"], 0.0), axis.name
+        limit = limits[axis.name]
+        assert limit is not None
+        assert axis.bounds == Bounds(float(limit.attrib["lower"]), float(limit.attrib["upper"]))
+    # The profile has no torso motor; its binding is the superseded description's table.
+    torso = STATIC_UPPER_BODY_TORSO.layout.axes[0].actuation
+    assert isinstance(torso, DirectDrive) and torso.actuator.bus_id == 0x1F
+
+
+def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None:
+    """Every source joint renders with its origin and axis; the four reversed wrist axes carry
+    the donor's motor-coordinate limits negated, every other joint its limits unchanged."""
+    asset = ROOT / "assets/sentient_static_upper_body"
+    source = {
+        j.attrib["name"]: j
+        for j in ET.parse(asset / "source/allisa_bot.urdf").getroot().findall("joint")
+    }
+    rendered = {
+        j.attrib["name"]: j
+        for j in ET.parse(asset / "sentient_static_upper_body.urdf").getroot().findall("joint")
+    }
+    reversed_axes = {
+        "left_wrist_pitch_joint",
+        "left_wrist_roll_joint",
+        "right_wrist_pitch_joint",
+        "right_wrist_roll_joint",
+    }
+    assert set(source) <= set(rendered)
+    for name, joint in source.items():
+        ours = rendered[name]
+        for tag in ("origin", "axis", "parent", "child"):
+            theirs, mine = joint.find(tag), ours.find(tag)
+            assert (theirs is None) == (mine is None), (name, tag)
+            if theirs is not None and mine is not None:
+                assert theirs.attrib == mine.attrib, (name, tag)
+        theirs, mine = joint.find("limit"), ours.find("limit")
+        if theirs is None or mine is None:
+            assert theirs is mine, name
+            continue
+        lower, upper = float(theirs.attrib["lower"]), float(theirs.attrib["upper"])
+        expected = (-upper, -lower) if name in reversed_axes else (lower, upper)
+        assert (float(mine.attrib["lower"]), float(mine.attrib["upper"])) == expected, name
 
 
 def test_the_neck_is_bound_provisionally_as_an_so101_on_its_own_port() -> None:

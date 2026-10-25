@@ -52,16 +52,16 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   register (0x09, 50 µs per count, Damiao's DM-J4340-2EC manual V1.1 pp. 20 and 30) written in
   RAM at open and confirmed by echo and read-back; never saved to flash. An enabled motor that
   hears no command for that long disables itself and reports fault 0xD until power-cycled or
-  cleared (this crate sends no clear). The static upper body sets 0.75 s, its received
-  driver's heartbeat; the B601-DM and humanoid set none, as their sources do.
+  cleared (this crate sends no clear). The static upper body sets 0.75 s, the heartbeat
+  of the motor table it was first described with; the B601-DM and humanoid set none, as their sources do.
 - **Gains** are Seeed's (`reBotArm_control_py` `config/rebotarm_dm.yaml`); the 4340Ps' kd of
   8 is declared as 5, which `DM_CAN.py`'s `controlMIT` clamps it to on the wire.
   The humanoid's are `humanoid-simrealgap`'s single-motor validated gains
   (`configs/training_actuator_params_20260606.csv` at `5c11827f`), not a whole-body approval:
   the DM8009 and the humanoid's whole chain are owed the station's bench qualification.
-  The static upper body's are the received description's driver's
-  (`assets/sentient_static_upper_body/source/received.urdf`, `<motor_parameters>`), not a
-  qualification either. That driver's 0.25 rad/s speed cap and 0.2 rad tracking bound are not
+  The static upper body's are its hardware profile's
+  (`assets/sentient_static_upper_body/source/humanoid_allisa_bot_hardware.json`, `mit_gains`;
+  the torso's from the superseded description's motor table), not a qualification either. That driver's 0.25 rad/s speed cap and 0.2 rad tracking bound are not
   this chain's: `sx_embodiment_drivers::Governor` enforces them only when a caller wraps the
   chain in it with those limits.
 - **DM4340 velocity range.** Damiao publishes 10 rad/s (`DM_CAN.py`) and 8 rad/s (its C++ SDK).

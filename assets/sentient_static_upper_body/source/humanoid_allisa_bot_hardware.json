@@ -1,0 +1,431 @@
+{
+  "schema": "humanoid.yubi.absolute.allisa_bot.hardware.v1",
+  "urdf": "urdf/allisa_bot.urdf",
+  "udp_host": "127.0.0.1",
+  "udp_port": 7448,
+  "control": {
+    "rate_hz": 90,
+    "pose_gain": 8.0,
+    "pickup_position_m": 0.075,
+    "pickup_orientation_deg": 20.0,
+    "pickup_dwell_s": 0.2,
+    "feedback_timeout_s": 0.3,
+    "controller_timeout_s": 0.3,
+    "command_lead_deg": 20.0,
+    "max_joint_speed_rad_s": 0.5,
+    "max_joint_acceleration_rad_s2": 8.0
+  },
+  "hardware": {
+    "channel": "can0",
+    "command_timeout_s": 0.3,
+    "feedback_timeout_s": 0.3,
+    "model_reference": "Recorded named actuator assignments, not enum inference from anatomy.",
+    "motors": {
+      "left_shoulder_pitch_joint": {
+        "send_id": 24,
+        "recv_id": 56,
+        "model_candidate": "DM8009",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 45,
+          "t_max": 54
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_shoulder_roll_joint": {
+        "send_id": 25,
+        "recv_id": 57,
+        "model_candidate": "DM8009",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 45,
+          "t_max": 54
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_upper_arm_yaw_joint": {
+        "send_id": 26,
+        "recv_id": 58,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 20,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_elbow_pitch_joint": {
+        "send_id": 27,
+        "recv_id": 59,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 20,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_forearm_yaw_joint": {
+        "send_id": 28,
+        "recv_id": 60,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 10,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_wrist_pitch_joint": {
+        "send_id": 29,
+        "recv_id": 61,
+        "model_candidate": "DM4310",
+        "sign": -1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 30,
+          "t_max": 10
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "left_wrist_roll_joint": {
+        "send_id": 30,
+        "recv_id": 62,
+        "model_candidate": "DM4310",
+        "sign": -1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 30,
+          "t_max": 10
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_shoulder_pitch_joint": {
+        "send_id": 9,
+        "recv_id": 41,
+        "model_candidate": "DM8009",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 45,
+          "t_max": 54
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_shoulder_roll_joint": {
+        "send_id": 16,
+        "recv_id": 48,
+        "model_candidate": "DM8009",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.569999694824219,
+          "v_max": 45,
+          "t_max": 54
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_upper_arm_yaw_joint": {
+        "send_id": 17,
+        "recv_id": 49,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 20,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_elbow_pitch_joint": {
+        "send_id": 18,
+        "recv_id": 50,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 20,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_forearm_yaw_joint": {
+        "send_id": 19,
+        "recv_id": 51,
+        "model_candidate": "DM4340",
+        "sign": 1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 10,
+          "t_max": 28
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_wrist_pitch_joint": {
+        "send_id": 20,
+        "recv_id": 52,
+        "model_candidate": "DM4310",
+        "sign": -1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 30,
+          "t_max": 10
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      },
+      "right_wrist_roll_joint": {
+        "send_id": 21,
+        "recv_id": 53,
+        "model_candidate": "DM4310",
+        "sign": -1,
+        "zero_rad": 0.0,
+        "encoding_limits": {
+          "p_max": 12.5,
+          "v_max": 30,
+          "t_max": 10
+        },
+        "coordinate_evidence": "Recorded branch0 and raw SDK radians; negate wrist pitch/roll to preserve recorded flange FK with accepted allisa_bot axes."
+      }
+    },
+    "sdk_root": "vendor/sentient_can",
+    "status": "Configured from imported 2026-10-25 evidence; software-adapted profile, no claim of new physical commissioning.",
+    "mode": "MIT",
+    "mode_id": 1,
+    "command_lead_deg": 25.0,
+    "tracking_stop_deg": 30.0,
+    "mit_gains_by_model": {
+      "DM8009": {
+        "kp": 40.0,
+        "kd": 1.0
+      },
+      "DM4340": {
+        "kp": 20.0,
+        "kd": 5.0
+      }
+    },
+    "mit_gain_reference": "Explicit per-joint gains from imported allisa_current_motors.json with historical host-submission evidence in the 08:53 UTC session; no automatic retune or motor-resident PID write.",
+    "coordinate_reference": "Recorded zero/turn0/1:1 SDK convention; first five axes unchanged and four wrist axes inverted relative to recorded session model. No firmware zero writes.",
+    "mit_gains": {
+      "left_shoulder_pitch_joint": {
+        "kp": 60.984,
+        "kd": 1.091
+      },
+      "left_shoulder_roll_joint": {
+        "kp": 60.984,
+        "kd": 1.091
+      },
+      "left_upper_arm_yaw_joint": {
+        "kp": 24.0,
+        "kd": 5.0
+      },
+      "left_elbow_pitch_joint": {
+        "kp": 30.492,
+        "kd": 4.655
+      },
+      "left_forearm_yaw_joint": {
+        "kp": 29.04,
+        "kd": 4.75
+      },
+      "left_wrist_pitch_joint": {
+        "kp": 20.0,
+        "kd": 1.0
+      },
+      "left_wrist_roll_joint": {
+        "kp": 20.0,
+        "kd": 1.0
+      },
+      "right_shoulder_pitch_joint": {
+        "kp": 60.984,
+        "kd": 1.091
+      },
+      "right_shoulder_roll_joint": {
+        "kp": 42.0,
+        "kd": 0.98
+      },
+      "right_upper_arm_yaw_joint": {
+        "kp": 30.492,
+        "kd": 4.655
+      },
+      "right_elbow_pitch_joint": {
+        "kp": 30.492,
+        "kd": 4.655
+      },
+      "right_forearm_yaw_joint": {
+        "kp": 30.492,
+        "kd": 4.655
+      },
+      "right_wrist_pitch_joint": {
+        "kp": 20.0,
+        "kd": 1.0
+      },
+      "right_wrist_roll_joint": {
+        "kp": 20.0,
+        "kd": 1.0
+      }
+    },
+    "parameter_writes_allowed": false,
+    "feedback_status_reference": "Manual single feedback layout: upper nibble ERR/status; route by full feedback arbitration ID. Preserve raw byte0 in telemetry for normal startup inspection.",
+    "source_evidence": {
+      "motor_config": "hardware_evidence/originals/humanoid_quest/config/allisa_current_motors.json",
+      "motor_config_sha256": "e571b01cf7829ebcd1b841e77ea3bc14781317e42bfcb26c029751d6bfbcec30",
+      "recorded_bus": "can1",
+      "deployment_bus": "can0",
+      "coordinate_model_session": "hardware_evidence/recordings/teleop_20261025T085324.185104Z.csv.json",
+      "direction_audit": "hardware_evidence/originals/humanoid_quest/recordings/joint_directions_20261023T064354.615533Z.json"
+    }
+  },
+  "arms": {
+    "left": {
+      "controller_to_grasp_tcp": {
+        "position_m": [
+          0.03309189398770627,
+          -0.1219264222799964,
+          -0.10733810601229377
+        ],
+        "rotation_xyzw": [
+          -0.14644660940672624,
+          0.35355339059327373,
+          -0.35355339059327373,
+          0.8535533905932738
+        ]
+      },
+      "wrist_to_grasp_tcp": {
+        "position_m": [
+          0.151385126325,
+          -0.000482970510747,
+          0.00642775783742
+        ],
+        "rotation_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "home_rad": [
+        0.0,
+        0.0,
+        0.0,
+        -1.3962634015954636,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "tool_reference": "Supplied allisa_bot fixed gripper mount and TCP frames, retained from the new model. Controller-to-grasp handheld calibration unchanged. Not physically commissioned.",
+      "wrist_to_gripper_root": {
+        "position_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "home_reference": "Operator-accepted allisa_bot home, unchanged from RViz. Execute through the recorded motor-to-model conversion; not a firmware zero operation.",
+      "joint_names": [
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_upper_arm_yaw_joint",
+        "left_elbow_pitch_joint",
+        "left_forearm_yaw_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_roll_joint"
+      ],
+      "flange_link": "left_wrist_roll_link"
+    },
+    "right": {
+      "controller_to_grasp_tcp": {
+        "position_m": [
+          0.03309189398770627,
+          0.1219264222799964,
+          -0.10733810601229377
+        ],
+        "rotation_xyzw": [
+          0.14644660940672624,
+          0.35355339059327373,
+          0.35355339059327373,
+          0.8535533905932738
+        ]
+      },
+      "wrist_to_grasp_tcp": {
+        "position_m": [
+          0.151386663025,
+          -0.000485065605347,
+          0.00642876510685
+        ],
+        "rotation_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "home_rad": [
+        0.0,
+        0.0,
+        0.0,
+        1.3962634015954636,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "tool_reference": "Supplied allisa_bot fixed gripper mount and TCP frames, retained from the new model. Controller-to-grasp handheld calibration unchanged. Not physically commissioned.",
+      "wrist_to_gripper_root": {
+        "position_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "home_reference": "Operator-accepted allisa_bot home, unchanged from RViz. Execute through the recorded motor-to-model conversion; not a firmware zero operation.",
+      "joint_names": [
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_upper_arm_yaw_joint",
+        "right_elbow_pitch_joint",
+        "right_forearm_yaw_joint",
+        "right_wrist_pitch_joint",
+        "right_wrist_roll_joint"
+      ],
+      "flange_link": "right_wrist_roll_link"
+    }
+  },
+  "jaw_command_range_m": 0.1,
+  "jaw_reference": "Normalized jaw_opening 0..0.1 demand; physical output uses imported paired Feetech records; hardware display uses measured fractions.",
+  "follower_gripper": {
+    "preset": "existing_feetech_with_native_allisa_visuals",
+    "model_path": "urdf/allisa_bot.urdf",
+    "servo_calibration_path": "config/allisa_bot_feetech.json",
+    "reuse": "Imported matched PRD board/finger endpoints in reported tick coordinates; no EEPROM, offset, mode, baud or ID writes.",
+    "wrist_adapter_reference": "Native allisa_bot fixed wrist-to-gripper mount; replaces the superseded visual adapter estimate by operator model selection.",
+    "visual_model": "native_urdf"
+  },
+  "visual_urdf": "urdf/allisa_bot.urdf"
+}

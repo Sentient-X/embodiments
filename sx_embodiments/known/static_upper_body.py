@@ -1,76 +1,93 @@
 """Sentient static upper body: a torso with two seven-joint arms, clamped to a table.
 
 The robot sits on a table edge facing out from it, where it works a coffee machine: the base
-is clamped to the table top, so the description's root ``base_link`` is the table surface
-(the received file put it 0.797 m above a floor through a fixed ``world`` joint, which is
-that table's height and a placement fact, not part of the body). A yaw torso carries two
-arms of shoulder pitch, roll and yaw, elbow pitch, forearm yaw, wrist pitch and roll, each
-ending in a two-finger gripper with a ``*_gripper_tcp`` frame, and an SO-101 arm on the chest
-used as a six-joint neck whose last joint tilts a ZED camera (``ZED_camera`` frame).
+is clamped to the table top, so the description's root ``base_link`` is the table surface. A
+yaw torso carries two arms of shoulder pitch, roll and yaw, elbow pitch, forearm yaw, wrist
+pitch and roll, each ending in a two-finger gripper with a ``*_gripper_tcp`` frame, and an
+SO-101 arm on the chest used as a six-joint neck whose last joint tilts a ZED camera.
 
-The description is ``tools/compose_static_upper_body_urdf.py``'s rendering of the
-description as received on 2026-10-25 (maintainer ``suprajs``, licence ``Proprietary``; its
-meshes resolve under ``humanoid_pkg``'s ``models/allisa_current``), kept byte for byte under
-``source/``. That file carries the robot's Damiao motor table: per driven joint the model, CAN
-send and answer ids (answer = send + 0x20, on ``can1``), MIT gains, limits, and flags that its
-mapping, direction and limits are confirmed on the robot. The bindings below are that table;
-the joint limits pass through unchanged, and each joint drives its motor with identity sign.
+The description is ``tools/compose_static_upper_body_urdf.py``'s rendering of
+``source/allisa_bot.urdf``, Subraj's ``humanoid_pkg`` ``urdf/allisa_bot.urdf`` of 2026-10-25,
+byte for byte, with the package's display meshes. It replaces the ``allisa_feedback``
+description this body was first registered from (``source/received.urdf`` until 2026-10-26, in
+git history): "The operator rejected the feedback geometry and selected
+``urdf/allisa_bot.urdf`` instead. The feedback model is a joint-limit donor only"
+(``source/allisa_bot_integration.md``). allisa_bot is that CAD export with the donor's limits
+copied onto its 25 movable joints by name (``source/allisa_bot_model_provenance.json``). The
+two agree on every link, visual and joint origin; allisa_bot reverses both wrist axes on each
+arm, has no collision geometry, and carries a ``zed2i_left_optical_frame`` where the feedback
+file had a ``ZED_camera``. Both are Sentient's own CAD (``LicenseRef-Sentient-Proprietary``;
+the package ships no licence of its own).
+
+The bindings are humanoid_pkg's hardware profile for it
+(``source/humanoid_allisa_bot_hardware.json``): per arm joint the Damiao model, CAN send and
+answer ids (answer = send + 0x20, deployed on ``can0``), MIT gains and a sign. It repeats the
+feedback file's motor table, whose limits, mapping and directions were flagged confirmed on the
+robot, exactly, except that both wrists' motors read with sign -1, because allisa_bot turns
+those axes against them. Their confirmed limits are motor coordinates, so the rendering
+negates them onto allisa_bot's axes (the package copies them by name unnegated, and says
+hardware signs still need evidence). The profile has no torso entry, so the torso's binding
+(DM8009 at 0x1F) is the superseded table's.
 
 * **Elbows** bend both ways about the forearm hanging straight (-pi/2 left, +pi/2 right): about
-  90 deg forward to the stop at zero and about 80 deg back. The first rendering read the
-  backward half as impossible and moved the range; the robot's confirmed stops replace that.
+  90 deg forward to the stop at zero and about 80 deg back, the robot's confirmed stops.
 * **Forearm yaw** turns 8.7 rad (left) and 7.4 rad (right), more than once; also confirmed.
 
-The rendering still changes the received file where simulation needs it:
+The rendering changes the source only where simulation and the registry need it:
 
 * **Mass properties.** No link has an inertial. Each link gets its visual meshes' convex hull
-  at one density (600 kg/m^3), 11.6 kg in all; the CAD's mass properties replace them, and the
+  at one density (600 kg/m^3), 11.5 kg in all; the CAD's mass properties replace them, and the
   estimate is likely light on the arm actuators. This is why it is still a development body.
-* **Collision.** The received capsules on the four distal links of each arm and the torso
-  box stay; every other link with geometry gets its visual hull as its collision mesh.
-* The motor table is removed (the bindings carry it), visual names are made unique, meshes
-  are referenced as ``meshes/<name>.stl``, and the ``world`` link and joint are removed.
+* **Collision.** No link has collision geometry; each link with geometry gets its visual hull.
+* Visual names are made unique, meshes are referenced as ``meshes/<name>.stl``, the four wrist
+  limits are negated as above, and the Gazebo ``<sensor>`` element is dropped (the registry
+  declares the camera).
 
 Still open with the hardware owner: every arm joint declares 54 Nm and 0.5 rad/s, too slow to
-replay human motion, and the received driver configuration caps speed at 0.25 rad/s; left and
-right do not mirror one sign convention; the right arm's first id is 0x09 where the rest of
-that arm runs 0x10..0x15; the motor table's gains (kp 20..61, kd 1..5) are that driver's, not
-a qualification. The right forearm yaw's entry contradicts itself: it flags
-``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
-calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
-as received until the hardware owner settles which holds.
+replay human motion, and the superseded driver configuration capped speed at 0.25 rad/s; left
+and right do not mirror one sign convention; the right arm's first id is 0x09 where the rest of
+that arm runs 0x10..0x15; the gains (kp 20..61, kd 1..5) are that driver's, not a
+qualification. The feedback table flagged the right forearm yaw's direction confirmed while its
+note said "model pose/direction calibration still pending"; the profile keeps its sign +1.
 
-The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_left`` and
-``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
-published as one side-by-side ``head`` track (:data:`STATIC_UPPER_BODY_RIG`).
+The neck carries a Stereolabs ZED 2i (:mod:`.zed`): the rendering adds ``ZED_camera`` (x out of
+the lenses, y left) on the source's ``zed2i_left_optical_frame`` so that the left eye's optical
+frame is the source's own, and the ``head_left`` and ``head_right`` cameras on optical frames
+60 mm either side of it, published as one side-by-side ``head`` track
+(:data:`STATIC_UPPER_BODY_RIG`). The source puts its left eye at ``camera_link`` +z, where the
+feedback file's ``ZED_camera`` was turned half a turn about the lens axis: left and right are
+swapped relative to the earlier registration.
 
 **The neck and grippers are provisional, in data.** Each of their bindings is marked
 ``provisional`` (:class:`~sx_embodiments.layout.ActuatorBinding`): no driver moves them unless
 a person bringing the robot up opts in for their port, and the station's normal path drives
 the fifteen Damiao axes with them left off.
 
-*The neck, from a read-only probe on 2026-10-25.* The received file has no entry for the
-SO-101 neck either. A probe that wrote nothing found it on its own USB serial bus (a WCH
-CH343, 1,000,000 baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order,
-the sixth the camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are
-bound here on a serial bus named ``neck``, identity drive map. Unverified: each joint's sign
-and zero. The degree normalization puts each joint's zero at its servo's calibrated
-mid-range, and the declared ranges are lopsided about zero (shoulder lift -0.03..3.63 rad,
-elbow flex -3.40..0.09), so that cannot be right for every joint: governed from where the
-probe found it, the first motion would carry shoulder lift about +1.76 rad, elbow flex
--1.48 and camera tilt +2.32 toward that unverified zero. The servos' calibration registers
-are a unit's facts, not the design's, and are supplied at open. The probe found ids 2, 3, 4
-and 6 resting outside their calibrated ranges.
+*The neck.* No profile covers it (humanoid_pkg introduces no torso, SO-101 or camera control).
+A read-only probe on 2026-10-25 found it on its own USB serial bus (a WCH CH343, 1,000,000
+baud): six Feetech STS3215s (model number 777) at ids 1..6 in SO-101 order, the sixth the
+camera tilt where the SO-101's gripper servo was, configured by LeRobot. They are bound here on
+a serial bus named ``neck``, identity drive map. The neck's kinematics are the CAD assembly's:
+its joint zeros are where the parts sat in the assembly, not LeRobot's calibrated mid-range
+(TheRobotStudio's ``so101_new_calib`` puts its zeros there), so each joint reads with a unit
+offset. Registered part by part against ``so101_new_calib``, the source's zeros sit at official
+angles of +1.1 deg (pan), -109.4 deg (lift), +89.1 deg (elbow), +75.7 deg (wrist flex) and about
+0 deg (wrist roll), and its lift, elbow and wrist-flex links sit 15, 19 and 29 mm off the
+official ones along their axes. Read with offsets that undo those, a recording at the moment of
+the side photo of 2026-10-25 reproduces the photo, and the front and rear photos, only with the
+pan turned a further half turn: the CAD mounts the SO-101's base facing the robot's front, and
+the robot has it facing back (driver board forward, lift axis behind the pan axis). The pan's
+declared range (+/-122 deg) cannot reach that, so the base's mounting in the source is wrong;
+the hardware owner is asked to confirm it. The camera tilt's mount angle on its horn fits the
+photo a half turn from the CAD's. The robot rests folded outside the declared ranges, and the
+servos' calibration registers are a unit's facts, supplied at open.
 
-*The grippers, from the same probe.* Not in the received motor table, and not Dynamixel: each
-finger has its own Feetech STS3215 (model 777, firmware 3.10), and each gripper's two are on a
-USB serial bus of their own (a CH343, 1,000,000 baud), one bus answering at ids 1 and 2 and
-the other at 3 and 4. Which bus is which side, and which id drives which finger, is
-unverified; the choice here is a guess, stated plainly: the bus at ids 1 and 2 is
-``right_gripper`` (by analogy with the right arm's lower CAN ids), the other ``left_gripper``,
-and the lower id is the left finger. An earlier commissioning fixture guessed the opposite
-sides; neither was checked. Each finger's declared range is taken as its servo's calibrated
-range, also unverified.
+*The grippers.* Each finger has its own Feetech STS3215 (model 777), each gripper's two on a USB
+serial bus of their own (a CH343, 1,000,000 baud). humanoid_pkg's Feetech record
+(``source/allisa_bot_feetech.json``) confirms the sides by board serial: ``right_gripper`` is
+the board answering at ids 1 (left finger) and 2 (right), ``left_gripper`` at 3 (left) and 4
+(right). It records each finger's closed and open ticks (operator-confirmed closed,
+2026-10-23); each finger's declared range is the description's limit.
 """
 
 from typing import Final
@@ -101,24 +118,25 @@ from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
 from .zed import EYES, optical_frame, zed_2i_eye
 
-_RECEIVED: Final = AssetProvenance(
-    repository="https://github.com/Sentient-X/sx-embodiments",
-    revision="788bb9be9911747df56d2bebf6ff45d5da0461b0287e5a881718217735ceb080",
-    path="assets/sentient_static_upper_body/source/received.urdf",
+_SOURCE: Final = AssetProvenance(
+    repository="https://github.com/Sentient-X/humanoid_pkg",
+    # The sha256 of humanoid_pkg's urdf/allisa_bot.urdf as vendored; no commit was supplied.
+    revision="039b0b7d98893030d5ca80c50eea779ef8fad5b720b8c110685ce010c03b2571",
+    path="urdf/allisa_bot.urdf",
     license_id="LicenseRef-Sentient-Proprietary",
 )
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="2d2dbf122e008ecb9d513670f902c43df8b1e851bdc78bd133c9491b54ceabb9",
-    size_bytes=235486,
+    sha256="03e2ff203125733dd1750ee96ead2ac101afb8c22d86b2aa68f666f1aef80622",
+    size_bytes=241725,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
-        repository=_RECEIVED.repository,
-        revision=_RECEIVED.revision,
-        path=_RECEIVED.path,
-        license_id=_RECEIVED.license_id,
+        repository=_SOURCE.repository,
+        revision=_SOURCE.revision,
+        path=_SOURCE.path,
+        license_id=_SOURCE.license_id,
         generator="sx-embodiments/tools/compose_static_upper_body_urdf.py",
     ),
     media_type="application/xml",
@@ -151,9 +169,16 @@ _ARM_IDS: Final = {
 STATIC_UPPER_BODY_MASTER_ID_OFFSET: Final = 0x20
 
 
-def _damiao(model: ActuatorModel, bus_id: int) -> DirectDrive:
-    """One motor on the body's one Damiao CAN bus, identity drive map."""
-    return DirectDrive(ActuatorBinding(model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id))
+#: Each arm's motor signs in ``_ARM_JOINTS`` order: allisa_bot turns both wrist axes against
+#: their motors, which the hardware profile reads with sign -1.
+_ARM_SIGNS: Final = (1, 1, 1, 1, 1, -1, -1)
+
+
+def _damiao(model: ActuatorModel, bus_id: int, sign: int = 1) -> DirectDrive:
+    """One motor on the body's one Damiao CAN bus, direct drive."""
+    return DirectDrive(
+        ActuatorBinding(model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id, sign=sign)
+    )
 
 
 STATIC_UPPER_BODY_TORSO: Final = ChainSpec(
@@ -179,8 +204,8 @@ def _arm(side: str, lower: tuple[float, ...], upper: tuple[float, ...]) -> Chain
             lower=lower,
             upper=upper,
             actuations=tuple(
-                _damiao(model, bus_id)
-                for model, bus_id in zip(_ARM_MODELS, _ARM_IDS[side], strict=True)
+                _damiao(model, bus_id, sign)
+                for model, bus_id, sign in zip(_ARM_MODELS, _ARM_IDS[side], _ARM_SIGNS, strict=True)
             ),
             observations=(ActuatorFeedback(),) * 7,
         ),
@@ -196,8 +221,8 @@ STATIC_UPPER_BODY_LEFT_ARM: Final = _arm(
         -5.1230258640421145,
         -2.9753185320820936,
         -6.82669565880827,
-        -2.1280613412680243,
-        -2.096017395284962,
+        -2.4408712901503016,
+        -2.0967803463797967,
     ),
     upper=(
         2.889868009460594,
@@ -205,8 +230,8 @@ STATIC_UPPER_BODY_LEFT_ARM: Final = _arm(
         0.8070115205615327,
         0.000953688868543523,
         1.8839169909208824,
-        2.4408712901503016,
-        2.0967803463797967,
+        2.1280613412680243,
+        2.096017395284962,
     ),
 )
 
@@ -218,8 +243,8 @@ STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
         -2.4210345616845963,
         -0.029182879377431803,
         -6.009575036240177,
-        -2.308880750743878,
-        -2.112039368276493,
+        -2.255855649652858,
+        -2.0986877241168838,
     ),
     upper=(
         3.1225680933852136,
@@ -227,8 +252,8 @@ STATIC_UPPER_BODY_RIGHT_ARM: Final = _arm(
         2.7597848477912574,
         2.966544594491493,
         1.4261463340199896,
-        2.255855649652858,
-        2.0986877241168838,
+        2.308880750743878,
+        2.112039368276493,
     ),
 )
 
