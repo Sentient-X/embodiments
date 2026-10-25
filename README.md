@@ -300,8 +300,8 @@ enable torque.
 cargo run -p sx-embodiment-commission -- probe            # every bridge and what answers on it
 cargo run -p sx-embodiment-commission -- commission \
   --bindings drivers/sx-damiao-can/bindings/sentient-static-upper-body.json \
-  --instance <instance id> --pod <pod id> --revision <n>  # dry run: the document and calibrations
-#  ... --write <dir>   writes commissioning.json and <port>.calibration.json
+  --instance "$INSTANCE" --pod "$POD" --revision "$REVISION"  # dry run: the document and calibrations
+#  ... --write "$DIR"   writes commissioning.json and one PORT.calibration.json per port
 ```
 
 `commission` refuses a port with no answering bridge, with several, or with a unit of another

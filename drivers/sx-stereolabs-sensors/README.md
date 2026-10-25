@@ -34,7 +34,7 @@ Where they sit is the registry's: `sx_embodiments.known.zed.zed_2i_imu` mounts t
 
 ```bash
 cargo run -p sx-stereolabs-sensors --features hid --bin sx-imu-still -- \
-  --plan plan.json --instance <instance id> --seconds 5
+  --plan plan.json --instance "$INSTANCE" --seconds 5
 ```
 
 Hold the camera still. It prints the rate on both clocks, the mean specific force and gyro bias on
