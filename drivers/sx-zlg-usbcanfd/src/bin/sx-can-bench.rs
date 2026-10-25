@@ -1,13 +1,19 @@
 //! Measure a CAN link with read-only Damiao register reads; see `sx_zlg_usbcanfd::bench`.
 //!
 //! ```text
-//! sx-can-bench zlg [--serial S] [--channel 1] [--in-flight 1|2] [options]
+//! sx-can-bench zlg [--serial S] [--channel 1] [--in-flight 1|2] [--spin] [--exercise-recovery] [options]
 //! sx-can-bench socketcan <interface> [options]        (Linux, feature socketcan)
 //! ```
 //!
 //! Options: --motors 0x09,0x10,...  (master = send + 0x20; default the static upper body's
-//! fifteen) --samples N --rates 50,100,250,500 --seconds S --throughput-seconds S
-//! --timeout-ms N --json PATH --max-load L (default 20).
+//! fourteen answering motors, without the faulty torso 0x1F) --samples N --rates 50,100,200,250
+//! --seconds S --throughput-seconds S --timeout-ms N --json PATH --max-load L (default 20).
+//!
+//! `--spin` makes the ZLG channel poll instead of sleeping while it waits for a frame (the
+//! opt-in `ReceiveWait::Spin`). `--exercise-recovery` first checks the stall recovery on the
+//! adapter: it marks the channel stalled twice in a row, so the next sends run a channel
+//! restart and then a device close and open (only the channel lifecycle's commands), and then
+//! checks that a register read is answered.
 //!
 //! Refuses a debug build, and a machine whose 1-minute load average is at or above the limit,
 //! since either would measure the host, not the link.
@@ -15,7 +21,7 @@
 use std::process::ExitCode;
 
 use sx_zlg_usbcanfd::bench::{self, Config, ReadOnly};
-use sx_zlg_usbcanfd::{ChannelOptions, Options, UsbCanFd};
+use sx_zlg_usbcanfd::{ChannelOptions, LinkError, Options, ReceiveWait, Recovery, UsbCanFd};
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -40,6 +46,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let transport = args.next().ok_or("name a transport: zlg or socketcan")?;
     let mut config = Config::static_upper_body();
     let (mut serial, mut channel, mut in_flight) = (None, 1_u8, 1_usize);
+    let (mut spin, mut exercise_recovery) = (false, false);
     let (mut interface, mut json, mut max_load) = (None, None, 20.0_f64);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -75,6 +82,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             "--timeout-ms" => config.reply_timeout_ms = number(&value()?)?,
             "--json" => json = Some(value()?),
+            "--spin" => spin = true,
+            "--exercise-recovery" => exercise_recovery = true,
             "--max-load" => max_load = value()?.parse().map_err(|_| "bad --max-load")?,
             other if interface.is_none() && !other.starts_with("--") => {
                 interface = Some(other.to_owned());
@@ -87,6 +96,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "build with --release: a debug build measures the compiler, not the link".to_owned(),
         );
     }
+    bench::check(&config).map_err(|error| error.to_string())?;
     match bench::load_average() {
         Some(load) if load >= max_load => {
             return Err(format!(
@@ -110,18 +120,41 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 "probe: {}",
                 serde_json::to_string(adapter.probe()).unwrap_or_default()
             );
+            let wait = if spin {
+                ReceiveWait::Spin
+            } else {
+                ReceiveWait::Block
+            };
             let port = adapter
-                .open_channel(channel, ChannelOptions::default())
+                .open_channel(
+                    channel,
+                    ChannelOptions {
+                        receive_wait: wait,
+                        ..ChannelOptions::default()
+                    },
+                )
                 .map_err(|error| error.to_string())?;
+            eprintln!(
+                "transmit budget: {}",
+                serde_json::to_string(&port.budget()).unwrap_or_default()
+            );
             let mut port = ReadOnly::new(port);
-            let name =
-                format!("zlg userspace, channel {channel}, {in_flight} transmit(s) in flight");
+            let recovery = if exercise_recovery {
+                Some(exercise(&mut port, &config)?)
+            } else {
+                None
+            };
+            let name = format!(
+                "zlg userspace, channel {channel}, {in_flight} transmit(s) in flight, receive {wait:?}"
+            );
             let report = bench::run(&mut port, &name, &config, bench::process_cpu)
                 .map_err(|error| error.to_string())?;
             let extra = serde_json::json!({
                 "probe": adapter.probe(),
                 "channel": port.inner().stats(),
                 "device": adapter.stats(),
+                "budget": port.inner().budget(),
+                "recovery_check": recovery,
             });
             (report, extra)
         }
@@ -154,4 +187,55 @@ fn run(args: Vec<String>) -> Result<(), String> {
         None => println!("{text}"),
     }
     Ok(())
+}
+
+/// Stall the channel twice in a row and send a read after each: the first must come back
+/// recovered by a channel restart, the second by a device close and open, and a read after
+/// them must be answered.
+fn exercise(
+    port: &mut ReadOnly<sx_zlg_usbcanfd::Channel>,
+    config: &Config,
+) -> Result<Vec<String>, String> {
+    use std::time::{Duration, Instant};
+    use sx_embodiment_drivers::can::CanPort;
+    let &(motor, master) = config.motors.first().ok_or("no motor")?;
+    let mut seen = Vec::new();
+    for expected in [Recovery::ChannelRestart, Recovery::DeviceReopen] {
+        port.inner().inject_stall();
+        let started = Instant::now();
+        let error = port
+            .send(&bench::read_request(motor, bench::REGISTERS[0]))
+            .err()
+            .ok_or("a send on a stalled channel was not refused")?;
+        let took = started.elapsed();
+        match LinkError::of(&error) {
+            Some(LinkError::Recovered { action, .. }) if *action == expected => {
+                seen.push(format!("{action:?} in {took:?}: {error}"));
+                eprintln!("recovery check: {action:?} took {took:?}");
+            }
+            _ => return Err(format!("expected recovery by {expected:?}, got: {error}")),
+        }
+    }
+    let rid = bench::REGISTERS[1];
+    let sent = Instant::now();
+    port.send(&bench::read_request(motor, rid))
+        .map_err(|error| format!("read after recovery: {error}"))?;
+    let deadline = sent + Duration::from_millis(100);
+    loop {
+        match port
+            .receive_until(deadline)
+            .map_err(|error| error.to_string())?
+        {
+            Some(frame) if bench::is_reply(&frame, motor, master, rid) => {
+                seen.push(format!(
+                    "read answered {:?} after the recoveries",
+                    sent.elapsed()
+                ));
+                eprintln!("recovery check: read answered after {:?}", sent.elapsed());
+                return Ok(seen);
+            }
+            Some(_) => {}
+            None => return Err("no answer to a read after the recoveries".to_owned()),
+        }
+    }
 }
