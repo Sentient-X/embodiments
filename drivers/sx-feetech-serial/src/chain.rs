@@ -346,6 +346,10 @@ pub enum FeetechChainError {
         speed: u16,
         acceleration: u8,
     },
+    #[error("bus_id {0} could not be added to a group packet: its id is already in it")]
+    GroupParam(u16),
+    #[error("the chain's axes are on ports {0:?}; one chain drives one bus")]
+    Ports(Vec<String>),
     #[error("bus_id {0} has an empty or out-of-resolution calibrated range")]
     Calibration(u16),
     #[error("bus_id {bus_id} reports model {model}; only the STS3215 (777) is qualified")]
@@ -417,6 +421,11 @@ impl<P: SerialPort> FeetechChain<P> {
     pub fn open(port: P, servos: Vec<FeetechServo>) -> Result<Self, FeetechChainError> {
         let axes: Vec<BoundAxis> = servos.iter().map(|servo| servo.axis.clone()).collect();
         validate_chain(&axes)?;
+        let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
+        ports.dedup();
+        if ports.len() > 1 {
+            return Err(FeetechChainError::Ports(ports));
+        }
         for servo in &servos {
             let binding = servo.axis.binding;
             if binding.bus != FEETECH_SERIAL || binding.model != FEETECH_STS3215 {
@@ -632,14 +641,17 @@ impl<P: SerialPort> FeetechChain<P> {
     /// One SYNC READ of every servo's `Present_Position`, as joint coordinates in native state
     /// order; a servo whose answer is missing or corrupt is `NaN`, which no tracking bound
     /// admits.
-    fn sync_read_positions(&mut self) -> Vec<f64> {
+    fn sync_read_positions(&mut self) -> Result<Vec<f64>, FeetechChainError> {
         let mut reader = GroupSyncRead::new(SMS_STS_PRESENT_POSITION_L, 2);
         for servo in &self.servos {
-            reader.add_param(servo.scs_id());
+            if !reader.add_param(servo.scs_id()) {
+                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
+            }
         }
         let _ = reader.tx_rx_packet(&mut self.sms.ph);
         let end = self.sms.ph.scs_getend();
-        self.servos
+        Ok(self
+            .servos
             .iter()
             .map(|servo| {
                 reader
@@ -651,7 +663,7 @@ impl<P: SerialPort> FeetechChain<P> {
                         ))
                     })
             })
-            .collect()
+            .collect())
     }
 
     /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
@@ -744,23 +756,25 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             .zip(joints)
             .map(|(servo, joint)| servo.goal_position(*joint))
             .collect::<Result<Vec<u16>, _>>()?;
+        let mut writer = GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2);
+        for (servo, goal) in self.servos.iter().zip(goals) {
+            if !writer.add_param(
+                servo.scs_id(),
+                &[self.sms.ph.scs_lobyte(goal), self.sms.ph.scs_hibyte(goal)],
+            ) {
+                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
+            }
+        }
         // From here the servos may move: what open or the last stop read no longer holds.
         self.observed = None;
         if !self.enabled {
             self.enable_torque()?;
             self.enabled = true;
         }
-        let mut writer = GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2);
-        for (servo, goal) in self.servos.iter().zip(goals) {
-            writer.add_param(
-                servo.scs_id(),
-                &[self.sms.ph.scs_lobyte(goal), self.sms.ph.scs_hibyte(goal)],
-            );
-        }
         match writer.tx_packet(&mut self.sms.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
-                observed: self.sync_read_positions(),
+                observed: self.sync_read_positions()?,
                 feedback: Vec::new(),
             }),
             result => Err(FeetechChainError::SyncWrite(result)),
@@ -857,6 +871,8 @@ impl ChainError for FeetechChainError {
             | Self::Unencodable(_)
             | Self::CalibrationCount { .. }
             | Self::ApproachLimit(_)
+            | Self::GroupParam(_)
+            | Self::Ports(_)
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,
             Self::Comm {

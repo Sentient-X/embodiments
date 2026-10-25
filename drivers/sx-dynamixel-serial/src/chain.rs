@@ -224,6 +224,10 @@ pub enum DynamixelChainError {
     Unqualified(u16),
     #[error("bus_id {0} is above the protocol's last device id, 252")]
     Ids(u16),
+    #[error("bus_id {0} could not be added to a group packet: its id is already in it")]
+    GroupParam(u16),
+    #[error("the chain's axes are on ports {0:?}; one chain drives one bus")]
+    Ports(Vec<String>),
     #[error("bus_id {0} has an empty or out-of-resolution calibrated range")]
     Calibration(u16),
     #[error("{found} servo calibrations supplied for {expected} servos")]
@@ -307,6 +311,11 @@ impl<P: SerialPort> DynamixelChain<P> {
     pub fn open(port: P, servos: Vec<DynamixelServo>) -> Result<Self, DynamixelChainError> {
         let axes: Vec<BoundAxis> = servos.iter().map(|servo| servo.axis.clone()).collect();
         validate_chain(&axes)?;
+        let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
+        ports.dedup();
+        if ports.len() > 1 {
+            return Err(DynamixelChainError::Ports(ports));
+        }
         for servo in &servos {
             let binding = servo.axis.binding;
             if binding.bus != DYNAMIXEL_SERIAL || model_number(binding.model).is_none() {
@@ -527,14 +536,10 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
             .zip(joints)
             .map(|(servo, joint)| servo.goal_position(*joint))
             .collect::<Result<Vec<u32>, _>>()?;
-        if !self.enabled {
-            self.enable_torque()?;
-            self.enabled = true;
-        }
         let mut writer = GroupSyncWrite::new(GOAL_POSITION, 4);
         for (servo, goal) in self.servos.iter().zip(goals) {
             let (low, high) = (dxl_loword(goal), dxl_hiword(goal));
-            writer.add_param(
+            if !writer.add_param(
                 servo.dxl_id(),
                 &[
                     crate::dynamixel_sdk::dxl_lobyte(low),
@@ -542,7 +547,13 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
                     crate::dynamixel_sdk::dxl_lobyte(high),
                     crate::dynamixel_sdk::dxl_hibyte(high),
                 ],
-            );
+            ) {
+                return Err(DynamixelChainError::GroupParam(servo.axis.binding.bus_id));
+            }
+        }
+        if !self.enabled {
+            self.enable_torque()?;
+            self.enabled = true;
         }
         match writer.tx_packet(&mut self.ph) {
             CommResult::Success => Ok(Receipt {
@@ -621,6 +632,8 @@ impl ChainError for DynamixelChainError {
             | Self::Target(_)
             | Self::OutsideCalibration { .. }
             | Self::CalibrationCount { .. }
+            | Self::GroupParam(_)
+            | Self::Ports(_)
             | Self::StopPending
             | Self::FaultedAtStop { .. } => ChainFailure::Refused,
             Self::Comm {

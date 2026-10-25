@@ -333,3 +333,15 @@ fn a_sync_read_is_the_vendors() {
     assert_eq!(reader.get_data(1, 132, 4), Some(read.positions[0]));
     assert_eq!(reader.get_data(2, 132, 4), Some(read.positions[1]));
 }
+
+#[test]
+fn a_chain_of_servos_on_two_ports_is_refused_before_the_bus() {
+    let golden = golden();
+    let mut split = servos(&golden);
+    split[1].axis.port = "elsewhere".to_owned();
+    split[1].axis.binding.bus_id = 1;
+    assert!(matches!(
+        DynamixelChain::open(FakePort::default(), split),
+        Err(DynamixelChainError::Ports(ports)) if ports == ["dynamixel", "elsewhere"]
+    ));
+}

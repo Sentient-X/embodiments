@@ -897,3 +897,16 @@ fn every_command_observes_every_servo_through_one_sync_read() {
         }
     }
 }
+
+#[test]
+fn a_chain_of_servos_on_two_ports_is_refused_before_the_bus() {
+    let golden = golden();
+    let mut split = servos(&golden, "so101");
+    split[5].axis.port = "elsewhere".to_owned();
+    split[5].axis.binding.bus_id = 1;
+    let port = FakePort::default();
+    assert!(matches!(
+        FeetechChain::open(port, split),
+        Err(FeetechChainError::Ports(ports)) if ports == ["serial", "elsewhere"]
+    ));
+}
