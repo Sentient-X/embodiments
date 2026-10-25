@@ -4,12 +4,12 @@ Damiao DM-J motors over CAN, translated from Damiao's own `DM_CAN.py`
 (<https://gitee.com/kit-miao/motor-sdk> at `fb0e9fc5`, `Python例程/u2can/DM_CAN.py`; Damiao's
 copy of cmjang's `DM_Control_Python`, MIT, Copyright (c) 2024 cmjang — see
 `LICENSE-THIRD-PARTY`), and the
-bodies built of them: the Seeed reBot B601-DM's chain of seven and the Sentient humanoid upper
-body's chain of eleven. Every departure from `DM_CAN.py` is listed in the
+bodies built of them: the Seeed reBot B601-DM's chain of seven, and the Sentient humanoid upper
+body's chain of eleven and static upper body's chain of fifteen, each one `DamiaoBody`. Every departure from `DM_CAN.py` is listed in the
 header of the module that makes it.
 
-Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601` and
-`humanoid::open_humanoid_upper_body`.
+Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
+`humanoid::open_humanoid_upper_body` and `body::DamiaoBody::open`.
 
 ## The surface the station builds against
 
@@ -20,11 +20,14 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601` and
 | A stop's proof | `sx_embodiment_drivers::StopReport`, and `StopReport::prove()` for a `ProvenStop` |
 | The port | `sx_embodiment_drivers::can::{CanFrame, CanPort}` |
 | The B601 chain | `sx_damiao_can::b601::open_b601(arm_port, gripper_port, drive)`: a `Composite` of the arm's and gripper's `DamiaoChain`s, composed from `bindings/b601-dm.json` (`b601_arm`, `b601_gripper`) and calibrated by the robot instance's `InstanceDrive` |
-| The humanoid upper body | `sx_damiao_can::humanoid::open_humanoid_upper_body(port, drive)`: one `DamiaoChain` of the torso yaw and both arms (DM8009 shoulders and torso, DM4340 elbows, forearms and wrists) on `can0`, answer ids send id + 0x20, composed from `bindings/sentient-humanoid-upper-body.json`; the waist's two-motor linkage is in no chain and its motors are never enabled |
+| A body on one bus | `sx_damiao_can::body::DamiaoBody { bindings, master_id_offset, joints }`, a `const` of the rendered bindings, the answer-id offset and each joint's `JointGains { joint, kp, kd }` in the bindings' order: `body(drive)` (refused unless the joints are the bindings' in order, then calibrated), `axes(drive)` (each motor's range the joint's bounds through its drive map), `open(port, drive)`; `DamiaoBody::of(embodiment_id)` finds one among `body::BODIES` |
+| The humanoid upper body | `sx_damiao_can::humanoid::open_humanoid_upper_body(port, drive)`: one `DamiaoChain` of the torso yaw and both arms (DM8009 shoulders and torso, DM4340 elbows, forearms and wrists) on `can0`, answer ids send id + 0x20, composed from `bindings/sentient-humanoid-upper-body.json`; the waist's two-motor linkage is in no chain and its motors are never enabled; `humanoid::HUMANOID_UPPER_BODY` is its `DamiaoBody` |
+| The static upper body | `sx_damiao_can::static_upper_body::STATIC_UPPER_BODY.open(port, drive)`: one `DamiaoChain` of the torso yaw (DM8009, 0x1F) and both seven-joint arms (DM8009 shoulders, DM4340 upper arm, elbow and forearm, DM4310 wrists; left 0x18..0x1E, right 0x09 then 0x10..0x15) on `can1`, answer ids send id + 0x20, composed from `bindings/sentient-static-upper-body.json` (a development body); grippers and the SO-101 neck have no motor entry and are in no chain |
 | The USB2CAN bridge | `sx_damiao_can::usb2can::Usb2CanPort::new(serial)` over any `Read + Write` serial stream |
+| A `SocketCAN` interface | `sx_socketcan::SocketCanPort::open("can1")` (Linux), in its own crate: it is no vendor's |
 | Per-motor answers | `sx_damiao_can::MotorFeedback`: state (`MotorState` from the first-byte nibble), position, velocity, torque, MOS and rotor temperatures |
 | Limits found at open | `DamiaoChain::limits()`: the `PMAX`, `VMAX`, `TMAX` each motor reported and is scaled by |
-| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms; 192 ms for the humanoid upper body's eleven) |
+| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and link allowance (122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms; 192 ms for the humanoid upper body's eleven, 248 ms for the static upper body's fifteen) |
 
 - **One bridge, two chains.** Seeed ships one USB2CAN bridge for all seven motors
   (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud); open both
@@ -42,6 +45,10 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601` and
   The humanoid's are `humanoid-simrealgap`'s single-motor validated gains
   (`configs/training_actuator_params_20260606.csv` at `5c11827f`), not a whole-body approval:
   the DM8009 and the humanoid's whole chain are owed the station's bench qualification.
+  The static upper body's are the received description's driver's
+  (`assets/sentient_static_upper_body/source/received.urdf`, `<motor_parameters>`), not a
+  qualification either; that driver's 0.25 rad/s speed cap and 0.2 rad tracking bound are the
+  station's supervision to apply, not this crate's.
 - **DM4340 velocity range.** Damiao publishes 10 rad/s (`DM_CAN.py`) and 8 rad/s (its C++ SDK).
   Open reads each motor's registers, accepts either, scales that motor by what it reported,
   and records it in `limits()`.

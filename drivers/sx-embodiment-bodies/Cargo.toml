@@ -11,6 +11,9 @@ publish.workspace = true
 # Open commissioned USB serial bridges (Damiao's USB2CAN) on Linux, found by their USB serial
 # number in sysfs. Without it the crate builds anywhere and a port source is the caller's.
 usb-serial = ["dep:serialport"]
+# Open commissioned SocketCAN interfaces (`can1`) on Linux, found by their USB adapter's serial
+# number, or their own name for a controller on the board. Off Linux only the lookup builds.
+socketcan = ["dep:sx-socketcan"]
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
@@ -19,6 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 serialport = { version = "4.7", default-features = false, optional = true }
+sx-socketcan = { path = "../sx-socketcan", optional = true }
 
 [dev-dependencies]
 sx-damiao-can = { path = "../sx-damiao-can", features = ["sim"] }

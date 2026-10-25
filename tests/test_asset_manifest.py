@@ -46,7 +46,12 @@ def test_every_row_keeps_its_directory_audience() -> None:
         for entry in asset_manifest().values()
         if entry.audience is AssetAudience.ENTITLED
     }
-    assert entitled == {"sentient_rwh", "yubi_description", "piper_umi_description"}
+    assert entitled == {
+        "sentient_rwh",
+        "sentient_static_upper_body",
+        "yubi_description",
+        "piper_umi_description",
+    }
 
 
 def test_a_tree_that_disagrees_with_a_declaration_refuses(tmp_path: Path) -> None:

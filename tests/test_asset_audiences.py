@@ -21,7 +21,7 @@ def test_empty_licence_is_refused_not_guessed() -> None:
 
 
 def test_the_companys_own_robots_are_entitled_only() -> None:
-    """The RWH and Yubi descriptions are the hardware design; they are never public.
+    """The RWH, static upper body and Yubi descriptions are the hardware design; never public.
 
     Pinned by name because this is the fact the publication path depends on. If a robot
     is added whose directory belongs on the entitled side, this test failing is the
@@ -30,7 +30,12 @@ def test_the_companys_own_robots_are_entitled_only() -> None:
     entitled = {
         name for name, value in asset_audiences().items() if value is AssetAudience.ENTITLED
     }
-    assert entitled == {"sentient_rwh", "yubi_description", "piper_umi_description"}
+    assert entitled == {
+        "sentient_rwh",
+        "sentient_static_upper_body",
+        "yubi_description",
+        "piper_umi_description",
+    }
 
 
 def test_every_directory_on_disk_is_claimed_by_a_declaration() -> None:

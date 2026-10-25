@@ -107,6 +107,16 @@ a socket fitted with the CAD's D435, a camera module that adds its own optical f
 grippers are modules whose servo and jaw no source describes, so the body with them,
 `sentient-humanoid-upper-body-grippers`, is a development body.
 
+`sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
+arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge
+(`MountKind.CLAMP_EDGE`). Its description is `tools/compose_static_upper_body_urdf.py`'s
+rendering of the file as received, kept under `source/`. That file's Damiao motor table
+(model, CAN ids, robot-confirmed limits and directions for the torso and arms) is the body's
+actuator bindings, and `tests/test_static_upper_body.py` holds the two equal; the rendering
+drops the table, keeps the limits, and estimates mass and collision from the meshes' convex
+hulls, which `tests/test_static_upper_body.py` re-renders byte for byte. Its masses are
+estimates, so it is a development body.
+
 Observation and controller semantics are owned by `sx-actions`, which depends on this
 package and derives spaces from the complete object:
 
@@ -259,8 +269,9 @@ driver's chain.
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
-| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601` and `humanoid::open_humanoid_upper_body` |
-| `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to USB bridge serial), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0) | the `sx` station's `StationRobot::open_actuator` |
+| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601`, `humanoid::open_humanoid_upper_body` and `body::DamiaoBody::open` (any single-bus body: the humanoid and static upper bodies) |
+| `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to the bridge's USB serial, or a board CAN interface's name), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0), feature `socketcan` finds `SocketCAN` interfaces by their adapter's serial; `system::SystemPorts` looks a commissioned identity up across every transport compiled in, opens the one bridge carrying it and refuses two (`OpenError::Ambiguous`), so the station names no transport | the `sx` station's `StationRobot::open_actuator`, over `SystemPorts::system()` |
+| `sx-socketcan` | any CAN bus | none: Linux `SocketCAN` (`CAN_RAW`) as a `can::CanPort`, through `libc`; the one crate allowed `unsafe`, in its one socket module | `sx-embodiment-bodies`'s `socketcan::SocketCanPorts` and `system::SystemPorts` |
 | `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
 
 Cameras follow the same rule through `sx_embodiment_drivers::FrameSource`: a robot's

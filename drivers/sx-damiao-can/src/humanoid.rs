@@ -19,12 +19,13 @@
 //! spelled here; what is added is controller configuration, keyed by joint name. Every
 //! commandable range is the URDF's: the vendor states no soft box.
 //!
-//! [`open_humanoid_upper_body`] opens the whole chain on one `CanPort`, calibrated from one
-//! built robot's [`InstanceDrive`].
+//! The body is one [`DamiaoBody`], [`HUMANOID_UPPER_BODY`]; [`open_humanoid_upper_body`] opens
+//! the whole chain on one `CanPort`, calibrated from one built robot's [`InstanceDrive`].
 
 use sx_embodiment_drivers::can::CanPort;
-use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, InstanceDrive};
+use sx_embodiment_drivers::{BodyBindings, BodyError, InstanceDrive};
 
+use crate::body::{DamiaoBody, JointGains};
 use crate::chain::{DamiaoAxis, DamiaoChain, DamiaoChainError};
 
 /// The registry's humanoid upper-body axes, rendered.
@@ -33,39 +34,24 @@ pub const BINDINGS: &str = include_str!("../bindings/sentient-humanoid-upper-bod
 /// `sentient_can`'s answer-id convention for the humanoid: `recv_id = send_id + 0x20`.
 pub const MASTER_ID_OFFSET: u16 = 0x20;
 
-/// One joint's controller configuration: name, kp, kd.
-type Joint = (&'static str, f64, f64);
-
-const JOINTS: [Joint; 11] = [
-    ("torso_joint", 350.0, 5.0),
-    ("right_shoulder_pitch_joint", 100.0, 5.0),
-    ("right_shoulder_roll_joint", 40.0, 2.8),
-    ("right_elbow_yaw_joint", 54.772, 5.0),
-    ("right_elbow_forearm_yaw_joint", 54.772, 5.0),
-    ("right_wrist_yaw_joint", 54.772, 5.0),
-    ("left_shoulder_pitch_joint", 40.0, 2.6595),
-    ("left_shoulder_roll_joint", 100.0, 5.0),
-    ("left_elbow_yaw_joint", 54.772, 4.861),
-    ("left_elbow_forearm_yaw_joint", 110.0, 5.0),
-    ("left_wrist_yaw_joint", 54.772, 4.075_301_53),
-];
-
-fn joint(axis: BoundAxis, &(_, kp, kd): &Joint) -> DamiaoAxis {
-    // The motor's range is the joint's bounds through this unit's drive map, so a calibrated
-    // zero or direction carries it with the joint.
-    let ends = [
-        axis.actuator_from_joint(axis.lower),
-        axis.actuator_from_joint(axis.upper),
-    ];
-    DamiaoAxis {
-        master_id: axis.binding.bus_id + MASTER_ID_OFFSET,
-        motor_lower: ends[0].min(ends[1]),
-        motor_upper: ends[0].max(ends[1]),
-        axis,
-        kp,
-        kd,
-    }
-}
+/// The torso yaw and both arms on `can0`.
+pub const HUMANOID_UPPER_BODY: DamiaoBody = DamiaoBody {
+    bindings: BINDINGS,
+    master_id_offset: MASTER_ID_OFFSET,
+    joints: &[
+        JointGains::new("torso_joint", 350.0, 5.0),
+        JointGains::new("right_shoulder_pitch_joint", 100.0, 5.0),
+        JointGains::new("right_shoulder_roll_joint", 40.0, 2.8),
+        JointGains::new("right_elbow_yaw_joint", 54.772, 5.0),
+        JointGains::new("right_elbow_forearm_yaw_joint", 54.772, 5.0),
+        JointGains::new("right_wrist_yaw_joint", 54.772, 5.0),
+        JointGains::new("left_shoulder_pitch_joint", 40.0, 2.6595),
+        JointGains::new("left_shoulder_roll_joint", 100.0, 5.0),
+        JointGains::new("left_elbow_yaw_joint", 54.772, 4.861),
+        JointGains::new("left_elbow_forearm_yaw_joint", 110.0, 5.0),
+        JointGains::new("left_wrist_yaw_joint", 54.772, 4.075_301_53),
+    ],
+};
 
 /// The rendered body, refused unless its driven joints are the ones configured here, then
 /// calibrated by `drive`.
@@ -74,10 +60,7 @@ fn joint(axis: BoundAxis, &(_, kp, kd): &Joint) -> DamiaoAxis {
 ///
 /// Refuses other joints and a drive of another body.
 pub fn body(drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
-    let body = BodyBindings::parse(BINDINGS)?;
-    let joints: Vec<&str> = JOINTS.iter().map(|(name, ..)| *name).collect();
-    body.require_joints(&joints)?;
-    body.calibrated(drive)
+    HUMANOID_UPPER_BODY.body(drive)
 }
 
 /// The torso yaw and both arms, in native state order, as `drive`'s robot drives them.
@@ -86,12 +69,7 @@ pub fn body(drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
 ///
 /// Refuses rendered bindings whose joints are not the upper body's, and a drive of another body.
 pub fn humanoid_upper_body(drive: &InstanceDrive) -> Result<Vec<DamiaoAxis>, BodyError> {
-    Ok(body(drive)?
-        .axes
-        .into_iter()
-        .zip(&JOINTS)
-        .map(|(axis, configuration)| joint(axis, configuration))
-        .collect())
+    HUMANOID_UPPER_BODY.axes(drive)
 }
 
 /// Open the humanoid upper body's motors on `port`, each brought up as the vendor does and
@@ -104,5 +82,5 @@ pub fn open_humanoid_upper_body<P: CanPort>(
     port: P,
     drive: &InstanceDrive,
 ) -> Result<DamiaoChain<P>, DamiaoChainError> {
-    DamiaoChain::open(port, humanoid_upper_body(drive)?)
+    HUMANOID_UPPER_BODY.open(port, drive)
 }

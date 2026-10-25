@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use sx_damiao_can::b601::b601;
 use sx_damiao_can::humanoid::humanoid_upper_body;
 use sx_damiao_can::sim::Sim;
+use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{Body, Commissioning, OpenError, Port, PortSource, open, ports};
 use sx_embodiment_drivers::{ActuatorChain, InstanceDrive};
 
@@ -102,9 +103,38 @@ fn the_humanoid_upper_body_opens_on_its_one_bridge() {
         &mut bridges,
     )
     .expect("humanoid");
-    assert!(matches!(body, Body::HumanoidUpperBody(_)));
+    assert!(matches!(body, Body::DamiaoBus(_)));
     assert_eq!(body.axes().len(), axes.len());
     assert!(body.stop().is_proven());
+}
+
+#[test]
+fn the_static_upper_body_opens_on_its_one_bridge_and_commands_and_stops() {
+    let drive = drive("sentient-static-upper-body");
+    assert_eq!(ports(&drive).expect("ports"), &["can"]);
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    assert_eq!(axes.len(), 15);
+    let bus = Sim::for_axes(&axes);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), bus.clone())]),
+        opened: Vec::new(),
+    };
+    let mut body = open(
+        &drive,
+        &commissioning(&drive, &[("can", "CAN")]),
+        &mut bridges,
+    )
+    .expect("static upper body");
+    assert!(matches!(body, Body::DamiaoBus(_)));
+    assert_eq!(body.axes().len(), 15);
+    assert_eq!(body.stop_budget(), std::time::Duration::from_millis(248));
+    // Every motor answered on its own id + 0x20, the right shoulder pitch's 0x09 among them.
+    let receipt = body
+        .command(&[0.0; 15])
+        .expect("a command at the zero pose");
+    assert_eq!(receipt.observed.len(), 15);
+    assert!(body.stop().is_proven());
+    assert!(bus.state().motors.values().all(|motor| motor.state == 0));
 }
 
 #[test]

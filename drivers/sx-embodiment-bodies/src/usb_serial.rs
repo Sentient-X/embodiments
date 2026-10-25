@@ -35,12 +35,19 @@ impl UsbSerialPorts {
         }
     }
 
-    /// The tty of the USB device whose serial number is `serial`.
+    /// The kernel view under `usb_devices` (`/sys/bus/usb/devices`) and `dev`.
+    #[cfg(test)]
+    pub(crate) fn rooted(usb_devices: PathBuf, dev: PathBuf) -> Self {
+        Self { usb_devices, dev }
+    }
+
+    /// The tty of the serial bridge whose USB serial number is `serial`.
     ///
     /// # Errors
     ///
-    /// Returns [`OpenError::NotAttached`] when no attached device reports the serial, and
-    /// [`OpenError::Port`] when one does but carries no single tty interface, or two do.
+    /// Returns [`OpenError::NotAttached`] when no attached device reporting the serial carries
+    /// a tty (a `SocketCAN` adapter carries none), [`OpenError::Ambiguous`] when more than one
+    /// tty does, and [`OpenError::Port`] when the kernel's view cannot be read.
     pub fn tty(&self, serial: &str) -> Result<PathBuf, OpenError> {
         let port = |reason: String| OpenError::Port {
             serial: serial.to_owned(),
@@ -57,26 +64,18 @@ impl UsbSerialPorts {
             if fs::read_to_string(entry.path().join("serial"))
                 .is_ok_and(|reported| reported.trim() == serial)
             {
-                found.push(entry.path());
+                let ttys =
+                    interface_ttys(&entry.path()).map_err(|error| port(error.to_string()))?;
+                found.extend(ttys.iter().map(|tty| self.dev.join(tty)));
             }
         }
-        let device = match found.as_slice() {
-            [] => return Err(OpenError::NotAttached(serial.to_owned())),
-            [device] => device.clone(),
-            _ => {
-                return Err(port(
-                    "two attached USB devices report this serial".to_owned(),
-                ));
-            }
-        };
-        let ttys = interface_ttys(&device).map_err(|error| port(error.to_string()))?;
-        match ttys.as_slice() {
-            [tty] => Ok(self.dev.join(tty)),
-            [] => Err(port("the device carries no tty interface".to_owned())),
-            _ => Err(port(format!(
-                "the device carries {} tty interfaces",
-                ttys.len()
-            ))),
+        match found.as_slice() {
+            [] => Err(OpenError::NotAttached(serial.to_owned())),
+            [tty] => Ok(tty.clone()),
+            _ => Err(OpenError::Ambiguous {
+                identity: serial.to_owned(),
+                bridges: found.iter().map(|tty| tty.display().to_string()).collect(),
+            }),
         }
     }
 }
@@ -115,16 +114,20 @@ fn interface_ttys(device: &Path) -> std::io::Result<Vec<String>> {
 
 impl PortSource for UsbSerialPorts {
     fn open(&mut self, serial: &str) -> Result<Port, OpenError> {
-        let tty = self.tty(serial)?;
-        let stream = serialport::new(tty.to_string_lossy(), USB2CAN_BAUD)
-            .timeout(READ_TIMEOUT)
-            .open()
-            .map_err(|error| OpenError::Port {
-                serial: serial.to_owned(),
-                reason: error.to_string(),
-            })?;
-        Ok(Box::new(Usb2CanPort::new(stream)))
+        open_tty(&self.tty(serial)?, serial)
     }
+}
+
+/// Damiao's USB2CAN bridge on `tty`, commissioned as `serial`.
+pub(crate) fn open_tty(tty: &Path, serial: &str) -> Result<Port, OpenError> {
+    let stream = serialport::new(tty.to_string_lossy(), USB2CAN_BAUD)
+        .timeout(READ_TIMEOUT)
+        .open()
+        .map_err(|error| OpenError::Port {
+            serial: serial.to_owned(),
+            reason: error.to_string(),
+        })?;
+    Ok(Box::new(Usb2CanPort::new(stream)))
 }
 
 #[cfg(test)]
@@ -145,10 +148,7 @@ mod tests {
     }
 
     fn ports(root: &Path) -> UsbSerialPorts {
-        UsbSerialPorts {
-            usb_devices: root.to_path_buf(),
-            dev: PathBuf::from("/dev"),
-        }
+        UsbSerialPorts::rooted(root.to_path_buf(), PathBuf::from("/dev"))
     }
 
     #[test]
@@ -170,7 +170,10 @@ mod tests {
             Err(OpenError::NotAttached(_))
         ));
         device(&root, "1-3", "B601-ARM", "ttyACM2", true);
-        assert!(matches!(ports.tty("B601-ARM"), Err(OpenError::Port { .. })));
+        assert!(matches!(
+            ports.tty("B601-ARM"),
+            Err(OpenError::Ambiguous { .. })
+        ));
         let _ = fs::remove_dir_all(root);
     }
 

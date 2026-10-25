@@ -308,6 +308,7 @@ dependencies = [
  "serialport",
  "sx-damiao-can",
  "sx-embodiment-drivers",
+ "sx-socketcan",
  "thiserror 2.0.21",
 ]
 
@@ -340,6 +341,14 @@ dependencies = [
  "serde_json",
  "sx-embodiment-drivers",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sx-socketcan"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "sx-embodiment-drivers",
 ]
 
 [[package]]
