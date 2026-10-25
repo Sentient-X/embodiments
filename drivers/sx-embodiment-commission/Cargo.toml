@@ -1,0 +1,31 @@
+[package]
+name = "sx-embodiment-commission"
+description = "Find a robot's bridges and what answers on them, read-only, and commission its ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sx-commission"
+path = "src/main.rs"
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+sx-feetech-serial = { path = "../sx-feetech-serial" }
+sx-damiao-can = { path = "../sx-damiao-can" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+serialport = { version = "4.7", default-features = false }
+nusb = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sx-socketcan = { path = "../sx-socketcan" }
+
+[dev-dependencies]
+sx-embodiment-bodies = { path = "../sx-embodiment-bodies" }
+
+[lints]
+workspace = true

@@ -7,6 +7,7 @@ members = [
     "drivers/sx-realsense",
     "drivers/sx-socketcan",
     "drivers/sx-embodiment-bodies",
+    "drivers/sx-embodiment-commission",
 ]
 
 [workspace.package]
