@@ -15,7 +15,7 @@
 
 use crate::body::{FeetechBody, ServoSetup};
 use crate::chain::MotorNormMode;
-use crate::so101::POSITION_LOOP;
+use crate::so101::{LEROBOT_BAUD, POSITION_LOOP};
 
 /// The registry's static upper-body axes, rendered; the neck's are its Feetech axes.
 pub const BINDINGS: &str = include_str!("../bindings/sentient-static-upper-body.json");
@@ -31,6 +31,8 @@ const fn degrees(joint: &'static str) -> ServoSetup {
 /// The neck's six servos on their own bus.
 pub const NECK: FeetechBody = FeetechBody {
     bindings: BINDINGS,
+    // An SO-101's rate; provisional with the rest.
+    baud: LEROBOT_BAUD,
     servos: &[
         degrees("so101_shoulder_pan_joint"),
         degrees("so101_shoulder_lift_joint"),

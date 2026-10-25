@@ -24,6 +24,9 @@ use crate::chain::{
 /// The registry's SO-101 axes, rendered.
 pub const BINDINGS: &str = include_str!("../bindings/so101.json");
 
+/// `FeetechMotorsBus.default_baudrate` (`src/lerobot/motors/feetech/feetech.py:44`).
+pub const LEROBOT_BAUD: u32 = 1_000_000;
+
 /// The position loop on every servo: P lowered from 32 "to avoid shakiness", I and D at their
 /// defaults.
 pub const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
@@ -50,6 +53,7 @@ const fn arm(joint: &'static str) -> ServoSetup {
 /// `SOFollower`'s motor table, in native state order.
 pub const SO101: FeetechBody = FeetechBody {
     bindings: BINDINGS,
+    baud: LEROBOT_BAUD,
     servos: &[
         arm("shoulder_pan"),
         arm("shoulder_lift"),

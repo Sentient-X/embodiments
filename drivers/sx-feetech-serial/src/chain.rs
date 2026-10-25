@@ -87,6 +87,8 @@
 
 use std::time::Duration;
 
+use sx_embodiment_drivers::lerobot::unnormalize;
+pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
@@ -108,6 +110,8 @@ pub const FEETECH_SERIAL: ActuatorBus = ActuatorBus::new("feetech_serial");
 pub const STS3215_MODEL_NUMBER: u16 = 777;
 /// Encoder steps per turn (`LeRobot` `MODEL_RESOLUTION["sts3215"]`).
 const RESOLUTION: f64 = 4096.0;
+/// `FeetechMotorsBus.apply_drive_mode`: an inverted percent servo is inverted in software.
+const APPLY_DRIVE_MODE: bool = true;
 /// `Goal_Position`'s sign bit: `sms_sts`'s `scs_toscs(position, 15)`, and `LeRobot`'s
 /// `STS_SMS_SERIES_ENCODINGS_TABLE`.
 const GOAL_POSITION_SIGN_BIT: u32 = 15;
@@ -136,28 +140,6 @@ const ACCELERATION: u8 = 254;
 const OPERATING_MODE_POSITION: u8 = 0;
 /// `Phase` bit 4: angle feedback mode, cleared on the STS3215 (`feetech.py:219-225`).
 const PHASE_ANGLE_FEEDBACK: u8 = 0x10;
-
-/// How `LeRobot` normalizes a servo's coordinate on the wire (`MotorNormMode`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MotorNormMode {
-    /// `DEGREES`: degrees about the middle of the calibrated range.
-    Degrees,
-    /// `RANGE_0_100`: percent of the calibrated range.
-    Range0100,
-}
-
-/// One servo's per-unit calibration, as `LeRobot`'s `MotorCalibration` records it. Open
-/// refuses a servo whose own registers disagree with it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MotorCalibration {
-    /// An inverted drive; applied to percent servos only, as `_unnormalize` does.
-    pub drive_mode: bool,
-    /// The servo's `Homing_Offset` register, in encoder ticks.
-    pub homing_offset: i16,
-    /// The calibrated raw range, in encoder ticks: the servo's position limits.
-    pub range_min: u16,
-    pub range_max: u16,
-}
 
 /// The torque and current limits `SOFollower.configure` writes to the gripper "to avoid
 /// burnout".
@@ -219,34 +201,18 @@ impl FeetechServo {
         }
         let single = float32(joint);
         let binding = axis.binding;
-        let actuator = axis.actuator_from_joint(single);
-        let min = f64::from(self.calibration.range_min);
-        let max = f64::from(self.calibration.range_max);
-        let raw = match self.norm_mode {
-            // Python's `(min_ + max_) / 2`, written the same way so every rounding step matches.
-            #[allow(clippy::manual_midpoint)]
-            MotorNormMode::Degrees => {
-                let val = actuator.to_degrees();
-                let mid = (min + max) / 2.0;
-                let max_res = RESOLUTION - 1.0;
-                (val * max_res / 360.0 + mid).trunc()
-            }
-            MotorNormMode::Range0100 => {
-                let ends = [
-                    axis.actuator_from_joint(axis.lower),
-                    axis.actuator_from_joint(axis.upper),
-                ];
-                let (low, high) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
-                let val = (actuator - low) * 100.0 / (high - low);
-                let val = if self.calibration.drive_mode {
-                    100.0 - val
-                } else {
-                    val
-                };
-                let bounded_val = val.clamp(0.0, 100.0);
-                ((bounded_val / 100.0) * (max - min) + min).trunc()
-            }
-        };
+        let ends = [
+            axis.actuator_from_joint(axis.lower),
+            axis.actuator_from_joint(axis.upper),
+        ];
+        let raw = unnormalize(
+            self.norm_mode,
+            &self.calibration,
+            APPLY_DRIVE_MODE,
+            RESOLUTION,
+            axis.actuator_from_joint(single),
+            (ends[0].min(ends[1]), ends[0].max(ends[1])),
+        );
         if raw.abs() > GOAL_POSITION_MAGNITUDE {
             return Err(FeetechChainError::Unencodable(binding.bus_id));
         }

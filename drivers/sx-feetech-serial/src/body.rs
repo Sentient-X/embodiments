@@ -31,6 +31,8 @@ pub struct ServoSetup {
 pub struct FeetechBody {
     /// The registry's rendered bindings (`bindings/<body>.json`).
     pub bindings: &'static str,
+    /// The bus's rate, in baud.
+    pub baud: u32,
     /// Every Feetech joint's setup, in the bindings' native state order.
     pub servos: &'static [ServoSetup],
 }

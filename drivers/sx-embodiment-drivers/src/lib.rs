@@ -38,6 +38,7 @@ pub mod drive;
 pub mod governor;
 pub mod kinematics;
 pub mod layout;
+pub mod lerobot;
 pub mod media;
 pub mod serial;
 
