@@ -12,10 +12,12 @@
 //!
 //! [`ActuatorChain::last_observed`] is every chain's in the same order, or none when any chain
 //! has none, so a [`Governor`](crate::Governor) around the whole starts every axis from where it
-//! rests or refuses. A receipt's evidence is the weakest any chain established. Its observed joints and
-//! feedback are the chains' in order only when every chain reported a value for each of its
-//! axes; otherwise both are empty, since a vector missing one chain's values would index other
-//! joints than the state order says.
+//! rests or refuses. A receipt's evidence is the weakest any chain established. Its observed
+//! joints are every chain's in order, a chain that did not report one for each of its axes
+//! contributing `NaN` for each, so a tracking check fails closed on exactly those axes; when
+//! no chain observed anything the vector is empty, as for a bus that answers nothing. Its
+//! feedback is the chains' in order only when every chain reported one per axis, and empty
+//! otherwise.
 
 use std::time::Duration;
 
@@ -118,7 +120,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         let mut evidence = Evidence::BusObservedComplete;
         let mut observed = Vec::with_capacity(joints.len());
         let mut feedback = Vec::with_capacity(joints.len());
-        let (mut observed_whole, mut feedback_whole) = (true, true);
+        let (mut observed_any, mut feedback_whole) = (false, true);
         let mut rest = joints;
         for (index, chain) in self.members.iter_mut().enumerate() {
             let width = chain.axes().len();
@@ -132,12 +134,17 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             if receipt.evidence == Evidence::DispatchAttempted {
                 evidence = Evidence::DispatchAttempted;
             }
-            observed_whole &= receipt.observed.len() == width;
             feedback_whole &= receipt.feedback.len() == width;
-            observed.extend(receipt.observed);
+            if receipt.observed.len() == width {
+                observed_any = true;
+                observed.extend(receipt.observed);
+            } else {
+                // This chain did not observe each of its axes: say so per axis.
+                observed.extend(std::iter::repeat_n(f64::NAN, width));
+            }
             feedback.extend(receipt.feedback);
         }
-        if !observed_whole {
+        if !observed_any {
             observed.clear();
         }
         if !feedback_whole {
@@ -360,11 +367,22 @@ mod tests {
         assert_eq!(receipt.observed, [0.1, 0.2, 0.3]);
         assert_eq!(receipt.feedback, [1, 2, 1]);
         assert_eq!(chains.chains()[1].sent, [[0.3]]);
-        // A chain that answers nothing leaves no partial vector.
+        // A chain that answers nothing is unobserved on its own axes, NaN, and every other
+        // chain's observations stand; feedback, not per axis, is dropped.
         let mut mixed = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], false)]);
         let receipt = mixed.command(&[0.1, 0.2, 0.3]).expect("commanded");
         assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
-        assert!(receipt.observed.is_empty() && receipt.feedback.is_empty());
+        assert_eq!(receipt.observed[..2], [0.1, 0.2]);
+        assert!(receipt.observed[2].is_nan());
+        assert!(receipt.feedback.is_empty());
+        let mut silent = Chains::new(vec![fake("can", &[1], false), fake("neck", &[1], false)]);
+        assert!(
+            silent
+                .command(&[0.1, 0.3])
+                .expect("commanded")
+                .observed
+                .is_empty()
+        );
     }
 
     #[test]
