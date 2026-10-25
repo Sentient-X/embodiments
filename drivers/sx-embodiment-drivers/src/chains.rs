@@ -10,7 +10,9 @@
 //! when every chain's is. Its budget is the sum of theirs: the chains are stopped one after the
 //! other.
 //!
-//! A receipt's evidence is the weakest any chain established. Its observed joints and
+//! [`ActuatorChain::last_observed`] is every chain's in the same order, or none when any chain
+//! has none, so a [`Governor`](crate::Governor) around the whole starts every axis from where it
+//! rests or refuses. A receipt's evidence is the weakest any chain established. Its observed joints and
 //! feedback are the chains' in order only when every chain reported a value for each of its
 //! axes; otherwise both are empty, since a vector missing one chain's values would index other
 //! joints than the state order says.
@@ -155,6 +157,15 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         report
     }
 
+    /// Every chain's, in native state order, or `None` when any chain has none.
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        let mut observed = Vec::with_capacity(self.axes.len());
+        for chain in &self.members {
+            observed.extend(chain.last_observed()?);
+        }
+        Some(observed)
+    }
+
     /// One stop after the other.
     fn stop_budget(&self) -> Duration {
         self.members
@@ -193,6 +204,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn stop_budget(&self) -> Duration {
         (**self).stop_budget()
+    }
+
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        (**self).last_observed()
     }
 
     fn clear_faults(&mut self) {
@@ -310,6 +325,10 @@ mod tests {
         fn stop_budget(&self) -> Duration {
             self.budget
         }
+
+        fn last_observed(&self) -> Option<Vec<f64>> {
+            self.answers.then(|| vec![0.25; self.axes.len()])
+        }
     }
 
     #[test]
@@ -362,6 +381,10 @@ mod tests {
         let report = chains.stop();
         assert_eq!(report.unproven, [2]);
         assert!(chains.chains().iter().all(|chain| chain.stops == 1));
+        // The neck observes nothing here, so the whole has no resting position to start from.
+        assert_eq!(chains.last_observed(), None);
+        let both = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], true)]);
+        assert_eq!(both.last_observed(), Some(vec![0.25; 3]));
         let mut boxed: Vec<Box<dyn ActuatorChain<Error = Failed, Feedback = u16>>> = vec![
             Box::new(fake("can", &[1], true)),
             Box::new(fake("neck", &[1], true)),

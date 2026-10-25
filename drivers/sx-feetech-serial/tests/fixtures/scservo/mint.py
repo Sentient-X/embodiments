@@ -39,6 +39,10 @@ minted from).
 - ``read_calibration``: per servo, ``Min_Position_Limit``, ``Max_Position_Limit`` and
   ``Homing_Offset`` read (``read2ByteTxRx``), answered with the ``so101`` calibration, the
   offset in sign-magnitude at bit 11 (the vendor's ``scs_toscs``).
+- ``present_position``: per servo, ``Present_Position`` read (``read2ByteTxRx``), as the chain
+  reads it after open and after every stop, servos 2 and 4 answering below their calibrated
+  range; ``present_joints``: the joints LeRobot's own ``_normalize`` makes of it, through the
+  drive map.
 - ``configure``: ``disable_torque``, then ``configure_motors`` per servo (``Return_Delay_Time``
   0, ``Maximum_Acceleration`` 254, ``Acceleration`` 254, ``Phase`` read, and written back with
   bit 4 cleared where the answer had it, as servo 6's does), then per servo ``Operating_Mode``
@@ -124,7 +128,11 @@ NAMESPACE: dict[str, Any] = {"Enum": enum.Enum}
 exec(  # noqa: S102  (LeRobot's own definitions, from the pinned checkout)
     compile(
         ast.Module(
-            body=[lerobot_definition("MotorNormMode"), lerobot_definition("_unnormalize")],
+            body=[
+                lerobot_definition("MotorNormMode"),
+                lerobot_definition("_unnormalize"),
+                lerobot_definition("_normalize"),
+            ],
             type_ignores=[],
         ),
         LEROBOT_FILES[0],
@@ -134,6 +142,7 @@ exec(  # noqa: S102  (LeRobot's own definitions, from the pinned checkout)
 )
 MotorNormMode = NAMESPACE["MotorNormMode"]
 _unnormalize = NAMESPACE["_unnormalize"]
+_normalize = NAMESPACE["_normalize"]
 
 # SOFollower's motors with use_degrees=True, its default; checked against the pinned file.
 NORM_MODES = {
@@ -185,7 +194,10 @@ for spelled in (
 ):
     if spelled not in SO_FOLLOWER:
         raise SystemExit(f"SOFollower.configure no longer runs {spelled}")
-if "def configure_motors(self, return_delay_time=0, maximum_acceleration=254, acceleration=254)" not in FEETECH:
+if (
+    "def configure_motors(self, return_delay_time=0, maximum_acceleration=254, acceleration=254)"
+    not in FEETECH
+):
     raise SystemExit("configure_motors' defaults changed")
 HOMING_OFFSET_SIGN_BIT = 11  # tables.py STS_SMS_SERIES_ENCODINGS_TABLE["Homing_Offset"]
 HOMING_OFFSETS = [-31, 1240, -2047, 0, 512, -873]
@@ -195,6 +207,9 @@ PHASES = [0x00, 0x00, 0x00, 0x00, 0x00, 0x1C]
 STS3215_RESOLUTION = 4096  # tables.py MODEL_RESOLUTION["sts3215"]
 STS3215_MODEL = 777  # tables.py MODEL_NUMBER_TABLE["sts3215"]
 SIGN_BIT = 15  # sms_sts.py scs_toscs(position, 15)
+# What each servo's Present_Position answers at open and after a stop: servos 2 and 4 rest
+# below the so101 calibration's minimum, as the static upper body's neck was found resting.
+PRESENT_POSITIONS = [2050, 700, 3100, 700, 2045, 2500]
 
 
 class Calibration:
@@ -228,6 +243,7 @@ class Bus:
         return "sts3215"
 
     _unnormalize = _unnormalize
+    _normalize = _normalize
 
 
 # --- the recording port ----------------------------------------------------------------------
@@ -345,7 +361,10 @@ def main() -> None:
         for action in ACTIONS:
             targets = np.asarray(action, dtype=np.float32)
             raw = bus._unnormalize(
-                {axis["bus_id"]: wire(axis, target) for axis, target in zip(axes, targets, strict=True)}
+                {
+                    axis["bus_id"]: wire(axis, target)
+                    for axis, target in zip(axes, targets, strict=True)
+                }
             )
             ticks = [handler.scs_toscs(raw[axis["bus_id"]], SIGN_BIT) for axis in axes]
             if any(abs(raw[axis["bus_id"]]) >= 1 << SIGN_BIT for axis in axes):
@@ -442,7 +461,9 @@ def main() -> None:
     configure = []
     for scs_id in ids:
         configure.append(write(scs_id, "SMS_STS_TORQUE_ENABLE", 0))
-        configure.append(exchange(port, status(scs_id, []), lambda i=scs_id: handler.unLockEprom(i)))
+        configure.append(
+            exchange(port, status(scs_id, []), lambda i=scs_id: handler.unLockEprom(i))
+        )
     # FeetechMotorsBus.configure_motors, protocol 0, on an STS3215.
     for scs_id, phase in zip(ids, PHASES, strict=True):
         configure.append(write(scs_id, "Return_Delay_Time", 0))
@@ -467,8 +488,31 @@ def main() -> None:
             configure.append(write(scs_id, "Max_Torque_Limit", 500, width=2))
             configure.append(write(scs_id, "Protection_Current", 250, width=2))
             configure.append(write(scs_id, "Overload_Torque", 25))
+    # The chain's position read, at open and after a stop, and the joints LeRobot's own
+    # _normalize makes of it (unclamped for degrees; the gripper's reading lies in its range).
+    bus = Bus(axes, CALIBRATIONS["so101"])
+    present_position = [
+        exchange(
+            port,
+            status(scs_id, [handler.scs_lobyte(raw), handler.scs_hibyte(raw)]),
+            lambda i=scs_id: handler.read2ByteTxRx(i, scs.SMS_STS_PRESENT_POSITION_L),
+        )
+        for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True)
+    ]
+    normalized = bus._normalize(dict(zip(ids, PRESENT_POSITIONS, strict=True)))
+    present_joints = []
+    for axis in axes:
+        value = normalized[axis["bus_id"]]
+        if NORM_MODES[axis["joint"]] is MotorNormMode.RANGE_0_100:
+            ends = (actuator(axis, axis["lower"]), actuator(axis, axis["upper"]))
+            value = min(ends) + value / 100.0 * (max(ends) - min(ends))
+        else:
+            value = math.radians(value)
+        present_joints.append(value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO)
     document = {
         "motors": motors,
+        "present_position": present_position,
+        "present_joints": present_joints,
         "calibrations": {
             name: [
                 {"id": i, "drive_mode": d, "range_min": lo, "range_max": hi}

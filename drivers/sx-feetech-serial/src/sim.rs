@@ -5,7 +5,9 @@
 //! limits and homing offset a supplied calibration. An instruction packet (`FF FF id len inst
 //! params checksum`) is answered with a status packet: READ with the registers asked for,
 //! WRITE by storing and acknowledging, SYNC WRITE (broadcast) by storing each servo's bytes
-//! with no answer. A servo marked dead answers nothing. The link's packet timeout runs out as
+//! with no answer. A servo with torque on is at its goal at once; one with torque off rests
+//! where it was put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
+//! nothing. The link's packet timeout runs out as
 //! soon as nothing more is pending, as a recording port's does. Clones share one bus.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -20,7 +22,7 @@ use crate::chain::STS3215_MODEL_NUMBER;
 use crate::scservo_sdk::{
     BROADCAST_ID, INST_READ, INST_SYNC_WRITE, INST_WRITE, SMS_STS_GOAL_POSITION_L,
     SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODEL_L, SMS_STS_OFS_L,
-    SMS_STS_TORQUE_ENABLE,
+    SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE,
 };
 
 /// Every servo's registers, the servos that answer nothing, and what is waiting to be read.
@@ -79,6 +81,10 @@ impl SimBus {
             put(SMS_STS_MIN_ANGLE_LIMIT_L, calibration.range_min);
             put(SMS_STS_MAX_ANGLE_LIMIT_L, calibration.range_max);
             put(SMS_STS_OFS_L, homing_register(calibration.homing_offset));
+            put(
+                SMS_STS_PRESENT_POSITION_L,
+                calibration.range_min.midpoint(calibration.range_max),
+            );
             state.servos.insert(*id, registers);
         }
         Self(Arc::new(Mutex::new(state)))
@@ -89,6 +95,18 @@ impl SimBus {
     /// Panics when a holder of the lock panicked.
     pub fn state(&self) -> MutexGuard<'_, SimState> {
         self.0.lock().expect("the simulated bus")
+    }
+
+    /// Leave servo `id` resting at `raw` ticks.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the bus has no servo `id`.
+    pub fn rest_at(&self, id: u8, raw: u16) {
+        let mut state = self.state();
+        let registers = state.servos.get_mut(&id).expect("a simulated servo");
+        let at = usize::from(SMS_STS_PRESENT_POSITION_L);
+        registers[at..at + 2].copy_from_slice(&raw.to_le_bytes());
     }
 
     /// Make servo `id` answer nothing from now on.
@@ -165,6 +183,14 @@ impl SerialPort for SimBus {
         let mut state = self.state();
         state.written.push(packet.to_vec());
         state.answer(packet);
+        // A servo holding torque is where it was told to be.
+        for registers in state.servos.values_mut() {
+            if registers[usize::from(SMS_STS_TORQUE_ENABLE)] == 1 {
+                let goal = usize::from(SMS_STS_GOAL_POSITION_L);
+                let present = usize::from(SMS_STS_PRESENT_POSITION_L);
+                registers.copy_within(goal..goal + 2, present);
+            }
+        }
         Ok(packet.len())
     }
 
@@ -204,7 +230,13 @@ mod tests {
             crate::FeetechChain::open(bus.clone(), so101([calibration; 6]).expect("composes"))
                 .expect("opens");
         assert_eq!(SO101.servos.len(), 6);
+        let rest = chain.last_observed().expect("read at open");
+        assert!(
+            rest.iter().take(5).all(|joint| joint.abs() < 1e-3),
+            "{rest:?}"
+        );
         chain.command(&[0.0; 6]).expect("commanded");
+        assert_eq!(chain.last_observed(), None);
         assert_eq!(bus.state().torque(1), 1);
         assert_eq!(bus.state().goal(1), 2000);
         assert!(chain.stop().is_proven());

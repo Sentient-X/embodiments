@@ -43,6 +43,40 @@
    "upper": 2.0944
   }
  ],
+ "present_position": [
+  {
+   "request": "ffff0104023802be",
+   "response": "ffff0104000208f0"
+  },
+  {
+   "request": "ffff0204023802bd",
+   "response": "ffff020400bc023b"
+  },
+  {
+   "request": "ffff0304023802bc",
+   "response": "ffff0304001c0cd0"
+  },
+  {
+   "request": "ffff0404023802bb",
+   "response": "ffff040400bc0239"
+  },
+  {
+   "request": "ffff0504023802ba",
+   "response": "ffff050400fd07f2"
+  },
+  {
+   "request": "ffff0604023802b9",
+   "response": "ffff060400c40928"
+  }
+ ],
+ "present_joints": [
+  0.0,
+  -2.071379771597666,
+  1.6494320403462897,
+  -2.0637079946658226,
+  0.0,
+  0.5660215208333335
+ ],
  "calibrations": {
   "so101": [
    {

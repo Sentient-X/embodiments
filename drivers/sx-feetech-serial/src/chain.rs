@@ -42,6 +42,11 @@
 //!   0, then `Lock` 0 (`sms_sts.unLockEprom`), each acknowledged, on every servo whatever an
 //!   earlier one answered. Then it reads every servo's `Torque_Enable` back
 //!   (`read1ByteTxRx`); a servo is proven stopped only when it reads 0.
+//! - After open and after every stop it reads each servo's `Present_Position`
+//!   (`read2ByteTxRx`, sign-magnitude at bit 15), as `LeRobot` reads an observation, and
+//!   reports it as [`ActuatorChain::last_observed`] until the next command, so a caller can
+//!   start from where the body rests. A servo resting outside its calibrated range is reported
+//!   there, unclamped. A position read that fails reports nothing; it does not fail open.
 //!
 //! A goal position is computed from a joint target in three steps:
 //!
@@ -87,8 +92,8 @@
 
 use std::time::Duration;
 
-use sx_embodiment_drivers::lerobot::unnormalize;
 pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
+use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
@@ -99,7 +104,7 @@ use thiserror::Error;
 use crate::scservo_sdk::{
     CommResult, GroupSyncWrite, MAX_ID, ProtocolPacketHandler, SMS_STS_ACC,
     SMS_STS_GOAL_POSITION_L, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_MODE,
-    SMS_STS_MODEL_L, SMS_STS_OFS_L, SMS_STS_TORQUE_ENABLE, SmsSts,
+    SMS_STS_MODEL_L, SMS_STS_OFS_L, SMS_STS_PRESENT_POSITION_L, SMS_STS_TORQUE_ENABLE, SmsSts,
 };
 
 /// `ActuatorModel.FEETECH_STS3215` in the registry.
@@ -117,8 +122,11 @@ const APPLY_DRIVE_MODE: bool = true;
 const GOAL_POSITION_SIGN_BIT: u32 = 15;
 /// The register's largest magnitude below its sign bit.
 const GOAL_POSITION_MAGNITUDE: f64 = 32_767.0;
-/// Exchanges a stop makes per servo: torque off, unlock, and the torque read-back.
-const STOP_EXCHANGES_PER_SERVO: u32 = 3;
+/// Exchanges a stop makes per servo: torque off, unlock, the torque read-back, and the
+/// position read.
+const STOP_EXCHANGES_PER_SERVO: u32 = 4;
+/// `Present_Position`'s sign bit (`LeRobot` `STS_SMS_SERIES_ENCODINGS_TABLE`).
+const PRESENT_POSITION_SIGN_BIT: u32 = 15;
 /// `Homing_Offset`'s sign bit (`LeRobot` `STS_SMS_SERIES_ENCODINGS_TABLE`).
 const HOMING_OFFSET_SIGN_BIT: u32 = 11;
 
@@ -225,6 +233,27 @@ impl FeetechServo {
     }
 }
 
+impl FeetechServo {
+    /// The joint coordinate a `Present_Position` reading of `raw` ticks is at, not clamped to
+    /// the calibrated range ([`sx_embodiment_drivers::lerobot::normalize`]).
+    #[must_use]
+    pub fn joint_from_raw(&self, raw: i32) -> f64 {
+        let axis = &self.axis;
+        let ends = [
+            axis.actuator_from_joint(axis.lower),
+            axis.actuator_from_joint(axis.upper),
+        ];
+        axis.joint_from_actuator(normalize(
+            self.norm_mode,
+            &self.calibration,
+            APPLY_DRIVE_MODE,
+            RESOLUTION,
+            f64::from(raw),
+            (ends[0].min(ends[1]), ends[0].max(ends[1])),
+        ))
+    }
+}
+
 /// `value` rounded to float32, the precision targets are converted at.
 fn float32(value: f64) -> f64 {
     // Rounding to float32 is the intended conversion.
@@ -289,6 +318,9 @@ pub struct FeetechChain<P> {
     enabled: bool,
     stop_pending: bool,
     faults: Vec<(u16, u8)>,
+    /// Every servo's position, read at open and after each stop; `None` once a command may
+    /// have moved it, or when a read failed.
+    observed: Option<Vec<f64>>,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no flags.
@@ -350,9 +382,11 @@ impl<P: SerialPort> FeetechChain<P> {
             enabled: false,
             stop_pending: false,
             faults: Vec::new(),
+            observed: None,
         };
         chain.is_calibrated()?;
         chain.configure()?;
+        chain.observed = chain.read_positions();
         Ok(chain)
     }
 
@@ -454,6 +488,25 @@ impl<P: SerialPort> FeetechChain<P> {
         Ok(())
     }
 
+    /// Every servo's `Present_Position` as a joint coordinate, or `None` when any servo did
+    /// not answer.
+    fn read_positions(&mut self) -> Option<Vec<f64>> {
+        let ids: Vec<u8> = self.servos.iter().map(FeetechServo::scs_id).collect();
+        let mut observed = Vec::with_capacity(ids.len());
+        for (servo, scs_id) in self.servos.iter().zip(ids) {
+            let (raw, result, _) = self
+                .sms
+                .ph
+                .read2_byte_tx_rx(scs_id, SMS_STS_PRESENT_POSITION_L);
+            if result != CommResult::Success {
+                return None;
+            }
+            let raw = ProtocolPacketHandler::<()>::scs_tohost(raw, PRESENT_POSITION_SIGN_BIT);
+            observed.push(servo.joint_from_raw(raw));
+        }
+        Some(observed)
+    }
+
     /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
     /// proven or not, as (bus id, flags).
     #[must_use]
@@ -528,6 +581,8 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             .zip(joints)
             .map(|(servo, joint)| servo.goal_position(*joint))
             .collect::<Result<Vec<u16>, _>>()?;
+        // From here the servos may move: what open or the last stop read no longer holds.
+        self.observed = None;
         if !self.enabled {
             self.enable_torque()?;
             self.enabled = true;
@@ -598,10 +653,17 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 self.faults.push(*fault);
             }
         }
+        self.observed = self.read_positions();
         report
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo,
+    /// Where every servo was read at open or after the last stop, when no command has been
+    /// sent since and every servo answered.
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        self.observed.clone()
+    }
+
+    /// The longest [`ActuatorChain::stop`] takes on this chain: four exchanges per servo,
     /// each bounded by the link's [`SerialPort::timeout`].
     fn stop_budget(&self) -> Duration {
         let servos = u32::try_from(self.servos.len()).unwrap_or(u32::MAX);

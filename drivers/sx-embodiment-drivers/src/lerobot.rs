@@ -74,6 +74,42 @@ pub fn unnormalize(
     }
 }
 
+/// `MotorsBus._normalize` inverted to the actuator coordinate: the radians a servo reading
+/// `raw` ticks is at, `low` and `high` as [`unnormalize`] takes them.
+///
+/// Degrees are `(raw - (min + max) / 2) * 360 / (resolution - 1)`, as `LeRobot` computes them;
+/// percent is `(raw - min) / (max - min) * 100`, inverted when the drive mode is applied, then
+/// mapped onto `low..high`. One departure: `LeRobot` clamps a percent reading into the
+/// calibrated range first; here it is not clamped, so a servo resting outside its range is
+/// reported where it is, and whatever moves it starts from there rather than from the edge.
+#[must_use]
+pub fn normalize(
+    norm_mode: MotorNormMode,
+    calibration: &MotorCalibration,
+    apply_drive_mode: bool,
+    resolution: f64,
+    raw: f64,
+    (low, high): (f64, f64),
+) -> f64 {
+    let min = f64::from(calibration.range_min);
+    let max = f64::from(calibration.range_max);
+    match norm_mode {
+        #[allow(clippy::manual_midpoint)]
+        MotorNormMode::Degrees => {
+            ((raw - (min + max) / 2.0) * 360.0 / (resolution - 1.0)).to_radians()
+        }
+        MotorNormMode::Range0100 => {
+            let norm = (raw - min) / (max - min) * 100.0;
+            let norm = if apply_drive_mode && calibration.drive_mode {
+                100.0 - norm
+            } else {
+                norm
+            };
+            low + norm / 100.0 * (high - low)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,5 +148,32 @@ mod tests {
         assert!((percent(0.5, false) - 1500.0).abs() < f64::EPSILON);
         assert!((percent(0.5, true) - 2500.0).abs() < f64::EPSILON);
         assert!((percent(3.0, false) - 3000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_reading_maps_back_to_its_target_and_outside_the_range_is_not_clamped() {
+        for (mode, range, target) in [
+            (MotorNormMode::Degrees, (-1.0, 1.0), 0.7),
+            (MotorNormMode::Range0100, (0.0, 2.0), 0.5),
+        ] {
+            for apply in [false, true] {
+                let raw = unnormalize(mode, &CALIBRATION, apply, 4096.0, target, range);
+                let back = normalize(mode, &CALIBRATION, apply, 4096.0, raw, range);
+                // Within the one tick the truncation can lose.
+                assert!(
+                    (back - target).abs() < 2.0 * std::f64::consts::TAU / 4096.0,
+                    "{mode:?}"
+                );
+            }
+        }
+        let below = normalize(
+            MotorNormMode::Range0100,
+            &CALIBRATION,
+            false,
+            4096.0,
+            500.0,
+            (0.0, 2.0),
+        );
+        assert!(below < 0.0, "{below}");
     }
 }

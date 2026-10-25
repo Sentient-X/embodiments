@@ -34,6 +34,8 @@ struct Golden {
     homing_offsets: Vec<HomingOffset>,
     read_calibration: Vec<Exchange>,
     configure: Vec<Exchange>,
+    present_position: Vec<Exchange>,
+    present_joints: Vec<f64>,
 }
 
 #[derive(Deserialize)]
@@ -181,13 +183,20 @@ fn open(exchanges: &[Exchange], calibration: &str) -> FeetechChain<FakePort> {
     .expect("open")
 }
 
-/// Everything open says to the bus: identify, the calibration check, and configure.
+/// Everything open says to the bus: identify, the calibration check, configure, and the
+/// position read.
 fn opening(golden: &Golden) -> Vec<Exchange> {
     with(&[
         &golden.identify,
         &golden.read_calibration,
         &golden.configure,
+        &golden.present_position,
     ])
+}
+
+/// A stop and the position read that follows it.
+fn stopping(golden: &Golden, stop: &[Exchange]) -> Vec<Exchange> {
+    with(&[stop, &golden.present_position])
 }
 
 fn with(parts: &[&[Exchange]]) -> Vec<Exchange> {
@@ -284,22 +293,35 @@ fn a_stop_disables_torque_proves_it_and_the_next_command_re_enables() {
         &with(&[
             &opening(&golden),
             &golden.torque_enable,
-            &golden.safe_stop,
+            &stopping(&golden, &golden.safe_stop),
             &golden.torque_enable,
         ]),
         "so101",
     );
-    // Three exchanges per servo (torque off, unlock, read-back), each within the link's
-    // 10 ms timeout.
+    // Four exchanges per servo (torque off, unlock, read-back, position), each within the
+    // link's 10 ms timeout.
     assert_eq!(
         chain.stop_budget(),
-        Duration::from_millis(10) * 3 * u32::try_from(golden.motors.len()).unwrap()
+        Duration::from_millis(10) * 4 * u32::try_from(golden.motors.len()).unwrap()
+    );
+    assert_eq!(
+        chain.last_observed().as_deref(),
+        Some(golden.present_joints.as_slice())
     );
     let radians = &golden.goal_positions[1].radians;
     chain.command(radians).expect("command");
+    assert_eq!(
+        chain.last_observed(),
+        None,
+        "a command may have moved every servo"
+    );
     let report = chain.stop();
     assert_eq!(report, StopReport::default());
     assert!(report.prove().is_ok());
+    assert_eq!(
+        chain.last_observed().as_deref(),
+        Some(golden.present_joints.as_slice())
+    );
     chain.command(radians).expect("command after a proven stop");
     assert!(chain.port().expected.is_empty(), "torque was enabled again");
 }
@@ -549,8 +571,8 @@ fn faults_a_proven_stop_reported_refuse_motion_until_cleared() {
     let mut chain = open(
         &with(&[
             &opening(&golden),
-            &stop,
-            &golden.safe_stop,
+            &stopping(&golden, &stop),
+            &stopping(&golden, &golden.safe_stop),
             &golden.torque_enable,
         ]),
         "so101",
