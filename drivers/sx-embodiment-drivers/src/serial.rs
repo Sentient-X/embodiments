@@ -44,3 +44,30 @@ pub trait SerialPort: Send {
     /// link replaying a transcript runs out as soon as it has nothing more to hand out.
     fn is_packet_timeout(&mut self) -> bool;
 }
+
+/// A link chosen at run time, as a station opens whichever bridge its commissioning names.
+impl<P: SerialPort + ?Sized> SerialPort for Box<P> {
+    fn clear_port(&mut self) -> io::Result<()> {
+        (**self).clear_port()
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        (**self).write_port(packet)
+    }
+
+    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+        (**self).read_port(length)
+    }
+
+    fn timeout(&self) -> Duration {
+        (**self).timeout()
+    }
+
+    fn set_packet_timeout(&mut self, packet_length: usize) {
+        (**self).set_packet_timeout(packet_length);
+    }
+
+    fn is_packet_timeout(&mut self) -> bool {
+        (**self).is_packet_timeout()
+    }
+}

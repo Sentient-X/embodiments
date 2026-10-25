@@ -6,6 +6,8 @@
 //! `usb-serial`) and `SocketCAN` interfaces ([`crate::socketcan`], feature `socketcan`). Exactly
 //! one bridge carrying the identity is opened. None is [`OpenError::NotAttached`]; two, on one
 //! transport or across both, is [`OpenError::Ambiguous`], naming each, and nothing is opened.
+//! A serial-servo bus is carried by a USB serial adapter alone, so its identity is looked up
+//! the same way and refused unless it is that adapter's tty.
 //! The module builds when either transport does.
 
 #[cfg(feature = "usb-serial")]
@@ -15,12 +17,12 @@ use std::path::PathBuf;
 use crate::socketcan::SocketCanPorts;
 #[cfg(feature = "usb-serial")]
 use crate::usb_serial::{self, UsbSerialPorts};
-use crate::{OpenError, Port, PortSource};
+use crate::{OpenError, Port, PortSource, SerialLink};
 
 /// One bridge an identity resolved to.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Bridge {
-    /// A Damiao USB2CAN bridge's tty.
+    /// A USB serial bridge's tty: a Damiao USB2CAN bridge, or a serial-servo adapter.
     #[cfg(feature = "usb-serial")]
     Usb2Can(PathBuf),
     /// A `SocketCAN` interface.
@@ -97,6 +99,20 @@ fn attached<T>(found: Result<T, OpenError>) -> Result<Option<T>, OpenError> {
 }
 
 impl PortSource for SystemPorts {
+    fn open_serial(&mut self, serial: &str, baud: u32) -> Result<SerialLink, OpenError> {
+        match self.bridge(serial)? {
+            #[cfg(feature = "usb-serial")]
+            Bridge::Usb2Can(tty) => usb_serial::open_servo_tty(&tty, serial, baud),
+            #[cfg(feature = "socketcan")]
+            Bridge::SocketCan(interface) => Err(OpenError::Port {
+                serial: serial.to_owned(),
+                reason: format!(
+                    "{interface} is a SocketCAN interface, not a serial bus at {baud} baud"
+                ),
+            }),
+        }
+    }
+
     fn open(&mut self, serial: &str) -> Result<Port, OpenError> {
         match self.bridge(serial)? {
             #[cfg(feature = "usb-serial")]
@@ -160,7 +176,7 @@ mod tests {
         let board = root.join("platform/can0");
         fs::create_dir_all(&board).expect("board");
         can(&root, "can0", &board);
-        let ports = SystemPorts {
+        let mut ports = SystemPorts {
             usb_serial: UsbSerialPorts::rooted(root.join("usb"), PathBuf::from("/dev")),
             socketcan: SocketCanPorts::rooted(root.join("net")),
         };
@@ -192,6 +208,15 @@ mod tests {
             }
             other => panic!("expected an ambiguity, got {other:?}"),
         }
+        // A serial-servo bus is refused on an ambiguous identity and on a CAN interface.
+        assert!(matches!(
+            ports.open_serial("TWIN", 1_000_000),
+            Err(OpenError::Ambiguous { .. })
+        ));
+        assert!(matches!(
+            ports.open_serial("UB-CAN", 1_000_000),
+            Err(OpenError::Port { serial, .. }) if serial == "UB-CAN"
+        ));
         let _ = fs::remove_dir_all(root);
     }
 }

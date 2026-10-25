@@ -255,12 +255,12 @@ Cargo workspace pinned to the station's toolchain (`rust-toolchain.toml`).
 `drivers/sx-embodiment-drivers` is the surface each implements: `ActuatorChain` drives the
 actuators an axis's `ActuatorBinding` names, indexed in the body's native state order, each
 failure classified as a `ChainFailure`, and a stop becomes a `ProvenStop` only when every
-actuator answered stopped. A body spanning two devices or buses is one `Composite` chain, and
-`can::SharedCanPort` lets chains take turns on one bridge. `Governor` wraps any chain with a
-per-axis speed bound (each command slewed from where the body rests, `last_observed`) and a
-tracking-error bound that stops the chain and latches a fault when the body does not follow;
-the limits are the operator's to pass. The station drives every body through this trait and
-names no vendor.
+actuator answered stopped. A body spanning two devices or buses is one `Composite` chain, or,
+when its buses are read from its bindings, one `Chains` of any number; `can::SharedCanPort` lets
+chains take turns on one bridge. `Governor` wraps any chain with a per-axis speed bound (each
+command slewed from where the body rests, `last_observed`) and a tracking-error bound that
+stops the chain and latches a fault when the body does not follow; the limits are the
+operator's to pass. The station drives every body through this trait and names no vendor.
 
 A bus crate is a translation of its vendor's own driver — the same structure, names, frames,
 clamps and command order — pinned to transcripts recorded by running that driver, with each
@@ -271,15 +271,20 @@ spelled in Rust; it adds only its vendor's controller configuration, keyed by jo
 joint's zero is the unit's calibration, applied at one seam (`BoundAxis::calibrated`) from the
 robot instance's `InstanceDrive`; a nominal instance carries `UNCALIBRATED_ZERO`. Only directly
 driven joints are rendered: a joint driven any other way (the humanoid's waist linkage) is in no
-driver's chain.
+driver's chain. Every rendered axis names the port its bus is commissioned under
+(`ActuatorBinding.port`, or its bus kind's default: `can`, `serial`, `dynamixel`), so a body on
+several buses (the static upper body's Damiao CAN bus and Feetech `neck`) is opened port by
+port, each bus by its vendor's crate. A serial servo's `LeRobot` calibration is per unit
+(`sx_embodiment_drivers::lerobot`), shared by the Feetech and Dynamixel crates.
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|
-| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | the `sx` station's `ChainActuator`, over `b601::open_b601`, `humanoid::open_humanoid_upper_body` and `body::DamiaoBody::open` (any single-bus body: the humanoid and static upper bodies) |
-| `sx-embodiment-bodies` | any of the above | none: it opens a registered body from its `InstanceDrive` and the station's `sx.station-commissioning/v1` (port name to the bridge's USB serial, or a board CAN interface's name), dispatching to the body's opener and sharing one bridge two ports name; feature `usb-serial` finds Damiao USB2CAN bridges by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0), feature `socketcan` finds `SocketCAN` interfaces by their adapter's serial; `system::SystemPorts` looks a commissioned identity up across every transport compiled in, opens the one bridge carrying it and refuses two (`OpenError::Ambiguous`), so the station names no transport | the `sx` station's `StationRobot::open_actuator`, over `SystemPorts::system()` |
+| `sx-damiao-can` | `damiao_can` | Damiao's `DM_CAN.py` ([kit-miao/motor-sdk](https://gitee.com/kit-miao/motor-sdk) `fb0e9fc5`; by cmjang, MIT) | `sx-embodiment-bodies`, over `b601::open_b601` and `body::DamiaoBody::open` (a body's Damiao axes on one bus: the humanoid and static upper bodies) |
+| `sx-embodiment-bodies` | any of these | none: it opens a registered body from its `InstanceDrive`, the station's `sx.station-commissioning/v1` (port name to the bridge's USB serial, or a board CAN interface's name) and, for serial servos, their `ServoCalibrations`. The B601-DM keeps its own opener; every other body is split into one bus per port and each bus opened by its vendor's crate (`DamiaoBody`, `FeetechBody`, `DynamixelBody`), composed as one `Chains`. Two CAN ports on one serial share a bridge; a serial bus shares none. Feature `usb-serial` finds USB2CAN bridges and serial-servo adapters by serial in sysfs (through [`serialport`](https://github.com/serialport/serialport-rs), MPL-2.0), feature `socketcan` finds `SocketCAN` interfaces by their adapter's serial; `system::SystemPorts` looks a commissioned identity up across every transport compiled in, opens the one bridge carrying it and refuses two (`OpenError::Ambiguous`), so the station names no transport | the `sx` station's `StationRobot::open_actuator`, over `SystemPorts::system()` |
 | `sx-embodiment-commission` | any of the above, read-only | none: it enumerates every USB device (through [`nusb`](https://github.com/kevinmehall/nusb), Apache-2.0 or MIT; ttys through `serialport`, `SocketCAN` through sysfs), scans each bus with its vendor crate's read-only `scan`, and matches each port a body's bindings declare to the one bridge its units answer on | a person or agent commissioning a station, through the `sx-commission` binary |
 | `sx-socketcan` | any CAN bus | none: Linux `SocketCAN` (`CAN_RAW`) as a `can::CanPort`, through `libc`, holding a per-interface `flock` so a second of our processes cannot open the bus (a foreign driver is not excluded); the one crate allowed `unsafe`, in its socket and lock modules | `sx-embodiment-bodies`'s `socketcan::SocketCanPorts` and `system::SystemPorts` |
-| `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | the `sx` station's `ChainActuator`, over `so101::open_so101` |
+| `sx-feetech-serial` | `feetech_serial` | Feetech's `scservo_sdk` ([ftservo/FTServo_Python](https://github.com/ftservo/FTServo_Python) `cbcfa646`; by ftservo, MIT) | `sx-embodiment-bodies`, over `body::FeetechBody::open` (the SO-101 follower, and the static upper body's neck and grippers, provisional until their calibration is supplied); `so101::open_so101` |
+| `sx-dynamixel-serial` | `dynamixel_serial` | ROBOTIS's DynamixelSDK, Protocol 2.0 ([ROBOTIS-GIT/DynamixelSDK](https://github.com/ROBOTIS-GIT/DynamixelSDK) `a8d35d51`; Apache-2.0). **Untested on the bench**; no registered body binds one | `sx-embodiment-bodies`, over `body::DynamixelBody::open` |
 
 A robot is commissioned with `sx-commission`, never by an ad-hoc probe script. It only reads:
 every scan speaks through its crate's read-only port (`sx_feetech_serial::scan::ReadOnlyPort`

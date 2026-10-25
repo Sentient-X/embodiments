@@ -995,7 +995,9 @@ dependencies = [
  "serde_json",
  "serialport",
  "sx-damiao-can",
+ "sx-dynamixel-serial",
  "sx-embodiment-drivers",
+ "sx-feetech-serial",
  "sx-socketcan",
  "thiserror 2.0.21",
 ]

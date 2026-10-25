@@ -8,6 +8,11 @@ rust-version.workspace = true
 license = "Apache-2.0 AND MIT"
 publish.workspace = true
 
+[features]
+# A simulated Feetech bus answering as STS3215 firmware does, for the suites of every crate
+# that drives a Feetech body (`sim`).
+sim = []
+
 [dependencies]
 sx-embodiment-drivers.workspace = true
 thiserror.workspace = true

@@ -12,6 +12,8 @@ pub mod body;
 pub mod chain;
 pub mod scan;
 pub mod scservo_sdk;
+#[cfg(any(test, feature = "sim"))]
+pub mod sim;
 pub mod so101;
 pub mod static_upper_body;
 
