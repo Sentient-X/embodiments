@@ -669,3 +669,58 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
     assert!(neck.present(6) - 753 <= 15 + 150);
     assert!(body.stop().is_proven());
 }
+
+#[test]
+fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let serial = probed_buses();
+    let neck = serial["5A7C118709"].clone();
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let body = open_calibrated(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        &mut bridges,
+    )
+    .expect("open");
+    // Where each axis rests, held inside its declared bounds: the target.
+    let target: Vec<f64> = body
+        .last_observed()
+        .expect("rest")
+        .iter()
+        .zip(body.axes())
+        .map(|(rest, axis)| rest.clamp(axis.lower, axis.upper))
+        .collect();
+    // Slower than the servos' own 0.23 rad/s, so a following servo never falls behind.
+    let limits = vec![
+        AxisLimits {
+            max_speed: 0.2,
+            max_tracking_error: 0.2,
+        };
+        25
+    ];
+    let mut governed = Governor::new(body, limits).expect("limits");
+    // Hold every axis where it rests, the out-of-range neck axes at their nearest in-range
+    // position, which the servos themselves approach at their own speed.
+    let mut tilt = Vec::new();
+    for _ in 0..100 {
+        governed
+            .command(&target)
+            .unwrap_or_else(|error| panic!("{error}"));
+        for bus in serial.values() {
+            bus.advance(Duration::from_millis(20));
+        }
+        tilt.push(neck.present(6));
+    }
+    // The camera tilt left tick 753 at the servo's pace, about 150 ticks a second, and no
+    // faster: two seconds bring it at most 300 ticks nearer its 1760 minimum (the simulated
+    // servo moves whole ticks per 20 ms step, so it lags that pace: 2 a step).
+    assert!(tilt[0] > 753 && tilt[0] <= 753 + 3);
+    let moved = tilt[99] - 753;
+    assert!((150..=300).contains(&moved), "{moved}");
+}
