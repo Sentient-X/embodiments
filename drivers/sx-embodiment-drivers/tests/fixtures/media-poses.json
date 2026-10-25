@@ -176,5 +176,391 @@
         0.37287564444757715
       ]
     }
+  ],
+  "sentient-static-upper-body": [
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": 0.53111,
+        "so101_shoulder_pan_joint": 1.036987,
+        "so101_shoulder_lift_joint": -0.20008,
+        "so101_elbow_flex_joint": -0.293717,
+        "so101_wrist_flex_joint": -0.507247,
+        "so101_wrist_roll_joint": -0.494025,
+        "so101_camera_tilt_joint": -0.8196
+      },
+      "translation_m": [
+        0.12333205407002563,
+        0.04363064522006816,
+        0.6275534087855186
+      ],
+      "rotation_xyzw": [
+        0.5387179337075486,
+        -0.6772215759690489,
+        -0.5006029857690788,
+        0.02346434705996264
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": 1.03541,
+        "so101_shoulder_pan_joint": -0.175105,
+        "so101_shoulder_lift_joint": 0.425363,
+        "so101_elbow_flex_joint": -0.088953,
+        "so101_wrist_flex_joint": -0.832257,
+        "so101_wrist_roll_joint": -0.196208,
+        "so101_camera_tilt_joint": -0.504992
+      },
+      "translation_m": [
+        -0.015266981768482409,
+        0.16070762273141076,
+        0.5383170410312798
+      ],
+      "rotation_xyzw": [
+        0.8191513630890981,
+        -0.14472865601599294,
+        -0.2206648883324013,
+        0.5092658122575344
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": 0.641876,
+        "so101_shoulder_pan_joint": 0.977852,
+        "so101_shoulder_lift_joint": 1.155261,
+        "so101_elbow_flex_joint": -0.894045,
+        "so101_wrist_flex_joint": 0.642904,
+        "so101_wrist_roll_joint": -0.278718,
+        "so101_camera_tilt_joint": -0.380416
+      },
+      "translation_m": [
+        0.10001779985232573,
+        0.06568897458331763,
+        0.589757878174744
+      ],
+      "rotation_xyzw": [
+        0.11317829090695436,
+        -0.34291988191173345,
+        -0.8302785256901652,
+        0.42453998496583245
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": 0.361424,
+        "so101_shoulder_pan_joint": 0.828942,
+        "so101_shoulder_lift_joint": -1.061053,
+        "so101_elbow_flex_joint": 0.288099,
+        "so101_wrist_flex_joint": 1.010823,
+        "so101_wrist_roll_joint": 1.130592,
+        "so101_camera_tilt_joint": -1.085639
+      },
+      "translation_m": [
+        0.011193887494281862,
+        0.01579958930719602,
+        0.5007356054454483
+      ],
+      "rotation_xyzw": [
+        0.13415152399795544,
+        -0.24864678045561917,
+        -0.4252404885087412,
+        0.8598538678815886
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": -1.024834,
+        "so101_shoulder_pan_joint": 0.121716,
+        "so101_shoulder_lift_joint": -1.019491,
+        "so101_elbow_flex_joint": -0.773392,
+        "so101_wrist_flex_joint": 0.453368,
+        "so101_wrist_roll_joint": 0.023859,
+        "so101_camera_tilt_joint": -0.931574
+      },
+      "translation_m": [
+        0.0641141834285708,
+        0.03346017490697336,
+        0.552586466343932
+      ],
+      "rotation_xyzw": [
+        0.1951388977921136,
+        -0.9121354125877197,
+        -0.35453523161670986,
+        0.06507356770913485
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": 0.612909,
+        "so101_shoulder_pan_joint": 0.88363,
+        "so101_shoulder_lift_joint": -0.488586,
+        "so101_elbow_flex_joint": 0.003631,
+        "so101_wrist_flex_joint": 0.947795,
+        "so101_wrist_roll_joint": 0.90971,
+        "so101_camera_tilt_joint": 0.302037
+      },
+      "translation_m": [
+        0.004426072571998896,
+        0.04745279861502773,
+        0.45764194572331707
+      ],
+      "rotation_xyzw": [
+        0.666840907754152,
+        -0.4023361175023135,
+        -0.2637597713867933,
+        0.5691042393944802
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": -0.691858,
+        "so101_shoulder_pan_joint": -1.17576,
+        "so101_shoulder_lift_joint": 0.942446,
+        "so101_elbow_flex_joint": 0.017528,
+        "so101_wrist_flex_joint": 1.034938,
+        "so101_wrist_roll_joint": -0.095642,
+        "so101_camera_tilt_joint": -0.644297
+      },
+      "translation_m": [
+        -0.03221255629619908,
+        0.04419519305449124,
+        0.5928990276935621
+      ],
+      "rotation_xyzw": [
+        -0.29707075430157287,
+        0.11433073201791817,
+        -0.524813282524046,
+        0.7894608724574496
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_left",
+      "positions": {
+        "torso_joint": -0.361992,
+        "so101_shoulder_pan_joint": -0.321969,
+        "so101_shoulder_lift_joint": -0.248937,
+        "so101_elbow_flex_joint": -0.145688,
+        "so101_wrist_flex_joint": -0.065168,
+        "so101_wrist_roll_joint": -0.212774,
+        "so101_camera_tilt_joint": 0.222097
+      },
+      "translation_m": [
+        0.15066225774484351,
+        0.05743014503481357,
+        0.5445405416348591
+      ],
+      "rotation_xyzw": [
+        0.6359666891339651,
+        -0.726683779788216,
+        -0.2514607386144125,
+        0.06515022210390414
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": 0.393432,
+        "so101_shoulder_pan_joint": -1.166046,
+        "so101_shoulder_lift_joint": -0.018022,
+        "so101_elbow_flex_joint": -0.660488,
+        "so101_wrist_flex_joint": -0.860015,
+        "so101_wrist_roll_joint": 0.135739,
+        "so101_camera_tilt_joint": -0.115928
+      },
+      "translation_m": [
+        0.07830620614236108,
+        0.0993854819081252,
+        0.698124809943392
+      ],
+      "rotation_xyzw": [
+        -0.988825414088077,
+        0.03365849598872458,
+        -0.03890504740559506,
+        0.13992070392793263
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": 0.636217,
+        "so101_shoulder_pan_joint": -1.154372,
+        "so101_shoulder_lift_joint": 0.208476,
+        "so101_elbow_flex_joint": -1.102757,
+        "so101_wrist_flex_joint": 0.608252,
+        "so101_wrist_roll_joint": 0.259092,
+        "so101_camera_tilt_joint": 0.530301
+      },
+      "translation_m": [
+        0.05544263302839868,
+        0.08803728756097103,
+        0.6147641942518587
+      ],
+      "rotation_xyzw": [
+        0.9712840202667212,
+        0.15226969985540645,
+        0.10377328084520351,
+        0.150507131602069
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": -1.134485,
+        "so101_shoulder_pan_joint": 0.578487,
+        "so101_shoulder_lift_joint": -0.237599,
+        "so101_elbow_flex_joint": -1.139439,
+        "so101_wrist_flex_joint": -0.861916,
+        "so101_wrist_roll_joint": -0.284231,
+        "so101_camera_tilt_joint": 0.103661
+      },
+      "translation_m": [
+        -0.02501148235565178,
+        0.010083742653318241,
+        0.759374330688631
+      ],
+      "rotation_xyzw": [
+        -0.03712177948101812,
+        0.8203794714265276,
+        -0.5646110630015845,
+        0.08254601072320046
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": -0.060519,
+        "so101_shoulder_pan_joint": -0.642059,
+        "so101_shoulder_lift_joint": -0.728082,
+        "so101_elbow_flex_joint": 0.051762,
+        "so101_wrist_flex_joint": 0.642829,
+        "so101_wrist_roll_joint": -0.349637,
+        "so101_camera_tilt_joint": 0.050518
+      },
+      "translation_m": [
+        0.07987010341024356,
+        -0.005282842739284463,
+        0.4629443539063903
+      ],
+      "rotation_xyzw": [
+        0.703117014287394,
+        -0.476030547525016,
+        -0.3989908332580221,
+        0.3461613742442724
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": -0.192284,
+        "so101_shoulder_pan_joint": 0.184936,
+        "so101_shoulder_lift_joint": -0.323793,
+        "so101_elbow_flex_joint": -0.037456,
+        "so101_wrist_flex_joint": 0.870449,
+        "so101_wrist_roll_joint": 1.109296,
+        "so101_camera_tilt_joint": 0.247421
+      },
+      "translation_m": [
+        0.07212582490493104,
+        -0.07133406306768746,
+        0.476128505603126
+      ],
+      "rotation_xyzw": [
+        0.6613069090881378,
+        -0.34894372981518135,
+        -0.26475353354092485,
+        0.6089474623418326
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": 0.016413,
+        "so101_shoulder_pan_joint": 0.061199,
+        "so101_shoulder_lift_joint": -0.117906,
+        "so101_elbow_flex_joint": -1.178055,
+        "so101_wrist_flex_joint": 0.032689,
+        "so101_wrist_roll_joint": 0.343019,
+        "so101_camera_tilt_joint": -1.149293
+      },
+      "translation_m": [
+        -0.02764627563289478,
+        -0.05549964629512073,
+        0.6692947518809436
+      ],
+      "rotation_xyzw": [
+        0.5112834502374148,
+        -0.7000861113677693,
+        -0.2849591403672661,
+        0.408982833997258
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": 0.65578,
+        "so101_shoulder_pan_joint": -0.013066,
+        "so101_shoulder_lift_joint": -0.507893,
+        "so101_elbow_flex_joint": 0.565412,
+        "so101_wrist_flex_joint": 0.715268,
+        "so101_wrist_roll_joint": 0.06017,
+        "so101_camera_tilt_joint": 0.166064
+      },
+      "translation_m": [
+        0.05939131128487378,
+        -0.020079238085239072,
+        0.4155741469317054
+      ],
+      "rotation_xyzw": [
+        0.575961756160108,
+        -0.27947584297502015,
+        -0.33708014100801464,
+        0.6903175263401498
+      ]
+    },
+    {
+      "track": "head",
+      "camera": "head_right",
+      "positions": {
+        "torso_joint": 0.545887,
+        "so101_shoulder_pan_joint": -0.310445,
+        "so101_shoulder_lift_joint": 0.969202,
+        "so101_elbow_flex_joint": 0.999717,
+        "so101_wrist_flex_joint": 0.91787,
+        "so101_wrist_roll_joint": -0.73898,
+        "so101_camera_tilt_joint": 0.026584
+      },
+      "translation_m": [
+        -0.03561240664625471,
+        -0.0671353139611653,
+        0.6407127940699652
+      ],
+      "rotation_xyzw": [
+        -0.49184618497053445,
+        -0.20282027054800017,
+        -0.19813950954397055,
+        0.8232205068767673
+      ]
+    }
   ]
 }

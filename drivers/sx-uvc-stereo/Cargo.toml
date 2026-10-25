@@ -1,0 +1,25 @@
+[package]
+name = "sx-uvc-stereo"
+description = "Side-by-side UVC stereo cameras (Stereolabs ZED 2i) as media-plan FrameSources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+publish.workspace = true
+
+[features]
+# Open real devices through `nokhwa` (V4L2 on Linux, AVFoundation on macOS). Without it the
+# crate builds anywhere: the request, the mode table, the side-by-side split and the source
+# over any `Device`, which the tests drive with synthetic frames.
+capture = ["dep:nokhwa"]
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+nokhwa = { version = "=0.10.11", default-features = false, features = ["input-native"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

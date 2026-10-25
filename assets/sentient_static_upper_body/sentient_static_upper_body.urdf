@@ -4905,4 +4905,16 @@
     <child link="ZED_camera" />
     <origin xyz="-0.0466970279927614 -0.0431009139788017 0.0197280379020933" rpy="-1.57079110328921 6.29241013934381e-06 3.14158606607202" />
   </joint>
+  <link name="zed_left_optical" data-preview-kind="camera" data-preview-label="Head camera, left" data-frame-convention="camera_optical" />
+  <joint name="ZED_camera_to_zed_left_optical" type="fixed">
+    <origin xyz="0 0.06 0" rpy="-1.5707963267948966 0 -1.5707963267948966" />
+    <parent link="ZED_camera" />
+    <child link="zed_left_optical" />
+  </joint>
+  <link name="zed_right_optical" data-preview-kind="camera" data-preview-label="Head camera, right" data-frame-convention="camera_optical" />
+  <joint name="ZED_camera_to_zed_right_optical" type="fixed">
+    <origin xyz="0 -0.06 0" rpy="-1.5707963267948966 0 -1.5707963267948966" />
+    <parent link="ZED_camera" />
+    <child link="zed_right_optical" />
+  </joint>
 </robot>

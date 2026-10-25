@@ -39,8 +39,11 @@ a qualification. The right forearm yaw's entry contradicts itself: it flags
 ``direction_confirmed`` true while its ``calibration_note`` says "model pose/direction
 calibration still pending" (after an encoder zero saved 2026-10-22); its identity sign is kept
 as received until the hardware owner settles which holds. The grippers and the SO-101 neck
-have no motor entry, so they stay undocumented drives, and the ZED stays a frame, not a
-sensor.
+have no motor entry, so they stay undocumented drives.
+
+The neck carries a Stereolabs ZED 2i (:mod:`.zed`): its two eyes are the ``head_left`` and
+``head_right`` cameras on optical frames the rendering adds 60 mm either side of ``ZED_camera``,
+published as one side-by-side ``head`` track (:data:`STATIC_UPPER_BODY_RIG`).
 """
 
 from typing import Final
@@ -53,6 +56,7 @@ from ..compose import (
     MountKind,
     RootMount,
     body_component,
+    sensor_component,
 )
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import (
@@ -64,8 +68,10 @@ from ..layout import (
     DirectDrive,
 )
 from ..mechanical import Build, Module, ModuleId
+from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ._authoring import bounded_layout
+from .zed import EYES, optical_frame, zed_2i_eye
 
 _RECEIVED: Final = AssetProvenance(
     repository="https://github.com/Sentient-X/sx-embodiments",
@@ -76,8 +82,8 @@ _RECEIVED: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="6c8d85891f0c85fa8a79d5b8a80505d2f4963e0239006525c65e4831ab278fe0",
-    size_bytes=234759,
+    sha256="2d2dbf122e008ecb9d513670f902c43df8b1e851bdc78bd133c9491b54ceabb9",
+    size_bytes=235486,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -280,8 +286,15 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
         body_component(
             "neck", STATIC_UPPER_BODY_NECK, MountedOn("torso", "so101_base_link"), limb=Limb.HEAD
         ),
+        *(
+            sensor_component(f"head_{eye}", zed_2i_eye(eye), MountedOn("neck", optical_frame(eye)))
+            for eye in EYES
+        ),
     ),
 )
+
+#: The ZED's two eyes as one side-by-side track.
+STATIC_UPPER_BODY_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))
 
 STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-static-upper-body"),

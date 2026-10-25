@@ -59,6 +59,9 @@ pairing, a taken socket or an unknown one is a typed refusal (`InterfaceMismatch
 `SocketError`). Interfaces are an open registry, `MECHANICAL_INTERFACES`, like the camera models.
 A passive element is a module with no components (`rigid_module`, a solid with its mass and
 inertia), and `known/realsense.py` makes Intel's D405 and D435 descriptions camera modules.
+`known/zed.py` declares the Stereolabs ZED 2i's two eyes, which the static upper body's neck
+carries as its `head` stereo track, calibrated per serial from Stereolabs' factory record
+(`factory_intrinsics.zed_factory_calibration`).
 A module authored outside the registry (a plate drawn from photos and measurements) is admitted
 by `admit_module`: its plug and sockets name registered interfaces, each socket sits on a link of
 its description, and one carrying no part moves nothing and has a positive mass on every link
@@ -302,12 +305,15 @@ captures exactly that.
 | Crate | Devices | Vendor SDK it drives | Consumer |
 |---|---|---|---|
 | `sx-realsense` | Intel RealSense D405, D435, D435i (colour, and the infrared pair as one stereo track) | librealsense2 2.x through [`realsense-rust`](https://gitlab.com/tangram-vision/oss/realsense-rust) 1.3.0 (Apache-2.0), behind the `sdk` feature | the `sx` station's media publisher, over `sdk::open`, once the station opens sources from its media plan |
+| `sx-uvc-stereo` | Stereolabs ZED 2i (both eyes of one side-by-side UVC frame as one stereo track; the static upper body's head) | none: USB Video Class through [`nokhwa`](https://github.com/l1npengtul/nokhwa) 0.10.11 (Apache-2.0; V4L2 on Linux, AVFoundation on macOS), behind the `capture` feature; the ZED SDK (depth, IMU) is not used | the `sx` station's media publisher, over `capture::open`, once the station opens sources from its media plan |
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 # with librealsense2 installed (Homebrew's pkg-config file names a Linux libdir: add
 # RUSTFLAGS="-L /opt/homebrew/lib" on a Mac)
 cargo test -p sx-realsense --features sdk
+# on an attached ZED (macOS: the app running this needs camera access)
+cargo test -p sx-uvc-stereo --features capture --test hardware -- --ignored
 ```
 
 Nothing in this repository runs those checks: it has no workflow. The `sx` superproject's

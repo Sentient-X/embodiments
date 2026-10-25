@@ -27,6 +27,7 @@ CAMERA_MODELS: Final = {
         CameraModel(SensorModel("realsense_d435i"), "Intel RealSense D435i"),
         CameraModel(SensorModel("quest3_rgb"), "Meta Quest 3 passthrough RGB"),
         CameraModel(SensorModel("insta360_x5"), "Insta360 X5"),
+        CameraModel(SensorModel("zed_2i"), "Stereolabs ZED 2i"),
     )
 }
 
