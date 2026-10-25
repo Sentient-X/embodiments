@@ -6,7 +6,7 @@ scan speaks through its vendor crate's read-only port, which refuses any other p
 before the link sees a byte. The one part that can write a register or move a joint is
 `calibrate` ([below](#calibrating-a-feetech-bus)), and only under `--move`.
 
-```bash
+```text
 sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
 sx-commission commission --bindings <file> [--bindings <file>...] \
   [--instance <id> --pod <id> --revision <n>] [--json] [--write <dir>]
@@ -47,7 +47,7 @@ until a commissioning identity can name a channel.
 `sx-commission calibrate` replaces one-off scripts for STS3215 buses. Every run is repeatable
 and leaves the bus as it found it.
 
-```bash
+```text
 sx-commission calibrate read --bus <tty> [--ids 1-20] [--json]
 sx-commission calibrate gripper --bus <tty> --ids 1,2 [--move] [--widen <ticks>] \
   [--closed 1:low,2:high] [--json]
