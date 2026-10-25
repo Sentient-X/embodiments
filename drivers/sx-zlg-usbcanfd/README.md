@@ -86,3 +86,16 @@ send ids 0x09, 0x10–0x15, 0x18–0x1F, answering on send id + 0x20.
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
+
+## macOS
+
+On macOS the adapter enumerates and answers every standard read (device, configuration and
+string descriptors), but nothing configures it: no macOS driver matches a vendor-class device,
+and asking for configuration 1 from userspace fails with `kIOReturnNotResponding`
+(`0xe00002ed`). Measured on the USBCANFD-200U, serial A30F115DD0120A949B80, firmware bcdDevice
+0x0200, on 2026-10-25: through the robot's hub and on a direct port, with no other user client
+holding the device, through this crate (`nusb`) and through libusb alike. A port reset leaves
+the adapter off the bus until it is power-cycled, so the driver never resets it. The driver
+still selects the configuration when it finds the device unconfigured, which is all that other
+hosts need; on Linux the kernel configures the device at enumeration and the driver opens it
+over usbfs. Driving this adapter from macOS is therefore not supported; run on Linux.

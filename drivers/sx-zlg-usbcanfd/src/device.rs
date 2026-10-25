@@ -315,6 +315,25 @@ impl UsbCanFd {
     }
 }
 
+/// Select the device's one configuration when the host left it unconfigured. Linux configures
+/// a device when it enumerates; macOS leaves a vendor-class device that no driver matches
+/// unconfigured, so it has no interface to claim (see the README's macOS section). The adapter
+/// is never reset here: a port reset on macOS can drop it off the bus until it is power-cycled.
+fn configure(device: &nusb::Device) -> Result<(), String> {
+    if device.active_configuration().is_ok() {
+        return Ok(());
+    }
+    let value = device
+        .configurations()
+        .next()
+        .map(|configuration| configuration.configuration_value())
+        .ok_or_else(|| "the device declares no configuration".to_owned())?;
+    device
+        .set_configuration(value)
+        .wait()
+        .map_err(|error| format!("set configuration {value}: {error}"))
+}
+
 /// Probe an adapter (§1.3), claim its endpoints and start its I/O thread.
 fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
     let usb_serial = info.serial_number().map(str::to_owned);
@@ -326,6 +345,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         detail,
     };
     let device = info.open().wait().map_err(|error| usb(error.to_string()))?;
+    configure(&device).map_err(usb)?;
     let interface = device.claim_interface(0).wait().map_err(|error| {
         if error.kind() == nusb::ErrorKind::Busy {
             ZlgError::Busy {
