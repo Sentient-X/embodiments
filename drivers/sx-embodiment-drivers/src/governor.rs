@@ -542,6 +542,11 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.chain.stop_budget()
     }
 
+    /// A read moves nothing, so it passes through even while a fault is latched.
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        self.chain.read_positions().map_err(GovernorError::Chain)
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.chain.last_observed()
     }

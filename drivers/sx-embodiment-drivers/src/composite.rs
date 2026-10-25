@@ -148,6 +148,22 @@ where
         }
     }
 
+    /// Both chains' fresh reads, or `None` when either has none. Reading moves nothing.
+    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+        let Some(mut observed) = self.first.read_positions().map_err(CompositeError::First)? else {
+            return Ok(None);
+        };
+        let Some(second) = self
+            .second
+            .read_positions()
+            .map_err(CompositeError::Second)?
+        else {
+            return Ok(None);
+        };
+        observed.extend(second);
+        Ok(Some(observed))
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = self.first.last_observed()?;
         observed.extend(self.second.last_observed()?);
