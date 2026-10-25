@@ -30,6 +30,8 @@ pub struct Slow {
     pub torque_limit: u16,
 }
 
+/// How many times a state read is tried before a run stops on it.
+pub const READ_ATTEMPTS: usize = 3;
 /// How many times an undo is tried on a servo that does not answer.
 const UNDO_ATTEMPTS: usize = 3;
 /// The longest one wait goes without checking for a signal or the deadline.
@@ -112,6 +114,8 @@ pub struct Session<P: SerialPort> {
     budget: Duration,
     stop: Arc<AtomicUsize>,
     closed: bool,
+    /// One JSON line per read, goal and enable, when asked (`--trace`).
+    trace: Option<Box<dyn std::io::Write + Send>>,
 }
 
 impl<P: SerialPort> Session<P> {
@@ -126,6 +130,26 @@ impl<P: SerialPort> Session<P> {
             budget,
             stop,
             closed: false,
+            trace: None,
+        }
+    }
+
+    /// Write one JSON line per state read, goal, enable and torque-off to `trace`.
+    #[must_use]
+    pub fn with_trace(mut self, trace: Box<dyn std::io::Write + Send>) -> Self {
+        self.trace = Some(trace);
+        self
+    }
+
+    fn note(&mut self, event: &serde_json::Value) {
+        let seconds = self.started.elapsed().as_secs_f64();
+        if let Some(trace) = &mut self.trace {
+            let mut line = serde_json::json!({ "t": seconds });
+            if let (Some(line), Some(event)) = (line.as_object_mut(), event.as_object()) {
+                line.extend(event.clone());
+            }
+            let _ = writeln!(trace, "{line}");
+            let _ = trace.flush();
         }
     }
 
@@ -177,8 +201,34 @@ impl<P: SerialPort> Session<P> {
     /// # Errors
     ///
     /// The bus's failure or the servo's error flags.
+    /// A missed status packet is read again, up to [`READ_ATTEMPTS`] times: a read changes
+    /// nothing, and one lost reply on a half-duplex bus is not a reason to stop a sweep.
     pub fn state(&mut self, id: u8) -> Result<ServoState, CalibrateError> {
-        read::state(&mut self.ph, id)
+        let mut attempt = 1;
+        loop {
+            match read::state(&mut self.ph, id) {
+                Ok(state) => {
+                    self.note(&serde_json::json!({
+                        "id": id, "position": state.position, "speed": state.speed,
+                        "load": state.load,
+                    }));
+                    return Ok(state);
+                }
+                Err(error @ CalibrateError::Comm { .. }) => {
+                    self.note(&serde_json::json!({
+                        "id": id, "read_error": error.to_string(), "attempt": attempt,
+                    }));
+                    if attempt >= READ_ATTEMPTS {
+                        return Err(error);
+                    }
+                    attempt += 1;
+                }
+                Err(error) => {
+                    self.note(&serde_json::json!({ "id": id, "read_error": error.to_string() }));
+                    return Err(error);
+                }
+            }
+        }
     }
 
     /// # Errors
@@ -326,6 +376,7 @@ impl<P: SerialPort> Session<P> {
         }
         self.journal.persist()?;
         self.powered = Some((id, limits));
+        self.note(&serde_json::json!({ "id": id, "enable": at, "limits": [limits.0, limits.1] }));
         self.write(id, SMS_STS_TORQUE_ENABLE, 1, 1)?;
         let torque = read::register(&mut self.ph, id, SMS_STS_TORQUE_ENABLE, 1)?;
         if torque != 1 {
@@ -362,6 +413,7 @@ impl<P: SerialPort> Session<P> {
         if goal < i32::from(min) || goal > i32::from(max) {
             return Err(CalibrateError::OutsideLimits { id, goal, min, max });
         }
+        self.note(&serde_json::json!({ "id": id, "goal": goal }));
         self.write(
             id,
             SMS_STS_GOAL_POSITION_L,
@@ -438,7 +490,9 @@ impl<P: SerialPort> Session<P> {
             .collect();
         let mut limp = BTreeSet::new();
         for id in touched {
-            match self.torque_off(id) {
+            let off = self.torque_off(id);
+            self.note(&serde_json::json!({ "id": id, "torque_off": off.is_ok() }));
+            match off {
                 Ok(()) => {
                     limp.insert(id);
                     report.disabled.push(id);

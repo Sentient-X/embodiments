@@ -78,6 +78,11 @@ sx-commission calibrate --restore <journal>
   and turns torque off. It prints each position and the measured ticks per second at the given
   `--goal-speed`. That measurement settles the `Goal_Speed` unit, which
   `sx-feetech-serial`'s README records as unverified.
+- A sweep's end is one of `Load`, `NoProgress` (a stop), `Stuck` (it never moved a lead's
+  worth, so it proves no stop), `Limit` (its position limit, or a stall within a lead of it,
+  where the goal is clamped) and `MaxTravel`. A move that stops short without load holds where
+  it is; only a load stall backs off. A missed status packet is read again up to three times.
+  `--trace <file>` writes one JSON line per read, goal, enable and torque-off.
 - Without `--move`, `gripper` and `jog` are dry runs. They read through the scan's read-only
   port and print the plan. They create no session and no journal, so they cannot write.
 

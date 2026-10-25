@@ -470,3 +470,106 @@ fn a_finger_the_lowered_torque_cannot_move_is_stuck_not_at_a_stop() {
     assert!(!end.end.is_stop());
     assert!(session.close().is_clean());
 }
+
+/// A port that drops the next `n` replies to a read of `Present_Position`, as a half-duplex
+/// bus now and then loses a status packet.
+struct Lossy {
+    inner: RealTime,
+    drop_next: Arc<AtomicUsize>,
+}
+
+impl sx_embodiment_drivers::serial::SerialPort for Lossy {
+    fn clear_port(&mut self) -> std::io::Result<()> {
+        self.inner.clear_port()
+    }
+    fn write_port(&mut self, packet: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write_port(packet)?;
+        if packet[4] == 2 && packet[5] == 56 && self.drop_next.load(Ordering::SeqCst) > 0 {
+            self.drop_next.fetch_sub(1, Ordering::SeqCst);
+            self.inner.clear_port()?;
+        }
+        Ok(written)
+    }
+    fn read_port(&mut self, length: usize) -> std::io::Result<Vec<u8>> {
+        self.inner.read_port(length)
+    }
+    fn timeout(&self) -> Duration {
+        self.inner.timeout()
+    }
+    fn set_packet_timeout(&mut self, packet_length: usize) {
+        self.inner.set_packet_timeout(packet_length);
+    }
+    fn is_packet_timeout(&mut self) -> bool {
+        self.inner.is_packet_timeout()
+    }
+}
+
+#[test]
+fn a_lost_reply_is_read_again_and_three_in_a_row_stop_the_run() {
+    let bus = fingers();
+    let dir = journal_dir("lossy");
+    let drop_next = Arc::new(AtomicUsize::new(0));
+    let journal = Journal::create(&dir, BUS, 1_000_000).expect("journal");
+    let mut session = Session::new(
+        Lossy {
+            inner: RealTime::new(bus.clone()),
+            drop_next: Arc::clone(&drop_next),
+        },
+        journal,
+        Duration::from_secs(30),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    session.enable(1, &settings().slow).expect("enabled");
+    drop_next.store(2, Ordering::SeqCst);
+    assert_eq!(
+        session.state(1).expect("read on the third try").position,
+        2000
+    );
+    drop_next.store(3, Ordering::SeqCst);
+    assert!(matches!(
+        session.state(1),
+        Err(CalibrateError::Comm {
+            id: 1,
+            address: 56,
+            ..
+        })
+    ));
+    assert!(session.close().is_clean());
+    untouched(&bus, 1, (1000, 3000));
+}
+
+#[test]
+fn a_move_that_stops_short_without_load_holds_instead_of_backing_off() {
+    let bus = fingers();
+    let dir = journal_dir("short");
+    let mut session = session(&bus, &dir, Duration::from_secs(30));
+    let s = settings();
+    session.enable(1, &s.slow).expect("enabled");
+    // Friction a few ticks short of the target: goal writes are not taken any more.
+    bus.state().ignored.insert((1, 42));
+    let arrival = drive_to(&mut session, 1, 2010, &s.watch).expect("ended");
+    assert_eq!(arrival.end, End::NoProgress);
+    // Its last goal is where it stands, never backed off the way it came.
+    assert_eq!(goals(&bus, 1).last(), Some(&2000));
+    assert!(session.close().is_clean());
+}
+
+#[test]
+fn a_stall_a_few_ticks_short_of_the_limit_is_the_limit_not_a_stop() {
+    let bus = fingers();
+    let dir = journal_dir("near-limit");
+    let mut session = session(&bus, &dir, Duration::from_secs(30));
+    let s = settings();
+    session
+        .widen_limits(1, 1000, 2100)
+        .expect("narrowed for the test");
+    session.enable(1, &s.slow).expect("enabled");
+    // It moves until 2094, six ticks short of its limit, then a weak servo stops answering
+    // its small error: its goal writes are no longer taken.
+    let reached = drive_to(&mut session, 1, 2094, &s.watch).expect("moved");
+    assert_eq!(reached.end, End::Arrived);
+    bus.state().ignored.insert((1, 42));
+    let end = sweep(&mut session, 1, Direction::Increasing, &s).expect("ended");
+    assert_eq!(end.end, End::Limit(2100));
+    assert!(session.close().is_clean());
+}

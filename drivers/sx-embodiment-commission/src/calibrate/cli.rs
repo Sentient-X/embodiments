@@ -28,7 +28,8 @@ pub const USAGE: &str = "usage:
   Without --move, gripper and jog only read and print what they would do.
   motion settings (defaults): --goal-speed 20 --acceleration 5 --torque-limit 250
     --load-threshold 150 --lead 20 --backoff 30 --stall-ms 600 --min-progress 3
-    --max-travel 1500 --inset 10 --max-seconds 180 --baud 1000000 --journal-dir <dir>";
+    --max-travel 1500 --inset 10 --max-seconds 180 --baud 1000000 --journal-dir <dir>
+    --trace <file> (one JSON line per motion step)";
 
 /// The largest nudge `jog` takes, ticks (about 35 degrees).
 pub const MAX_JOG: i32 = 400;
@@ -57,6 +58,8 @@ pub struct Args {
     pub inset: u16,
     pub max_seconds: u64,
     pub journal_dir: PathBuf,
+    /// One JSON line per motion step, for a moving run.
+    pub trace: Option<PathBuf>,
 }
 
 /// The settings a gripper sweep starts from: slow, weak and quick to give up.
@@ -149,6 +152,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         inset: 10,
         max_seconds: 180,
         journal_dir: Journal::default_dir(),
+        trace: None,
     };
     let (mut id, mut delta, mut restore) = (None, None, None);
     while let Some(flag) = words.next() {
@@ -166,6 +170,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--closed" => args.closed = closed(value()?)?,
             "--restore" => restore = Some(PathBuf::from(value()?)),
             "--journal-dir" => args.journal_dir = PathBuf::from(value()?),
+            "--trace" => args.trace = Some(PathBuf::from(value()?)),
             "--goal-speed" => sweep.slow.goal_speed = number(flag, value()?)?,
             "--acceleration" => sweep.slow.acceleration = number(flag, value()?)?,
             "--torque-limit" => sweep.slow.torque_limit = number(flag, value()?)?,
@@ -420,6 +425,18 @@ fn moving<P: SerialPort>(
         Duration::from_secs(args.max_seconds),
         Arc::clone(stop),
     );
+    if let Some(path) = &args.trace {
+        match std::fs::File::create(path) {
+            Ok(file) => session = session.with_trace(Box::new(file)),
+            Err(error) => {
+                // Nothing is powered yet; the session closes on the way out.
+                return Err(CalibrateError::Refused(format!(
+                    "trace {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
     let result = match args.mode {
         Mode::Jog { id, delta } => {
             jog(&mut session, id, delta, &args.sweep.slow, &args.sweep.watch).map(|jog| {

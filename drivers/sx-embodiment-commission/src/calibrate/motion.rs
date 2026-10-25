@@ -189,7 +189,11 @@ pub fn sweep<P: SerialPort>(
         } else if (at - origin).abs() >= i32::from(settings.max_travel) {
             Some(End::MaxTravel)
         } else if mark_at.elapsed() >= watch.stall_window {
-            if sign * (farthest - origin) < i32::from(settings.lead) {
+            if sign * (i32::from(limit) - at) < i32::from(settings.lead) {
+                // Within a lead of its limit the goal is clamped there, and a servo a few
+                // ticks short of a goal may not move at all: that is the limit, not a stop.
+                Some(End::Limit(limit))
+            } else if sign * (farthest - origin) < i32::from(settings.lead) {
                 Some(End::Stuck)
             } else {
                 Some(End::NoProgress)
@@ -217,7 +221,7 @@ pub fn sweep<P: SerialPort>(
 }
 
 /// Move the powered servo `id` to `target` at its own `Goal_Speed`, watching it as a sweep
-/// does: at a stall it backs off and the move ends there.
+/// does: at a load stall it backs off, at no progress it holds, and the move ends there.
 ///
 /// # Errors
 ///
@@ -257,7 +261,15 @@ pub fn drive_to<P: SerialPort>(
         };
         if let Some(end) = end {
             let elapsed = started.elapsed();
-            back_off(session, id, at, sign, watch)?;
+            // Only a load stall pushes against something to back away from. A move that stops
+            // advancing without load (friction a few ticks short) holds where it is: backing
+            // off would send it the other way, toward wherever it came from.
+            if matches!(end, End::Load(_)) {
+                back_off(session, id, at, sign, watch)?;
+            } else {
+                let limits = session.powered_limits(id)?;
+                session.goal(id, clamp_to(at, limits))?;
+            }
             return Ok(Arrival {
                 from,
                 at,
@@ -265,6 +277,17 @@ pub fn drive_to<P: SerialPort>(
                 end,
             });
         }
+    }
+}
+
+/// Whether a move back to where a finger started got there: arrived, or stopped by friction
+/// within `backoff` ticks of it with no load stall. Where it rests between sweeps needs no
+/// precision; it only must not be left against a stop.
+fn returned_to(arrival: &Arrival, start: i32, watch: &Watch) -> bool {
+    match arrival.end {
+        End::Arrived => true,
+        End::NoProgress | End::Stuck => (arrival.at - start).abs() <= i32::from(watch.backoff),
+        _ => false,
     }
 }
 
@@ -366,7 +389,7 @@ pub fn sweep_finger<P: SerialPort>(
     let limits = session.powered_limits(id)?;
     let low = sweep(session, id, Direction::Decreasing, settings)?;
     let back = drive_to(session, id, start, &settings.watch)?;
-    if back.end != End::Arrived {
+    if !returned_to(&back, start, &settings.watch) {
         return Err(CalibrateError::Refused(format!(
             "servo {id} stopped at {} on its way back to {start}",
             back.at
@@ -374,7 +397,7 @@ pub fn sweep_finger<P: SerialPort>(
     }
     let high = sweep(session, id, Direction::Increasing, settings)?;
     let returned = drive_to(session, id, start, &settings.watch)?;
-    if returned.end != End::Arrived {
+    if !returned_to(&returned, start, &settings.watch) {
         return Err(CalibrateError::Refused(format!(
             "servo {id} stopped at {} on its way back to {start}",
             returned.at
