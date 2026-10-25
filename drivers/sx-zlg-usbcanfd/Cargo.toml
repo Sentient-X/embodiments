@@ -1,0 +1,24 @@
+[package]
+name = "sx-zlg-usbcanfd"
+description = "ZLG USBCANFD-200U/400U CAN-FD adapters as CanPorts, in userspace over USB, implemented clean-room from a protocol specification"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The bench's SocketCAN transport, so one binary measures both paths on Linux.
+socketcan = ["dep:sx-socketcan"]
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Pure-Rust USB: IOKit on macOS, usbfs on Linux; no libusb, no unsafe in this crate.
+nusb = "0.2"
+sx-socketcan = { path = "../sx-socketcan", optional = true }
+
+[lints]
+workspace = true
