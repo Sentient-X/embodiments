@@ -5,6 +5,7 @@ members = [
     "drivers/sx-damiao-can",
     "drivers/sx-feetech-serial",
     "drivers/sx-realsense",
+    "drivers/sx-uvc-stereo",
     "drivers/sx-socketcan",
     "drivers/sx-embodiment-bodies",
     "drivers/sx-embodiment-commission",

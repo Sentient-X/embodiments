@@ -24,7 +24,9 @@ holds, for each view of those plans that rides moving joints, its mount pose at 
 positions as :func:`sx_embodiments.media.mount_pose_at` answers, which the crate's evaluation of
 the rendered chain is held equal to. ``tests/fixtures/media-plans.json`` in ``sx-realsense``
 holds the humanoid's head D435 planned with its imagers placed by unit, as colour and as the
-infrared-pair body option. ``tests/test_driver_bindings.py`` runs the same check.
+infrared-pair body option, and ``tests/fixtures/media-plans.json`` in ``sx-uvc-stereo`` holds the
+static upper body's ZED 2i placed by its serial with the factory calibration Stereolabs publishes
+for it (``zed-2i-30371653.conf`` beside it). ``tests/test_driver_bindings.py`` runs the same check.
 """
 
 import argparse
@@ -42,6 +44,7 @@ from sx_embodiments.calibration import (
 from sx_embodiments.composition import compose_build
 from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.errors import UnknownEmbodimentError
+from sx_embodiments.factory_intrinsics import zed_factory_calibration
 from sx_embodiments.instance import (
     RobotInstance,
     Slot,
@@ -54,6 +57,8 @@ from sx_embodiments.known.humanoid import (
     HEAD_INFRARED_RIG,
     SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
 )
+from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
+from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
 from sx_embodiments.layout import ActuatorBus, ActuatorModel
 from sx_embodiments.media import (
     NO_RIG,
@@ -82,6 +87,10 @@ MEDIA = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-plans.json"
 REALSENSE_MEDIA = ROOT / "drivers/sx-realsense/tests/fixtures/media-plans.json"
 #: A placeholder device serial for the humanoid's head D435.
 HEAD_D435 = "923322071108"
+UVC_MEDIA = ROOT / "drivers/sx-uvc-stereo/tests/fixtures/media-plans.json"
+#: The static upper body's ZED 2i, and the factory record Stereolabs publishes for its serial.
+HEAD_ZED = "30371653"
+ZED_FACTORY = ROOT / f"drivers/sx-uvc-stereo/tests/fixtures/zed-2i-{HEAD_ZED}.conf"
 POSES = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-poses.json"
 #: Joint positions per moving view the chain evaluation is checked at.
 POSE_SAMPLES = 8
@@ -131,8 +140,7 @@ def drives() -> str:
 
 def media() -> str:
     """The Quest head as one stereo track and as two, the humanoid, which declares no
-    microphone, and the static upper body, which registers no camera yet: its ZED head camera's
-    model is unknown, so it plans no track rather than a guessed one."""
+    microphone, and the static upper body, whose ZED 2i is one stereo head track."""
     quest = embodiments["quest-ego"]
     humanoid = embodiments["sentient-humanoid-upper-body"]
     static = registered("sentient-static-upper-body")
@@ -144,7 +152,7 @@ def media() -> str:
         "quest-ego-stereo": plan(quest, QUEST_RIG),
         "quest-ego-mono": plan(quest),
         "sentient-humanoid-upper-body": plan(humanoid),
-        "sentient-static-upper-body": plan(static),
+        "sentient-static-upper-body": plan(static, STATIC_UPPER_BODY_RIG),
     }
     return json.dumps(document, indent=2) + "\n"
 
@@ -177,16 +185,45 @@ def realsense_media() -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def uvc_media() -> str:
+    """The static upper body's ZED 2i placed by serial, its eyes calibrated by the factory."""
+    body = registered("sentient-static-upper-body")
+    factory = zed_factory_calibration(
+        ZED_FACTORY.read_bytes(),
+        HEAD_ZED,
+        ZED_2I_EYE_WIDTH,
+        ZED_2I_EYE_HEIGHT,
+        (optical_frame("left"), optical_frame("right")),
+    )
+    calibrations = (factory.left, factory.right)
+    instance = RobotInstance.of(
+        body.id,
+        {Slot(SlotKind.CAMERA, f"head_{eye}"): UnitSerial(f"{HEAD_ZED}/{eye}") for eye in EYES},
+        calibrations,
+    )
+    document = {
+        "static-upper-body-head": media_document(
+            body, resolve(body, instance, calibrations), STATIC_UPPER_BODY_RIG
+        ),
+    }
+    return json.dumps(document, indent=2) + "\n"
+
+
 def poses() -> str:
     """Each moving view's mount pose at seeded positions, from the description itself."""
     import random
 
     generator = random.Random(20261017)
     document: dict[str, object] = {}
-    for key, body in (
-        ("sentient-humanoid-upper-body", embodiments["sentient-humanoid-upper-body"]),
+    for key, body, rig in (
+        ("sentient-humanoid-upper-body", embodiments["sentient-humanoid-upper-body"], NO_RIG),
+        (
+            "sentient-static-upper-body",
+            registered("sentient-static-upper-body"),
+            STATIC_UPPER_BODY_RIG,
+        ),
     ):
-        plan = media_document(body, resolve(body, nominal_instance(body), ()))
+        plan = media_document(body, resolve(body, nominal_instance(body), ()), rig)
         samples: list[object] = []
         for track in plan["tracks"]:  # type: ignore[union-attr]
             for view in track["views"]:  # type: ignore[index]
@@ -221,6 +258,7 @@ def rendered() -> dict[Path, str]:
     files[DRIVES] = drives()
     files[MEDIA] = media()
     files[REALSENSE_MEDIA] = realsense_media()
+    files[UVC_MEDIA] = uvc_media()
     files[POSES] = poses()
     return files
 

@@ -24,6 +24,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import ConvexHull  # pyright: ignore[reportMissingTypeStubs]  # no stubs
 
+from sx_embodiments.assembly import Pose
+from sx_embodiments.known.zed import EYES, OPTICAL_RPY, eye_offset, optical_frame
+
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "assets/sentient_static_upper_body"
 SOURCE = ASSET / "source/received.urdf"
@@ -32,6 +35,8 @@ SOURCE_MESH_PREFIX = (
     # The received package's model folder; incidental, not the robot's name.
     "package://humanoid_pkg/models/allisa_current/meshes_preview/"
 )
+#: The neck's camera frame, a ZED 2i in Stereolabs' ROS convention (x out of the lenses, y left).
+ZED_FRAME = "ZED_camera"
 #: Driver configuration inside the description; the body's actuator bindings carry it.
 MOTOR_TAGS = ("motor_configuration", "motor_parameters")
 
@@ -188,6 +193,26 @@ def render() -> dict[Path, bytes]:
             path = ASSET / relpath
             _write_stl(path, vertices, faces)
             outputs[path] = path.read_bytes()
+
+    # The ZED's two eyes as optical frames on its frame, where the declared cameras mount.
+    if robot.find(f"link[@name='{ZED_FRAME}']") is None:
+        raise ValueError(f"the source no longer carries {ZED_FRAME}")
+    for eye in EYES:
+        name = optical_frame(eye)
+        ET.SubElement(
+            robot,
+            "link",
+            {
+                "name": name,
+                "data-preview-kind": "camera",
+                "data-preview-label": f"Head camera, {eye}",
+                "data-frame-convention": "camera_optical",
+            },
+        )
+        joint = ET.SubElement(robot, "joint", {"name": f"{ZED_FRAME}_to_{name}", "type": "fixed"})
+        ET.SubElement(joint, "origin", Pose((0.0, eye_offset(eye), 0.0), OPTICAL_RPY).origin())
+        ET.SubElement(joint, "parent", {"link": ZED_FRAME})
+        ET.SubElement(joint, "child", {"link": name})
 
     ET.indent(robot, space="  ")
     xml = '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(robot, encoding="unicode")

@@ -250,8 +250,8 @@
   "sentient-static-upper-body": {
     "nominal": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "8ff56d13ef8b0a82cd93068f35dc6cc9b9e7b2447d11139e30847eddcd996255",
-      "instance": "fe0ca3d3e56cbcf0c78e779972f5547584b9794bb8b2be87e6a61c41227aad17",
+      "embodiment": "cdee7a4131a780d48fcd866a631949b9c3eaf0f5ffe3fbf287b7de5107eaa63b",
+      "instance": "171329ceef4d93ee39e4e56b7e224b32575d2625fc6257b3d3695527759363a6",
       "joints": [
         {
           "joint": "torso_joint",
@@ -347,8 +347,8 @@
     },
     "measured": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "8ff56d13ef8b0a82cd93068f35dc6cc9b9e7b2447d11139e30847eddcd996255",
-      "instance": "24b1e9639e879f5763b1661f381891f663a290fc86da1d9283a57ae22a30325b",
+      "embodiment": "cdee7a4131a780d48fcd866a631949b9c3eaf0f5ffe3fbf287b7de5107eaa63b",
+      "instance": "a0c3fa8b1c382cce72650558be09fbcda49fc797facfa0bfc34b0052e982e10f",
       "joints": [
         {
           "joint": "torso_joint",
