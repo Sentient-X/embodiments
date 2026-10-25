@@ -1,0 +1,48 @@
+//! The Sentient static upper body's fifteen directly driven Damiao motors as one chain.
+//!
+//! Reference: `assets/sentient_static_upper_body/source/received.urdf` in this repository, the
+//! description as received on 2026-10-25 (maintainer `suprajs`). Its `<motor_configuration>`
+//! puts every motor on `can1` (Linux `SocketCAN`) at 50 Hz, and its `<motor_parameters>` give
+//! each joint's send id, answer id (send id + 0x20) and MIT `kp` and `kd`. Those gains are that
+//! file's driver's, not a qualification: whole-body qualification is the station's bench work.
+//! The same file's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad with a
+//! 0.5 s feedback and 0.75 s heartbeat timeout; this crate does not apply those, the station's
+//! supervision does.
+//!
+//! The axes and their bindings are the registry's (`sx_embodiments/known/static_upper_body.py`,
+//! a development body), read from `bindings/sentient-static-upper-body.json`, which
+//! `tools/render_driver_bindings.py` renders: the torso yaw and both seven-joint arms, identity
+//! sign, every commandable range the confirmed limits. The grippers and the SO-101 neck have
+//! no motor entry and are in no chain. No bound, address, model, sign or reduction is spelled
+//! here; what is added is controller configuration, keyed by joint name.
+
+use crate::body::{DamiaoBody, JointGains};
+
+/// The registry's static upper-body axes, rendered.
+pub const BINDINGS: &str = include_str!("../bindings/sentient-static-upper-body.json");
+
+/// The received motor table's answer ids: `recv_id = send_id + 0x20`.
+pub const MASTER_ID_OFFSET: u16 = 0x20;
+
+/// The torso yaw and both arms on one bus.
+pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
+    bindings: BINDINGS,
+    master_id_offset: MASTER_ID_OFFSET,
+    joints: &[
+        JointGains::new("torso_joint", 40.0, 1.0),
+        JointGains::new("left_shoulder_pitch_joint", 60.984, 1.091),
+        JointGains::new("left_shoulder_roll_joint", 60.984, 1.091),
+        JointGains::new("left_upper_arm_yaw_joint", 24.0, 5.0),
+        JointGains::new("left_elbow_pitch_joint", 30.492, 4.655),
+        JointGains::new("left_forearm_yaw_joint", 29.04, 4.75),
+        JointGains::new("left_wrist_pitch_joint", 20.0, 1.0),
+        JointGains::new("left_wrist_roll_joint", 20.0, 1.0),
+        JointGains::new("right_shoulder_pitch_joint", 60.984, 1.091),
+        JointGains::new("right_shoulder_roll_joint", 42.0, 0.98),
+        JointGains::new("right_upper_arm_yaw_joint", 30.492, 4.655),
+        JointGains::new("right_elbow_pitch_joint", 30.492, 4.655),
+        JointGains::new("right_forearm_yaw_joint", 30.492, 4.655),
+        JointGains::new("right_wrist_pitch_joint", 20.0, 1.0),
+        JointGains::new("right_wrist_roll_joint", 20.0, 1.0),
+    ],
+};

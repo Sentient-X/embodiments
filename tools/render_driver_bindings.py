@@ -4,13 +4,16 @@
     python tools/render_driver_bindings.py           # rewrite every bindings file
     python tools/render_driver_bindings.py --check   # exit 1 when one disagrees
 
-A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601-DM and
-humanoid upper body, ``sx-feetech-serial``'s SO-101) embeds that body's document, rendered here
-from the direct-driven coordinates of ``robot.state`` in native state order (a joint driven any
-other way, such as the humanoid's waist linkage, is outside every driver's chain), and parses it
-with ``sx_embodiment_drivers::BodyBindings``: no bound,
-address, model, sign or reduction is spelled in Rust. ``vocabulary.json`` is the registry's
-``ActuatorModel`` and ``ActuatorBus``, which the driver crate's own lists are held equal to.
+A driver crate under ``drivers/`` that composes a known body (``sx-damiao-can``'s B601-DM,
+humanoid upper body and static upper body, ``sx-feetech-serial``'s SO-101) embeds that body's
+document, rendered here from the direct-driven coordinates of ``robot.state`` in native state
+order (a joint driven any other way, such as the humanoid's waist linkage, is outside every
+driver's chain), and parses it with ``sx_embodiment_drivers::BodyBindings``: no bound,
+address, model, sign or reduction is spelled in Rust. A body is looked up in ``embodiments`` and
+then in ``development_embodiments``, so a body still under construction (the static upper body)
+is driven from the same registry facts its promotion will keep. ``vocabulary.json`` is the
+registry's ``ActuatorModel`` and ``ActuatorBus``, which the driver crate's own lists are held
+equal to.
 ``tests/fixtures/drives.json`` in ``sx-damiao-can`` holds, for each Damiao body, the
 ``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
 its nominal instance and for one with a measured, reversed first joint, which the crate's
@@ -29,7 +32,7 @@ import json
 import sys
 from pathlib import Path
 
-from sx_embodiments import embodiments
+from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.calibration import (
     CalibrationMethod,
     JointUnitCalibration,
@@ -38,6 +41,7 @@ from sx_embodiments.calibration import (
 )
 from sx_embodiments.composition import compose_build
 from sx_embodiments.embodiment import Embodiment
+from sx_embodiments.errors import UnknownEmbodimentError
 from sx_embodiments.instance import (
     RobotInstance,
     Slot,
@@ -67,6 +71,9 @@ BINDINGS: dict[Path, str] = {
     ROOT / "drivers/sx-damiao-can/bindings/sentient-humanoid-upper-body.json": (
         "sentient-humanoid-upper-body"
     ),
+    ROOT / "drivers/sx-damiao-can/bindings/sentient-static-upper-body.json": (
+        "sentient-static-upper-body"
+    ),
     ROOT / "drivers/sx-feetech-serial/bindings/so101.json": "so101",
 }
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
@@ -84,7 +91,15 @@ QUEST_RIG = MediaRig(
     microphones=(MicrophoneSpec("head_mic", "quest3_microphone", 48_000, 1, "quest3s_head"),),
 )
 #: The Damiao bodies whose openers take an instance's drive.
-DAMIAO_BODIES = ("b601-dm", "sentient-humanoid-upper-body")
+DAMIAO_BODIES = ("b601-dm", "sentient-humanoid-upper-body", "sentient-static-upper-body")
+
+
+def registered(name: str) -> Embodiment:
+    """A registered body, executable or still in development."""
+    try:
+        return embodiments[name]
+    except UnknownEmbodimentError:
+        return development_embodiments[name]
 
 
 def vocabulary() -> str:
@@ -99,7 +114,7 @@ def drives() -> str:
     """Each Damiao body's nominal drive, and one with its first driven joint measured."""
     document: dict[str, object] = {}
     for name in DAMIAO_BODIES:
-        body = embodiments[name]
+        body = registered(name)
         first = next(c for c in body.state.coordinates if c.axis.actuator is not None)
         slot = Slot(SlotKind.ACTUATOR, f"{first.instance}/{first.axis.name}")
         unit = UnitSerial(f"{name}-unit-1")
@@ -207,7 +222,7 @@ def rendered() -> dict[Path, str]:
 
 
 def render(name: str) -> str:
-    robot = embodiments[name]
+    robot = registered(name)
     axes: list[dict[str, object]] = []
     for coordinate in robot.state.coordinates:
         binding = coordinate.axis.actuator

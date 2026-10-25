@@ -1,0 +1,26 @@
+[package]
+name = "sx-socketcan"
+description = "Linux SocketCAN interfaces as CanPorts, for any vendor's CAN-bus driver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+
+# The raw socket calls: libc is already in the lock (serialport's), no new crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# The workspace forbids unsafe code; this crate is the one place a raw CAN socket is opened,
+# so it denies unsafe everywhere but its one socket module, where every block says why it is
+# sound.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+undocumented_unsafe_blocks = "deny"

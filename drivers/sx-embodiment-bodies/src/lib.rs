@@ -4,10 +4,14 @@
 //! A station is one robot instance. The registry renders that instance's drive
 //! (`sx.instance-drive/v1`, [`InstanceDrive`]), and commissioning records which physical bridge
 //! carries each of the body's buses ([`Commissioning`], `sx.station-commissioning/v1`): a port
-//! name the body's opener declares ([`ports`]) mapped to the bridge's USB serial number. [`open`]
-//! picks the opener by the body the drive was resolved for, opens each named bridge once
-//! through a [`PortSource`] (two port names on one serial share one bridge, as the B601-DM's
-//! arm and gripper can), and returns one [`Body`], an [`ActuatorChain`] the station drives
+//! name the body's opener declares ([`ports`]) mapped to the bridge's identity: its USB serial
+//! number, or for a CAN controller on the board itself its interface name. [`open`] picks the
+//! opener by the body the drive was resolved for: the B601-DM's, or a [`DamiaoBody`], any
+//! single-bus Damiao body opened from rendered bindings and gains alone (the humanoid and
+//! static upper bodies). It opens each named bridge once through a [`PortSource`] (two port
+//! names on one serial share one bridge, as the B601-DM's arm and gripper can): `usb_serial`
+//! (feature `usb-serial`) for Damiao USB2CAN bridges, `socketcan` (feature `socketcan`, Linux)
+//! for `SocketCAN` interfaces. It returns one [`Body`], an [`ActuatorChain`] the station drives
 //! without naming a vendor, a joint or a limit.
 //!
 //! Every mismatch between the drive, the commissioning and the opener is refused before any
@@ -23,8 +27,8 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use sx_damiao_can::b601::{self, B601};
+use sx_damiao_can::body::DamiaoBody;
 use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, MotorFeedback};
-use sx_damiao_can::humanoid;
 use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::{
     ActuatorChain, BodyBindings, BodyError, BoundAxis, ChainError, ChainFailure, CommandRange,
@@ -32,6 +36,8 @@ use sx_embodiment_drivers::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "socketcan")]
+pub mod socketcan;
 #[cfg(feature = "usb-serial")]
 pub mod usb_serial;
 
@@ -49,7 +55,8 @@ pub struct Commissioning {
     pub instance: String,
     pub pod_id: String,
     pub pod_revision: u32,
-    /// Port name, as the body's opener declares it, to the bridge's USB serial number.
+    /// Port name, as the body's opener declares it, to the bridge's USB serial number (or a
+    /// board CAN interface's name, which has none).
     pub ports: BTreeMap<String, String>,
 }
 
@@ -108,7 +115,8 @@ impl Commissioning {
 
 /// Opens the bridge with a USB serial number.
 pub trait PortSource {
-    /// Open the bridge whose USB serial number is `serial`.
+    /// Open the bridge whose USB serial number is `serial` (for `SocketCAN`, a board
+    /// interface without one is named by its interface name).
     ///
     /// # Errors
     ///
@@ -117,29 +125,21 @@ pub trait PortSource {
     fn open(&mut self, serial: &str) -> Result<Port, OpenError>;
 }
 
-/// A body this crate composes, by the registry name its bindings carry.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// A body this crate composes, by the content id its bindings carry.
+#[derive(Clone, Copy, Debug)]
 enum Opener {
     B601,
-    HumanoidUpperBody,
+    /// A Damiao body on one bus, opened from its rendered bindings and gains.
+    Bus(&'static DamiaoBody),
 }
 
 impl Opener {
-    const ALL: [Self; 2] = [Self::B601, Self::HumanoidUpperBody];
-
-    const fn bindings(self) -> &'static str {
-        match self {
-            Self::B601 => b601::BINDINGS,
-            Self::HumanoidUpperBody => humanoid::BINDINGS,
-        }
-    }
-
     const fn ports(self) -> &'static [&'static str] {
         match self {
             // Seeed's controller puts the arm and the gripper behind their own bridge; one
             // bridge carrying both is commissioned as the same serial under both names.
             Self::B601 => &["arm", "gripper"],
-            Self::HumanoidUpperBody => &["can"],
+            Self::Bus(_) => &["can"],
         }
     }
 
@@ -148,18 +148,18 @@ impl Opener {
     fn check(self, drive: &InstanceDrive) -> Result<(), OpenError> {
         match self {
             Self::B601 => b601::b601(drive).map(|_| ()),
-            Self::HumanoidUpperBody => humanoid::humanoid_upper_body(drive).map(|_| ()),
+            Self::Bus(body) => body.axes(drive).map(|_| ()),
         }
         .map_err(OpenError::from)
     }
 
     fn of(drive: &InstanceDrive) -> Result<Self, OpenError> {
-        for opener in Self::ALL {
-            if BodyBindings::parse(opener.bindings())?.id == drive.embodiment {
-                return Ok(opener);
-            }
+        if BodyBindings::parse(b601::BINDINGS)?.id == drive.embodiment {
+            return Ok(Self::B601);
         }
-        Err(OpenError::Body(drive.embodiment.clone()))
+        DamiaoBody::of(&drive.embodiment)?
+            .map(Self::Bus)
+            .ok_or_else(|| OpenError::Body(drive.embodiment.clone()))
     }
 }
 
@@ -177,7 +177,8 @@ pub fn ports(drive: &InstanceDrive) -> Result<&'static [&'static str], OpenError
 #[allow(clippy::large_enum_variant)]
 pub enum Body {
     B601(B601<Port, Port>),
-    HumanoidUpperBody(DamiaoChain<Port>),
+    /// A Damiao body on one bus: the humanoid upper body, the static upper body.
+    DamiaoBus(DamiaoChain<Port>),
 }
 
 /// Open `drive`'s body on the bridges `commissioning` names, through `source`.
@@ -239,9 +240,7 @@ pub fn open(
     let mut next = || taken.next().ok_or(OpenError::MissingPort(String::new()));
     Ok(match opener {
         Opener::B601 => Body::B601(b601::open_b601(next()?, next()?, drive)?),
-        Opener::HumanoidUpperBody => {
-            Body::HumanoidUpperBody(humanoid::open_humanoid_upper_body(next()?, drive)?)
-        }
+        Opener::Bus(body) => Body::DamiaoBus(body.open(next()?, drive)?),
     })
 }
 
@@ -293,42 +292,42 @@ impl ActuatorChain for Body {
     fn axes(&self) -> &[BoundAxis] {
         match self {
             Self::B601(chain) => chain.axes(),
-            Self::HumanoidUpperBody(chain) => chain.axes(),
+            Self::DamiaoBus(chain) => chain.axes(),
         }
     }
 
     fn commandable(&self) -> &[CommandRange] {
         match self {
             Self::B601(chain) => chain.commandable(),
-            Self::HumanoidUpperBody(chain) => chain.commandable(),
+            Self::DamiaoBus(chain) => chain.commandable(),
         }
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
         Ok(match self {
             Self::B601(chain) => chain.command(joints)?,
-            Self::HumanoidUpperBody(chain) => chain.command(joints)?,
+            Self::DamiaoBus(chain) => chain.command(joints)?,
         })
     }
 
     fn stop(&mut self) -> StopReport {
         match self {
             Self::B601(chain) => chain.stop(),
-            Self::HumanoidUpperBody(chain) => chain.stop(),
+            Self::DamiaoBus(chain) => chain.stop(),
         }
     }
 
     fn stop_budget(&self) -> Duration {
         match self {
             Self::B601(chain) => chain.stop_budget(),
-            Self::HumanoidUpperBody(chain) => chain.stop_budget(),
+            Self::DamiaoBus(chain) => chain.stop_budget(),
         }
     }
 
     fn clear_faults(&mut self) {
         match self {
             Self::B601(chain) => chain.clear_faults(),
-            Self::HumanoidUpperBody(chain) => chain.clear_faults(),
+            Self::DamiaoBus(chain) => chain.clear_faults(),
         }
     }
 }
