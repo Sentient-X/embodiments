@@ -40,7 +40,8 @@
 //!   command's receipt claims only a dispatch. Right after it, one SYNC READ of every servo's
 //!   `Present_Position` (`GroupSyncRead` at `SMS_STS_PRESENT_POSITION_L`, two bytes, as
 //!   `sms_sts/sync_read.py` reads it) is the receipt's observed joints, in native state order;
-//!   a servo that misses it is reported `NaN`, so a tracking check fails closed.
+//!   a servo that misses it is reported `NaN`, so a tracking check fails closed. The read
+//!   covers `Torque_Enable` (40) through `Present_Position` (56..=57) in one range.
 //! - Stop disables as `disable_torque` does (`feetech.py:291-294`): per servo, `Torque_Enable`
 //!   0, then `Lock` 0 (`sms_sts.unLockEprom`), each acknowledged, on every servo whatever an
 //!   earlier one answered. Then it reads every servo's `Torque_Enable` back
@@ -76,7 +77,13 @@
 //!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
 //!   where it rests, is approached at the limit: [`ActuatorChain::approach_speed_limited`]
 //!   reports it. A servo without one (the SO-101 follower's) keeps `LeRobot`'s registers and
-//!   reports `false`, so a governor refuses to move it from outside its range.
+//!   reports `false`, so a governor refuses to move it from outside its range. Those registers
+//!   are RAM: a servo whose power cycles while its USB link stays up comes back with
+//!   `Goal_Speed` 0 (full speed) and torque off. So the limit is never trusted for the
+//!   chain's life: every enable reads it back (and rewrites and reads again where it differs,
+//!   refusing a servo that still does not hold it), and every command's SYNC READ covers
+//!   `Torque_Enable` through `Present_Position`, so a servo found limp or unlimited is `NaN`
+//!   and no longer approach-limited, and the chain enables afresh on the next command.
 //! - **Enabling never drives toward a stale goal.** Before `Torque_Enable` 1, each servo's
 //!   `Present_Position` is read and written to its `Goal_Position`, so the instant torque comes
 //!   on it holds where it rests; `LeRobot` enables with whatever goal the register last held.
@@ -143,6 +150,9 @@ const GOAL_POSITION_MAGNITUDE: f64 = 32_767.0;
 /// Exchanges a stop makes per servo: torque off, unlock, the torque read-back, and the
 /// position read.
 const STOP_EXCHANGES_PER_SERVO: u32 = 4;
+/// The registers each command's SYNC READ covers: `Torque_Enable` (40) to `Present_Position`'s
+/// high byte (57).
+const SYNC_READ_LENGTH: u8 = SMS_STS_PRESENT_POSITION_L + 2 - SMS_STS_TORQUE_ENABLE;
 /// `Present_Position`'s sign bit (`LeRobot` `STS_SMS_SERIES_ENCODINGS_TABLE`).
 const PRESENT_POSITION_SIGN_BIT: u32 = 15;
 /// `Homing_Offset`'s sign bit (`LeRobot` `STS_SMS_SERIES_ENCODINGS_TABLE`).
@@ -584,34 +594,51 @@ impl<P: SerialPort> FeetechChain<P> {
     /// and read both back, so the servo itself moves slowly toward whatever goal it is given.
     fn limit_approach(&mut self) -> Result<(), FeetechChainError> {
         self.approach_limited = vec![false; self.servos.len()];
-        let limits: Vec<(u16, u8, (u16, u8))> = self
-            .servos
-            .iter()
-            .filter_map(|servo| {
-                let binding = servo.axis.binding;
-                let approach = servo.configuration.approach?;
-                Some(
-                    approach
-                        .registers(binding.reduction)
-                        .map(|registers| (binding.bus_id, servo.scs_id(), registers))
-                        .ok_or(FeetechChainError::ApproachLimit(binding.bus_id)),
-                )
+        for index in 0..self.servos.len() {
+            self.hold_approach(index, true)?;
+        }
+        Ok(())
+    }
+
+    /// The approach registers servo `index` declares: `None` when it declares none.
+    fn approach_registers(&self, index: usize) -> Result<Option<(u16, u8)>, FeetechChainError> {
+        let servo = &self.servos[index];
+        let binding = servo.axis.binding;
+        servo
+            .configuration
+            .approach
+            .map(|approach| {
+                approach
+                    .registers(binding.reduction)
+                    .ok_or(FeetechChainError::ApproachLimit(binding.bus_id))
             })
-            .collect::<Result<_, FeetechChainError>>()?;
-        for (bus_id, scs_id, (speed, acceleration)) in &limits {
-            self.write1(*bus_id, *scs_id, SMS_STS_ACC, *acceleration)?;
+            .transpose()
+    }
+
+    /// Prove servo `index` holds the approach limit it declares: read its `Acceleration` and
+    /// `Goal_Speed` (one read of 41..=47), and where they differ (or `rewrite`) write them and
+    /// read them again. A servo whose power cycled while its link stayed up has lost them: the
+    /// registers are RAM and come back as `Goal_Speed` 0, full speed. Only a servo that reads
+    /// them back is approach-limited; one that does not is refused.
+    fn hold_approach(&mut self, index: usize, rewrite: bool) -> Result<(), FeetechChainError> {
+        let Some((speed, acceleration)) = self.approach_registers(index)? else {
+            return Ok(());
+        };
+        let (bus_id, scs_id) = {
+            let servo = &self.servos[index];
+            (servo.axis.binding.bus_id, servo.scs_id())
+        };
+        let mut held = !rewrite && self.reads_approach(bus_id, scs_id)? == (speed, acceleration);
+        if !held {
+            self.approach_limited[index] = false;
+            self.write1(bus_id, scs_id, SMS_STS_ACC, acceleration)?;
             expect(
-                *bus_id,
+                bus_id,
                 self.sms
                     .ph
-                    .write2_byte_tx_rx(*scs_id, SMS_STS_GOAL_SPEED_L, *speed),
+                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_SPEED_L, speed),
             )?;
-        }
-        for (bus_id, scs_id, (speed, acceleration)) in limits {
-            let (read_acceleration, result, error) =
-                self.sms.ph.read1_byte_tx_rx(scs_id, SMS_STS_ACC);
-            expect(bus_id, (result, error))?;
-            let read_speed = self.read2(bus_id, scs_id, SMS_STS_GOAL_SPEED_L)?;
+            let (read_speed, read_acceleration) = self.reads_approach(bus_id, scs_id)?;
             if (read_speed, read_acceleration) != (speed, acceleration) {
                 return Err(FeetechChainError::ApproachUnconfirmed {
                     bus_id,
@@ -619,11 +646,28 @@ impl<P: SerialPort> FeetechChain<P> {
                     acceleration: read_acceleration,
                 });
             }
+            held = true;
         }
-        for (servo, limited) in self.servos.iter().zip(&mut self.approach_limited) {
-            *limited = servo.configuration.approach.is_some();
-        }
+        self.approach_limited[index] = held;
         Ok(())
+    }
+
+    /// A servo's `Goal_Speed` and `Acceleration`, read as one range from `Acceleration` (41) to
+    /// `Goal_Speed`'s high byte (47).
+    fn reads_approach(&mut self, bus_id: u16, scs_id: u8) -> Result<(u16, u8), FeetechChainError> {
+        let length = SMS_STS_GOAL_SPEED_L + 2 - SMS_STS_ACC;
+        let (data, result, error) = self.sms.ph.read_tx_rx(scs_id, SMS_STS_ACC, length);
+        expect(bus_id, (result, error))?;
+        let speed_at = usize::from(SMS_STS_GOAL_SPEED_L - SMS_STS_ACC);
+        match (data.first(), data.get(speed_at), data.get(speed_at + 1)) {
+            (Some(acceleration), Some(low), Some(high)) => {
+                Ok((self.sms.ph.scs_makeword(*low, *high), *acceleration))
+            }
+            _ => Err(FeetechChainError::Comm {
+                bus_id,
+                result: CommResult::RxCorrupt,
+            }),
+        }
     }
 
     /// Every servo's `Present_Position` as a joint coordinate, or `None` when any servo did
@@ -645,11 +689,13 @@ impl<P: SerialPort> FeetechChain<P> {
         Some(observed)
     }
 
-    /// One SYNC READ of every servo's `Present_Position`, as joint coordinates in native state
-    /// order; a servo whose answer is missing or corrupt is `NaN`, which no tracking bound
-    /// admits.
+    /// One SYNC READ of every servo's registers from `Torque_Enable` (40) to `Present_Position`
+    /// (56..=57), as joint coordinates in native state order. A servo whose answer is missing
+    /// or corrupt, that no longer holds torque, or that no longer holds its declared approach
+    /// limit is `NaN`, which no tracking bound admits; any of those marks the chain disabled, so
+    /// the next enable holds every servo where it rests and proves its limits again.
     fn sync_read_positions(&mut self) -> Result<Vec<f64>, FeetechChainError> {
-        let mut reader = GroupSyncRead::new(SMS_STS_PRESENT_POSITION_L, 2);
+        let mut reader = GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH);
         for servo in &self.servos {
             if !reader.add_param(servo.scs_id()) {
                 return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
@@ -657,20 +703,36 @@ impl<P: SerialPort> FeetechChain<P> {
         }
         let _ = reader.tx_rx_packet(&mut self.sms.ph);
         let end = self.sms.ph.scs_getend();
-        Ok(self
-            .servos
-            .iter()
-            .map(|servo| {
-                reader
-                    .get_data2(end, servo.scs_id(), SMS_STS_PRESENT_POSITION_L)
-                    .map_or(f64::NAN, |raw| {
-                        servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
-                            raw,
-                            PRESENT_POSITION_SIGN_BIT,
-                        ))
-                    })
-            })
-            .collect())
+        let mut observed = Vec::with_capacity(self.servos.len());
+        for index in 0..self.servos.len() {
+            let servo = &self.servos[index];
+            let id = servo.scs_id();
+            let torque = reader.get_data1(id, SMS_STS_TORQUE_ENABLE);
+            let approach = match self.approach_registers(index)? {
+                None => true,
+                Some((speed, acceleration)) => {
+                    reader.get_data1(id, SMS_STS_ACC) == Some(acceleration)
+                        && reader.get_data2(end, id, SMS_STS_GOAL_SPEED_L) == Some(speed)
+                }
+            };
+            let position = reader
+                .get_data2(end, id, SMS_STS_PRESENT_POSITION_L)
+                .filter(|_| torque == Some(1) && approach)
+                .map(|raw| {
+                    servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
+                        raw,
+                        PRESENT_POSITION_SIGN_BIT,
+                    ))
+                });
+            if !approach {
+                self.approach_limited[index] = false;
+            }
+            if position.is_none() {
+                self.enabled = false;
+            }
+            observed.push(position.unwrap_or(f64::NAN));
+        }
+        Ok(observed)
     }
 
     /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
@@ -698,6 +760,10 @@ impl<P: SerialPort> FeetechChain<P> {
 
     /// `FeetechMotorsBus.enable_torque`: `Torque_Enable` 1, then `Lock` 1, on every servo.
     fn enable_torque(&mut self) -> Result<(), FeetechChainError> {
+        // Prove every declared approach limit still holds: a servo that power-cycled has lost it.
+        for index in 0..self.servos.len() {
+            self.hold_approach(index, false)?;
+        }
         // Hold every servo where it is first, so enabling never drives toward a stale goal.
         let ids: Vec<(u16, u8)> = self
             .servos
@@ -784,7 +850,11 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 observed: self.sync_read_positions()?,
                 feedback: Vec::new(),
             }),
-            result => Err(FeetechChainError::SyncWrite(result)),
+            result => {
+                // Whatever the servos hold now, the next command proves it again.
+                self.enabled = false;
+                Err(FeetechChainError::SyncWrite(result))
+            }
         }
     }
 

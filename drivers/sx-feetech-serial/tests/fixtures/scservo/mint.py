@@ -45,9 +45,9 @@ minted from).
   reads it after open and after every stop, servos 2 and 4 answering below their calibrated
   range; ``present_joints``: the joints LeRobot's own ``_normalize`` makes of it, through the
   drive map.
-- ``sync_read``: the chain's observation after every command, one ``GroupSyncRead`` of
-  ``Present_Position`` (``txRxPacket``) and every servo's answer in turn, with
-  ``present_position``'s ticks.
+- ``sync_read``: the chain's observation after every command, one ``GroupSyncRead``
+  (``txRxPacket``) of ``Torque_Enable`` through ``Present_Position`` and every servo's answer
+  in turn, holding torque and ``present_position``'s ticks.
 - ``configure``: ``disable_torque``, then ``configure_motors`` per servo (``Return_Delay_Time``
   0, ``Maximum_Acceleration`` 254, ``Acceleration`` 254, ``Phase`` read, and written back with
   bit 4 cleared where the answer had it, as servo 6's does), then per servo ``Operating_Mode``
@@ -216,6 +216,8 @@ SIGN_BIT = 15  # sms_sts.py scs_toscs(position, 15)
 # What each servo's Present_Position answers at open and after a stop: servos 2 and 4 rest
 # below the so101 calibration's minimum, as the static upper body's neck was found resting.
 PRESENT_POSITIONS = [2050, 700, 3100, 700, 2045, 2500]
+# The chain's SYNC READ after each command: Torque_Enable (40) to Present_Position's high byte.
+SYNC_READ_LENGTH = 18
 
 
 class Calibration:
@@ -532,15 +534,25 @@ def main() -> None:
         else:
             value = math.radians(value)
         present_joints.append(value / (axis["sign"] * axis["reduction"]) + UNCALIBRATED_ZERO)
-    # The chain's observation after every command: one GroupSyncRead of Present_Position,
-    # every servo answering in turn.
-    reader = scs.GroupSyncRead(handler, scs.SMS_STS_PRESENT_POSITION_L, 2)
+    # The chain's observation after every command: one GroupSyncRead of every servo's
+    # registers from Torque_Enable (40) to Present_Position (56..57), each servo answering in
+    # turn as it holds torque (1), LeRobot's Acceleration (254), no Goal_Speed, and its position.
+    reader = scs.GroupSyncRead(handler, scs.SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH)
     for scs_id in ids:
         if not reader.addParam(scs_id):
             raise SystemExit(f"GroupSyncRead refused servo {scs_id}")
+
+    def image(raw: int) -> list[int]:
+        registers = [0] * SYNC_READ_LENGTH
+        registers[scs.SMS_STS_TORQUE_ENABLE - scs.SMS_STS_TORQUE_ENABLE] = 1
+        registers[scs.SMS_STS_ACC - scs.SMS_STS_TORQUE_ENABLE] = 254
+        at = scs.SMS_STS_PRESENT_POSITION_L - scs.SMS_STS_TORQUE_ENABLE
+        registers[at] = handler.scs_lobyte(raw)
+        registers[at + 1] = handler.scs_hibyte(raw)
+        return registers
+
     answers = [
-        status(scs_id, [handler.scs_lobyte(raw), handler.scs_hibyte(raw)])
-        for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True)
+        status(scs_id, image(raw)) for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True)
     ]
     port.written.clear()
     port.pending = [byte for answer in answers for byte in answer]
@@ -549,6 +561,8 @@ def main() -> None:
     for scs_id, raw in zip(ids, PRESENT_POSITIONS, strict=True):
         if reader.getData(scs_id, scs.SMS_STS_PRESENT_POSITION_L, 2) != raw:
             raise SystemExit(f"GroupSyncRead read servo {scs_id} otherwise")
+        if reader.getData(scs_id, scs.SMS_STS_TORQUE_ENABLE, 1) != 1:
+            raise SystemExit(f"GroupSyncRead read servo {scs_id}'s torque otherwise")
     (sync_request,) = port.written
     sync_read = {
         "request": bytes(sync_request).hex(),

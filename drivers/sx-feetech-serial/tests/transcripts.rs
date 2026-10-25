@@ -265,7 +265,11 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
     assert!(golden.goal_positions.len() >= 8);
     for case in &golden.goal_positions {
         let mut chain = open(
-            &with(&[&opening(&golden), &golden.torque_enable]),
+            &with(&[
+                &opening(&golden),
+                &golden.torque_enable,
+                std::slice::from_ref(&golden.sync_read),
+            ]),
             &case.calibration,
         );
         let ticks: Vec<u16> = chain
@@ -277,10 +281,14 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
         assert_eq!(ticks, case.ticks, "{} {:?}", case.calibration, case.radians);
         let receipt = chain.command(&case.radians).expect("command");
         assert_eq!(receipt.evidence, Evidence::DispatchAttempted);
-        // No servo answers the SYNC READ here: every axis is unobserved, NaN.
-        assert!(receipt.observed.len() == 6 && receipt.observed.iter().all(|joint| joint.is_nan()));
+        assert!(
+            receipt.observed.len() == 6 && receipt.observed.iter().all(|joint| joint.is_finite())
+        );
         assert!(receipt.feedback.is_empty());
-        assert!(chain.port().expected.is_empty(), "torque was enabled first");
+        assert!(
+            chain.port().expected.is_empty(),
+            "torque was enabled first, then the read"
+        );
         let written = chain.port().written.len();
         assert_eq!(
             chain
@@ -298,10 +306,15 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
             Some(golden.sync_read.request.clone()),
             "the SYNC READ follows it"
         );
-        // An enabled chain sends the SYNC WRITE and the SYNC READ alone.
+        // An enabled chain sends the SYNC WRITE and the SYNC READ alone. Nothing answers this
+        // read: every axis is unobserved, NaN, and the chain will enable afresh.
         let before = chain.port().written.len();
-        chain.command(&case.radians).expect("second command");
+        let observed = chain
+            .command(&case.radians)
+            .expect("second command")
+            .observed;
         assert_eq!(chain.port().written.len(), before + 2);
+        assert!(observed.iter().all(|joint| joint.is_nan()));
     }
 }
 
@@ -852,7 +865,7 @@ fn every_command_observes_every_servo_through_one_sync_read() {
     // Servo 4's answer corrupted: that axis alone is NaN.
     let mut corrupt = golden.sync_read.clone();
     let mut response = bytes(&corrupt.response);
-    let at = 3 * 8 + 7; // servo 4's checksum
+    let at = 3 * 24 + 23; // servo 4's checksum
     response[at] ^= 0xFF;
     corrupt.response = hex(&response);
     let mut chain = open(

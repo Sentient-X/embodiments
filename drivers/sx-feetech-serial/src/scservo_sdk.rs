@@ -580,6 +580,20 @@ impl GroupSyncRead {
         result
     }
 
+    /// `getData` for one byte: the byte at `address` from `scs_id`'s answer, when its packet
+    /// arrived whole.
+    #[must_use]
+    pub fn get_data1(&self, scs_id: u8, address: u8) -> Option<u8> {
+        let data = self
+            .data_dict
+            .iter()
+            .find(|(id, _)| *id == scs_id)?
+            .1
+            .as_ref()?;
+        data.get(usize::from(address.checked_sub(self.start_address)?) + 1)
+            .copied()
+    }
+
     /// `getData` for two bytes: the word at `address` from `scs_id`'s answer, when its packet
     /// arrived whole.
     #[must_use]

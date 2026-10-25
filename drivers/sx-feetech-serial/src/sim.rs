@@ -154,6 +154,21 @@ impl SimBus {
         u16::from_le_bytes([state.servos[&id][at], state.servos[&id][at + 1]])
     }
 
+    /// Power-cycle servo `id` while its link stays up: its RAM registers come back as the
+    /// firmware's defaults, torque off, `Acceleration` and `Goal_Speed` 0.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the bus has no servo `id`.
+    pub fn power_cycle(&self, id: u8) {
+        let mut state = self.state();
+        let registers = state.servos.get_mut(&id).expect("a simulated servo");
+        registers[usize::from(SMS_STS_TORQUE_ENABLE)] = 0;
+        registers[usize::from(crate::scservo_sdk::SMS_STS_ACC)] = 0;
+        let speed = usize::from(SMS_STS_GOAL_SPEED_L);
+        registers[speed..speed + 2].copy_from_slice(&[0, 0]);
+    }
+
     /// Make servo `id` answer nothing from now on.
     pub fn kill(&self, id: u8) {
         self.state().dead.insert(id);
@@ -366,6 +381,38 @@ mod tests {
         assert_eq!(bus.state().written.len(), written, "refused before the bus");
     }
 
+    #[test]
+    fn a_servo_that_power_cycles_is_unobserved_until_its_limit_and_hold_are_proven_again() {
+        let bus = calibrated_bus();
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
+        let zeros = [0.0; 6];
+        assert!(chain.command(&zeros).expect("commanded").observed[2].is_finite());
+        bus.power_cycle(3);
+        // The next command's read finds servo 3 limp and unlimited: NaN, no longer limited.
+        let observed = chain.command(&zeros).expect("commanded").observed;
+        assert!(observed[2].is_nan());
+        assert!(
+            observed
+                .iter()
+                .enumerate()
+                .all(|(i, joint)| i == 2 || joint.is_finite())
+        );
+        assert!(!chain.approach_speed_limited(2));
+        // The one after enables afresh: the limit is written again and read back, the servo is
+        // held where it rests, and torque comes back on.
+        let written = bus.state().written.len();
+        let observed = chain.command(&zeros).expect("commanded").observed;
+        assert!(observed.iter().all(|joint| joint.is_finite()));
+        assert!(chain.approach_speed_limited(2));
+        let state = bus.state();
+        let registers = &state.servos[&3];
+        assert_eq!((registers[40], registers[41], registers[46]), (1, 3, 3));
+        let rewrote = state.written[written..]
+            .iter()
+            .any(|packet| packet[2] == 3 && packet[4..7] == [0x03, 46, 3]);
+        assert!(rewrote);
+    }
+
     /// The bytes one command puts on the line once torque is on: the `Goal_Position` SYNC
     /// WRITE, the SYNC READ, and every servo's answer to it.
     fn command_bytes(servos: u8) -> usize {
@@ -394,10 +441,10 @@ mod tests {
 
     #[test]
     fn one_command_costs_ten_bits_a_byte_of_its_write_read_and_answers() {
-        // Six servos: a 26-byte SYNC WRITE, a 14-byte SYNC READ and six 8-byte answers: 88
-        // bytes, 880 us at 1 Mbaud before any adapter latency. Two servos: 14 + 10 + 16 = 40
-        // bytes, 400 us.
-        assert_eq!(command_bytes(6), 88);
-        assert_eq!(command_bytes(2), 40);
+        // Six servos: a 26-byte SYNC WRITE, a 14-byte SYNC READ of Torque_Enable through
+        // Present_Position and six 24-byte answers: 184 bytes, 1.84 ms at 1 Mbaud before any
+        // adapter latency. Two servos: 14 + 10 + 48 = 72 bytes, 720 us.
+        assert_eq!(command_bytes(6), 184);
+        assert_eq!(command_bytes(2), 72);
     }
 }
