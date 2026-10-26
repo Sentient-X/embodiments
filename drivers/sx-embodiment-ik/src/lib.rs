@@ -9,11 +9,14 @@
 //! interior-point method (`qp`, no dependencies, so it builds wherever the station and the
 //! headset do):
 //!
-//! - **tool position** error, in metres;
-//! - **tool orientation** error times [`Settings::orientation_m_per_rad`] (a look-at target's
-//!   pointing error weighs the same);
-//! - **posture**: each joint toward its rest, weighted so little ([`Settings::posture_weight`])
-//!   that it decides only what the tasks leave free, the 7-DoF arms' null space.
+//! - **tool position** error, in metres, and **tool orientation** error times
+//!   [`Settings::orientation_m_per_rad`] (a look-at target's pointing error weighs the same),
+//!   each closed per tick no faster than the limb can still stop on it;
+//! - **the step itself** ([`Settings::damping`]): damped least squares, the smallest joint
+//!   motion that closes the error;
+//! - **posture**: each joint toward the anchor, its measured position at engage, weighted so
+//!   little ([`Settings::posture_weight`]) that it decides only what the tasks leave free, the
+//!   7-DoF arms' null space, and returns it there slowly instead of swinging it.
 //!
 //! subject to hard constraints, never clamps after the fact:
 //!
