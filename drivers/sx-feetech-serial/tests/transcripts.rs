@@ -900,3 +900,55 @@ fn a_chain_of_servos_on_two_ports_is_refused_before_the_bus() {
         Err(FeetechChainError::Ports(ports)) if ports == ["serial", "elsewhere"]
     ));
 }
+
+#[test]
+fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
+    let golden = golden();
+    let mut chain = open(
+        &with(&[&opening(&golden), &golden.present_position]),
+        "so101",
+    );
+    let before = chain.port().written.len();
+    assert_eq!(
+        chain.read_positions().expect("every servo answered"),
+        Some(golden.present_joints.clone())
+    );
+    assert!(chain.port().expected.is_empty());
+    let sent: Vec<String> = chain.port().written[before..]
+        .iter()
+        .map(|packet| hex(packet))
+        .collect();
+    let reads: Vec<String> = golden
+        .present_position
+        .iter()
+        .map(|exchange| exchange.request.clone())
+        .collect();
+    assert_eq!(sent, reads, "only READs of Present_Position");
+}
+
+#[test]
+fn a_silent_stale_or_flagged_servo_refuses_the_whole_read() {
+    let golden = golden();
+    // Servo 3 is silent; a status packet it sent before the read waits in the buffer.
+    let mut silent = golden.present_position.clone();
+    let stale = silent[2].response.clone();
+    silent[2].response = String::new();
+    let mut chain = open(&with(&[&opening(&golden), &silent]), "so101");
+    chain.port_mut().pending.extend(bytes(&stale));
+    assert!(matches!(
+        chain.read_positions(),
+        Err(FeetechChainError::Comm { bus_id: 3, .. })
+    ));
+    // Servo 4 answers with its overload flag set.
+    let mut flagged = golden.present_position.clone();
+    let params = bytes(&flagged[3].response)[5..7].to_vec();
+    answer(&mut flagged[3], 0x20, &params);
+    let mut chain = open(&with(&[&opening(&golden), &flagged]), "so101");
+    assert!(matches!(
+        chain.read_positions(),
+        Err(FeetechChainError::ServoError {
+            bus_id: 4,
+            error: 0x20
+        })
+    ));
+}

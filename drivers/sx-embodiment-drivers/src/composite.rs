@@ -4,7 +4,8 @@
 //! chains' commandable ranges before either is written; the first is commanded, then the second.
 //! A second chain that fails after the first applied is a [`ChainFailure::Fault`] whatever it
 //! reported, since one device already holds its new target. A stop stops both, whatever the first
-//! answered, and is proven only when both are.
+//! answered, and is proven only when both are. A read moves nothing, so either chain's failed
+//! read is that chain's own failure.
 
 use std::time::Duration;
 
@@ -32,6 +33,9 @@ pub enum CompositeError<E, F> {
     First(E),
     #[error("after the first chain applied, {0}")]
     Second(F),
+    /// The second chain's read failed; a read applies nothing, so it is that chain's failure.
+    #[error("{0} (reading the second chain)")]
+    SecondRead(F),
 }
 
 impl<E: ChainError, F: ChainError> ChainError for CompositeError<E, F> {
@@ -40,6 +44,7 @@ impl<E: ChainError, F: ChainError> ChainError for CompositeError<E, F> {
             Self::Target(_) => ChainFailure::Refused,
             Self::First(error) => error.failure(),
             Self::Second(_) => ChainFailure::Fault,
+            Self::SecondRead(error) => error.failure(),
         }
     }
 }
@@ -156,7 +161,7 @@ where
         let Some(second) = self
             .second
             .read_positions()
-            .map_err(CompositeError::Second)?
+            .map_err(CompositeError::SecondRead)?
         else {
             return Ok(None);
         };
@@ -173,5 +178,108 @@ where
     fn clear_faults(&mut self) {
         self.first.clear_faults();
         self.second.clear_faults();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::binding::{
+        ActuatorBinding, ActuatorBus, ActuatorModel, UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO,
+    };
+
+    #[derive(Debug, Error)]
+    #[error("{0:?}")]
+    struct Failed(ChainFailure);
+
+    impl ChainError for Failed {
+        fn failure(&self) -> ChainFailure {
+            self.0
+        }
+    }
+
+    /// A one-axis chain whose commands and reads succeed or fail as configured.
+    struct Fake {
+        axes: Vec<BoundAxis>,
+        commandable: Vec<CommandRange>,
+        fails: Option<ChainFailure>,
+    }
+
+    fn fake(fails: Option<ChainFailure>) -> Fake {
+        Fake {
+            axes: vec![BoundAxis {
+                joint: "joint".into(),
+                port: "port".into(),
+                lower: -1.0,
+                upper: 1.0,
+                binding: ActuatorBinding {
+                    model: ActuatorModel::new("m"),
+                    bus: ActuatorBus::new("b"),
+                    bus_id: 1,
+                    sign: 1,
+                    reduction: 1.0,
+                },
+                zero: UNCALIBRATED_ZERO,
+                direction: UNCALIBRATED_DIRECTION,
+            }],
+            commandable: vec![CommandRange {
+                lower: -1.0,
+                upper: 1.0,
+            }],
+            fails,
+        }
+    }
+
+    impl ActuatorChain for Fake {
+        type Error = Failed;
+        type Feedback = ();
+
+        fn axes(&self) -> &[BoundAxis] {
+            &self.axes
+        }
+
+        fn commandable(&self) -> &[CommandRange] {
+            &self.commandable
+        }
+
+        fn command(&mut self, joints: &[f64]) -> Result<Receipt<()>, Failed> {
+            self.fails.map_or_else(
+                || {
+                    Ok(Receipt {
+                        evidence: Evidence::BusObservedComplete,
+                        observed: joints.to_vec(),
+                        feedback: vec![()],
+                    })
+                },
+                |failure| Err(Failed(failure)),
+            )
+        }
+
+        fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Failed> {
+            self.fails
+                .map_or(Ok(Some(vec![0.5])), |failure| Err(Failed(failure)))
+        }
+
+        fn stop(&mut self) -> StopReport {
+            StopReport::default()
+        }
+
+        fn stop_budget(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn a_failed_read_is_each_chains_own_failure_but_a_late_command_is_a_fault() {
+        let mut both = Composite::new(fake(None), fake(None));
+        assert_eq!(both.read_positions().expect("read"), Some(vec![0.5, 0.5]));
+        let mut second = Composite::new(fake(None), fake(Some(ChainFailure::Timeout)));
+        let read = second.read_positions().expect_err("second is silent");
+        assert_eq!(read.failure(), ChainFailure::Timeout);
+        let command = second.command(&[0.0, 0.0]).expect_err("second is silent");
+        assert_eq!(command.failure(), ChainFailure::Fault);
+        let mut first = Composite::new(fake(Some(ChainFailure::Unavailable)), fake(None));
+        let read = first.read_positions().expect_err("first is down");
+        assert_eq!(read.failure(), ChainFailure::Unavailable);
     }
 }

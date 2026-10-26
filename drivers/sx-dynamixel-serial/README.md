@@ -44,6 +44,10 @@ Consumer: `sx-embodiment-bodies`, which opens a body's Dynamixel port beside its
 - **Wire values** are `LeRobot`'s `_unnormalize` with `apply_drive_mode` false (the servo
   reverses itself by its `Drive_Mode`); a goal outside the unit's calibrated range is refused,
   since the extended and current-based modes ignore the servo's position limits.
+- **Read-only positions.** `read_positions` reads every servo's `Present_Position` (132), one `READ` per
+  servo; the packet handler clears the port before each, so every value is a fresh answer. A
+  servo that is silent, answers corrupt or reports an error, the hardware-error alert included refuses the whole read. It
+  writes no register: it never enables torque or sends a goal.
 - **Open at rest.** Open disables torque, so a held pose slumps.
 
 ## Parity

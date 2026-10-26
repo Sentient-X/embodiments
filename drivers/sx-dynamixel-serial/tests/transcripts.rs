@@ -692,3 +692,51 @@ fn a_chain_of_servos_on_two_ports_is_refused_before_the_bus() {
         Err(DynamixelChainError::Ports(ports)) if ports == ["dynamixel", "elsewhere"]
     ));
 }
+
+#[test]
+fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
+    let golden = golden();
+    let mut chain = open(&golden, &[&positions()]);
+    let before = chain.port().written.len();
+    let rest: Vec<f64> = chain
+        .servos()
+        .iter()
+        .map(|servo| servo.joint_from_raw(2050))
+        .collect();
+    assert_eq!(chain.read_positions().expect("both answered"), Some(rest));
+    assert!(chain.port().expected.is_empty());
+    let sent: Vec<String> = chain.port().written[before..]
+        .iter()
+        .map(|packet| hex(packet))
+        .collect();
+    let reads: Vec<String> = positions()
+        .into_iter()
+        .map(|exchange| exchange.request)
+        .collect();
+    assert_eq!(sent, reads, "only READs of Present_Position");
+}
+
+#[test]
+fn a_silent_stale_or_alerting_servo_refuses_the_whole_read() {
+    let golden = golden();
+    // The wrist is silent; a status packet it sent before the read waits in the buffer.
+    let mut silent = positions();
+    let stale = silent[1].response.clone();
+    silent[1].response = String::new();
+    let mut chain = open(&golden, &[&silent]);
+    chain.port_mut().pending.extend(bytes(&stale));
+    let error = chain.read_positions().expect_err("silent");
+    assert!(matches!(error, DynamixelChainError::Comm { bus_id: 2, .. }));
+    assert_eq!(error.failure(), ChainFailure::Timeout);
+    // The wrist answers with its hardware-error alert set.
+    let mut alerting = positions();
+    answer(&mut alerting[1], 0x80, &REST.to_le_bytes());
+    let mut chain = open(&golden, &[&alerting]);
+    assert!(matches!(
+        chain.read_positions(),
+        Err(DynamixelChainError::ServoError {
+            bus_id: 2,
+            error: 0x80
+        })
+    ));
+}
