@@ -570,3 +570,31 @@ fn a_command_no_motor_answers_is_silent() {
         Err(DamiaoChainError::Silent(_))
     ));
 }
+
+/// Bench 2026-10-26 (station run 11): the CAN link failed during a return, and the one disable
+/// phase the stop sent went out on the failing link, leaving every motor unproven and enabled
+/// until its 0.75 s watchdog latched 0xD. A stop now drains and disables again, up to three
+/// phases, and a frame the adapter dropped while it recovered from a stall is sent again.
+#[test]
+fn a_stop_on_a_link_that_failed_and_came_back_still_disables_every_motor() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    // The first disable phase: the drain fails, so none of its answers counts.
+    bus.fail_next(&[std::io::ErrorKind::Other]);
+    let report = chain.stop();
+    assert!(report.unproven.is_empty(), "{report:?}");
+    assert!(
+        bus.state().motors.values().all(|motor| motor.state == 0),
+        "every motor disabled"
+    );
+    // A frame the adapter reports as dropped while it recovered is sent again.
+    let mut chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    bus.fail_next(&[std::io::ErrorKind::Interrupted; 3]);
+    let report = chain.stop();
+    assert!(report.unproven.is_empty(), "{report:?}");
+}

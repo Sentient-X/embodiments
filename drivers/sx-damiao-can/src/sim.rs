@@ -78,6 +78,9 @@ pub struct SimState {
     pub waited: Duration,
     /// Waits really sleep, as on the bench.
     pub real: bool,
+    /// Link failures still to come: each send or receive takes the next and fails with it,
+    /// as a failing USB adapter does, sending or reading nothing.
+    pub failures: VecDeque<io::ErrorKind>,
 }
 
 impl SimState {
@@ -195,6 +198,11 @@ impl Sim {
     /// A frame arriving on the link before anything asks for it, as a late answer does.
     pub fn deliver_late(&self, frame: CanFrame) {
         self.state().inbox.push_back(frame);
+    }
+
+    /// Fail the link's next sends and receives with `kinds`, one each, in order.
+    pub fn fail_next(&self, kinds: &[io::ErrorKind]) {
+        self.state().failures.extend(kinds.iter().copied());
     }
 
     pub fn kill(&self, id: u16) {
@@ -327,6 +335,9 @@ pub fn answer(id: u16, motor: &mut SimMotor, frame: &CanFrame) -> Option<CanFram
 impl CanPort for Sim {
     fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
         let mut state = self.state();
+        if let Some(kind) = state.failures.pop_front() {
+            return Err(io::Error::from(kind));
+        }
         state.sent += 1;
         state.frames.push(*frame);
         let id = address(frame);
@@ -345,7 +356,11 @@ impl CanPort for Sim {
     }
 
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
-        Ok(self.state().inbox.pop_front())
+        let mut state = self.state();
+        if let Some(kind) = state.failures.pop_front() {
+            return Err(io::Error::from(kind));
+        }
+        Ok(state.inbox.pop_front())
     }
 
     /// An answer if one is pending; else the bus clock runs to `deadline` and nothing came.
