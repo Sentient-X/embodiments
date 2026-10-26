@@ -8,9 +8,9 @@
   </material>
   <link name="base_link">
     <inertial>
-      <origin xyz="0.0295608982 0.00545673078 0.155512257" rpy="0 0 0" />
-      <mass value="1.45907" />
-      <inertia ixx="0.0202171" ixy="-0.000245504" ixz="-0.00466004" iyy="0.021434" iyz="-0.000870022" izz="0.00281516" />
+      <origin xyz="-9.16685243e-05 -0.000148366015 0.0368667901" rpy="0 0 0" />
+      <mass value="0.416388" />
+      <inertia ixx="0.000498008" ixy="-5.09583e-06" ixz="-2.81077e-07" iyy="0.000489723" iyz="8.59663e-07" izz="0.000607019" />
     </inertial>
     <visual name="base_link_visual_0">
       <origin xyz="-3.53809e-19 5.09907e-19 0.01" rpy="1.5708 0 -0.500549" />
@@ -25,15 +25,6 @@
       <origin xyz="-7.54470422318e-08 -1.37925655869e-07 0.0527997915475" rpy="-3.67320510335e-06 -2.22044604925e-16 1.07024732678" />
       <geometry>
         <mesh filename="meshes/torso_yaw_base_adapter.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
-        <color rgba="0.792157 0.819608 0.933333 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_2">
-      <origin xyz="0.132891350511 -0.00214479703757 0.544862364554" rpy="3.09100248145 0.592188910609 3.06779207165" />
-      <geometry>
-        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
       <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
         <color rgba="0.792157 0.819608 0.933333 1" />
@@ -4332,9 +4323,9 @@
   </link>
   <link name="camera_link">
     <inertial>
-      <origin xyz="0.0405527791 0.00511310872 0.0160623772" rpy="0 0 0" />
-      <mass value="0.264252" />
-      <inertia ixx="0.000547229" ixy="1.19309e-05" ixz="-7.45393e-07" iyy="0.000596369" iyz="-4.16123e-07" izz="0.000140933" />
+      <origin xyz="0.0405353234 0.00509404066 0.0160581386" rpy="0 0 0" />
+      <mass value="0.264509" />
+      <inertia ixx="0.000547436" ixy="1.18562e-05" ixz="-7.73087e-07" iyy="0.000596641" iyz="-4.37038e-07" izz="0.000141202" />
     </inertial>
     <visual name="camera_link_visual_0">
       <origin xyz="0.0422094771 0.0075768098 0.00722524256" rpy="2.44874912 1.57078815 1.61210846" />
@@ -4457,6 +4448,15 @@
       <origin xyz="0.0461697078 0.0131714493 0.0761936598" rpy="1.57079621 -4.8625317e-07 0.734155814" />
       <geometry>
         <mesh filename="meshes/Right_Lens_Holder_step__ZED2i_step_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <visual name="camera_link_visual_14">
+      <origin xyz="-0.0070942026 0.00582073343 0.0234386979" rpy="-1.59044834 -1.50270567e-05 -0.669134912" />
+      <geometry>
+        <mesh filename="meshes/_________step__Body1_1_.stl" scale="1 1 1" />
       </geometry>
       <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
         <color rgba="0.792157 0.819608 0.933333 1" />
