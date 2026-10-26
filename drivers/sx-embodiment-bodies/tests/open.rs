@@ -644,12 +644,16 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         &mut bridges,
     )
     .expect("open does not refuse a servo resting outside its range");
-    // Every Feetech servo holds its port's registry approach: Goal_Speed 52 and Acceleration
-    // 105 (4 rad/s, 16 rad/s², the bindings' approach).
+    // Open writes every Feetech servo its port's registry approach: Goal_Speed 2607 and
+    // Acceleration 104 (4 rad/s, 16 rad/s², in steps/s and 100 steps/s²); the enable below
+    // slows a servo resting outside its limits to the bring-up pull-in.
     {
         let state = neck.state();
         let registers = &state.servos[&6];
-        assert_eq!((registers[46], registers[47], registers[41]), (52, 0, 105));
+        assert_eq!(
+            (u16::from_le_bytes([registers[46], registers[47]]), registers[41]),
+            (2607, 104)
+        );
     }
     // The first command asks for the tilt's nearest commandable joint, its lower bound.
     let mut target = rest_inside(&body);
@@ -684,12 +688,12 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         goal + 1 >= TILT_MIN,
         "the goal is at the calibrated range's edge: {goal}"
     );
-    // The servo itself moves at most 52 steps of 0.732 rpm: about 2600 ticks a second.
+    // The servo itself moves at most 162 steps a second.
     neck.advance(Duration::from_millis(100));
     let moved = neck.present(6) - 753;
-    assert!((1..=260).contains(&moved), "{moved} ticks in 100 ms");
-    neck.advance(Duration::from_millis(200));
-    assert!(neck.present(6) - 753 <= 260 + 520);
+    assert!((1..=17).contains(&moved), "{moved} ticks in 100 ms");
+    neck.advance(Duration::from_secs(1));
+    assert!(neck.present(6) - 753 <= 17 + 162);
     assert!(body.stop().is_proven());
 }
 
@@ -782,11 +786,11 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
         }
         tilt.push(neck.present(6));
     }
-    // The camera tilt left tick 753 at the servo's pace, about 2600 ticks a second and no
-    // faster (52 a 20 ms step), until it reached its range about 0.4 s later.
-    assert!(tilt[0] > 753 && tilt[0] <= 753 + 52);
-    let moved = tilt[9] - 753;
-    assert!((300..=520).contains(&moved), "{moved}");
+    // The camera tilt left tick 753 at the servo's pace, 162 ticks a second and no faster
+    // (3.24 a 20 ms step), until it reached its range about 6.2 s later.
+    assert!(tilt[0] > 753 && tilt[0] <= 753 + 4);
+    let moved = tilt[99] - 753;
+    assert!((300..=330).contains(&moved), "{moved}");
     // It came to rest at the in-range position the governor held: its declared range reaches
     // below its unit's, so the edge its unit reaches, tick 1760 to within the radian round trip.
     let held = neck.state().goal(6);

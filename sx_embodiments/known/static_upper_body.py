@@ -397,10 +397,9 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
 #: slews these joints at up to 3 rad/s (the owner's bench speed, 2026-10-26), below this, so the
 #: governor binds and the servo keeps up, a finger's RANGE_0_100 map asking its servo for up to
 #: 1.15 joint rad/s each. The bring-up's 0.25 rad/s made the neck too slow to follow a head.
-#: It is also how fast a servo resting outside its calibrated limits is pulled in by its own
-#: firmware when torque comes on, which no governor bounds (the camera tilt was probed 1.5 rad
-#: outside: about 0.5 s). Both rest on the Goal_Speed unit, 0.732 rpm per step, which is still
-#: unverified on the servo (sx-feetech-serial's README).
+#: A servo resting outside its calibrated limits is pulled in at the slower bring-up approach
+#: (0.25 rad/s) and raised to this once it reads inside (sx-feetech-serial's pull-in), since no
+#: governor bounds that move. Goal_Speed is in steps/s, measured on the servo.
 _SERVO_APPROACH: Final = ServoApproach(speed=4.0, acceleration=16.0)
 STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
     STATIC_UPPER_BODY_NECK_PORT: _SERVO_APPROACH,

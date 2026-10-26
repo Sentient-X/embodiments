@@ -122,8 +122,8 @@ class ServoApproach:
 
     A driver setting per bus, rendered into the driver bindings beside the axes and outside the
     body's identity: the governor bounds every commanded step, and this is the servo's own
-    backstop for a goal its position limits clamp, which is also how fast a servo resting outside
-    those limits is pulled in when torque comes on.
+    backstop for a goal its position limits clamp. A servo resting outside those limits is pulled
+    in at the slower of this and the driver's bring-up approach.
     """
 
     speed: float

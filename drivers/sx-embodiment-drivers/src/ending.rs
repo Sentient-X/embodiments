@@ -326,7 +326,10 @@ impl Return {
                 continue;
             }
             if keep.contains(&index) || !pose.is_finite() {
-                // Held where it is read: the governor's range rule lets it stay.
+                // Held where it is read. Inside its range, or no further out than its
+                // interval reached when the governor took it up: one that drifted further out
+                // since is brought in to that edge (and the tracking check stops a return whose
+                // joint cannot follow).
                 target.push(*at);
                 continue;
             }

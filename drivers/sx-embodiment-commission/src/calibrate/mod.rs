@@ -43,6 +43,7 @@
 pub mod cli;
 pub mod journal;
 pub mod motion;
+pub mod range;
 pub mod read;
 pub mod session;
 
