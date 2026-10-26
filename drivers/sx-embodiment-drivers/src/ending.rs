@@ -135,6 +135,10 @@ pub enum ReturnFailure {
     Deadline { after: Duration },
     /// The person running it asked for the body to stop where it is.
     Aborted,
+    /// A [`Pace`] whose speed is not finite and positive, or whose ramp is shorter than one
+    /// step ([`MAX_STEP_INTERVAL`]): taken as asked it would crash the plan, lift the pace or
+    /// let the first step run at twice it.
+    BadPace,
     /// The governor refused a step (nothing applied) or stopped the body for a fault.
     Governor {
         failure: ChainFailure,
@@ -165,6 +169,9 @@ impl fmt::Display for ReturnFailure {
                 )
             }
             Self::Aborted => f.write_str("stopped in place on request"),
+            Self::BadPace => f.write_str(
+                "the pace needs a finite, positive speed and a ramp of at least one step",
+            ),
             Self::Governor { error, .. } => f.write_str(error),
         }
     }
@@ -299,7 +306,7 @@ impl Return {
     ///
     /// # Errors
     ///
-    /// As [`Return::begin`].
+    /// As [`Return::begin`], and [`ReturnFailure::BadPace`].
     #[allow(clippy::too_many_lines)] // One plan: readings, target, pace, deadline.
     pub fn begin_paced<C: ActuatorChain, K: Clock>(
         governor: &mut Governor<C, K>,
@@ -307,6 +314,11 @@ impl Return {
         keep: &[usize],
         pace: Option<Pace>,
     ) -> Result<Self, ReturnFailure> {
+        if pace.is_some_and(|pace| {
+            !(pace.max_speed.is_finite() && pace.max_speed > 0.0) || pace.ramp < MAX_STEP_INTERVAL
+        }) {
+            return Err(ReturnFailure::BadPace);
+        }
         let speed: Axes<f64> = governor
             .limits()
             .iter()
@@ -859,6 +871,49 @@ mod tests {
             "{ending}"
         );
         assert!(close(&governor.chain().at, &[0.5, 0.3]));
+    }
+
+    /// Refute pass on #123: a zero or negative pace panicked the plan or the step, a NaN one
+    /// silently ran at the full share, and a ramp under one step let the first step run at
+    /// twice the pace. Each is refused before any command.
+    #[test]
+    fn a_pace_that_is_not_a_speed_or_ramps_in_under_a_step_is_refused() {
+        let (mut governor, clock) = governed(fake([0.5, 0.3]));
+        clock.0.set(clock.0.get() + Duration::from_secs(1));
+        governor.command(&[0.0, 0.0]).expect("move");
+        let ramp = Duration::from_secs(1);
+        for pace in [
+            Pace {
+                max_speed: 0.0,
+                ramp,
+            },
+            Pace {
+                max_speed: -0.1,
+                ramp,
+            },
+            Pace {
+                max_speed: f64::NAN,
+                ramp,
+            },
+            Pace {
+                max_speed: f64::INFINITY,
+                ramp,
+            },
+            Pace {
+                max_speed: 0.15,
+                ramp: Duration::ZERO,
+            },
+            Pace {
+                max_speed: 0.15,
+                ramp: MAX_STEP / 2,
+            },
+        ] {
+            assert_eq!(
+                Return::begin_paced(&mut governor, AtEnd::Start, &[], Some(pace)).err(),
+                Some(ReturnFailure::BadPace),
+                "{pace:?}"
+            );
+        }
     }
 
     #[test]

@@ -651,7 +651,10 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         let state = neck.state();
         let registers = &state.servos[&6];
         assert_eq!(
-            (u16::from_le_bytes([registers[46], registers[47]]), registers[41]),
+            (
+                u16::from_le_bytes([registers[46], registers[47]]),
+                registers[41]
+            ),
             (2607, 104)
         );
     }

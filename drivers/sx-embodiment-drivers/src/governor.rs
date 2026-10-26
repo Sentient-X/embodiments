@@ -118,6 +118,10 @@ pub enum LimitsError {
         "joint {0} needs a finite, positive speed and tracking-error bound, and acceleration bound where given"
     )]
     NotPositive(String),
+    /// A run's chosen over-rail derate whose speed or acceleration is not finite and positive:
+    /// taken as asked it would lift the derate (NaN) or stall or crash the step.
+    #[error("a chosen derate needs a finite, positive speed and acceleration")]
+    Derate,
 }
 
 /// A command the governor refused, or a fault it stopped the chain for.
@@ -276,6 +280,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 && limit.max_acceleration.is_none_or(positive))
         }) {
             return Err(LimitsError::NotPositive(axis.joint.clone()));
+        }
+        if derate.is_some_and(|d| !(positive(d.max_speed) && positive(d.max_acceleration))) {
+            return Err(LimitsError::Derate);
         }
         let opened_at = chain
             .last_observed()
@@ -999,6 +1006,32 @@ mod tests {
 
     fn close(left: &[f64], right: &[f64]) -> bool {
         left.iter().zip(right).all(|(a, b)| (a - b).abs() < 1e-12)
+    }
+
+    /// Refute pass on #123: a chosen derate's NaN speed lifted the over-rail derate, and a
+    /// zero, negative or NaN one stalled or panicked the step. Each is refused at build.
+    #[test]
+    fn a_chosen_derate_that_is_not_a_speed_and_acceleration_is_refused() {
+        let over = crate::rail::OVER_RAIL;
+        for (max_speed, max_acceleration) in [
+            (f64::NAN, 3.0),
+            (0.0, 3.0),
+            (-0.6, 3.0),
+            (0.6, f64::NAN),
+            (0.6, -1.0),
+            (f64::INFINITY, 3.0),
+        ] {
+            let derate = crate::rail::DerateLimits {
+                max_speed,
+                max_acceleration,
+                ..over
+            };
+            assert!(matches!(
+                Governor::with_derate(fake(true), vec![LIMITS; 2], Some(derate)),
+                Err(LimitsError::Derate)
+            ));
+        }
+        assert!(Governor::with_derate(fake(true), vec![LIMITS; 2], Some(over)).is_ok());
     }
 
     #[test]
