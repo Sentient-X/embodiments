@@ -6,7 +6,7 @@ from sx_contracts import ComponentId
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb
@@ -152,6 +152,10 @@ UNITREE_G1_MODULE: Final = Module(
 
 UNITREE_G1_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("unitree-g1"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("d8b7cd6420c6fa0cfe51577a3515758da06af3abd770b46812f6c2a7534fc113"),
+    ),
     label="Unitree G1 (29 DOF)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="unitree-g1", variant="29dof"),

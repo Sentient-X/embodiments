@@ -68,7 +68,7 @@ from ..compose import (
     body_component,
     sensor_component,
 )
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import (
     UNDOCUMENTED_DRIVE_REASON,
     UNDOCUMENTED_OBSERVATION_REASON,
@@ -561,6 +561,10 @@ HEAD_INFRARED_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "hea
 
 SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-humanoid-upper-body"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc"),
+    ),
     label="Sentient humanoid upper body",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid", variant="upper-body"),
@@ -593,6 +597,10 @@ SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC: Final = EmbodimentDefinition(
 
 SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-humanoid"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("4c63b409d2b192e8a1deecab1f607fe76a8be15568943de8e97ade4ef5f05583"),
+    ),
     label="Sentient humanoid",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),

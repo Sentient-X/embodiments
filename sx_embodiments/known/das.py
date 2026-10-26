@@ -27,7 +27,7 @@ from ..compose import (
     sensor_component,
 )
 from ..curves import Curve1D, Knot
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
 from ..parts import (
@@ -283,6 +283,10 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
         ),
     ),
     name=EmbodimentName("quest-ego"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("12f4b3f04e3a5328fc03fa6888a6b040408beb09f720907f19c4b26a7f7ebe5a"),
+    ),
     label="Quest 3 egocentric headset (stereo passthrough, no controllers)",
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
