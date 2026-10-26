@@ -18,7 +18,8 @@ standstill.
 
 :func:`fit_joint` fits M1 (Coulomb, viscous), M2 (+ Stribeck), M3 (+ load), M4 (M3 + Stribeck
 load) and M5 (directional load) by robust nonlinear least squares and keeps the model with the
-lowest error on a held-out pass (a more complex model must beat a simpler one by 5 %).
+lowest error on a held-out pass (a more complex model must beat a simpler one by 5 %). M5's
+directional terms need backdriving to separate, so in place the choice is among M1 to M4.
 :func:`segment_checks` rejects segments a contact or a stall corrupted before anything is fitted.
 """
 
@@ -63,6 +64,10 @@ MODELS: Final[dict[str, tuple[str, ...]]] = {
         "load_external_stribeck",
     ),
 }
+#: The models a mounted joint's sweeps can tell apart. In a quasi-static sweep the drive's
+#: torque is gravity's plus friction, so BAM's directional pair (M5) sees only the sum of its
+#: drive and load coefficients; telling them apart takes backdriving on a bench.
+IN_PLACE: Final = ("m1", "m2", "m3", "m4")
 #: A more complex model is kept only when its held-out error is this much lower.
 COMPLEXITY_MARGIN: Final = 0.05
 
@@ -251,6 +256,7 @@ def fit_joint(
     segments: Sequence[Segment],
     limits: SegmentLimits,
     armature: float = 0.0,
+    models: Sequence[str] = IN_PLACE,
 ) -> JointFit:
     """Fit every model to the passes but the last, choose by the last pass's error, refit the
     choice on every pass. Segments failing :func:`segment_checks` are rejected first."""
@@ -274,6 +280,7 @@ def fit_joint(
         start = [0.0, 0.0, 0.0] + [_BOUNDS[name][0] for name in MODELS[model]]
         lower = [-np.inf] * 3 + [_BOUNDS[name][1] for name in MODELS[model]]
         upper = [np.inf] * 3 + [_BOUNDS[name][2] for name in MODELS[model]]
+
         def residual(x: Array) -> Array:
             return _predict(model, x, q, v, tau, direction, joint) - tau
 
@@ -292,10 +299,10 @@ def fit_joint(
         return math.sqrt(float(np.mean(error**2)))
 
     held_out: dict[str, float] = {}
-    for model in MODELS:
+    for model in models:
         held_out[model] = rms(model, solve(model, train), held)
-    chosen = "m1"
-    for model in MODELS:
+    chosen = models[0]
+    for model in models:
         if held_out[model] < held_out[chosen] * (1.0 - COMPLEXITY_MARGIN):
             chosen = model
     values = solve(chosen, kept)
