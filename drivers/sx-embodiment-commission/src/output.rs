@@ -322,3 +322,41 @@ pub fn commission_report(result: &Result<Vec<PortMatch>, Vec<PortError>>) -> Str
     }
     out
 }
+
+/// The robot's host needs (`host-needs.json`, `sx_embodiment_drivers::host_needs`): each
+/// matched port's, as the driver opening its bridge declares them, and their union.
+#[must_use]
+pub fn host_needs(probe: &Probe, matched: &[PortMatch]) -> sx_embodiment_drivers::HostNeeds {
+    let mut needs = sx_embodiment_drivers::HostNeeds::new();
+    for port in matched {
+        needs.add(&port.port, port_needs(probe, port));
+    }
+    needs
+}
+
+fn port_needs(probe: &Probe, port: &PortMatch) -> Vec<sx_embodiment_drivers::HostNeed> {
+    let ids = |bridge: &Bridge| (bridge.usb.vendor_id, bridge.usb.product_id);
+    for bridge in &probe.bridges {
+        match &bridge.access {
+            Access::Tty { .. } if bridge.identity() == Some(port.identity.as_str()) => {
+                let (vendor, product) = ids(bridge);
+                return sx_embodiment_bodies::serial_bridge_host_needs(
+                    vendor,
+                    product,
+                    bridge.identity(),
+                );
+            }
+            Access::Userspace { channels } if channels.contains(&port.identity) => {
+                let (vendor, product) = ids(bridge);
+                let serial = bridge.identity().unwrap_or_default();
+                return sx_zlg_usbcanfd::host_needs(vendor, product, serial);
+            }
+            Access::SocketCan { interfaces } if interfaces.contains(&port.channel) => {
+                return sx_socketcan::host_needs(&port.channel, Some(ids(bridge)));
+            }
+            _ => {}
+        }
+    }
+    // A board's own CAN controller: no USB device behind it.
+    sx_socketcan::host_needs(&port.channel, None)
+}

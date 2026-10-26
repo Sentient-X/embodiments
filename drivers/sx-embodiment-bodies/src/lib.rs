@@ -1247,3 +1247,29 @@ where
         self.0.clear_faults();
     }
 }
+
+/// What the host must provide to open a USB serial bridge (a Feetech or Dynamixel servo adapter,
+/// a Damiao USB2CAN) as it was measured (`sx_embodiment_drivers::host_needs`): its tty for the
+/// station's group, USB autosuspend off, and `SCHED_FIFO` for the control loop driving it.
+#[must_use]
+pub fn serial_bridge_host_needs(
+    vendor_id: u16,
+    product_id: u16,
+    serial: Option<&str>,
+) -> Vec<sx_embodiment_drivers::HostNeed> {
+    use sx_embodiment_drivers::HostNeed;
+    vec![
+        HostNeed::SerialTty {
+            vendor_id,
+            product_id,
+            serial: serial.map(str::to_owned),
+        },
+        HostNeed::UsbAutosuspendOff {
+            vendor_id,
+            product_id,
+        },
+        HostNeed::RealtimePriority {
+            priority: u8::try_from(sx_realtime::CONTROL_LOOP_PRIORITY).unwrap_or(u8::MAX),
+        },
+    ]
+}

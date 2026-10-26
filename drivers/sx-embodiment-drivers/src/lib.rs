@@ -44,6 +44,7 @@ pub mod dynamics;
 pub mod ending;
 pub mod governor;
 pub mod holder;
+pub mod host_needs;
 pub mod inertial;
 pub mod kinematics;
 pub mod layout;
@@ -81,6 +82,7 @@ pub use governor::{
     MAX_STEP_INTERVAL, MonotonicClock,
 };
 pub use holder::{Holder, Process, holder_of};
+pub use host_needs::{HOST_NEEDS_SCHEMA, HostNeed, HostNeeds};
 pub use inertial::{
     InertialQuantity, InertialSample, InertialSensor, InertialSource, MAX_INERTIAL_HZ, Stillness,
     Tilt,

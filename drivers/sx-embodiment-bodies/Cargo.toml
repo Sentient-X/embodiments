@@ -21,6 +21,7 @@ zlg = ["dep:sx-zlg-usbcanfd"]
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
+sx-realtime.workspace = true
 sx-damiao-can = { path = "../sx-damiao-can" }
 sx-feetech-serial = { path = "../sx-feetech-serial" }
 sx-dynamixel-serial = { path = "../sx-dynamixel-serial" }

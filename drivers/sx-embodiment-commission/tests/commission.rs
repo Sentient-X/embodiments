@@ -569,3 +569,42 @@ fn bindings_without_ports_put_damiao_on_can() {
         Err(DeclaredError::MixedPort { .. })
     ));
 }
+
+#[test]
+fn the_robot_host_needs_are_each_drivers_for_its_bridge() {
+    use sx_embodiment_drivers::HostNeed;
+    let mut robot = Robot::found(false);
+    let found = probe(&mut robot, &Ids::default()).unwrap();
+    let matched = commission(&body(), &found).unwrap();
+    let needs = sx_embodiment_commission::output::host_needs(&found, &matched);
+    let can = &needs.ports["can"];
+    assert!(can.contains(&HostNeed::UsbDevice {
+        vendor_id: 0x3068,
+        product_id: 0x0009,
+        serial: Some(ZLG_SERIAL.to_owned()),
+    }));
+    assert!(can.contains(&HostNeed::CpuWakeLatency));
+    assert!(needs.ports["neck"].contains(&HostNeed::SerialTty {
+        vendor_id: 0x1a86,
+        product_id: 0x55d3,
+        serial: Some(NECK_SERIAL.to_owned()),
+    }));
+    assert_eq!(needs.realtime_priority(), Some(80));
+    let text = serde_json::to_string(&needs).unwrap();
+    assert_eq!(
+        sx_embodiment_drivers::HostNeeds::parse(&text).unwrap(),
+        needs
+    );
+
+    // The same body on SocketCAN: the interface comes up with its bitrate and restart.
+    let mut robot = Robot::found(true);
+    let found = probe(&mut robot, &Ids::default()).unwrap();
+    let matched = commission(&body(), &found).unwrap();
+    let needs = sx_embodiment_commission::output::host_needs(&found, &matched);
+    assert!(needs.ports["can"].contains(&HostNeed::CanInterface {
+        interface: "can1".to_owned(),
+        bitrate: 1_000_000,
+        restart_ms: 100,
+        txqueue_len: 64,
+    }));
+}
