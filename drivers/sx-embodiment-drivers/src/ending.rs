@@ -22,7 +22,7 @@
 //! carries the caller's feed-forward (the gravity a model holds the arm against), so a PD arm
 //! does not sag when the operation's feed-forward stops. It moves its target from where the
 //! governor last sent each axis at [`RETURN_SPEED_SHARE`] of each axis's cap, so a servo whose own approach limit
-//! floors below the cap (an STS3215 set to 0.25 rad/s moves at 0.23) keeps up instead of
+//! floors below the cap (an STS3215 set to 0.25 rad/s moved at 0.23) keeps up instead of
 //! falling ever further behind. It has arrived when every axis was sent its target and observed
 //! within [`RETURN_TOLERANCE`] of it, and is held there for [`RETURN_SETTLE`] before the stop.
 //! It is bounded three ways:

@@ -669,10 +669,8 @@ impl Opener {
                     FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
                 let calibrated = body.calibrated(drive)?;
                 whole = calibrated.clone();
-                let (axes, setups) = in_service(
-                    calibrated.into_iter().zip(body.servos.iter().copied()),
-                    out_of_service,
-                );
+                let (axes, setups) =
+                    in_service(calibrated.into_iter().zip(body.setups()?), out_of_service);
                 (!axes.is_empty()).then(|| Part::Feetech {
                     baud: body.baud,
                     calibrations: supplied(&axes),

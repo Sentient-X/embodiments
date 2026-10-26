@@ -644,12 +644,16 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         &mut bridges,
     )
     .expect("open does not refuse a servo resting outside its range");
-    // Every Feetech servo holds Goal_Speed 162 and Acceleration 3 (0.25 rad/s, 0.5 rad/s²,
-    // in steps/s and 100 steps/s²).
+    // Open writes every Feetech servo its port's registry approach: Goal_Speed 2607 and
+    // Acceleration 104 (4 rad/s, 16 rad/s², in steps/s and 100 steps/s²); the enable below
+    // slows a servo resting outside its limits to the bring-up pull-in.
     {
         let state = neck.state();
         let registers = &state.servos[&6];
-        assert_eq!((registers[46], registers[47], registers[41]), (162, 0, 3));
+        assert_eq!(
+            (u16::from_le_bytes([registers[46], registers[47]]), registers[41]),
+            (2607, 104)
+        );
     }
     // The first command asks for the tilt's nearest commandable joint, its lower bound.
     let mut target = rest_inside(&body);
@@ -878,7 +882,7 @@ fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_
     // It came in at the servo's own pace, then held at the edge it reaches: the governor
     // never tracked it toward 1.74 rad, which the firmware would clamp.
     assert!(
-        lifts[0] < resting && resting - lifts[0] <= 3,
+        lifts[0] < resting && resting - lifts[0] <= 52,
         "{}",
         lifts[0]
     );
