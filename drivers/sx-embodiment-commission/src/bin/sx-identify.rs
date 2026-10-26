@@ -205,8 +205,9 @@ struct Args {
     torso: bool,
     without: Vec<String>,
     feedforward: Option<String>,
-    /// The supply the motors run on, V, recorded with every run.
-    supply: Option<f64>,
+    /// The supply the motors run on, recorded with every run: one voltage, or per motor model
+    /// (`damiao_dm8009=48,*=24`), as given.
+    supply: Option<String>,
     /// What feeds the motors (`boost-converter`, `battery`, ...), recorded with every run.
     source: Option<String>,
     motion: bool,
@@ -246,7 +247,9 @@ fn parse() -> Result<Args, String> {
             "--feedforward" => parsed.feedforward = Some(value()?),
             "--supply-source" => parsed.source = Some(value()?),
             "--supply-volts" => {
-                parsed.supply = Some(value()?.parse().map_err(|_| "bad --supply-volts")?);
+                let text = value()?;
+                supply_for(&text, "").map_err(|()| "bad --supply-volts")?;
+                parsed.supply = Some(text);
             }
             "--move" => parsed.motion = true,
             other => return Err(format!("unknown argument {other}")),
@@ -268,6 +271,25 @@ fn parse() -> Result<Args, String> {
         return Err(format!("--speed is in (0, {MAX_SPEED}] rad/s"));
     }
     Ok(parsed)
+}
+
+/// The supply `text` gives a motor of `model`: a plain voltage for every motor, or
+/// `model=volts` pairs with `*` for the rest.
+fn supply_for(text: &str, model: &str) -> Result<Option<f64>, ()> {
+    if let Ok(volts) = text.trim().parse::<f64>() {
+        return Ok(Some(volts));
+    }
+    let mut fallback = None;
+    for pair in text.split(',') {
+        let (key, volts) = pair.split_once('=').ok_or(())?;
+        let volts: f64 = volts.trim().parse().map_err(|_| ())?;
+        match key.trim() {
+            "*" => fallback = Some(volts),
+            key if key == model => return Ok(Some(volts)),
+            _ => {}
+        }
+    }
+    Ok(fallback)
 }
 
 /// Peak torque by model, N·m: what the guard is a share of.
@@ -569,7 +591,7 @@ struct Record {
 /// torque.
 fn write_records(
     out: &mut impl Write,
-    supply: Option<f64>,
+    supply: Option<&str>,
     source: Option<&str>,
     names: &[String],
     ticks: &[Tick],
@@ -657,7 +679,12 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
                 axis.axis.joint
             )),
             Some(motor) => {
-                if let (Some(supply), Some(over)) = (args.supply, motor.over_voltage)
+                let supply = args.supply.as_deref().and_then(|text| {
+                    supply_for(text, axis.axis.binding.model.wire())
+                        .ok()
+                        .flatten()
+                });
+                if let (Some(supply), Some(over)) = (supply, motor.over_voltage)
                     && f64::from(over) <= supply
                 {
                     problems.push(format!(
@@ -665,7 +692,7 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
                         axis.axis.joint
                     ));
                 }
-                if let (Some(supply), Some(under)) = (args.supply, motor.under_voltage)
+                if let (Some(supply), Some(under)) = (supply, motor.under_voltage)
                     && f64::from(under) >= supply
                 {
                     problems.push(format!(
@@ -1002,7 +1029,7 @@ fn run() -> Result<(), String> {
     let report = governor.stop();
     let written = write_records(
         &mut out,
-        args.supply,
+        args.supply.as_deref(),
         args.source.as_deref(),
         &names,
         &ticks,
