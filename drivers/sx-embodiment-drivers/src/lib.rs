@@ -47,6 +47,7 @@ pub mod layout;
 pub mod lerobot;
 pub mod masked;
 pub mod media;
+pub mod rail;
 pub mod serial;
 
 pub use approach::{ApproachLimit, BRING_UP_APPROACH};
@@ -81,4 +82,8 @@ pub use masked::{Masked, check_available};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
     MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,
+};
+pub use rail::{
+    AxisDerate, DerateLimits, OVER_RAIL, OverRail, REFUSE_ABOVE, RailCheck, Rails, RailsError,
+    derates,
 };

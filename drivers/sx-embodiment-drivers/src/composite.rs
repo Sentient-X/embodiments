@@ -17,6 +17,7 @@ use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
     FeedforwardLimit, Receipt, StopReport, TargetError, check_reach,
 };
+use crate::rail::AxisDerate;
 
 /// The first chain's axes, then the second's.
 pub struct Composite<A, B> {
@@ -215,6 +216,16 @@ where
         let mut readings = self.first.read_positions();
         readings.extend(self.second.read_positions());
         readings
+    }
+
+    fn derated(&self) -> Vec<AxisDerate> {
+        let first = self.first.axes().len();
+        let mut derated = self.first.derated();
+        derated.extend(self.second.derated().into_iter().map(|derate| AxisDerate {
+            axis: first + derate.axis,
+            ..derate
+        }));
+        derated
     }
 
     fn unavailable(&self) -> Vec<usize> {

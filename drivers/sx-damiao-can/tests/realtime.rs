@@ -35,6 +35,7 @@ fn a_governed_command_tick_allocates_nothing() {
             AxisLimits {
                 max_speed: 0.25,
                 max_tracking_error: 0.2,
+                max_acceleration: None,
             };
             width
         ],

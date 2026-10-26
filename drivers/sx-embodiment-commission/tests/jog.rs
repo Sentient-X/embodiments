@@ -85,6 +85,7 @@ fn governed(drive: &InstanceDrive, bus: &Sim) -> (Governor<Body, Manual>, Manual
             AxisLimits {
                 max_speed: SPEED,
                 max_tracking_error: 0.2,
+                max_acceleration: None,
             };
             joints.len()
         ],

@@ -383,6 +383,13 @@ pub trait ActuatorChain {
         Vec::new()
     }
 
+    /// The axes (indices in native state order) commissioning's rails put over their model's
+    /// supported supply, each with what it is held to: a [`crate::Governor`] applies them.
+    /// Fixed once the chain is open.
+    fn derated(&self) -> Vec<crate::rail::AxisDerate> {
+        Vec::new()
+    }
+
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
     fn clear_faults(&mut self) {}
