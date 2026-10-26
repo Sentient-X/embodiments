@@ -21,6 +21,12 @@ pub struct CanFrame {
 }
 
 /// A link to one CAN bus.
+///
+/// A refused send carries its reason as an `io::Error` whose kind every transport keeps the
+/// same: `WouldBlock`, the transmit queue is full, send again once the bus drains;
+/// `Interrupted`, the link recovered itself and dropped what was queued, send again;
+/// `NotConnected`, the link needs action outside this process (a power cycle, a bus-off
+/// controller, an interface that is down).
 pub trait CanPort: Send {
     /// Transmit one frame.
     ///
@@ -67,6 +73,13 @@ pub trait CanPort: Send {
     fn frame_allowance(&self) -> Duration {
         FRAME_ALLOWANCE
     }
+
+    /// The link's own counts, by name, for a diagnostic report (frames lost, refusals, error
+    /// frames, how late the host took answers): what tells a host stall from a bus fault, on
+    /// whichever transport. Read between runs, never per tick. Empty where the link keeps none.
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        Vec::new()
+    }
 }
 
 /// A port chosen at run time, as a station opens whichever bridge its commissioning names.
@@ -89,6 +102,10 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn frame_allowance(&self) -> Duration {
         (**self).frame_allowance()
+    }
+
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        (**self).counters()
     }
 }
 
@@ -144,5 +161,11 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
         self.0
             .lock()
             .map_or(FRAME_ALLOWANCE, |port| port.frame_allowance())
+    }
+
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        self.0
+            .lock()
+            .map_or_else(|_| Vec::new(), |port| port.counters())
     }
 }

@@ -184,6 +184,7 @@ fn access(bridge: &Bridge) -> String {
     match &bridge.access {
         Access::Tty { path } => path.clone(),
         Access::SocketCan { interfaces } => format!("SocketCAN {}", interfaces.join(", ")),
+        Access::Userspace { channels } => format!("userspace {}", channels.join(", ")),
         Access::NoDriver { reason } => format!("present, unusable here: {reason}"),
         Access::None => String::new(),
     }

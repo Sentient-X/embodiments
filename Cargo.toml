@@ -11,6 +11,7 @@ members = [
     "drivers/sx-realsense",
     "drivers/sx-uvc-stereo",
     "drivers/sx-stereolabs-sensors",
+    "drivers/sx-realtime",
     "drivers/sx-socketcan",
     "drivers/sx-zlg-usbcanfd",
     "drivers/sx-embodiment-bodies",
@@ -30,6 +31,7 @@ publish = false
 [workspace.dependencies]
 sx-yubi = { path = "drivers/sx-yubi" }
 sx-embodiment-drivers = { path = "drivers/sx-embodiment-drivers" }
+sx-realtime = { path = "drivers/sx-realtime" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

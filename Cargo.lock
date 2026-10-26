@@ -1247,6 +1247,7 @@ dependencies = [
  "sx-embodiment-bodies",
  "sx-embodiment-drivers",
  "sx-feetech-serial",
+ "sx-realtime",
  "sx-socketcan",
  "sx-zlg-usbcanfd",
  "thiserror 2.0.21",
@@ -1300,11 +1301,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sx-realtime"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "mach2 0.5.0",
+]
+
+[[package]]
 name = "sx-socketcan"
 version = "0.1.0"
 dependencies = [
  "libc",
  "sx-embodiment-drivers",
+ "sx-realtime",
  "thiserror 2.0.21",
 ]
 
@@ -1336,8 +1346,6 @@ version = "0.1.0"
 name = "sx-zlg-usbcanfd"
 version = "0.1.0"
 dependencies = [
- "libc",
- "mach2 0.5.0",
  "nusb",
  "objc2",
  "objc2-core-foundation",
@@ -1347,6 +1355,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sx-embodiment-drivers",
+ "sx-realtime",
  "sx-socketcan",
  "thiserror 2.0.21",
 ]

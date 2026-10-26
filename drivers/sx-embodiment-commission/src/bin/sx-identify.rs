@@ -4,7 +4,7 @@
 //! ```text
 //! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>
 //!             --record <out.csv> --drive <instance-drive.json> --instance <id>
-//!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1]
+//!             --bus <identity> [--speed 0.25]
 //!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>]
 //!             [--feedforward-ramp-s 2] [--supply-volts 48|<model>=<V>,*=<V>] [--supply-source <s>]
 //!             [--move] [--seconds 30]
@@ -77,7 +77,6 @@ use sx_embodiment_drivers::{
     ActuatorChain, Dynamics, DynamicsCalibration, Feedforward, FeedforwardLimit, InstanceDrive,
     Scratch, UPRIGHT,
 };
-use sx_zlg_usbcanfd::{ChannelOptions, UsbCanFd};
 
 const PERIOD: Duration = Duration::from_millis(20);
 const MAX_SPEED: f64 = 0.5;
@@ -212,8 +211,9 @@ struct Args {
     drive: String,
     instance: String,
     speed: f64,
-    serial: Option<String>,
-    channel: u8,
+    /// The bus's commissioned identity (`<ZLG serial>:<channel>`, a `SocketCAN` interface or
+    /// its adapter's serial), opened through `SystemPorts` on whichever transport carries it.
+    bus: String,
     torso: bool,
     without: Vec<String>,
     feedforward: Option<String>,
@@ -238,8 +238,7 @@ fn parse() -> Result<Args, String> {
         drive: String::new(),
         instance: String::new(),
         speed: 0.25,
-        serial: None,
-        channel: 1,
+        bus: String::new(),
         torso: false,
         without: Vec::new(),
         feedforward: None,
@@ -258,8 +257,7 @@ fn parse() -> Result<Args, String> {
             "--drive" => parsed.drive = value()?,
             "--instance" => parsed.instance = value()?,
             "--speed" => parsed.speed = value()?.parse().map_err(|_| "bad --speed")?,
-            "--zlg-serial" => parsed.serial = Some(value()?),
-            "--channel" => parsed.channel = value()?.parse().map_err(|_| "bad --channel")?,
+            "--bus" => parsed.bus = value()?,
             "--with-torso" => parsed.torso = true,
             "--without" => parsed.without.push(value()?),
             "--feedforward" => parsed.feedforward = Some(value()?),
@@ -701,18 +699,10 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     use sx_damiao_can::observe::DamiaoObserver;
     use sx_damiao_can::scan::scan;
     use sx_embodiment_drivers::{AxisReading, Observe};
-    let adapter = UsbCanFd::open(args.serial.as_deref()).map_err(|e| e.to_string())?;
     let ids: Vec<u16> = axes.iter().map(|a| a.axis.binding.bus_id).collect();
-    let registers = {
-        let port = adapter
-            .open_channel(args.channel, ChannelOptions::default())
-            .map_err(|e| e.to_string())?;
-        scan(port, ids.clone()).map_err(|e| e.to_string())?
-    };
+    let registers = scan(open_bus(args)?, ids.clone()).map_err(|e| e.to_string())?;
     let readings = {
-        let port = adapter
-            .open_channel(args.channel, ChannelOptions::default())
-            .map_err(|e| e.to_string())?;
+        let port = open_bus(args)?;
         let mut observer = DamiaoObserver::open(port, axes.clone()).map_err(|e| e.to_string())?;
         observer.read_positions()
     };
@@ -819,17 +809,29 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     }
 }
 
-/// Put this thread under the host's real-time policy for a 20 ms loop, where it has one
-/// (macOS: Mach's time-constraint policy, `sx_zlg_usbcanfd::macos::time_constraint`), so an
-/// overloaded host does not park the tick for tens of milliseconds. Refusal is reported and
-/// the loop runs as before.
+/// Put this thread under the host's real-time policy for a 20 ms loop (`sx_realtime`: Mach's
+/// time constraint on macOS, `SCHED_FIFO` on Linux), so an overloaded host does not park the
+/// tick for tens of milliseconds. Refusal is reported and the loop runs as before.
 fn realtime_loop() {
-    #[cfg(target_os = "macos")]
-    if let Err(code) = sx_zlg_usbcanfd::macos::time_constraint(PERIOD, PERIOD / 4, PERIOD / 2) {
-        eprintln!(
-            "sx-identify: the time-constraint policy was refused ({code}); ticks may run late"
+    if let Err(refused) = sx_realtime::elevate(sx_realtime::Role::ControlLoop { period: PERIOD }) {
+        eprintln!("sx-identify: the real-time policy was {refused}; ticks may run late");
+    }
+}
+
+/// The bus `--bus` names, opened on whichever transport carries that identity (a ZLG channel
+/// in userspace, a `SocketCAN` interface, a USB2CAN bridge), as a station opens a commissioned
+/// port.
+fn open_bus(args: &Args) -> Result<sx_embodiment_bodies::Port, String> {
+    use sx_embodiment_bodies::PortSource;
+    if args.bus.is_empty() {
+        return Err(
+            "--bus names the bus by its commissioned identity, e.g. A30F115DD0120A949B80:1 or can0"
+                .into(),
         );
     }
+    sx_embodiment_bodies::system::SystemPorts::system()
+        .open(&args.bus)
+        .map_err(|e| e.to_string())
 }
 
 /// `--part latency`: see the module docs. Sends only status refreshes and register reads.
@@ -842,11 +844,9 @@ fn realtime_loop() {
 )]
 fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     use sx_damiao_can::observe::DamiaoObserver;
+    use sx_embodiment_drivers::can::CanPort;
     use sx_embodiment_drivers::{AxisReading, MissingReason, Observe};
-    let adapter = UsbCanFd::open(args.serial.as_deref()).map_err(|e| e.to_string())?;
-    let port = adapter
-        .open_channel(args.channel, ChannelOptions::default())
-        .map_err(|e| e.to_string())?;
+    let port = open_bus(args)?;
     let mut observer = DamiaoObserver::open(port, axes.clone()).map_err(|e| e.to_string())?;
     let polls = (args.seconds / PERIOD.as_secs_f64()).ceil() as usize;
     let count = axes.len();
@@ -856,8 +856,7 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     let mut missed = vec![[0_u64; 4]; count];
     let mut faulted = vec![0_u64; count];
     let mut events: Vec<(f64, usize, MissingReason, u32)> = Vec::with_capacity(1024);
-    let channel_before = observer.port().stats();
-    let device_before = adapter.stats();
+    let link_before = observer.port().counters();
     realtime_loop();
     let began = Instant::now();
     let mut next = began;
@@ -899,8 +898,7 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
         }
     }
     let elapsed = began.elapsed().as_secs_f64();
-    let channel_after = observer.port().stats();
-    let device_after = adapter.stats();
+    let link_after = observer.port().counters();
     let quantiles = |values: &mut Vec<u32>| {
         values.sort_unstable();
         let at = |q: f64| {
@@ -931,7 +929,20 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
             "faulted": faulted[index],
         }));
     }
-    let received = channel_after.rx_frames - channel_before.rx_frames;
+    let count_of = |counters: &[(&str, u64)], name: &str| {
+        counters
+            .iter()
+            .find(|(counter, _)| *counter == name)
+            .map_or(0, |(_, value)| *value)
+    };
+    let received =
+        count_of(&link_after, "rx_frames").saturating_sub(count_of(&link_before, "rx_frames"));
+    let named = |counters: &[(&'static str, u64)]| {
+        counters
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), serde_json::Value::from(*value)))
+            .collect::<serde_json::Map<_, _>>()
+    };
     let poll_us = quantiles(&mut durations);
     eprintln!(
         "{polls} polls in {elapsed:.1} s; poll us {poll_us}; frames received {received}, taken by a poll {answered}, late or unclaimed {}",
@@ -946,10 +957,9 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
         "frames_received": received,
         "frames_taken_by_a_poll": answered,
         "late_or_unclaimed": received.saturating_sub(answered),
-        "channel_before": channel_before,
-        "channel_after": channel_after,
-        "device_before": device_before,
-        "device_after": device_after,
+        "bus": args.bus,
+        "link_before": named(&link_before),
+        "link_after": named(&link_after),
         "motors": motors,
         "misses": events.iter().map(|(t, index, reason, took)| serde_json::json!({
             "t": t, "joint": axes[*index].axis.joint, "reason": format!("{reason:?}"), "poll_us": took,
@@ -1040,10 +1050,7 @@ fn run() -> Result<(), String> {
         eprintln!("without --move nothing is sent");
         return Ok(());
     }
-    let adapter = UsbCanFd::open(args.serial.as_deref()).map_err(|e| e.to_string())?;
-    let port = adapter
-        .open_channel(args.channel, ChannelOptions::default())
-        .map_err(|e| e.to_string())?;
+    let port = open_bus(&args)?;
     let peaks: Vec<f64> = axes
         .iter()
         .map(|a| a.axis.binding.model.rating().peak_torque_nm)

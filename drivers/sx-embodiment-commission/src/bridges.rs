@@ -2,9 +2,12 @@
 //!
 //! A device is classed by what the host offers for it, then by the few devices a robot is
 //! known to carry: a tty makes it a serial bus, a `SocketCAN` interface on its serial makes it a
-//! CAN bus, a video-class interface (UVC) a camera, a HID interface an input. A known CAN bridge
-//! with no interface is present but unusable here: the ZLG USBCANFD-200U becomes `SocketCAN`
-//! only under ZLG's own Linux driver, and has none on macOS.
+//! CAN bus, a video-class interface (UVC) a camera, a HID interface an input. The ZLG
+//! USBCANFD-200U has no kernel driver (ZLG ships only a libusb library for its USB adapters,
+//! and `SocketCAN` drivers only for its `PCIe` cards): it is driven in userspace by
+//! `sx-zlg-usbcanfd` on Linux and macOS alike, each channel commissioned as
+//! `<USB serial>:<channel>`. Any other known CAN bridge with no interface is present but
+//! unusable here: its kernel driver (`gs_usb`, `peak_usb`) is not loaded.
 
 use serde::Serialize;
 
@@ -34,6 +37,8 @@ pub enum Access {
     Tty { path: String },
     /// Its `SocketCAN` interfaces, one per channel.
     SocketCan { interfaces: Vec<String> },
+    /// Its channels, opened in userspace, by their identities (`<USB serial>:<channel>`).
+    Userspace { channels: Vec<String> },
     /// Attached, but this host has no driver that makes it a bus.
     NoDriver { reason: String },
     /// Not a bus.
@@ -132,17 +137,29 @@ fn known(usb: &UsbDevice) -> Option<(&'static str, BridgeKind)> {
         .map(|&(_, _, name, kind)| (name, kind))
 }
 
+/// CAN bridges driven in userspace (`sx-zlg-usbcanfd`), by vendor and product id, with their
+/// channel count.
+const USERSPACE_CAN: [(u16, u16, u8); 2] = [(0x3068, 0x0009, 2), (0x04cc, 0x1240, 2)];
+
+/// The channel identities of a CAN bridge driven in userspace, or `None`.
+fn userspace_channels(usb: &UsbDevice) -> Option<Vec<String>> {
+    let serial = usb.serial.as_deref()?;
+    let &(_, _, channels) = USERSPACE_CAN
+        .iter()
+        .find(|(vendor, product, _)| *vendor == usb.vendor_id && *product == usb.product_id)?;
+    Some(
+        (0..channels)
+            .map(|channel| format!("{serial}:{channel}"))
+            .collect(),
+    )
+}
+
 /// Why a known CAN bridge without an interface cannot be opened here.
-fn no_can_driver(usb: &UsbDevice) -> String {
-    let driver = if usb.vendor_id == 0x3068 {
-        "ZLG's own driver"
-    } else {
-        "a SocketCAN driver"
-    };
+fn no_can_driver() -> String {
     if cfg!(target_os = "linux") {
-        format!("no SocketCAN interface: {driver} is not loaded")
+        "no SocketCAN interface: its kernel driver (gs_usb, peak_usb) is not loaded".to_owned()
     } else {
-        format!("SocketCAN is Linux only; on Linux it needs {driver}")
+        "SocketCAN is Linux only".to_owned()
     }
 }
 
@@ -179,8 +196,11 @@ pub fn classify(usb: UsbDevice, ttys: &[Tty], can: &[CanInterface]) -> Bridge {
             path: tty.path.clone(),
         },
         (None, BridgeKind::CanBus) if !interfaces.is_empty() => Access::SocketCan { interfaces },
-        (None, BridgeKind::CanBus) => Access::NoDriver {
-            reason: no_can_driver(&usb),
+        (None, BridgeKind::CanBus) => match userspace_channels(&usb) {
+            Some(channels) => Access::Userspace { channels },
+            None => Access::NoDriver {
+                reason: no_can_driver(),
+            },
         },
         (None, BridgeKind::SerialBus) => Access::NoDriver {
             reason: "no serial device node".to_owned(),

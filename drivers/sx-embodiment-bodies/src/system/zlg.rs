@@ -3,9 +3,9 @@
 //!
 //! One adapter carries several CAN channels under one USB serial number, so the serial alone
 //! cannot say which bus a port is; the channel index (0-based, so the adapter's second
-//! channel, Linux's `can1` under ZLG's kernel module, is `:1`) completes the identity, e.g.
+//! channel is `:1`) completes the identity, e.g.
 //! `A30F115DD0120A949B80:1`. The adapter is found by enumeration and opened through
-//! `sx_zlg_usbcanfd`, which claims its USB interface (refused while ZLG's Linux kernel module or
+//! `sx_zlg_usbcanfd`, which claims its USB interface (refused while
 //! another process holds it); the channel opens as classic CAN at 1 Mbit/s with the adapter's
 //! termination at its default, on. Two identities on one serial share the opened adapter.
 

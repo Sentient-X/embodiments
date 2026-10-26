@@ -25,8 +25,9 @@ const VENDOR: &[&str] = &[
 /// Bench binaries still to move onto the layer, and why they have not.
 const NOT_YET: &[(&str, &str)] = &[(
     "sx-identify.rs",
-    "opens DamiaoChain over a ZLG channel and reads registers with the Damiao scan; to move \
-     onto open_with and observe, its torso and wrist skips onto out_of_service",
+    "opens DamiaoChain on the bus --bus names (through SystemPorts, on any transport) and \
+     reads registers with the Damiao scan; to move onto open_with and observe, its torso and \
+     wrist skips onto out_of_service",
 )];
 
 #[test]

@@ -245,6 +245,10 @@ impl Robot {
             robot
                 .buses
                 .insert("can1".to_owned(), DAMIAO.into_iter().collect());
+        } else {
+            robot
+                .buses
+                .insert(format!("{ZLG_SERIAL}:1"), DAMIAO.into_iter().collect());
         }
         robot
     }
@@ -402,7 +406,7 @@ fn nothing_but_pings_and_reads_reach_any_bus() {
 }
 
 #[test]
-fn on_macos_the_zlg_is_present_and_the_can_port_is_missing() {
+fn without_socketcan_the_zlg_channels_are_scanned_in_userspace_and_named_by_channel() {
     let mut robot = Robot::found(false);
     let found = probe(&mut robot, &Ids::default()).unwrap();
     let zlg = found
@@ -411,13 +415,17 @@ fn on_macos_the_zlg_is_present_and_the_can_port_is_missing() {
         .find(|bridge| bridge.usb.vendor_id == 0x3068)
         .unwrap();
     assert_eq!(zlg.kind, BridgeKind::CanBus);
-    assert!(matches!(zlg.access, Access::NoDriver { .. }));
-    let errors = commission(&body(), &found).unwrap_err();
-    assert_eq!(errors.len(), 1);
-    assert!(
-        matches!(&errors[0], PortError::Missing { port, partial, .. }
-        if port == "can" && partial.is_empty())
+    assert_eq!(
+        zlg.access,
+        Access::Userspace {
+            channels: vec![format!("{ZLG_SERIAL}:0"), format!("{ZLG_SERIAL}:1")]
+        }
     );
+    let matched = commission(&body(), &found).unwrap();
+    let can = matched.iter().find(|port| port.port == "can").unwrap();
+    assert_eq!(can.identity, format!("{ZLG_SERIAL}:1"));
+    // A channel identity names one bus: nothing is ambiguous.
+    assert!(sx_embodiment_commission::output::warnings(&found, &matched).is_empty());
 }
 
 #[test]

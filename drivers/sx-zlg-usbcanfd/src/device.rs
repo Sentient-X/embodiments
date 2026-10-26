@@ -1,8 +1,8 @@
 //! One adapter, opened once per process, and its CAN channels as `CanPort`s.
 //!
 //! [`UsbCanFd::open`] finds the adapter by its USB serial number, claims interface 0 (which
-//! the operating system grants to one owner: a second process, or ZLG's own Linux kernel
-//! module when it is bound to the adapter, makes the claim fail with [`ZlgError::Busy`]),
+//! the operating system grants to one owner: a second process holding it makes the claim fail
+//! with [`ZlgError::Busy`]),
 //! probes it as the specification's §1.3 does and starts the I/O thread. Opening the same
 //! serial again in this process returns the same adapter, so two channels of one adapter can
 //! be opened by two callers. [`UsbCanFd::open_channel`] runs the channel lifecycle of §3.8 and
@@ -46,7 +46,7 @@ pub enum ZlgError {
     #[error("no ZLG USBCANFD adapter{} is attached", .0.as_ref().map(|serial| format!(" with USB serial {serial}")).unwrap_or_default())]
     NotFound(Option<String>),
     #[error(
-        "ZLG adapter {serial} is in use: {detail}. Its interface is held by another process, or on Linux by ZLG's kernel module, which claims the adapter when loaded and exposes its channels as SocketCAN interfaces; use those, or unload the module"
+        "ZLG adapter {serial} is in use: {detail}. Its interface is held by another process (on Linux, any driver bound to it: `ls /sys/bus/usb/devices/*/driver` names it)"
     )]
     Busy { serial: String, detail: String },
     #[error("ZLG adapter {serial}: {detail}")]
@@ -269,6 +269,10 @@ struct Core {
     probe: Probe,
     options: Options,
     io: Mutex<Option<JoinHandle<()>>>,
+    /// Cores kept able to wake at once while the adapter is open (`sx_realtime`), where the
+    /// host grants it: on the Spark a completion woken on a deeply idle core waited up to
+    /// 433 µs.
+    _wake: Option<sx_realtime::WakeLatency>,
 }
 
 impl Drop for Core {
@@ -573,6 +577,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
         probe,
         options,
         io: Mutex::new(Some(io)),
+        _wake: wake_latency(),
     })
 }
 
@@ -617,6 +622,18 @@ type DataEndpoints = (
     nusb::Endpoint<Bulk, In>,
 );
 
+/// Keep the host's cores able to wake at once while the adapter is open, where it is granted;
+/// a refusal is reported once and the adapter runs without it.
+fn wake_latency() -> Option<sx_realtime::WakeLatency> {
+    sx_realtime::hold_wake_latency()
+        .inspect_err(|refused| {
+            if *refused != sx_realtime::Refused::Unsupported {
+                eprintln!("zlg-usbcanfd: the CPU wake-latency request was {refused}");
+            }
+        })
+        .ok()
+}
+
 /// Start the I/O thread, returning once it has queued its receive reads.
 fn start_io(
     shared: &Arc<Shared>,
@@ -645,31 +662,23 @@ fn start_io(
     Ok(io)
 }
 
-/// Put the threads every answer passes through under the host's real-time policy: this I/O
-/// thread and, on macOS, nusb's `nusb-events`, which delivers every USB completion. On an
-/// overloaded host (macOS at load 30–100 parked default threads for 30–100 ms on 2026-10-26)
-/// either one at default priority held answers past their phase's deadline, and the chain read
-/// a motor as silent (`Silent(<id>)`) though it had answered. Each does under 0.1 ms of work
-/// per wake (the I/O thread about 6 % of a core at 250 Hz, README), inside the computation it
-/// asks for. A refusal leaves a thread at default priority, reported once.
+/// Put the threads every answer passes through under the host's real-time policy
+/// (`sx_realtime`, [`sx_realtime::Role::AnswerPath`]): this I/O thread and `nusb`'s
+/// `nusb-events`, which delivers every USB completion on macOS and reaps every URB on Linux.
+/// On an overloaded host (macOS at load 30–100 parked default threads for 30–100 ms on
+/// 2026-10-26) either one at default priority held answers past their phase's deadline, and the
+/// chain read a motor as silent (`Silent(<id>)`) though it had answered. Each does under 0.1 ms
+/// of work per wake (the I/O thread about 6 % of a core at 250 Hz, README). A refusal leaves a
+/// thread at default priority, reported once, with what the host must grant.
 fn io_thread_realtime() {
-    #[cfg(target_os = "macos")]
-    {
-        let (period, computation, constraint) = (
-            Duration::from_millis(1),
-            Duration::from_micros(250),
-            Duration::from_millis(1),
-        );
-        if let Err(code) = crate::macos::time_constraint(period, computation, constraint) {
-            eprintln!("zlg-usbcanfd: the I/O thread's time-constraint policy was refused ({code})");
-        }
-        match crate::macos::time_constraint_named("nusb-events", period, computation, constraint) {
-            Ok(0) => eprintln!("zlg-usbcanfd: no nusb-events thread to put under time constraint"),
-            Ok(_) => {}
-            Err(code) => {
-                eprintln!("zlg-usbcanfd: nusb-events' time-constraint policy was refused ({code})");
-            }
-        }
+    use sx_realtime::{Role, elevate, elevate_named};
+    if let Err(refused) = elevate(Role::AnswerPath) {
+        eprintln!("zlg-usbcanfd: the I/O thread's real-time policy was {refused}");
+    }
+    match elevate_named("nusb-events", Role::AnswerPath) {
+        Ok(0) => eprintln!("zlg-usbcanfd: no nusb-events thread to put under the real-time policy"),
+        Ok(_) => {}
+        Err(refused) => eprintln!("zlg-usbcanfd: nusb-events' real-time policy was {refused}"),
     }
 }
 
@@ -1013,6 +1022,30 @@ impl CanPort for Channel {
     fn frame_allowance(&self) -> Duration {
         let batch = Duration::from_millis(u64::from(self.core.options.transmit_timeout_ms) + 1);
         batch * 2
+    }
+
+    /// The channel's and the adapter's counts (`stats`, `UsbCanFd::stats`).
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        let channel = self.stats();
+        let device = self.core.shared.device.snapshot();
+        vec![
+            ("rx_frames", channel.rx_frames),
+            ("rx_lost", channel.rx_lost),
+            ("bus_errors", channel.bus_errors),
+            ("tx_queued", channel.tx_queued),
+            ("tx_queue_full", channel.tx_queue_full),
+            ("tx_batches", channel.tx_batches),
+            ("tx_partial_batches", channel.tx_partial_batches),
+            ("tx_failed_batches", channel.tx_failed_batches),
+            ("tx_holds", channel.tx_holds),
+            ("tx_stalls", channel.tx_stalls),
+            ("tx_dropped", channel.tx_dropped),
+            ("recoveries", channel.recoveries),
+            ("rx_transfers", device.rx_transfers),
+            ("rx_invalid", device.rx_invalid),
+            ("rx_unopened", device.rx_unopened),
+            ("rx_usb_errors", device.rx_usb_errors),
+        ]
     }
 }
 
