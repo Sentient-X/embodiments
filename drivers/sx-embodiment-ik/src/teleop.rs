@@ -21,7 +21,9 @@
 //!   the head are driven. Joints the config holds are never solved.
 //! - **head**: the limb named `head` (a camera, [`Task::LookAt`]) looks where the
 //!   [`HeadPolicy`] says: at the commanded hands, or along the operator's gaze (the head pose's
-//!   local +x, by looking at the point [`GAZE_DISTANCE_M`] ahead of the camera along it).
+//!   local +x, by looking at the point [`GAZE_DISTANCE_M`] ahead of the camera along it). The
+//!   neck alone turns it, its picture stays level, and it keeps each driven tool in clear
+//!   sight ([`Ik`] owns those).
 //! - **grippers**: each hand's gripper width moves its fingers, linear between the fingertips'
 //!   closed and open distance ([`Gripper`]).
 //!
@@ -61,8 +63,10 @@ pub const ENGAGE_RADIUS_M: f64 = 0.06;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeadPolicy {
-    /// At the hands: the midpoint of the commanded tool points, or the one commanded. The
-    /// operator needs no head tracking; with no hand driven the neck holds.
+    /// At the hands: the direction halfway between the commanded tool points as the camera
+    /// sees them, so both sit the same angle from the picture's centre however far each is
+    /// (the midpoint between them would put the nearer one closer to the edge); or the one
+    /// commanded. The operator needs no head tracking; with no hand driven the neck holds.
     #[default]
     Hands,
     /// Along the operator's gaze: the head pose's local +x. With no head pose the neck holds.
@@ -98,6 +102,9 @@ pub struct LimbConfig {
     /// a target (a camera).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look_forward: Option<[f64; 3]>,
+    /// For a camera: the unit vector in the frame kept horizontal (the image's across axis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look_level: Option<[f64; 3]>,
 }
 
 /// Everything the solve is built from besides the description, so a station and a headset
@@ -127,7 +134,7 @@ pub struct TeleopConfig {
 
 impl TeleopConfig {
     /// The static upper body's limbs: both grippers' tool frames, and the ZED looking out of
-    /// its lenses (`ZED_camera` +x) from the SO-101 neck.
+    /// its lenses (`ZED_camera` +x, its stereo baseline +y level) from the SO-101 neck.
     #[must_use]
     pub fn static_upper_body_limbs() -> Vec<LimbConfig> {
         vec![
@@ -135,16 +142,19 @@ impl TeleopConfig {
                 name: "left".into(),
                 frame: "left_gripper_tcp".into(),
                 look_forward: None,
+                look_level: None,
             },
             LimbConfig {
                 name: "right".into(),
                 frame: "right_gripper_tcp".into(),
                 look_forward: None,
+                look_level: None,
             },
             LimbConfig {
                 name: "head".into(),
                 frame: "ZED_camera".into(),
                 look_forward: Some([1.0, 0.0, 0.0]),
+                look_level: Some([0.0, 1.0, 0.0]),
             },
         ]
     }
@@ -354,7 +364,10 @@ impl Teleop {
                 frame: limb.frame.clone(),
                 task: limb
                     .look_forward
-                    .map_or(Task::Pose, |forward| Task::LookAt { forward }),
+                    .map_or(Task::Pose, |forward| Task::LookAt {
+                        forward,
+                        level: limb.look_level,
+                    }),
             })
             .collect();
         let body = Body::new(urdf, collision, &limbs)?;
@@ -450,6 +463,7 @@ impl Teleop {
                     residual_rad: 0.0,
                     reach: Reach::Idle,
                     active: Vec::new(),
+                    hidden_by: None,
                 })
                 .collect(),
             solve: Solve::Solved,
@@ -582,16 +596,31 @@ impl Teleop {
         if let Some(head) = self.head {
             self.wanted[head] = match self.config.head {
                 HeadPolicy::Hands => {
+                    self.ik.body().model().poses_into(&self.q, &mut self.frames);
+                    let camera = self.ik.body().frame(&self.frames, head).t;
                     let mut sum = [0.0; 3];
+                    let mut bisector = [0.0; 3];
+                    let mut distance = 0.0;
                     let mut count = 0.0;
                     for pose in targets.tcp.iter().flatten() {
-                        for (total, value) in sum.iter_mut().zip(pose.translation_m) {
-                            *total += value;
+                        let to = [0, 1, 2].map(|k| pose.translation_m[k] - camera[k]);
+                        let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+                        for k in 0..3 {
+                            sum[k] += pose.translation_m[k];
+                            bisector[k] += to[k] / length;
                         }
+                        distance += length;
                         count += 1.0;
                     }
+                    let across = bisector.iter().map(|v| v * v).sum::<f64>().sqrt();
                     (count > 0.0).then(|| Target::LookAt {
-                        point_m: sum.map(|total| total / count),
+                        // Hands on opposite sides of the camera have no bisector: their midpoint.
+                        point_m: if across > 1e-6 {
+                            let reach = distance / count / across;
+                            [0, 1, 2].map(|k| reach.mul_add(bisector[k], camera[k]))
+                        } else {
+                            sum.map(|total| total / count)
+                        },
                     })
                 }
                 HeadPolicy::Gaze => targets.head.map(|gaze| {

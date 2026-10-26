@@ -12,8 +12,13 @@ use crate::{IkError, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 pub enum Task {
     /// Reach a pose: a gripper's tool frame.
     Pose,
-    /// Point the frame's `forward` axis (unit, in the frame) at a point: a camera.
-    LookAt { forward: [f64; 3] },
+    /// Point the frame's `forward` axis (unit, in the frame) at a point: a camera. With a
+    /// `level` axis (unit, in the frame, across `forward`: the image's horizontal), that axis
+    /// is kept horizontal in the root frame, so the picture does not roll.
+    LookAt {
+        forward: [f64; 3],
+        level: Option<[f64; 3]>,
+    },
 }
 
 /// One task frame of the body and what it is asked to do.
@@ -97,7 +102,8 @@ impl Body {
     }
 
     /// The Sentient static upper body: both grippers' tool frames, and the ZED looking out
-    /// of its lenses (`ZED_camera` +x) from the SO-101 neck.
+    /// of its lenses (`ZED_camera` +x, its stereo baseline +y kept level) from the SO-101
+    /// neck.
     ///
     /// # Panics
     ///
@@ -120,6 +126,7 @@ impl Body {
                 frame: "ZED_camera".into(),
                 task: Task::LookAt {
                     forward: [1.0, 0.0, 0.0],
+                    level: Some([0.0, 1.0, 0.0]),
                 },
             },
         ];

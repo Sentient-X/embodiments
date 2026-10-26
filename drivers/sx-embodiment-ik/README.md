@@ -27,6 +27,16 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   declares it in `collision.json` (`support`, the mount frame's z = 0 plane, solid below
   everywhere within reach), and every `Ik` adds it to the scene it is given. Collision is checked on capsule proxies,
   with each pair's approach planned to stop before a 1 cm margin.
+- **The camera:** a look-at limb points at its target (teleop's `HeadPolicy::Hands` aims
+  halfway between the hands *as the camera sees them*, so both sit the same angle from the
+  picture's centre). It turns on its own neck only, never on the torso that carries the
+  arms. It keeps its picture level (`Task::LookAt::level`, the ZED's stereo baseline), and
+  it keeps each driven tool's line of sight 3 cm clear of the body, stepping around an arm
+  in the way. `LimbReport::hidden_by` names the link hiding a tool. Across 60 random arm
+  postures with the neck settling on the hands, both hands end in clear sight 70% of the
+  time against 27% without the sight rows (`tests/view.rs`). The view model is the one
+  from the Model 3 co-design study (October 2026): framing alone left the hands hidden by
+  the robot's own arms most of the time.
 - **Unreachable targets:** the solver degrades smoothly and reports
   `Reach::Unreachable` with the residual.
 - **Unavailable axes:** `available[axis] = false` holds an axis at its measured position.
