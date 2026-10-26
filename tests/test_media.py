@@ -153,9 +153,9 @@ def test_an_inertial_sensor_is_listed_with_its_axes_unit_and_mount() -> None:
     assert sensor["mount_frame"] == "ZED_camera"
     assert sensor["rate_hz"] == 400.0
     assert {"acceleration", "angular_velocity"} <= set(sensor["measures"])
-    # Stereolabs' RAW axes: x down, y left, z forward, a quarter turn about the ZED frame's y.
+    # As measured on the robot: x down, y towards the right eye, z out of the back.
     half = math.sqrt(0.5)
-    assert sensor["mount_from_sensor"]["rotation_xyzw"] == [0.0, half, 0.0, half]
+    assert sensor["mount_from_sensor"]["rotation_xyzw"] == [-half, 0.0, half, 0.0]
     assert "so101_camera_tilt_joint" in sensor["moves_with"]
     assert sensor["root_from_mount"] is None
     assert Embodiment.from_dict(body.to_dict()) == body

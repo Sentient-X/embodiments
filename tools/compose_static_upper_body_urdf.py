@@ -411,15 +411,21 @@ def render() -> dict[Path, bytes]:
             _write_stl(path, vertices, faces)
             outputs[path] = path.read_bytes()
 
-    # The ZED's frame, placed so its left eye's optical frame is the source's, and both eyes.
+    # The ZED's frame from the source's left optical frame, and both eyes. The source's frame is
+    # the left eye of an upside-down camera: it sits on the right lens (as the ZED meshes show
+    # it, facing forward and upright on the robot) with its x towards the robot's left. So the
+    # ZED frame is the one that frame implies, turned half a turn about its own x (forward): the
+    # centre stays, z comes up, and the left eye lands on the left lens.
     if robot.find(f"link[@name='{SOURCE_ZED_EYE}']") is None:
         raise ValueError(f"the source no longer carries {SOURCE_ZED_EYE}")
     left = _pose(Pose((0.0, eye_offset("left"), 0.0), OPTICAL_RPY))
+    upright = np.eye(4)
+    upright[:3, :3] = _rpy(np.array([math.pi, 0.0, 0.0]))
     ET.SubElement(robot, "link", {"name": ZED_FRAME})
     joint = ET.SubElement(
         robot, "joint", {"name": f"{SOURCE_ZED_EYE}_to_{ZED_FRAME}", "type": "fixed"}
     )
-    _set_origin(joint, np.linalg.inv(left))
+    _set_origin(joint, np.linalg.inv(left) @ upright)
     ET.SubElement(joint, "parent", {"link": SOURCE_ZED_EYE})
     ET.SubElement(joint, "child", {"link": ZED_FRAME})
     for eye in EYES:

@@ -24,7 +24,11 @@ track (:class:`~sx_embodiments.media.StereoPair`).
   an accelerometer and gyroscope at 400 Hz, a magnetometer, a barometer and temperatures, on what
   Stereolabs' ``zed-open-capture`` calls the RAW axes (``README.md``, "Coordinates system", at
   ``93739154``): x down, y towards the left eye, z out of the lenses, about the device centre.
-  That is the ROS ZED frame turned a quarter turn about its y axis, so :func:`zed_2i_imu` mounts on
+  Read that way, it is the ROS ZED frame turned a quarter turn about its y axis; but on the static
+  upper body (2026-10-26) the accelerometer put the camera 8 deg nose up when the ZED was upright,
+  facing forward and visibly 8 deg nose down, and a camera-tilt step the model turns nose up read
+  as nose down. Only the axes half a turn about the camera's vertical fit both: as mounted, the
+  module's x is down, y towards the right eye and z out of the back. :func:`zed_2i_imu` mounts on
   the body's ZED frame at that rotation. The SDK reads a per-unit camera-to-IMU transform from the
   device which ``zed-open-capture`` does not expose; the nominal offset is zero, which a gravity
   direction does not depend on.
@@ -127,6 +131,6 @@ def zed_2i_imu() -> InertialSpec:
         model=ZED_2I,
         rate_hz=ZED_2I_IMU_HZ,
         measures=tuple(InertialQuantity),
-        mount_from_sensor=((0.0, 0.0, 0.0), (0.0, half, 0.0, half)),
+        mount_from_sensor=((0.0, 0.0, 0.0), (-half, 0.0, half, 0.0)),
         source=_RAW_AXES,
     )
