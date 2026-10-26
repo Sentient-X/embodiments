@@ -2,7 +2,7 @@
 
 Two optional extras widen it for one tree each: ``capture`` lets ``encoder_serial.py`` read a
 serial port, ``calibrate`` lets the solvers under ``calibrate/`` use NumPy, SciPy and OpenCV,
-and ``render`` lets ``render_pack.py`` use NumPy. Nothing else in the package may import them,
+and ``render`` lets ``render_pack.py`` and the ``collision_proxies.py`` it fits use NumPy. Nothing else in the package may import them,
 so the registry stays importable bare.
 """
 
@@ -17,6 +17,7 @@ _EXTRAS = {
     "encoder_serial.py": frozenset({"serial"}),
     "calibrate": frozenset({"numpy", "scipy", "cv2"}),
     "render_pack.py": frozenset({"numpy"}),
+    "collision_proxies.py": frozenset({"numpy"}),
 }
 
 # The sanctioned environment reads live in assets.py alone: the local-tree override,
