@@ -53,6 +53,7 @@ sx-commission calibrate gripper --bus <tty> --ids 1,2 [--move] [--widen <ticks>]
   [--closed 1:low,2:high] [--json]
 sx-commission calibrate jog --bus <tty> --id <n> --delta <ticks> [--move] [--json]
 sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
+sx-commission calibrate apply --bus <tty> --calibration <file> --move
 sx-commission calibrate --restore <journal>
 ```
 
@@ -75,6 +76,15 @@ sx-commission calibrate --restore <journal>
   end closes, so 0 percent is closed. The calibration is printed, never written to the servo.
   The probed grippers' limits are about 600 ticks wide, so the stops may lie past them:
   `--widen <ticks>` widens the limits for the sweep and restores them after.
+- `apply` makes a calibration's `range_min`/`range_max` each servo's own position limits, kept
+  across power cycles (`Lock` 0, both words, `Lock` 1), with every servo limp. It takes
+  `gripper --json`'s output or a `LeRobot` calibration keyed by joint, prints the limits it
+  replaced, and only `Lock` is put back on close. The servo answers late while it stores an
+  EEPROM word, so a write whose status packet times out is judged by reading the word back.
+  `FeetechBody::open` refuses a servo whose limits disagree with its calibration, so a measured
+  gripper range is unusable until it is applied. On 2026-10-26 the static upper body's grippers
+  went from about 53 degrees of commandable stroke, past which every finger overloaded, to their
+  full measured stroke (about 40 degrees open and back, no fault).
 - `jog` powers one joint where it rests and moves it `--delta` ticks (at most 400), then back,
   and turns torque off. It prints each position and the measured ticks per second at the given
   `--goal-speed`. `--hold-seconds <s>` holds it at the target first, printing `HOLDING id N at
@@ -163,6 +173,11 @@ sx-jog --drive <drive.json> --commissioning <commissioning.json>
        [--exclude <joint,...>] [--speed 0.2] [--log <ticks.jsonl>]
        (--joint <joint> --delta-deg <deg> [--hold-seconds <s>] | --sequence <joint:deg|pause:s,...>)
 ```
+
+A step written `&joint:deg` moves with the step after it, so a pose reached by several joints
+(an IK answer) is one coordinated move: put the largest move last, since it sets the duration.
+`sx-embodiment-ik`'s `look_at` example turns measured neck joints into such a sequence's targets:
+the ZED looking ahead, at each gripper and at the table between them.
 
 Its old vendor-frame modes are gone, each covered by the layer: `--scan` is `sx-commission
 probe`; `--clear-faults` is the open's own settle phase, which clears a latched 0xD once;

@@ -18,6 +18,9 @@ use super::journal::{Journal, SavedRegister};
 use super::read::{self, ServoState};
 use super::{CalibrateError, MAX_TICK, TORQUE_LIMIT};
 
+/// How long a Feetech servo takes to store an EEPROM word before it answers reads again.
+const EEPROM_SETTLE: Duration = Duration::from_millis(30);
+
 /// How a powered servo is held back, servo-side: the registers [`Session::enable`] writes and
 /// reads back before `Torque_Enable` 1.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -319,6 +322,72 @@ impl<P: SerialPort> Session<P> {
         self.set(id, SMS_STS_LOCK, 1, 1)?;
         self.set(id, SMS_STS_MIN_ANGLE_LIMIT_L, 2, min)?;
         self.set(id, SMS_STS_MAX_ANGLE_LIMIT_L, 2, max)
+    }
+
+    /// [`Session::set`] for an unlocked EEPROM word: the servo answers late while it stores
+    /// it, so a write whose status packet timed out is judged by reading the word back.
+    fn set_eeprom(&mut self, id: u8, address: u8, value: u16) -> Result<(), CalibrateError> {
+        self.save(id, address, 2)?;
+        match self.write(id, address, 2, value) {
+            Ok(())
+            | Err(CalibrateError::Comm {
+                result: CommResult::RxTimeout,
+                ..
+            }) => {}
+            Err(error) => return Err(error),
+        }
+        std::thread::sleep(EEPROM_SETTLE);
+        let read = read::register(&mut self.ph, id, address, 2)?;
+        if read != value {
+            return Err(CalibrateError::ReadBack {
+                id,
+                address,
+                wrote: value,
+                read,
+            });
+        }
+        Ok(())
+    }
+
+    /// Make `min..max` servo `id`'s own position limits, kept across power cycles: `Lock` 0,
+    /// both limits written and read back, then `Lock` 1. Unlike [`Session::widen_limits`] this
+    /// is the unit's calibration, so closing the session does not undo the limits (it puts
+    /// `Lock` back); returns the limits it replaced, for the caller to report.
+    ///
+    /// # Errors
+    ///
+    /// A powered servo, a range that is not one, or a write that does not read back.
+    pub fn commit_limits(
+        &mut self,
+        id: u8,
+        min: u16,
+        max: u16,
+    ) -> Result<(u16, u16), CalibrateError> {
+        self.check()?;
+        if self.powered().is_some() {
+            return Err(CalibrateError::Refused(format!(
+                "limits change only with every servo limp (servo {id})"
+            )));
+        }
+        if min >= max || max > MAX_TICK {
+            return Err(CalibrateError::Refused(format!(
+                "{min}..{max} is not a position range"
+            )));
+        }
+        let before = self.limits(id)?;
+        self.set(id, SMS_STS_LOCK, 1, 0)?;
+        self.set_eeprom(id, SMS_STS_MIN_ANGLE_LIMIT_L, min)?;
+        self.set_eeprom(id, SMS_STS_MAX_ANGLE_LIMIT_L, max)?;
+        self.set(id, SMS_STS_LOCK, 1, 1)?;
+        self.journal.record.saved.retain(|saved| {
+            saved.id != id
+                || !matches!(
+                    saved.address,
+                    SMS_STS_MIN_ANGLE_LIMIT_L | SMS_STS_MAX_ANGLE_LIMIT_L
+                )
+        });
+        self.journal.persist()?;
+        Ok(before)
     }
 
     /// Power servo `id` where it rests, held back by `slow`: its goal is written to its present
