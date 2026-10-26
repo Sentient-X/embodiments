@@ -61,7 +61,8 @@ use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
-    ChainFailure, Chains, ChainsError, CommandRange, InstanceDrive, Observe, Receipt, StopReport,
+    ChainFailure, Chains, ChainsError, CommandRange, Feedforward, FeedforwardLimit, InstanceDrive,
+    Observe, Receipt, StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::body::{FeetechBody, ServoSetup as FeetechSetup};
@@ -997,6 +998,26 @@ where
             observed: receipt.observed,
             feedback: Answer::into_feedback(receipt.feedback),
         })
+    }
+
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<MotorFeedback>, BusError> {
+        let receipt = self
+            .0
+            .command_with(joints, feedforward)
+            .map_err(Into::into)?;
+        Ok(Receipt {
+            evidence: receipt.evidence,
+            observed: receipt.observed,
+            feedback: Answer::into_feedback(receipt.feedback),
+        })
+    }
+
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), BusError> {
+        self.0.set_feedforward_limits(limits).map_err(Into::into)
     }
 
     fn stop(&mut self) -> StopReport {

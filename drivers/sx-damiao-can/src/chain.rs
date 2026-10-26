@@ -89,8 +89,8 @@ use std::time::{Duration, Instant};
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
-    ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
-    TargetError, check_reach, validate_chain,
+    ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit, MissingReason,
+    Receipt, StopReport, TargetError, check_reach, validate_chain,
 };
 use thiserror::Error;
 
@@ -207,25 +207,6 @@ impl DamiaoAxis {
             upper: self.axis.upper.min(ends[0].max(ends[1])),
         }
     }
-}
-
-/// What a command adds to one axis' position target, at the joint: the planned velocity
-/// (rad/s) and the model's feed-forward torque (N·m), both in joint coordinates.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Feedforward {
-    pub velocity: f64,
-    pub torque: f64,
-}
-
-/// How much [`Feedforward`] one axis accepts, at the joint. `None` switches that part off: the
-/// MIT frame carries zero, as the chain did before feed-forward existed. A value is clamped to
-/// its bound, then to the motor's own `VMAX` and `TMAX` registers read at open.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct FeedforwardLimit {
-    /// The largest planned speed sent, rad/s; the governor's speed cap is the natural bound.
-    pub velocity: Option<f64>,
-    /// The largest feed-forward torque sent, N·m.
-    pub torque: Option<f64>,
 }
 
 /// The state a feedback frame's first-byte high nibble reports.
@@ -1214,6 +1195,21 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 }
             })
             .collect()
+    }
+
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
+        DamiaoChain::command_with(self, joints, feedforward)
+    }
+
+    fn set_feedforward_limits(
+        &mut self,
+        limits: &[FeedforwardLimit],
+    ) -> Result<(), DamiaoChainError> {
+        DamiaoChain::set_feedforward_limits(self, limits)
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {

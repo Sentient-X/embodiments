@@ -54,9 +54,9 @@ pub use binding::{
 };
 pub use body::{BodyBindings, BodyError, Bus};
 pub use chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, MissingReason,
-    Observe, ProvenStop, Receipt, StopReport, TargetError, check_reach, check_targets,
-    fresh_positions,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
+    FeedforwardLimit, MissingReason, Observe, ProvenStop, Receipt, StopReport, TargetError,
+    check_reach, check_targets, fresh_positions,
 };
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};

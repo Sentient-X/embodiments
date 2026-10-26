@@ -258,6 +258,26 @@ pub enum ChainFailure {
     Fault,
 }
 
+/// What a command adds to one axis' position target, at the joint: the planned velocity
+/// (unit/s) and the model's feed-forward torque (N·m, N for a prismatic joint), both in joint
+/// coordinates. An actuator that takes only a position target ignores it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Feedforward {
+    pub velocity: f64,
+    pub torque: f64,
+}
+
+/// How much [`Feedforward`] one axis accepts, at the joint. `None` switches that part off: the
+/// actuator is sent zero, as before feed-forward existed. A vendor chain clamps a value to its
+/// bound, then to what the actuator itself accepts.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FeedforwardLimit {
+    /// The largest planned speed sent, unit/s; the governor's speed cap is the natural bound.
+    pub velocity: Option<f64>,
+    /// The largest feed-forward torque sent, N·m.
+    pub torque: Option<f64>,
+}
+
 /// A chain's error, classified once by the crate that knows its vendor's failure modes.
 pub trait ChainError: std::error::Error + Send + Sync + 'static {
     fn failure(&self) -> ChainFailure;
@@ -285,6 +305,37 @@ pub trait ActuatorChain {
     /// ([`CommandRange::reaching`]), before any frame is sent; reports the
     /// link's failure or an actuator whose answer contradicts the command.
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error>;
+
+    /// [`ActuatorChain::command`] with each axis' planned velocity and feed-forward torque,
+    /// one per axis in native state order, bounded by
+    /// [`ActuatorChain::set_feedforward_limits`]. A chain whose actuators take only a position
+    /// target sends the positions alone.
+    ///
+    /// # Errors
+    ///
+    /// As [`ActuatorChain::command`]; a vendor chain also refuses, before any frame, a list of
+    /// another length or a non-finite entry.
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        let _ = feedforward;
+        self.command(joints)
+    }
+
+    /// Bound, or switch off, each axis' feed-forward, in native state order. Every part is off
+    /// until this bounds it. A chain whose actuators take only a position target accepts any
+    /// bounds and sends none.
+    ///
+    /// # Errors
+    ///
+    /// A vendor chain refuses a list of another length and a bound that is not finite and
+    /// non-negative, keeping the bounds in force.
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        let _ = limits;
+        Ok(())
+    }
 
     /// Poll measured joint coordinates without enabling an actuator or changing its target:
     /// one [`AxisReading`] per axis, always `axes().len()` of them in native state order, an
