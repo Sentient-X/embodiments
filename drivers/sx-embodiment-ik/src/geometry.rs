@@ -1,13 +1,13 @@
-//! Collision proxies (`collision.json`, `sx.collision-proxies/v2`) and the distances between
+//! Collision proxies (`collision.json`, `sx.collision-proxies/v3`) and the distances between
 //! them and the scene.
 
 use serde::Deserialize;
 
 use crate::IkError;
-use crate::math::{V3, add, dot, norm, scale, sub};
+use crate::math::{V3, add, dot, mat_vec, norm, scale, sub};
 use crate::model::Model;
 
-pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v2";
+pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v3";
 
 /// How far a declared support reaches from its frame, m: past any limb's reach.
 const SUPPORT_REACH_M: f64 = 3.0;
@@ -29,13 +29,44 @@ struct Document {
     support: Option<SupportDocument>,
 }
 
-/// The surface the body stands on: the `z = 0` plane of `frame`, solid below.
+/// The surface the body stands on: the `z = 0` plane of `frame`, solid below up to `edge`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SupportDocument {
     frame: String,
     #[allow(dead_code)]
     kind: String,
+    edge: Option<EdgeDocument>,
+}
+
+/// Where the support ends: the line where the `frame` coordinate along `out` is `at_m`;
+/// nothing of the support lies beyond it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EdgeDocument {
+    out: Direction,
+    at_m: f64,
+}
+
+/// An axis direction in the support frame's xy plane.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Direction {
+    PosX,
+    NegX,
+    PosY,
+    NegY,
+}
+
+impl Direction {
+    const fn unit(self) -> V3 {
+        match self {
+            Self::PosX => [1.0, 0.0, 0.0],
+            Self::NegX => [-1.0, 0.0, 0.0],
+            Self::PosY => [0.0, 1.0, 0.0],
+            Self::NegY => [0.0, -1.0, 0.0],
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -77,8 +108,9 @@ pub struct Proxies {
     /// Capsule index pairs on links that are neither ignored nor rigidly joined.
     pub pairs: Vec<(usize, usize)>,
     /// The surface the body stands on, as its embodiment declares it (its base mount): the
-    /// mount frame's `z = 0` plane, solid below everywhere within reach. A link below the top
-    /// is in collision.
+    /// mount frame's `z = 0` plane, solid below up to the support's declared edge, or
+    /// everywhere within reach when it declares none. A link below the top and behind the
+    /// edge is in collision; one in front of a clamp-edge table's edge may hang below its top.
     pub support: Option<Obstacle>,
 }
 
@@ -87,7 +119,7 @@ impl Proxies {
     ///
     /// # Errors
     ///
-    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v2`, names a link
+    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v3`, names a link
     /// the tree lacks, or declares a support on a frame that moves or is not level with the
     /// root.
     pub fn parse(json: &str, model: &Model) -> Result<Self, IkError> {
@@ -139,7 +171,12 @@ impl Proxies {
         }
         let support = match &document.support {
             None => None,
-            Some(declared) => Some(support(model, link(&declared.frame)?, &declared.frame)?),
+            Some(declared) => Some(support(
+                model,
+                link(&declared.frame)?,
+                &declared.frame,
+                declared.edge.as_ref(),
+            )?),
         };
         Ok(Self {
             capsules,
@@ -150,8 +187,15 @@ impl Proxies {
 }
 
 /// The support under `frame` as a box in the root frame: the frame must be fixed to the root
-/// and level with it, so its `z = 0` plane is a root-frame height.
-fn support(model: &Model, frame: usize, name: &str) -> Result<Obstacle, IkError> {
+/// and level with it, so its `z = 0` plane is a root-frame height. Without an edge the box
+/// reaches past any limb on every side; an edge cuts it at the edge line, which must run
+/// along a root axis so the box stays axis-aligned.
+fn support(
+    model: &Model,
+    frame: usize,
+    name: &str,
+    edge: Option<&EdgeDocument>,
+) -> Result<Obstacle, IkError> {
     if !model.above(frame).is_empty() {
         return Err(IkError::Proxies(format!(
             "support frame {name:?} moves with a joint"
@@ -166,10 +210,30 @@ fn support(model: &Model, frame: usize, name: &str) -> Result<Obstacle, IkError>
     }
     let [x, y, z] = pose.t;
     let reach = SUPPORT_REACH_M;
-    Ok(Obstacle {
+    let mut obstacle = Obstacle {
         min: [x - reach, y - reach, z - reach],
         max: [x + reach, y + reach, z],
-    })
+    };
+    if let Some(edge) = edge {
+        if !edge.at_m.is_finite() {
+            return Err(IkError::Proxies(format!(
+                "support frame {name:?} edge at_m is not finite"
+            )));
+        }
+        let out = mat_vec(&pose.r, edge.out.unit());
+        let Some(axis) = (0..2).find(|&k| (out[k].abs() - 1.0).abs() < 1e-9) else {
+            return Err(IkError::Proxies(format!(
+                "support frame {name:?} edge does not run along a root axis"
+            )));
+        };
+        let line = pose.apply(scale(edge.out.unit(), edge.at_m))[axis];
+        if out[axis] > 0.0 {
+            obstacle.max[axis] = line;
+        } else {
+            obstacle.min[axis] = line;
+        }
+    }
+    Ok(obstacle)
 }
 
 /// Whether no moving joint lies between two links: nothing can change their distance.
@@ -279,4 +343,90 @@ pub fn segment_box(obstacle: &Obstacle, a: V3, b: V3) -> (V3, f64, V3) {
     let point = at(s);
     let (distance, normal) = box_distance(obstacle, point);
     (point, distance, normal)
+}
+
+#[cfg(test)]
+#[allow(clippy::float_cmp)] // Exact comparisons of values the support copies through.
+mod tests {
+    use super::*;
+    use sx_embodiment_drivers::kinematics::Tree;
+
+    /// A root `world` with the mount frame fixed `yaw` about z and lifted 0.8 m.
+    fn model(yaw: f64) -> Model {
+        let urdf = format!(
+            r#"<robot name="r"><link name="world"/><link name="base"/>
+            <joint name="mount" type="fixed"><parent link="world"/><child link="base"/>
+            <origin xyz="0.1 0.2 0.8" rpy="0 0 {yaw}"/></joint></robot>"#
+        );
+        Model::new(&Tree::parse(&urdf).expect("tree"))
+    }
+
+    fn proxies(model: &Model, edge: &str) -> Result<Proxies, IkError> {
+        let json = format!(
+            r#"{{"schema":"{PROXIES_SCHEMA}","embodiment_id":"r","urdf_sha256":"0",
+            "capsules":[],"ignored_pairs":{{"adjacent":[],"touching_at_zero":[]}},
+            "adjacent_joints":2,"generated_by":"test",
+            "support":{{"frame":"base","kind":"clamp_edge","edge":{edge}}}}}"#
+        );
+        Proxies::parse(&json, model)
+    }
+
+    fn support(yaw: f64, edge: &str) -> Obstacle {
+        proxies(&model(yaw), edge)
+            .expect("proxies")
+            .support
+            .expect("support")
+    }
+
+    #[test]
+    fn a_support_without_an_edge_is_the_whole_slab() {
+        let slab = support(0.0, "null");
+        assert_eq!(
+            slab.max,
+            [0.1 + SUPPORT_REACH_M, 0.2 + SUPPORT_REACH_M, 0.8]
+        );
+        assert_eq!(
+            slab.min,
+            [
+                0.1 - SUPPORT_REACH_M,
+                0.2 - SUPPORT_REACH_M,
+                0.8 - SUPPORT_REACH_M
+            ]
+        );
+    }
+
+    #[test]
+    fn a_clamp_edge_support_ends_at_its_edge_and_lies_behind_it() {
+        let table = support(0.0, r#"{"out":"pos_x","at_m":0.0549}"#);
+        assert!((table.max[0] - (0.1 + 0.0549)).abs() < 1e-12, "{table:?}");
+        assert_eq!(table.min[0], 0.1 - SUPPORT_REACH_M);
+        assert_eq!(table.max[2], 0.8);
+        // In front of the edge, below the top, is free; behind it is the table.
+        let below = |x: f64| box_distance(&table, [x, 0.2, 0.6]).0;
+        assert!(below(0.1 + 0.0549 + 0.05) > 0.0);
+        assert!(below(0.1) < 0.0);
+        let back = support(0.0, r#"{"out":"neg_x","at_m":0.03}"#);
+        assert!((back.min[0] - (0.1 - 0.03)).abs() < 1e-12, "{back:?}");
+        assert_eq!(back.max[0], 0.1 + SUPPORT_REACH_M);
+    }
+
+    #[test]
+    fn the_edge_turns_with_its_frame() {
+        // The mount frame yawed a quarter turn: its +x is the root's +y.
+        let table = support(
+            std::f64::consts::FRAC_PI_2,
+            r#"{"out":"pos_x","at_m":0.05}"#,
+        );
+        assert!((table.max[1] - 0.25).abs() < 1e-9, "{table:?}");
+        assert_eq!(table.max[0], 0.1 + SUPPORT_REACH_M);
+        let side = support(std::f64::consts::PI, r#"{"out":"neg_y","at_m":0.05}"#);
+        assert!((side.max[1] - 0.25).abs() < 1e-9, "{side:?}");
+    }
+
+    #[test]
+    fn an_edge_off_a_root_axis_or_unknown_is_refused() {
+        assert!(proxies(&model(0.3), r#"{"out":"pos_x","at_m":0.05}"#).is_err());
+        assert!(proxies(&model(0.0), r#"{"out":"pos_z","at_m":0.05}"#).is_err());
+        assert!(proxies(&model(0.0), r#"{"out":"pos_x"}"#).is_err());
+    }
 }

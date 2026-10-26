@@ -1,7 +1,7 @@
 """Collision proxies: capsules fitted to a body's collision geometry, for a solver that must
 keep links apart many times a second.
 
-``collision.json`` (``sx.collision-proxies/v2``) sits in a body's render pack beside
+``collision.json`` (``sx.collision-proxies/v3``) sits in a body's render pack beside
 ``robot.urdf``. For every link with ``<collision>`` geometry it holds one to three capsules in
 the link frame, each a segment ``a``-``b`` and a radius, that together **contain** every vertex
 of the link's collision meshes (and so their hulls): a distance between proxies never
@@ -15,9 +15,11 @@ self-collision check skips, each for its reason:
 
 ``support`` is the surface the body stands on, from its declared
 :class:`~sx_embodiments.compose.BaseMount`: the top is the ``z = 0`` plane of the mount's
-``frame``, and the support is solid below it everywhere within reach. A body clamped at a table
-edge has the table under and in front of where its arms hang, so a link below the top is in
-collision unless the embodiment declares otherwise. ``null`` when the body declares no mount.
+``frame``, and the support is solid below it up to its ``edge`` (``{"out": "pos_x", "at_m": d}``:
+nothing of it lies beyond the line ``x = d``; ``neg_x`` is the line ``x = -d``), or everywhere
+within reach when ``edge`` is ``null``. A body clamped at a table edge facing out has the
+table behind the edge, so its arms may hang below the top in front of it; a link below the top
+and behind the edge is in collision. ``support`` is ``null`` when the body declares no mount.
 
 Fitting is deterministic: a capsule's axis is the points' principal direction (eigenvector
 sign fixed), its line through the centre of the points' extent across that axis, its radius
@@ -39,12 +41,13 @@ import numpy.typing as npt
 from sx_contracts.identity import JsonValue, canonical_bytes
 
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
+from .compose import BaseMount
 from .embodiment import Embodiment
 from .kinematics import JointType, Kinematics, Transform, from_xyz_rpy
 from .materialize import materialize
 
-SCHEMA: Final = "sx.collision-proxies/v2"
-GENERATOR: Final = "sx_embodiments.collision_proxies/v2"
+SCHEMA: Final = "sx.collision-proxies/v3"
+GENERATOR: Final = "sx_embodiments.collision_proxies/v3"
 FILE: Final = "collision.json"
 #: Links at most this many moving joints apart are not checked against each other.
 ADJACENT_JOINTS: Final = 2
@@ -54,6 +57,16 @@ _MICRO: Final = 1e-6
 
 Floats = npt.NDArray[np.float64]
 Capsule = tuple[Floats, Floats, float]
+
+
+def support_document(mount: BaseMount) -> dict[str, JsonValue]:
+    """``collision.json``'s ``support`` for a declared mount (``pack.json``'s ``mount`` too)."""
+    edge = mount.edge
+    return {
+        "frame": mount.frame,
+        "kind": str(mount.kind),
+        "edge": None if edge is None else {"out": edge.out.value, "at_m": edge.at_m},
+    }
 
 
 def _matrix(transform: Transform) -> Floats:
@@ -150,7 +163,8 @@ def fit(points: Floats) -> list[Capsule]:
     for count in range(2, _MAX_CAPSULES + 1):
         edges = np.linspace(s.min(), s.max(), count + 1)
         slabs = [
-            points[(s >= low) & (s <= high)] for low, high in zip(edges[:-1], edges[1:], strict=True)
+            points[(s >= low) & (s <= high)]
+            for low, high in zip(edges[:-1], edges[1:], strict=True)
         ]
         if any(len(slab) < 4 for slab in slabs):
             break
@@ -244,6 +258,7 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
                 adjacent.append(pair)
             elif min(_distance(p, q) for p in placed[first] for q in placed[second]) < 0:
                 touching.append(pair)
+    mount = embodiment.base_mount
     document: dict[str, JsonValue] = {
         "schema": SCHEMA,
         "embodiment_id": name or str(embodiment.name),
@@ -255,9 +270,7 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
         ],
         "ignored_pairs": {"adjacent": sorted(adjacent), "touching_at_zero": sorted(touching)},
         "adjacent_joints": ADJACENT_JOINTS,
-        "support": None
-        if embodiment.base_mount is None
-        else {"frame": embodiment.base_mount.frame, "kind": str(embodiment.base_mount.kind)},
+        "support": None if mount is None else support_document(mount),
         "generated_by": GENERATOR,
     }
     return canonical_bytes(document)

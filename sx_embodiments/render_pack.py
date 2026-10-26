@@ -15,9 +15,9 @@ A pack is a directory of three files, generated from the body's composed descrip
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
   count, and the body's gripper tool frames by side; and, when the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
-  side), ``mount`` (the base mount's frame and kind, as ``collision.json``'s ``support``, and
-  that surface's height above the floor) and ``virtual_gripper`` (the body's gripper drawn at an
-  empty controller).
+  side), ``mount`` (the base mount's frame, kind and edge, as ``collision.json``'s
+  ``support``, and that surface's height above the floor) and ``virtual_gripper`` (the body's
+  gripper drawn at an empty controller).
 * ``collision.json``, when a link has collision geometry: capsules containing it and the link
   pairs a self-collision check skips (:mod:`sx_embodiments.collision_proxies`), which the
   ``sx-embodiment-ik`` solver keeps apart.
@@ -46,6 +46,7 @@ import numpy.typing as npt
 from sx_contracts.identity import JsonValue, canonical_bytes
 
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
+from .collision_proxies import support_document
 from .embodiment import Embodiment
 from .errors import EmbodimentError
 from .kinematics import Transform, from_xyz_rpy
@@ -569,8 +570,7 @@ def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict
         if base is None:
             raise RenderPackError(f"{embodiment.name}: a workcell needs a base mount")
         fields["mount"] = {
-            "frame": base.frame,
-            "kind": str(base.kind),
+            **support_document(base),
             "floor_to_frame_m": viewing.mount.floor_to_frame_m,
         }
     if viewing.virtual_gripper is not None:

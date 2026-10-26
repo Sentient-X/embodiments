@@ -89,7 +89,8 @@ def test_tool_frames_are_the_grippers() -> None:
 @pytest.mark.parametrize("name", ["sentient-static-upper-body", "yubi"])
 def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
     import numpy as np
-    from sx_embodiments.collision_proxies import SCHEMA, _collision_points
+
+    from sx_embodiments.collision_proxies import SCHEMA, _collision_points, support_document
 
     directory = ROOT / "render_packs" / name
     document = json.loads((directory / "collision.json").read_bytes())
@@ -97,9 +98,7 @@ def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
     assert document["schema"] == SCHEMA
     assert document["urdf_sha256"] == hashlib.sha256(urdf).hexdigest()
     mount = _tool().body(name).base_mount
-    assert document["support"] == (
-        None if mount is None else {"frame": mount.frame, "kind": str(mount.kind)}
-    )
+    assert document["support"] == (None if mount is None else support_document(mount))
     points = _collision_points(_tool().body(name), urdf)
     assert {c["link"] for c in document["capsules"]} == set(points)
     for link, vertices in points.items():

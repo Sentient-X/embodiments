@@ -114,6 +114,34 @@ class OperatorMount:
             raise ComponentGraphError("operator mount frames must not be empty")
 
 
+class Direction(StrEnum):
+    """An axis direction in a mount frame's xy plane."""
+
+    POS_X = "pos_x"
+    NEG_X = "neg_x"
+    POS_Y = "pos_y"
+    NEG_Y = "neg_y"
+
+
+@dataclass(frozen=True, slots=True)
+class SupportEdge:
+    """Where the support a body stands on ends, in the mount frame.
+
+    The edge is the line where the coordinate along ``out`` equals ``at_m`` (for ``neg_x``,
+    the line ``x = -at_m``); the support lies on the other side of it and nothing of it lies
+    beyond. A body clamped at a table edge facing out from the table has the edge just in front
+    of its clamp plate and ``out`` pointing the way it faces, so its arms may reach below the
+    table top in front of the edge.
+    """
+
+    out: Direction
+    at_m: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.at_m):
+            raise ComponentGraphError("support edge at_m must be finite")
+
+
 @dataclass(frozen=True, slots=True)
 class BaseMount:
     """How this embodiment's root meets the world: the body's half of a placement.
@@ -121,7 +149,10 @@ class BaseMount:
     ``frame`` names the footprint link in the registered description; the footprint is
     the axis-aligned rectangle ``centre ± half_extents`` in that frame's xy plane
     (measured from the description's collision geometry, not eyeballed);
-    ``clearance_m`` is the free margin placement must keep around it.
+    ``clearance_m`` is the free margin placement must keep around it. The support is the
+    frame's ``z = 0`` plane, solid below; ``edge`` is where it ends, when the body states it
+    (a :attr:`MountKind.CLAMP_EDGE` body should); without one it extends past any reach,
+    which keeps every link above the support's plane.
     """
 
     kind: MountKind
@@ -129,6 +160,7 @@ class BaseMount:
     half_extents: tuple[float, float]
     centre: tuple[float, float] = (0.0, 0.0)
     clearance_m: float = 0.0
+    edge: SupportEdge | None = None
 
     def __post_init__(self) -> None:
         if not self.frame.strip():
@@ -141,6 +173,14 @@ class BaseMount:
             raise ComponentGraphError("base mount centre must contain two finite values")
         if not math.isfinite(self.clearance_m) or self.clearance_m < 0.0:
             raise ComponentGraphError("base mount clearance_m must be finite and non-negative")
+        if self.edge is not None and not self._footprint_on_support(self.edge):
+            raise ComponentGraphError("base mount footprint extends past its support's edge")
+
+    def _footprint_on_support(self, edge: SupportEdge) -> bool:
+        axis = 0 if edge.out in (Direction.POS_X, Direction.NEG_X) else 1
+        sign = 1.0 if edge.out in (Direction.POS_X, Direction.POS_Y) else -1.0
+        front = sign * self.centre[axis] + self.half_extents[axis]
+        return front <= edge.at_m + 1e-9
 
 
 def _require_limb(part: Part, limb: Limb | None) -> None:
