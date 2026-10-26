@@ -12,7 +12,8 @@
       "provisional": false,
       "bus_id": 15,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_shoulder_pitch_joint",
@@ -24,7 +25,8 @@
       "provisional": false,
       "bus_id": 16,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_shoulder_roll_joint",
@@ -36,7 +38,8 @@
       "provisional": false,
       "bus_id": 17,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_elbow_yaw_joint",
@@ -48,7 +51,8 @@
       "provisional": false,
       "bus_id": 18,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_elbow_forearm_yaw_joint",
@@ -60,7 +64,8 @@
       "provisional": false,
       "bus_id": 19,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_wrist_yaw_joint",
@@ -72,7 +77,8 @@
       "provisional": false,
       "bus_id": 20,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -84,7 +90,8 @@
       "provisional": false,
       "bus_id": 24,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_shoulder_roll_joint",
@@ -96,7 +103,8 @@
       "provisional": false,
       "bus_id": 25,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_elbow_yaw_joint",
@@ -108,7 +116,8 @@
       "provisional": false,
       "bus_id": 26,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_elbow_forearm_yaw_joint",
@@ -120,7 +129,8 @@
       "provisional": false,
       "bus_id": 27,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_wrist_yaw_joint",
@@ -132,7 +142,8 @@
       "provisional": false,
       "bus_id": 28,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     }
   ]
 }

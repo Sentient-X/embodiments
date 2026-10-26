@@ -185,6 +185,10 @@ pub struct BoundAxis {
     /// `-1` when this unit turns against its design sign: its joint calibration, or
     /// [`UNCALIBRATED_DIRECTION`].
     pub direction: i8,
+    /// Where the joint goes when an operation ends ([`crate::ending`]), in its own unit: its
+    /// chain's declared `home` (`ChainSpec.home`); `None` where its part declares none (a
+    /// gripper's finger), and such a joint stays where it is.
+    pub home: Option<f64>,
 }
 
 impl BoundAxis {
@@ -241,6 +245,9 @@ impl BoundAxis {
         }
         if !matches!(self.direction, -1 | 1) {
             return Err(BindingError::Direction(self.joint.clone()));
+        }
+        if self.home.is_some_and(|home| !self.admits(home)) {
+            return Err(BindingError::Home(self.joint.clone()));
         }
         self.binding.validate()
     }
@@ -304,6 +311,8 @@ pub enum BindingError {
     Reduction(u16),
     #[error("joint {0} has bounds that are not finite lower < upper")]
     Bounds(String),
+    #[error("joint {0} has a home that is not a finite value inside its bounds")]
+    Home(String),
     #[error("joint {0} names a port that is not a lowercase identifier")]
     Port(String),
     #[error("the chain binds {0} axes, more than a control tick carries")]
@@ -334,6 +343,7 @@ mod tests {
             },
             zero: 0.25,
             direction: UNCALIBRATED_DIRECTION,
+            home: Some(0.0),
         }
     }
 
@@ -374,6 +384,11 @@ mod tests {
             axis(1).calibrated(0.0, 0),
             Err(BindingError::Direction(_))
         ));
+        let mut bad = axis(1);
+        bad.home = Some(1.5);
+        assert!(matches!(bad.validate(), Err(BindingError::Home(_))));
+        bad.home = None;
+        assert_eq!(bad.validate(), Ok(()));
         let mut bad = axis(1);
         bad.upper = bad.lower;
         assert!(matches!(bad.validate(), Err(BindingError::Bounds(_))));

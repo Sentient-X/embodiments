@@ -54,6 +54,9 @@ struct Axis {
     bus_id: u16,
     sign: i8,
     reduction: f64,
+    /// The chain's declared home for this joint; absent where its part declares none.
+    #[serde(default)]
+    home: Option<f64>,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -167,6 +170,7 @@ impl BodyBindings {
                     },
                     zero: UNCALIBRATED_ZERO,
                     direction: UNCALIBRATED_DIRECTION,
+                    home: axis.home,
                 })
             })
             .collect::<Result<Vec<_>, BodyError>>()?;

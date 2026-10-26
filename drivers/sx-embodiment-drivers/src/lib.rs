@@ -18,7 +18,8 @@
 //! two buses) is one [`Composite`]; a body whose buses are read from its bindings, one chain
 //! per port ([`BodyBindings::buses`]), is one [`Chains`]. [`Governor`] wraps any chain with a
 //! speed and tracking-error bound per axis, stopping and latching a fault when the body does
-//! not follow.
+//! not follow; [`Governor::end`] ends a body's operation as its [`AtEnd`] says, by default
+//! returning it home under those same bounds before it is stopped.
 //!
 //! [`MediaPlan`] is the same rule for what a robot streams: its declared cameras and
 //! microphones as the registry resolves them for one instance, captured through
@@ -40,6 +41,7 @@ pub mod chains;
 pub mod composite;
 pub mod drive;
 pub mod dynamics;
+pub mod ending;
 pub mod governor;
 pub mod inertial;
 pub mod kinematics;
@@ -68,6 +70,10 @@ pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
 pub use dynamics::{
     Dynamics, DynamicsCalibration, DynamicsError, JointFriction, LinkInertia, STANDARD_GRAVITY,
     Scratch, UPRIGHT,
+};
+pub use ending::{
+    AtEnd, Ending, FeedforwardFn, MAX_RETURN, Progress, RETURN_MARGIN, RETURN_SETTLE, RETURN_SLACK,
+    RETURN_SPEED_SHARE, RETURN_TOLERANCE, Return, ReturnFailure,
 };
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,

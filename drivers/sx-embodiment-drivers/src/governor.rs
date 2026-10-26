@@ -192,6 +192,9 @@ pub struct Governor<C, K = MonotonicClock> {
     derated: Vec<AxisDerate>,
     /// The largest feed-forward torque each axis is sent, N·m, where a derate bounds it.
     torque_caps: Vec<Option<f64>>,
+    /// Where the chain observed the body when the governor was built over it; on the heap,
+    /// read once at the end, so the governor a control future holds stays small.
+    opened_at: Option<Vec<f64>>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -230,6 +233,10 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         }) {
             return Err(LimitsError::NotPositive(axis.joint.clone()));
         }
+        let opened_at = chain
+            .last_observed()
+            .filter(|observed| observed.len() == width)
+            .map(|observed| observed.to_vec());
         let mut limits = limits;
         let mut torque_caps = vec![None; limits.len()];
         let derated = chain.derated();
@@ -260,6 +267,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             missed: vec![0; width],
             derated,
             torque_caps,
+            opened_at,
         })
     }
 
@@ -271,7 +279,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ///
     /// Refuses a vector of the wrong width or outside the declared bounds.
     pub fn start_at(&mut self, joints: &[f64]) -> Result<(), TargetError> {
-        check_available(self.chain.axes(), &self.unavailable, joints)?;
+        check_available(self.chain.axes(), &self.unavailable, None, joints)?;
         self.start = Some(Axes::from_slice(joints));
         self.held = None;
         Ok(())
@@ -291,6 +299,25 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     #[must_use]
     pub fn limits(&self) -> &[AxisLimits] {
         &self.limits
+    }
+
+    /// Where the chain observed the body when this governor was built over it: the rest an
+    /// [`crate::AtEnd::Start`] returns to. `None` for a chain that observed none.
+    #[must_use]
+    pub fn opened_at(&self) -> Option<&[f64]> {
+        self.opened_at.as_deref()
+    }
+
+    /// Whether a fault is latched: every command is refused until
+    /// [`ActuatorChain::clear_faults`].
+    #[must_use]
+    pub const fn is_latched(&self) -> bool {
+        self.latched
+    }
+
+    /// The clock steps are measured by.
+    pub const fn clock(&self) -> &K {
+        &self.clock
     }
 
     /// The governed chain.
@@ -444,7 +471,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         if self.latched {
             return Err(GovernorError::Latched);
         }
-        check_available(self.chain.axes(), &self.unavailable, joints)?;
+        // Inside the declared bounds, or no further out than the joint already is (a joint
+        // resting outside them is held there or brought in, never sent further out).
+        let at = self.chain.last_observed();
+        check_available(
+            self.chain.axes(),
+            &self.unavailable,
+            Some((self.chain.commandable(), at.as_deref())),
+            joints,
+        )?;
         let now = self.clock.now();
         let held = match self.held.take() {
             Some(held) => held,
@@ -683,6 +718,7 @@ mod tests {
             },
             zero: 0.0,
             direction: 1,
+            home: None,
         }
     }
 
