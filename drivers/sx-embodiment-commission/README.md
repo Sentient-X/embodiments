@@ -29,6 +29,14 @@ each Feetech port's `LeRobot` calibration. It writes `commissioning.json` and
 | Matching | `matching::commission(&body, &probe)` gives one `PortMatch` per port, or every `PortError` (`Missing`, `Ambiguous`, `WrongModel`, `Unqualified`) naming the candidates |
 | Output | `output::commissioning(&Station, &matches)`, `output::calibration(&match)` (`LeRobot` JSON keyed by joint), `output::warnings` (a USB serial carried by several CAN channels), `probe_report`/`probe_json` |
 
+One process owns a bus, and the layer enforces it: every tool here opens a bus through the
+embodiment layer's exclusive openers (`TtyPort::open` is `sx_embodiment_bodies::usb_serial::open_exclusive`;
+bodies open through `system::SystemPorts`; ZLG adapters through `UsbCanFd::open`), so a bus
+another process holds is refused before a byte is sent, as `OpenError::Busy` (or an `io::Error`
+of kind `ResourceBusy`, or `ZlgError::Busy`) naming the holding pid where the host tells it.
+`probe` records that refusal against the bus instead of scanning it. Checking `ps` before a run
+is a courtesy, not the guard.
+
 A bus fits a port when every unit the port declares answers as its model: Feetech by model
 number, Damiao by the `PMAX`/`TMAX` row. A bus whose answering ids are exactly the port's wins.
 A bus that also carries other ids fits only when no exact bus does, and never when it is

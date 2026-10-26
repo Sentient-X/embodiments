@@ -2,7 +2,7 @@
 //!
 //! [`UsbCanFd::open`] finds the adapter by its USB serial number, claims interface 0 (which
 //! the operating system grants to one owner: a second process holding it makes the claim fail
-//! with [`ZlgError::Busy`]),
+//! with [`ZlgError::Busy`], which names the holding process where the host tells it),
 //! probes it as the specification's §1.3 does and starts the I/O thread. Opening the same
 //! serial again in this process returns the same adapter, so two channels of one adapter can
 //! be opened by two callers. [`UsbCanFd::open_channel`] runs the channel lifecycle of §3.8 and
@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use nusb::transfer::{Buffer, Bulk, In, Out};
 use nusb::{MaybeFuture, Speed};
+use sx_embodiment_drivers::Holder;
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use thiserror::Error;
 
@@ -45,10 +46,16 @@ const SPIN_TAIL: Duration = Duration::from_millis(1);
 pub enum ZlgError {
     #[error("no ZLG USBCANFD adapter{} is attached", .0.as_ref().map(|serial| format!(" with USB serial {serial}")).unwrap_or_default())]
     NotFound(Option<String>),
+    /// The operating system refused the interface claim because it is held: one process owns
+    /// an adapter, and the holder is named where the host tells it.
     #[error(
-        "ZLG adapter {serial} is in use: {detail}. Its interface is held by another process (on Linux, any driver bound to it: `ls /sys/bus/usb/devices/*/driver` names it)"
+        "ZLG adapter {serial} is in use, {holder}: {detail}. One process owns a bus: stop that process first (with no process named on Linux, a driver bound to it: `ls /sys/bus/usb/devices/*/driver` names it)"
     )]
-    Busy { serial: String, detail: String },
+    Busy {
+        serial: String,
+        detail: String,
+        holder: Holder,
+    },
     #[error("ZLG adapter {serial}: {detail}")]
     Usb { serial: String, detail: String },
     #[error(transparent)]
@@ -479,6 +486,29 @@ const fn configure(_device: &nusb::Device) -> Result<(), String> {
     Ok(())
 }
 
+/// Who holds the adapter's interface: on Linux the processes with its usbfs node open, on
+/// macOS the I/O Registry's `UsbExclusiveOwner` of its interface.
+#[cfg(target_os = "linux")]
+fn holder(info: &nusb::DeviceInfo) -> Holder {
+    sx_embodiment_drivers::holder_of(std::path::Path::new(&format!(
+        "/dev/bus/usb/{:03}/{:03}",
+        info.busnum(),
+        info.device_address()
+    )))
+}
+
+#[cfg(target_os = "macos")]
+fn holder(info: &nusb::DeviceInfo) -> Holder {
+    crate::macos::exclusive_owner(info.registry_entry_id()).map_or(Holder::Unknown, |owner| {
+        Holder::from_exclusive_owner(&owner)
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn holder(_info: &nusb::DeviceInfo) -> Holder {
+    Holder::Unknown
+}
+
 /// Probe an adapter (§1.3), claim its endpoints and start its I/O thread.
 fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
     let usb_serial = info.serial_number().map(str::to_owned);
@@ -497,6 +527,7 @@ fn probe(info: &nusb::DeviceInfo, options: Options) -> Result<Core, ZlgError> {
             ZlgError::Busy {
                 serial: name.clone(),
                 detail: error.to_string(),
+                holder: holder(info),
             }
         } else {
             usb(error.to_string())

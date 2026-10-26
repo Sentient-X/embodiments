@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use serialport::ClearBuffer;
 use sx_damiao_can::usb2can::Usb2CanPort;
 use sx_embodiment_drivers::serial::SerialPort;
+use sx_embodiment_drivers::{Holder, holder_of};
 
 use crate::{OpenError, Port, PortSource, SerialLink};
 
@@ -243,15 +244,78 @@ impl SerialPort for ServoLink {
     }
 }
 
+/// Why a tty did not open.
+#[derive(Debug, thiserror::Error)]
+pub enum TtyError {
+    /// Another process has it open: `TIOCEXCL` or its exclusive `flock` refused us.
+    #[error("{} is in use, {holder}", tty.display())]
+    Busy { tty: PathBuf, holder: Holder },
+    #[error("{}: {source}", tty.display())]
+    Open {
+        tty: PathBuf,
+        source: serialport::Error,
+    },
+}
+
+/// Open `tty` raw at `baud`, exclusively: the one way the layer opens a serial bus.
+///
+/// `serialport` takes `TIOCEXCL` and an exclusive `flock` on the descriptor, so a second
+/// opener, in this process or another, is refused while this port lives, and the kernel lets
+/// go when the process ends however it ends. That refusal (`EBUSY` from `open`, or the lock
+/// held, both reported by `serialport` as `NoDevice` at open) is [`TtyError::Busy`], naming the
+/// holder where the host tells it.
+///
+/// # Errors
+///
+/// [`TtyError::Busy`] when another opener holds it, [`TtyError::Open`] otherwise.
+pub fn open_exclusive(
+    tty: &Path,
+    baud: u32,
+    timeout: Duration,
+) -> Result<Box<dyn serialport::SerialPort>, TtyError> {
+    serialport::new(tty.to_string_lossy(), baud)
+        .timeout(timeout)
+        .exclusive(true)
+        .open()
+        .map_err(|source| busy_or(tty, source))
+}
+
+/// A failed open as [`TtyError`]: `NoDevice` is how `serialport` reports a held port at open.
+fn busy_or(tty: &Path, source: serialport::Error) -> TtyError {
+    if source.kind() == serialport::ErrorKind::NoDevice {
+        TtyError::Busy {
+            tty: tty.to_path_buf(),
+            holder: holder_of(tty),
+        }
+    } else {
+        TtyError::Open {
+            tty: tty.to_path_buf(),
+            source,
+        }
+    }
+}
+
+impl TtyError {
+    /// This failure as the body's [`OpenError`] for the bridge commissioned as `serial`.
+    fn for_bridge(self, serial: &str) -> OpenError {
+        match self {
+            Self::Busy { tty, holder } => OpenError::Busy {
+                serial: serial.to_owned(),
+                device: tty.display().to_string(),
+                holder,
+            },
+            Self::Open { source, .. } => OpenError::Port {
+                serial: serial.to_owned(),
+                reason: source.to_string(),
+            },
+        }
+    }
+}
+
 /// A serial-servo adapter on `tty`, commissioned as `serial`, at `baud`.
 pub(crate) fn open_servo_tty(tty: &Path, serial: &str, baud: u32) -> Result<SerialLink, OpenError> {
-    let stream = serialport::new(tty.to_string_lossy(), baud)
-        .timeout(READ_TIMEOUT)
-        .open()
-        .map_err(|error| OpenError::Port {
-            serial: serial.to_owned(),
-            reason: error.to_string(),
-        })?;
+    let stream =
+        open_exclusive(tty, baud, READ_TIMEOUT).map_err(|error| error.for_bridge(serial))?;
     Ok(Box::new(ServoLink {
         stream,
         deadline: Instant::now(),
@@ -260,13 +324,8 @@ pub(crate) fn open_servo_tty(tty: &Path, serial: &str, baud: u32) -> Result<Seri
 
 /// Damiao's USB2CAN bridge on `tty`, commissioned as `serial`.
 pub(crate) fn open_tty(tty: &Path, serial: &str) -> Result<Port, OpenError> {
-    let stream = serialport::new(tty.to_string_lossy(), USB2CAN_BAUD)
-        .timeout(READ_TIMEOUT)
-        .open()
-        .map_err(|error| OpenError::Port {
-            serial: serial.to_owned(),
-            reason: error.to_string(),
-        })?;
+    let stream = open_exclusive(tty, USB2CAN_BAUD, READ_TIMEOUT)
+        .map_err(|error| error.for_bridge(serial))?;
     Ok(Box::new(Usb2CanPort::new(stream)))
 }
 
@@ -332,6 +391,80 @@ mod tests {
             Err(OpenError::NotAttached(_))
         ));
         let _ = fs::remove_dir_all(root);
+    }
+
+    /// A pseudo-terminal pair: the controller side, which keeps the terminal alive, and the
+    /// terminal's path, which a bus opener opens.
+    #[cfg(unix)]
+    fn pseudo_terminal() -> (serialport::TTYPort, serialport::TTYPort, PathBuf) {
+        let (controller, terminal) = serialport::TTYPort::pair().expect("pseudo-terminal");
+        let tty = PathBuf::from(
+            serialport::SerialPort::name(&terminal).expect("the pseudo-terminal's path"),
+        );
+        (controller, terminal, tty)
+    }
+
+    /// Another process's hold, as the exclusive `flock` every opener in the layer takes.
+    #[cfg(unix)]
+    #[test]
+    fn a_tty_another_opener_holds_is_refused_as_busy_naming_the_holder() {
+        let (_controller, _terminal, tty) = pseudo_terminal();
+        let hold = fs::File::open(&tty).expect("the holder's descriptor");
+        hold.try_lock().expect("the holder's exclusive lock");
+        let refused = open_servo_tty(&tty, "B601-GRIP", 1_000_000)
+            .err()
+            .expect("a second opener is refused");
+        let OpenError::Busy {
+            serial,
+            device,
+            holder,
+        } = &refused
+        else {
+            panic!("expected the bus busy, got {refused}");
+        };
+        assert_eq!(serial, "B601-GRIP");
+        assert_eq!(device, &tty.display().to_string());
+        // Linux names the holder from /proc: this test process itself.
+        if cfg!(target_os = "linux") {
+            assert!(
+                holder
+                    .to_string()
+                    .contains(&format!("pid {}", std::process::id())),
+                "{holder}"
+            );
+        }
+        assert!(
+            refused.to_string().contains("is in use, held by"),
+            "{refused}"
+        );
+        assert!(matches!(
+            open_tty(&tty, "B601-ARM"),
+            Err(OpenError::Busy { .. })
+        ));
+    }
+
+    /// The whole exclusive open twice. macOS cannot set a pseudo-terminal's speed
+    /// (`IOSSIOSPEED` answers ENOTTY), so the first open only succeeds on Linux.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_second_exclusive_open_is_refused_until_the_first_lets_go() {
+        let (_controller, _terminal, tty) = pseudo_terminal();
+        let held = open_exclusive(&tty, 1_000_000, READ_TIMEOUT).expect("the first opener");
+        assert!(matches!(
+            open_exclusive(&tty, 1_000_000, READ_TIMEOUT),
+            Err(TtyError::Busy { .. })
+        ));
+        drop(held);
+        open_exclusive(&tty, 1_000_000, READ_TIMEOUT).expect("free once the first lets go");
+    }
+
+    #[test]
+    fn a_missing_tty_is_not_reported_busy() {
+        let missing = tempfile_dir().join("ttyACM9");
+        assert!(matches!(
+            open_exclusive(&missing, 1_000_000, READ_TIMEOUT),
+            Err(TtyError::Open { .. })
+        ));
     }
 
     fn tempfile_dir() -> PathBuf {

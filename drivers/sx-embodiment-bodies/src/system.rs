@@ -11,6 +11,12 @@
 //! A serial-servo bus is carried by a USB serial adapter alone, so its identity is looked up
 //! the same way and refused unless it is that adapter's tty.
 //! The module builds when any transport does.
+//!
+//! One process owns a bus, and the layer enforces it rather than leaving it to whoever runs a
+//! tool: every transport opens its device exclusively (a tty by `TIOCEXCL` and `flock`, a ZLG
+//! adapter by its USB interface claim, a `SocketCAN` interface by our lock file), and a device
+//! another process holds is refused as [`OpenError::Busy`], naming the holding process where
+//! the host tells it ([`sx_embodiment_drivers::holder`]).
 
 #[cfg(feature = "usb-serial")]
 use std::path::PathBuf;
@@ -149,12 +155,7 @@ impl PortSource for SystemPorts {
             #[cfg(feature = "usb-serial")]
             Bridge::Usb2Can(tty) => usb_serial::open_tty(&tty, serial),
             #[cfg(all(feature = "socketcan", target_os = "linux"))]
-            Bridge::SocketCan(interface) => sx_socketcan::SocketCanPort::open(&interface)
-                .map(|port| Box::new(port) as Port)
-                .map_err(|error| OpenError::Port {
-                    serial: serial.to_owned(),
-                    reason: error.to_string(),
-                }),
+            Bridge::SocketCan(interface) => crate::socketcan::open_interface(serial, &interface),
             #[cfg(all(feature = "socketcan", not(target_os = "linux")))]
             Bridge::SocketCan(interface) => Err(OpenError::Port {
                 serial: serial.to_owned(),

@@ -43,6 +43,7 @@ pub mod drive;
 pub mod dynamics;
 pub mod ending;
 pub mod governor;
+pub mod holder;
 pub mod inertial;
 pub mod kinematics;
 pub mod layout;
@@ -79,6 +80,7 @@ pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,
     MAX_STEP_INTERVAL, MonotonicClock,
 };
+pub use holder::{Holder, Process, holder_of};
 pub use inertial::{
     InertialQuantity, InertialSample, InertialSensor, InertialSource, MAX_INERTIAL_HZ, Stillness,
     Tilt,

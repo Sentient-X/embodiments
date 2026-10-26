@@ -73,6 +73,7 @@ impl InterfaceLock {
                 return Err(if error.kind() == io::ErrorKind::WouldBlock {
                     SocketCanError::Busy {
                         interface: interface.to_owned(),
+                        holder: sx_embodiment_drivers::holder_of(&path),
                         lock: path,
                     }
                 } else {
@@ -100,9 +101,22 @@ mod tests {
         let held = InterfaceLock::acquire_in(&dirs, "can1").expect("the first open");
         assert_eq!(held.path(), dir.join("sx-socketcan-can1.lock"));
         match InterfaceLock::acquire_in(&dirs, "can1") {
-            Err(SocketCanError::Busy { interface, lock }) => {
+            Err(SocketCanError::Busy {
+                interface,
+                lock,
+                holder,
+            }) => {
                 assert_eq!(interface, "can1");
                 assert_eq!(lock, dir.join("sx-socketcan-can1.lock"));
+                // Linux names the holder from /proc: here, this test process itself.
+                if cfg!(target_os = "linux") {
+                    assert!(
+                        holder
+                            .to_string()
+                            .contains(&format!("pid {}", std::process::id())),
+                        "{holder}"
+                    );
+                }
             }
             other => panic!("expected the interface busy, got {other:?}"),
         }

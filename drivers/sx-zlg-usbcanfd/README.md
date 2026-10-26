@@ -74,12 +74,18 @@ device honours it per batch, as the specification presumes (42 ms at the default
 
 ## Departures and open questions
 
-- Exclusive access is the operating system's interface claim: a second process (or any driver
-  bound to the adapter) makes the open fail with `ZlgError::Busy`. ZLG ships **no** Linux kernel
-  or SocketCAN driver for its USB adapters (checked 2026-10-26: its Linux download for the
+- Exclusive access is the operating system's interface claim (usbfs `CLAIMINTERFACE` on Linux,
+  the `IOUSBHostInterface` open on macOS): one process owns an adapter. A claim refused because
+  another holds it is `ZlgError::Busy`, never a generic USB failure, and it names the holder
+  where the host tells it: on Linux the processes with the adapter's `/dev/bus/usb/BBB/DDD` node
+  open (from `/proc/<pid>/fd`; another user's process is not visible without privilege), on macOS
+  the I/O Registry's `UsbExclusiveOwner` of the adapter's interface (`pid 1234, sx-station`).
+  Otherwise it says "held by another process". `sx-embodiment-bodies` turns it into
+  `OpenError::Busy`; `sx-identify` and `sx-can-bench` print it as is. ZLG ships **no** Linux kernel or SocketCAN
+  driver for its USB adapters (checked 2026-10-26: its Linux download for the
   USBCANFD-100U/200U/400U is `usbcanfd_libusb`, a userspace library on libusb, for x64 and
-  aarch64; SocketCAN packages exist only for its PCIe cards, and no community kernel driver
-  for `3068:0009` exists). This crate is the same kind of driver as ZLG's own Linux one.
+  aarch64; SocketCAN packages exist only for its PCIe cards, and no community kernel driver for
+  `3068:0009` was found). This crate is the same kind of driver as ZLG's own Linux one.
 - The reset control request (0xFF) is never sent: a failed probe is reported and the adapter left
   as found.
 - CRCs on what the device sends are not checked, as the reference does not; their presence is
