@@ -4137,40 +4137,40 @@
     <visual name="so101_shoulder_pan_link_visual_0">
       <origin xyz="-0.0303992 0.000422241 -0.0417" rpy="1.5708 1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
       <material name="sts3215" />
     </visual>
     <collision>
       <origin xyz="-0.0303992 0.000422241 -0.0417" rpy="1.5708 1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_shoulder_pan_link_visual_1">
       <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/motor_holder_so101_base_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/motor_holder_so101_base_v1.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/motor_holder_so101_base_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/motor_holder_so101_base_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_shoulder_pan_link_visual_2">
       <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0" />
       <geometry>
-        <mesh filename="meshes/so101/rotation_pitch_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/rotation_pitch_so101_v1.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0" />
       <geometry>
-        <mesh filename="meshes/so101/rotation_pitch_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/rotation_pitch_so101_v1.stl" />
       </geometry>
     </collision>
   </link>
@@ -4183,27 +4183,27 @@
     <visual name="so101_shoulder_lift_link_visual_0">
       <origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
       <material name="sts3215" />
     </visual>
     <collision>
       <origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_shoulder_lift_link_visual_1">
       <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30" />
       <geometry>
-        <mesh filename="meshes/so101/upper_arm_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/upper_arm_so101_v1.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30" />
       <geometry>
-        <mesh filename="meshes/so101/upper_arm_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/upper_arm_so101_v1.stl" />
       </geometry>
     </collision>
   </link>
@@ -4216,40 +4216,40 @@
     <visual name="so101_elbow_flex_link_visual_0">
       <origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 -0 6.67202e-31" />
       <geometry>
-        <mesh filename="meshes/so101/under_arm_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/under_arm_so101_v1.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 -0 6.67202e-31" />
       <geometry>
-        <mesh filename="meshes/so101/under_arm_so101_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/under_arm_so101_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_elbow_flex_link_visual_1">
       <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30" />
       <geometry>
-        <mesh filename="meshes/so101/motor_holder_so101_wrist_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/motor_holder_so101_wrist_v1.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30" />
       <geometry>
-        <mesh filename="meshes/so101/motor_holder_so101_wrist_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/motor_holder_so101_wrist_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_elbow_flex_link_visual_2">
       <origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
       <material name="sts3215" />
     </visual>
     <collision>
       <origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
     </collision>
   </link>
@@ -4262,27 +4262,27 @@
     <visual name="so101_wrist_flex_link_visual_0">
       <origin xyz="8.32667e-17 -0.0424 0.0306" rpy="1.5708 1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_no_horn_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_no_horn_v1.stl" />
       </geometry>
       <material name="sts3215" />
     </visual>
     <collision>
       <origin xyz="8.32667e-17 -0.0424 0.0306" rpy="1.5708 1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_no_horn_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_no_horn_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_wrist_flex_link_visual_1">
       <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/wrist_roll_pitch_so101_v2.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/wrist_roll_pitch_so101_v2.stl" />
       </geometry>
       <material name="3d_printed" />
     </visual>
     <collision>
       <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
       <geometry>
-        <mesh filename="meshes/so101/wrist_roll_pitch_so101_v2.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/wrist_roll_pitch_so101_v2.stl" />
       </geometry>
     </collision>
   </link>
@@ -4295,14 +4295,14 @@
     <visual name="so101_wrist_roll_link_visual_0">
       <origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
       <material name="sts3215" />
     </visual>
     <collision>
       <origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16" />
       <geometry>
-        <mesh filename="meshes/so101/sts3215_03a_v1.stl" />
+        <mesh filename="package://sx-embodiments/so101/meshes/sts3215_03a_v1.stl" />
       </geometry>
     </collision>
     <visual name="so101_wrist_roll_link_visual_1">

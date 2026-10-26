@@ -45,6 +45,7 @@ from numpy.typing import NDArray
 from scipy.spatial import ConvexHull  # pyright: ignore[reportMissingTypeStubs]  # no stubs
 
 from sx_embodiments.assembly import Pose
+from sx_embodiments.assets import PACKAGE_URI_PREFIX
 from sx_embodiments.known.zed import EYES, OPTICAL_RPY, eye_offset, optical_frame
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +53,11 @@ ASSET = ROOT / "assets/sentient_static_upper_body"
 SOURCE = ASSET / "source/allisa_bot.urdf"
 #: TheRobotStudio's SO-101 in its new calibration, byte for byte (see the neck, below).
 SO101 = ASSET / "source/so101_new_calib.urdf"
-SO101_MESHES = "meshes/so101/"
+#: Its meshes are the public SO-101 package's own bytes (``assets/so101/meshes``), named across
+#: packages as ``package://sx-embodiments/<relpath>`` like any shared mesh: a copy here would
+#: be the same digest under this package's proprietary licence, which the store serves under
+#: the stricter one, refusing the public SO-101 its own meshes.
+SO101_MESHES = PACKAGE_URI_PREFIX + "so101/meshes/"
 TARGET = ASSET / "sentient_static_upper_body.urdf"
 SOURCE_MESH_PREFIX = "package://humanoid_pkg/meshes/allisa_bot/"
 #: The source's frame on the ZED's left eye, optical convention (z out of the lens).
@@ -79,7 +84,7 @@ Vec = NDArray[np.float64]
 # calibrated mid-range. TheRobotStudio's ``so101_new_calib`` (SO-ARM100 commit 5f6d2b8,
 # Apache-2.0) puts every joint's zero there, so the neck from ``so101_shoulder_pan_joint`` down
 # is that file's chain under our names: joint origins, axes and limits, and each link's
-# inertial, visual and collision meshes (vendored byte for byte under ``meshes/so101/``). A
+# inertial, visual and collision meshes (the public ``so101`` package's, byte for byte). A
 # LeRobot degree reading is the joint angle with no offset. Each part of the official chain was
 # registered by ICP onto the matching part of allisa_bot's CAD (0.4..0.9 mm rms), which places
 # what the official file cannot know:
@@ -373,7 +378,11 @@ def _link_points(link: ET.Element) -> Vec | None:
         xyz = _floats(origin.get("xyz") if origin is not None else None, (0, 0, 0))
         rpy = _floats(origin.get("rpy") if origin is not None else None, (0, 0, 0))
         scale = _floats(mesh.get("scale"), (1, 1, 1))
-        raw = _read_stl(ASSET / mesh.get("filename", ""))
+        filename = mesh.get("filename", "")
+        if filename.startswith(PACKAGE_URI_PREFIX):
+            raw = _read_stl(ROOT / "assets" / filename.removeprefix(PACKAGE_URI_PREFIX))
+        else:
+            raw = _read_stl(ASSET / filename)
         points.append((raw * scale) @ _rpy(rpy).T + xyz)
     return np.concatenate(points) if points else None
 
