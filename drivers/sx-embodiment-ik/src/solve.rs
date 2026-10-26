@@ -124,7 +124,7 @@ impl Default for Settings {
             max_iterations: 40,
             deadline: Duration::from_millis(4),
             level_share: 0.25,
-            sight_clearance_m: 0.03,
+            sight_clearance_m: 0.01,
             sight_tool_m: 0.1,
         }
     }

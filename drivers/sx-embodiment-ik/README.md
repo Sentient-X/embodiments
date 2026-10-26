@@ -31,12 +31,15 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   halfway between the hands *as the camera sees them*, so both sit the same angle from the
   picture's centre). It turns on its own neck only, never on the torso that carries the
   arms. It keeps its picture level (`Task::LookAt::level`, the ZED's stereo baseline), and
-  it keeps each driven tool's line of sight 3 cm clear of the body, stepping around an arm
-  in the way. `LimbReport::hidden_by` names the link hiding a tool. Across 60 random arm
-  postures with the neck settling on the hands, both hands end in clear sight 70% of the
-  time against 27% without the sight rows (`tests/view.rs`). The view model is the one
-  from the Model 3 co-design study (October 2026): framing alone left the hands hidden by
-  the robot's own arms most of the time.
+  keeps each driven tool's line of sight 1 cm clear of the body's capsules, stepping around
+  an arm in the way. `LimbReport::hidden_by` names the link hiding a tool. Across 60 random
+  arm postures, both hands end in clear sight 67% of the time against 27% without the sight
+  rows (`tests/view.rs`). On recorded operators (`examples/film.rs`, rendered with the pack's
+  meshes and the ZED's 70 degree field of view), both hands are in the picture and unblocked
+  94 -> 98% (rings on a peg), 91 -> 97% (towel) and 99 -> 100% (bulbs). The margin is small on
+  purpose: the capsules are fatter than the meshes, and at 3 cm the camera climbed to twice
+  the distance from the hands for nothing. The view model is the Model 3 co-design study's
+  (October 2026): framing alone left the hands hidden by the robot's own arms.
 - **Unreachable targets:** the solver degrades smoothly and reports
   `Reach::Unreachable` with the residual.
 - **Unavailable axes:** `available[axis] = false` holds an axis at its measured position.

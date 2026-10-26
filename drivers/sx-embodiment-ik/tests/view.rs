@@ -59,7 +59,7 @@ fn ghost(sight: bool) -> Ik {
     }
     let settings = Settings {
         deadline: std::time::Duration::from_secs(1),
-        sight_clearance_m: if sight { 0.03 } else { f64::NEG_INFINITY },
+        sight_clearance_m: if sight { 0.01 } else { f64::NEG_INFINITY },
         ..Settings::default()
     };
     Ik::new(body, caps, settings, Vec::new()).expect("ik")
