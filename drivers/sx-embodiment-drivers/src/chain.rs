@@ -62,9 +62,10 @@ impl CommandRange {
     /// it was last observed. Inside the range, or no further out than the joint already is
     /// ([`CommandRange::reaching`]), plus [`READ_NOISE_RAD`] for the reading moving between the
     /// observation a command was planned on and the one it is checked against. With no finite
-    /// observation, the range itself. Every check of a target against the range uses it:
-    /// [`check_reach`] (each chain) and the [`crate::Governor`], which brings a target outside
-    /// it in to its nearest edge rather than refusing it.
+    /// observation, the range itself. Every chain checks each command against it
+    /// ([`check_reach`]); the [`crate::Governor`] commands only inside it, holding each axis to
+    /// the interval it had when it took the joint up so a joint pushed further out is not
+    /// followed, and brings a target outside in to the edge rather than refusing it.
     #[must_use]
     pub fn admissible(self, at: Option<f64>) -> Self {
         match at {

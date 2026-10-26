@@ -23,17 +23,20 @@
 //!   feed-forward torque at most a share of its model's peak, whatever is asked or set by
 //!   [`ActuatorChain::set_feedforward_limits`]. The derate is data on the chain, so it lifts
 //!   when the body is next opened on a rail in range.
-//! - **Range is a limit on motion, not on state.** Each step is held inside the chain's
-//!   commandable range widened to where the joint is now ([`CommandRange::reaching`]):
+//! - **Range is a limit on motion, not on state.** Each step is held inside an interval per
+//!   axis: when the governor takes the body up (after open, a stop or a failure), the chain's
+//!   commandable range widened to where the joint is ([`CommandRange::reaching`]):
 //!   `[min(lower, now), max(upper, now)]`, `now` being the chain's latest observation
-//!   ([`ActuatorChain::last_observed`]) or, for a chain that observes nothing, the position
-//!   last sent. A joint resting outside its range can hold or move toward it at `max_speed`,
-//!   never further out, and the interval shrinks as it comes in; the same rule is the chain's
-//!   ([`CommandRange::admissible`]). A finite target outside that interval is not refused: it
-//!   is brought in to the interval's nearest edge, so a caller that read the joint a moment
-//!   before the chain did (a joint drifting further out while idle) is never stopped for it,
-//!   and no caller keeps a range check of its own. Nothing is refused or latched for where a
-//!   joint rests.
+//!   ([`ActuatorChain::last_observed`]) or the position a command starts from; after that it
+//!   only narrows, to the range widened to where the joint is now, as the joint comes in. A
+//!   joint resting outside its range can hold or move toward it at `max_speed`, never further
+//!   out, and one pushed further out (an arm sagging, a hand) is not followed: the command stays
+//!   at the interval's edge and the tracking check catches a joint that does not come back. The
+//!   chains check every command against the same rule ([`CommandRange::admissible`], plus read
+//!   noise). A finite target outside the interval is not refused: it is brought in to the edge
+//!   ([`Governor::brought_in`] says which axis), so a caller that read the joint a moment before
+//!   the chain did (a joint drifting out while idle) is not stopped for it. Nothing is refused
+//!   or latched for where a joint rests.
 //! - **Fail closed.** Every receipt must observe every axis: a short or empty observation stops
 //!   the chain and latches [`GovernorError::Unobserved`], so a chain that observes nothing
 //!   cannot be governed. A chain error other than a refusal (the chain may have applied part
@@ -178,6 +181,12 @@ struct Held {
     position: Axes<f64>,
     velocity: Axes<f64>,
     at: Option<Instant>,
+    /// Per axis, the interval steps may go to: the range widened to where the joint was when
+    /// the governor took it up, narrowed as it comes in, never widened again. A joint pushed
+    /// further out (a sagging arm, a hand) is not followed out: the command stays at the edge
+    /// it had, and the tracking check catches a joint that does not come back.
+    lower: Axes<f64>,
+    upper: Axes<f64>,
 }
 
 /// A chain whose commands are slewed and whose tracking is checked; see the module docs.
@@ -199,6 +208,8 @@ pub struct Governor<C, K = MonotonicClock> {
     /// Where the chain observed the body when the governor was built over it; on the heap,
     /// read once at the end, so the governor a control future holds stays small.
     opened_at: Option<Vec<f64>>,
+    /// The first axis whose last target lay outside where it may go, and was brought in.
+    brought_in: Option<usize>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -272,6 +283,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             derated,
             torque_caps,
             opened_at,
+            brought_in: None,
         })
     }
 
@@ -312,6 +324,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.opened_at.as_deref()
     }
 
+    /// The first axis whose last command's target lay outside where that axis may go and was
+    /// brought in to the edge instead ([`CommandRange::admissible`]); `None` when every target
+    /// was taken as asked. A caller that should never ask past a range (a policy, a solver
+    /// bounded by the same ranges) reports it.
+    #[must_use]
+    pub const fn brought_in(&self) -> Option<usize> {
+        self.brought_in
+    }
+
     /// Whether a fault is latched: every command is refused until
     /// [`ActuatorChain::clear_faults`].
     #[must_use]
@@ -345,10 +366,20 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|observed| observed.len() == width)
                 .ok_or(GovernorError::NoStart)?,
         };
+        let (lower, upper) = position
+            .iter()
+            .zip(self.chain.commandable())
+            .map(|(at, range)| {
+                let reach = range.reaching(*at);
+                (reach.lower, reach.upper)
+            })
+            .unzip();
         Ok(Held {
             velocity: Axes::filled(0.0, position.len()),
             position,
             at: None,
+            lower,
+            upper,
         })
     }
 
@@ -372,22 +403,17 @@ fn within(observed: f64, sent: f64, limit: f64) -> bool {
 
 /// `value` moved toward `target` for `dt` seconds at most `limit.max_speed`, the speed changed
 /// from `speed` by at most `limit.max_acceleration * dt` and never past the speed it can brake
-/// to `target` from, then held inside `range` widened to `now`, where the joint is. Returns the
-/// position and the speed it was stepped at.
+/// to `target` from, held inside `reach`. Returns the position and the speed it was stepped at.
 fn slew(
     value: f64,
     target: f64,
     speed: f64,
     limit: &AxisLimits,
     dt: f64,
-    range: CommandRange,
-    now: f64,
+    reach: CommandRange,
 ) -> (f64, f64) {
-    // The target brought inside the range widened to where the joint is first, so the axis
-    // brakes onto the edge rather than meeting it at speed; every step stays inside it too.
-    // ([`CommandRange::admissible`] adds read noise to this for checks against a later
-    // reading; a command itself never uses that slack.)
-    let reach = range.reaching(now);
+    // The target brought inside `reach` first, so the axis brakes onto the edge rather than
+    // meeting it at speed; every step stays inside it too.
     let target = target.clamp(reach.lower, reach.upper);
     if dt <= 0.0 {
         return (value.clamp(reach.lower, reach.upper), speed);
@@ -407,8 +433,16 @@ fn slew(
 
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     /// Each axis moved from `held` toward `joints` for `step` seconds within its limits, inside
-    /// its range widened to where it is now; an unavailable axis at any in-range value, at rest.
-    fn step(&self, held: &Held, joints: &[f64], step: f64) -> (Axes<f64>, Axes<f64>) {
+    /// its interval (`Held::lower`) narrowed to its range widened to where it is now; an
+    /// unavailable axis at any in-range value, at rest. Returns the positions, their speeds,
+    /// the narrowed intervals and the first axis whose target lay outside its interval.
+    #[allow(clippy::type_complexity)] // One step's four answers, used once.
+    fn step(
+        &self,
+        held: &Held,
+        joints: &[f64],
+        step: f64,
+    ) -> (Axes<f64>, Axes<f64>, (Axes<f64>, Axes<f64>), Option<usize>) {
         // Where each joint is now: the chain's latest observation, else the position last sent.
         let observed = self
             .chain
@@ -416,6 +450,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .filter(|observed| observed.len() == held.position.len());
         let mut positions = Axes::new();
         let mut speeds = Axes::new();
+        let (mut lowers, mut uppers) = (Axes::new(), Axes::new());
+        let mut brought_in = None;
         for (index, ((value, target), (limit, range))) in held
             .position
             .iter()
@@ -432,6 +468,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 };
                 positions.push(target.clamp(range.lower, range.upper));
                 speeds.push(0.0);
+                lowers.push(range.lower);
+                uppers.push(range.upper);
                 continue;
             }
             let at = observed
@@ -440,11 +478,22 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|at| at.is_finite())
                 .unwrap_or(*value);
             let speed = held.velocity.get(index).copied().unwrap_or(0.0);
-            let (position, speed) = slew(*value, *target, speed, limit, step, *range, at);
+            let now = range.reaching(at);
+            // Never empty: both contain the range itself.
+            let reach = CommandRange {
+                lower: held.lower[index].max(now.lower),
+                upper: held.upper[index].min(now.upper),
+            };
+            if brought_in.is_none() && !reach.admits(*target) {
+                brought_in = Some(index);
+            }
+            let (position, speed) = slew(*value, *target, speed, limit, step, reach);
             positions.push(position);
             speeds.push(speed);
+            lowers.push(reach.lower);
+            uppers.push(reach.upper);
         }
-        (positions, speeds)
+        (positions, speeds, (lowers, uppers), brought_in)
     }
 
     /// Count each available axis' unobserved (`NaN`) commands in a row, restarting at an
@@ -516,7 +565,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         let elapsed = held.at.map_or(MAX_STEP_INTERVAL, |at| {
             now.saturating_duration_since(at).min(MAX_STEP_INTERVAL)
         });
-        let (next, velocity) = self.step(&held, joints, elapsed.as_secs_f64());
+        let (next, velocity, (lower, upper), brought_in) =
+            self.step(&held, joints, elapsed.as_secs_f64());
+        self.brought_in = brought_in;
         let receipt = match feedforward {
             Some(wanted) => {
                 if wanted.len() != next.len() {
@@ -596,6 +647,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             position: next,
             velocity,
             at: Some(now),
+            lower,
+            upper,
         });
         Ok(receipt)
     }
@@ -1221,6 +1274,57 @@ mod tests {
             governor.command(&[0.0]),
             Err(GovernorError::Target(TargetError::Width { .. }))
         ));
+    }
+
+    /// Refute pass on 9e58e58: with the interval widened to wherever the joint was last read,
+    /// a joint that settles a little outward of each command (gravity, a hand) was followed out
+    /// past every bound. The interval only narrows once the governor has the joint, so the
+    /// command stays at its edge whatever the joint does.
+    #[test]
+    fn a_joint_pushed_outward_is_not_followed_out() {
+        for rest in [0.85, 1.2] {
+            let mut chain = fake(true);
+            chain.rest = vec![rest, 0.5];
+            chain.lag = 0.004;
+            let (mut governor, clock) = governed(chain);
+            let edge = rest.max(0.9);
+            for _ in 0..200 {
+                let sent = step(&mut governor, &clock, &[5.0, 0.5]);
+                assert!(sent[0] <= edge + 1e-12, "rest {rest}: sent {sent:?}");
+            }
+            assert_eq!(governor.brought_in(), Some(0));
+            assert_eq!(governor.chain().stops, 0);
+        }
+    }
+
+    #[test]
+    fn a_target_past_the_edge_is_braked_onto_it_not_hit_at_speed() {
+        let limits = AxisLimits {
+            max_acceleration: Some(1.5),
+            ..LIMITS
+        };
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let mut governor =
+            Governor::with_clock(fake(true), vec![limits; 2], clock.clone()).expect("limits");
+        let dt = MAX_STEP_INTERVAL.as_secs_f64();
+        let mut position = 0.0_f64;
+        let mut speeds = Vec::new();
+        for _ in 0..400 {
+            governor.command(&[5.0, 0.5]).expect("step");
+            clock.advance(MAX_STEP_INTERVAL);
+            let sent = governor.chain().sent.last().expect("sent")[0];
+            speeds.push((sent - position) / dt);
+            position = sent;
+        }
+        assert!((position - 0.9).abs() < 1e-9, "{position}");
+        // It reached the edge decelerating: the step before arriving was slower than the cruise.
+        let arrived = speeds.iter().position(|v| *v < 1e-9).expect("arrived");
+        let cruise = speeds.iter().copied().fold(0.0, f64::max);
+        assert!(
+            speeds[arrived - 1] < 0.5 * cruise,
+            "{:?}",
+            &speeds[..arrived]
+        );
     }
 
     #[test]
