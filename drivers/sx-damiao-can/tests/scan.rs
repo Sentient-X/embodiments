@@ -121,7 +121,8 @@ fn every_frame_is_a_register_read_byte_for_byte() {
     scan(port, [0x09, 0x0A]).unwrap();
     let log = log.lock().unwrap();
     assert!(log.iter().all(is_read_only));
-    // Id 9: MST_ID (7), ESC_ID (8), CTRL_MODE (10), PMAX, VMAX, TMAX; id 10: MST_ID alone.
+    // Id 9: MST_ID (7), ESC_ID (8), CTRL_MODE (10), PMAX, VMAX, TMAX, UV (0), OV (29), KT (1),
+    // Gr (20); id 10: MST_ID alone.
     let registers: Vec<(u32, [u8; 8])> = log.iter().map(|frame| (frame.id, frame.data)).collect();
     assert_eq!(
         registers,
@@ -132,6 +133,10 @@ fn every_frame_is_a_register_read_byte_for_byte() {
             (0x7FF, [0x09, 0, 0x33, 21, 0, 0, 0, 0]),
             (0x7FF, [0x09, 0, 0x33, 22, 0, 0, 0, 0]),
             (0x7FF, [0x09, 0, 0x33, 23, 0, 0, 0, 0]),
+            (0x7FF, [0x09, 0, 0x33, 0, 0, 0, 0, 0]),
+            (0x7FF, [0x09, 0, 0x33, 29, 0, 0, 0, 0]),
+            (0x7FF, [0x09, 0, 0x33, 1, 0, 0, 0, 0]),
+            (0x7FF, [0x09, 0, 0x33, 20, 0, 0, 0, 0]),
             (0x7FF, [0x0A, 0, 0x33, 7, 0, 0, 0, 0]),
         ]
     );
