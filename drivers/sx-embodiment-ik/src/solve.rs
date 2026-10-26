@@ -285,6 +285,9 @@ pub struct Ik {
 }
 
 impl Ik {
+    /// `scene` is what the site places around the body; the body's declared support (the
+    /// table its base mount stands on, [`crate::Proxies::support`]) is always added first.
+    ///
     /// # Errors
     ///
     /// [`IkError::Caps`] when the caps are not one positive finite speed and acceleration per
@@ -294,8 +297,13 @@ impl Ik {
         body: Body,
         caps: Caps,
         settings: Settings,
-        scene: Vec<Obstacle>,
+        mut scene: Vec<Obstacle>,
     ) -> Result<Self, IkError> {
+        // The body's own support (its declared base mount) is always in the scene; `scene`
+        // adds what the site places around it.
+        if let Some(support) = body.proxies.support {
+            scene.insert(0, support);
+        }
         let axes = body.model.axes();
         if caps.speed.len() != axes.len() || caps.accel.len() != axes.len() {
             return Err(IkError::Caps(format!(

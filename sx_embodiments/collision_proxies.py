@@ -1,7 +1,7 @@
 """Collision proxies: capsules fitted to a body's collision geometry, for a solver that must
 keep links apart many times a second.
 
-``collision.json`` (``sx.collision-proxies/v1``) sits in a body's render pack beside
+``collision.json`` (``sx.collision-proxies/v2``) sits in a body's render pack beside
 ``robot.urdf``. For every link with ``<collision>`` geometry it holds one to three capsules in
 the link frame, each a segment ``a``-``b`` and a radius, that together **contain** every vertex
 of the link's collision meshes (and so their hulls): a distance between proxies never
@@ -12,6 +12,12 @@ self-collision check skips, each for its reason:
   joint whose own design keeps them apart, and their fitted proxies overlap there.
 * ``touching_at_zero``: proxies that overlap with every joint at zero, the description's
   as-built pose; a constraint there could never be satisfied.
+
+``support`` is the surface the body stands on, from its declared
+:class:`~sx_embodiments.compose.BaseMount`: the top is the ``z = 0`` plane of the mount's
+``frame``, and the support is solid below it everywhere within reach. A body clamped at a table
+edge has the table under and in front of where its arms hang, so a link below the top is in
+collision unless the embodiment declares otherwise. ``null`` when the body declares no mount.
 
 Fitting is deterministic: a capsule's axis is the points' principal direction (eigenvector
 sign fixed), its line through the centre of the points' extent across that axis, its radius
@@ -37,8 +43,8 @@ from .embodiment import Embodiment
 from .kinematics import JointType, Kinematics, Transform, from_xyz_rpy
 from .materialize import materialize
 
-SCHEMA: Final = "sx.collision-proxies/v1"
-GENERATOR: Final = "sx_embodiments.collision_proxies/v1"
+SCHEMA: Final = "sx.collision-proxies/v2"
+GENERATOR: Final = "sx_embodiments.collision_proxies/v2"
 FILE: Final = "collision.json"
 #: Links at most this many moving joints apart are not checked against each other.
 ADJACENT_JOINTS: Final = 2
@@ -249,6 +255,9 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
         ],
         "ignored_pairs": {"adjacent": sorted(adjacent), "touching_at_zero": sorted(touching)},
         "adjacent_joints": ADJACENT_JOINTS,
+        "support": None
+        if embodiment.base_mount is None
+        else {"frame": embodiment.base_mount.frame, "kind": str(embodiment.base_mount.kind)},
         "generated_by": GENERATOR,
     }
     return canonical_bytes(document)
