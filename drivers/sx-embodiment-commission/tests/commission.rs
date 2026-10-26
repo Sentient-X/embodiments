@@ -125,9 +125,12 @@ impl SerialPort for FakeSerial {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        let take = length.min(self.pending.len());
-        Ok(self.pending.drain(..take).collect())
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let take = buffer.len().min(self.pending.len());
+        for (slot, byte) in buffer.iter_mut().zip(self.pending.drain(..take)) {
+            *slot = byte;
+        }
+        Ok(take)
     }
 
     fn timeout(&self) -> Duration {

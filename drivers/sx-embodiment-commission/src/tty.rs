@@ -48,18 +48,15 @@ impl SerialPort for TtyPort {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let buffered = usize::try_from(self.port.bytes_to_read().map_err(io::Error::other)?)
             .unwrap_or(usize::MAX);
-        let take = buffered.min(length);
+        let take = buffered.min(buffer.len());
         if take == 0 {
             std::thread::sleep(IDLE);
-            return Ok(Vec::new());
+            return Ok(0);
         }
-        let mut bytes = vec![0; take];
-        let read = self.port.read(&mut bytes)?;
-        bytes.truncate(read);
-        Ok(bytes)
+        self.port.read(&mut buffer[..take])
     }
 
     fn timeout(&self) -> Duration {

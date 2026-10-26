@@ -79,8 +79,8 @@ impl<P: SerialPort> SerialPort for ReadOnlyPort<P> {
         self.0.write_port(packet)
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        self.0.read_port(length)
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.0.read_port(buffer)
     }
 
     fn timeout(&self) -> Duration {

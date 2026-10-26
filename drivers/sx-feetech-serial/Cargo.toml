@@ -18,6 +18,9 @@ sx-embodiment-drivers.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+sx-feetech-serial = { path = ".", features = ["sim"] }
+# Counts a test's heap allocations (its own global allocator; this crate forbids unsafe code).
+allocation-counter = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

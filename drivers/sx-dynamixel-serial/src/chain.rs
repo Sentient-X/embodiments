@@ -93,8 +93,8 @@ pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
 use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, AxisReading, BindingError, BodyError,
-    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
+    ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, Axes, AxisReading, BindingError,
+    BodyError, BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
     StopReport, TargetError, fresh_positions, validate_chain,
 };
 use thiserror::Error;
@@ -375,9 +375,13 @@ pub struct DynamixelChain<P> {
     faults: Vec<(u16, u8)>,
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
-    observed: Option<Vec<f64>>,
+    observed: Option<Axes<f64>>,
     /// Each servo's reading from the last command's SYNC READ; none since open or a stop.
-    command_readings: Option<Vec<AxisReading>>,
+    command_readings: Option<Axes<AxisReading>>,
+    /// The command's SYNC READ of every servo, its servos added at open and reused.
+    reader: GroupSyncRead,
+    /// The command's SYNC WRITE of every goal, refilled each command in buffers it keeps.
+    writer: GroupSyncWrite,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no error.
@@ -593,7 +597,16 @@ impl<P: SerialPort> DynamixelChain<P> {
             faults: Vec::new(),
             observed: None,
             command_readings: None,
+            reader: GroupSyncRead::new(GOAL_CURRENT, LIMITS_READ_LENGTH),
+            writer: GroupSyncWrite::new(GOAL_POSITION, 4),
         };
+        for index in 0..chain.servos.len() {
+            if !chain.reader.add_param(chain.servos[index].dxl_id()) {
+                return Err(DynamixelChainError::GroupParam(
+                    chain.servos[index].axis.binding.bus_id,
+                ));
+            }
+        }
         chain.identify()?;
         chain.is_calibrated()?;
         chain.configure()?;
@@ -712,7 +725,7 @@ impl<P: SerialPort> DynamixelChain<P> {
         for index in 0..self.servos.len() {
             self.hold_limits(index, true)?;
         }
-        self.observed = fresh_positions(&self.present_positions());
+        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
         Ok(())
     }
 
@@ -795,7 +808,7 @@ impl<P: SerialPort> DynamixelChain<P> {
                 result: CommResult::RxCorrupt,
             });
         }
-        Ok(LimitsRead(data))
+        Ok(LimitsRead(data.to_vec()))
     }
 
     /// Every servo's `Present_Position` (132..=135), one `READ` per servo, as an
@@ -820,16 +833,11 @@ impl<P: SerialPort> DynamixelChain<P> {
     /// [`AxisReading`] is kept as the command's readings: missing (`Timeout`; the vendor's read
     /// stops at the first servo that fails, so every servo is missing then), faulted with its
     /// error, or faulted with 0 for a limit it no longer holds.
-    fn sync_read_positions(&mut self) -> Result<Vec<f64>, DynamixelChainError> {
-        let mut reader = GroupSyncRead::new(GOAL_CURRENT, LIMITS_READ_LENGTH);
-        for servo in &self.servos {
-            if !reader.add_param(servo.dxl_id()) {
-                return Err(DynamixelChainError::GroupParam(servo.axis.binding.bus_id));
-            }
-        }
-        let _ = reader.tx_rx_packet(&mut self.ph);
+    fn sync_read_positions(&mut self) -> Result<Axes<f64>, DynamixelChainError> {
+        let _ = self.reader.tx_rx_packet(&mut self.ph);
+        let reader = &self.reader;
         let received = Instant::now();
-        let mut readings = Vec::with_capacity(self.servos.len());
+        let mut readings: Axes<AxisReading> = Axes::new();
         for index in 0..self.servos.len() {
             let limits = self.limits(index)?;
             let servo = &self.servos[index];
@@ -942,11 +950,11 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
             .iter()
             .zip(joints)
             .map(|(servo, joint)| servo.goal_position(*joint))
-            .collect::<Result<Vec<u32>, _>>()?;
-        let mut writer = GroupSyncWrite::new(GOAL_POSITION, 4);
+            .collect::<Result<Axes<u32>, _>>()?;
+        self.writer.clear_param();
         for (servo, goal) in self.servos.iter().zip(goals) {
             let (low, high) = (dxl_loword(goal), dxl_hiword(goal));
-            if !writer.add_param(
+            if !self.writer.add_param(
                 servo.dxl_id(),
                 &[
                     crate::dynamixel_sdk::dxl_lobyte(low),
@@ -965,10 +973,10 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
             self.enable_torque()?;
             self.enabled = true;
         }
-        match writer.tx_packet(&mut self.ph) {
+        match self.writer.tx_packet(&mut self.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
-                observed: self.sync_read_positions()?.into(),
+                observed: self.sync_read_positions()?,
                 feedback: sx_embodiment_drivers::Axes::new(),
             }),
             result => {
@@ -1018,7 +1026,7 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
                 self.faults.push(*fault);
             }
         }
-        self.observed = fresh_positions(&self.present_positions());
+        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
         self.command_readings = None;
         report
     }
@@ -1028,16 +1036,12 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
         self.present_positions()
     }
 
-    fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         self.command_readings
-            .as_deref()
-            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
-    fn last_observed(&self) -> Option<sx_embodiment_drivers::Axes<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         self.observed
-            .as_deref()
-            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo, each

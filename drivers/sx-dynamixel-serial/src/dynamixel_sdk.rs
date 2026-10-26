@@ -72,7 +72,7 @@
 //!   reg-write, the `TxOnly` writes, the fast and bulk reads and writes, and Protocol 1.0 are
 //!   left out.
 
-use sx_embodiment_drivers::serial::SerialPort;
+use sx_embodiment_drivers::serial::{Packet, SerialPort};
 
 // robotis_def.py
 pub const BROADCAST_ID: u8 = 0xFE;
@@ -224,11 +224,11 @@ pub fn update_crc(crc_accum: u16, data_blk: &[u8]) -> u16 {
 /// the instruction and parameters, LENGTH counting each. `packet` is a whole packet with its
 /// LENGTH set and two trailing bytes for the CRC.
 #[must_use]
-pub fn add_stuffing(packet: &[u8]) -> Vec<u8> {
+pub fn add_stuffing(packet: &[u8]) -> Packet {
     let packet_length_in = usize::from(dxl_makeword(packet[PKT_LENGTH_L], packet[PKT_LENGTH_H]));
     let end = (PKT_INSTRUCTION + packet_length_in).min(packet.len());
     let body_end = end.saturating_sub(2).max(PKT_INSTRUCTION);
-    let mut stuffed = packet[..PKT_INSTRUCTION].to_vec();
+    let mut stuffed = Packet::from_slice(&packet[..PKT_INSTRUCTION]);
     for &byte in &packet[PKT_INSTRUCTION..body_end] {
         stuffed.push(byte);
         if stuffed.len() >= PKT_INSTRUCTION + 3 && stuffed.ends_with(&[0xFF, 0xFF, 0xFD]) {
@@ -245,7 +245,7 @@ pub fn add_stuffing(packet: &[u8]) -> Vec<u8> {
 }
 
 /// `removeStuffing`: drop the `FD` the sender added after each `FF FF FD`.
-pub fn remove_stuffing(packet: &mut Vec<u8>) {
+pub fn remove_stuffing(packet: &mut Packet) {
     let packet_length_in = usize::from(dxl_makeword(packet[PKT_LENGTH_L], packet[PKT_LENGTH_H]));
     let mut packet_length_out = packet_length_in;
 
@@ -341,8 +341,8 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
     }
 
     /// Receive one status packet, its stuffing removed.
-    pub fn rx_packet(&mut self) -> (Vec<u8>, CommResult) {
-        let mut rxpacket: Vec<u8> = Vec::new();
+    pub fn rx_packet(&mut self) -> (Packet, CommResult) {
+        let mut rxpacket = Packet::new();
         let packet_id = MAX_ID;
 
         let mut result;
@@ -351,14 +351,13 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
         let mut wait_length: usize = 11;
 
         loop {
-            let Ok(bytes) = self
-                .port_handler
-                .read_port(wait_length.saturating_sub(rxpacket.len()))
-            else {
+            if rxpacket
+                .read_from(&mut self.port_handler, wait_length)
+                .is_err()
+            {
                 result = CommResult::RxFail;
                 break;
-            };
-            rxpacket.extend(bytes);
+            }
             let rx_length = rxpacket.len();
             if rx_length >= wait_length {
                 // find packet header
@@ -383,7 +382,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
                         || rxpacket[PKT_INSTRUCTION] != INST_STATUS
                     {
                         // remove the first byte in the packet
-                        rxpacket.remove(0);
+                        rxpacket.drop_front(1);
                         if self.port_handler.is_packet_timeout() {
                             result = timed_out(rxpacket.len());
                             break;
@@ -419,7 +418,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
                     break;
                 }
                 // remove unnecessary packets
-                rxpacket.drain(0..idx);
+                rxpacket.drop_front(idx);
                 if self.port_handler.is_packet_timeout() {
                     result = timed_out(rxpacket.len());
                     break;
@@ -445,7 +444,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
     ///
     /// Returns the answer (`None` when none was due or the send failed), the result, and the
     /// answer's error byte.
-    pub fn tx_rx_packet(&mut self, txpacket: &[u8]) -> (Option<Vec<u8>>, CommResult, u8) {
+    pub fn tx_rx_packet(&mut self, txpacket: &[u8]) -> (Option<Packet>, CommResult, u8) {
         let mut error = 0;
 
         // tx packet
@@ -528,17 +527,17 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
     }
 
     /// The data bytes of a status packet that answered a read of `length` bytes.
-    fn data(rxpacket: &[u8], length: u16) -> Option<Vec<u8>> {
+    fn data(rxpacket: &[u8], length: u16) -> Option<Packet> {
         let start = PKT_PARAMETER0 + 1;
         let end = start + usize::from(length);
         // The data stop before the CRC.
-        (rxpacket.len() >= end + 2).then(|| rxpacket[start..end].to_vec())
+        (rxpacket.len() >= end + 2).then(|| Packet::from_slice(&rxpacket[start..end]))
     }
 
     /// `readRx`: receive the status packet `dxl_id` answers a read or sync read with.
-    pub fn read_rx(&mut self, dxl_id: u8, length: u16) -> (Vec<u8>, CommResult, u8) {
+    pub fn read_rx(&mut self, dxl_id: u8, length: u16) -> (Packet, CommResult, u8) {
         let mut error = 0;
-        let mut data = Vec::new();
+        let mut data = Packet::new();
 
         let (rxpacket, mut result) = loop {
             let (rxpacket, result) = self.rx_packet();
@@ -567,9 +566,9 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
         dxl_id: u8,
         address: u16,
         length: u16,
-    ) -> (Vec<u8>, CommResult, u8) {
+    ) -> (Packet, CommResult, u8) {
         let mut txpacket = [0_u8; 14];
-        let mut data = Vec::new();
+        let mut data = Packet::new();
 
         if dxl_id >= BROADCAST_ID {
             return (data, CommResult::NotAvailable, 0);
@@ -633,7 +632,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
         else {
             return (CommResult::TxError, 0);
         };
-        let mut txpacket = vec![0_u8; data.len() + 12];
+        let mut txpacket = Packet::zeroed(data.len() + 12);
 
         txpacket[PKT_ID] = dxl_id;
         txpacket[PKT_LENGTH_L] = dxl_lobyte(length);
@@ -682,7 +681,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
         };
         // 14: HEADER0 HEADER1 HEADER2 RESERVED ID LEN_L LEN_H INST START_ADDR_L START_ADDR_H
         // DATA_LEN_L DATA_LEN_H CRC16_L CRC16_H
-        let mut txpacket = vec![0_u8; param.len() + 14];
+        let mut txpacket = Packet::zeroed(param.len() + 14);
 
         txpacket[PKT_ID] = BROADCAST_ID;
         // 7: INST START_ADDR_L START_ADDR_H DATA_LEN_L DATA_LEN_H CRC16_L CRC16_H
@@ -719,7 +718,7 @@ impl<P: SerialPort> Protocol2PacketHandler<P> {
         else {
             return CommResult::TxError;
         };
-        let mut txpacket = vec![0_u8; param.len() + 14];
+        let mut txpacket = Packet::zeroed(param.len() + 14);
 
         txpacket[PKT_ID] = BROADCAST_ID;
         // 7: INST START_ADDR_L START_ADDR_H DATA_LEN_L DATA_LEN_H CRC16_L CRC16_H
@@ -744,9 +743,9 @@ pub struct GroupSyncWrite {
     start_address: u16,
     data_length: u16,
     is_param_changed: bool,
-    param: Vec<u8>,
+    param: Packet,
     /// In insertion order, as the vendor's `dict` keeps it.
-    data_dict: Vec<(u8, Vec<u8>)>,
+    data_dict: Vec<(u8, Packet)>,
 }
 
 impl GroupSyncWrite {
@@ -756,7 +755,7 @@ impl GroupSyncWrite {
             start_address,
             data_length,
             is_param_changed: false,
-            param: Vec::new(),
+            param: Packet::new(),
             data_dict: Vec::new(),
         }
     }
@@ -766,7 +765,7 @@ impl GroupSyncWrite {
             return;
         }
 
-        self.param = Vec::new();
+        self.param.clear();
 
         for (dxl_id, data) in &self.data_dict {
             if data.is_empty() {
@@ -790,7 +789,7 @@ impl GroupSyncWrite {
             return false;
         }
 
-        self.data_dict.push((dxl_id, data.to_vec()));
+        self.data_dict.push((dxl_id, Packet::from_slice(data)));
 
         self.is_param_changed = true;
         true
@@ -820,7 +819,7 @@ pub struct GroupSyncRead {
     data_length: u16,
     last_result: bool,
     /// In insertion order, as the vendor's `dict` keeps it.
-    data_dict: Vec<(u8, Vec<u8>)>,
+    data_dict: Vec<(u8, Packet)>,
     /// Each device's status error byte from the last read, in the same order; the vendor's
     /// `txRxPacket` drops it.
     errors: Vec<u8>,
@@ -843,7 +842,7 @@ impl GroupSyncRead {
         if self.data_dict.iter().any(|(id, _)| *id == dxl_id) {
             return false;
         }
-        self.data_dict.push((dxl_id, Vec::new()));
+        self.data_dict.push((dxl_id, Packet::new()));
         true
     }
 
@@ -862,7 +861,10 @@ impl GroupSyncRead {
         if self.data_dict.is_empty() {
             return CommResult::NotAvailable;
         }
-        let param: Vec<u8> = self.data_dict.iter().map(|(dxl_id, _)| *dxl_id).collect();
+        let mut param = Packet::new();
+        for (dxl_id, _) in &self.data_dict {
+            param.push(*dxl_id);
+        }
         let result = ph.sync_read_tx(self.start_address, self.data_length, &param);
         if result != CommResult::Success {
             return result;

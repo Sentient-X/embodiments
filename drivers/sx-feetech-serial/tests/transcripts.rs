@@ -145,9 +145,12 @@ impl SerialPort for FakePort {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        let available = length.min(self.pending.len());
-        Ok(self.pending.drain(..available).collect())
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let available = buffer.len().min(self.pending.len());
+        for (slot, byte) in buffer.iter_mut().zip(self.pending.drain(..available)) {
+            *slot = byte;
+        }
+        Ok(available)
     }
 
     fn timeout(&self) -> Duration {
@@ -703,13 +706,14 @@ impl SerialPort for Babbling {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.reads += 1;
         assert!(
             self.reads < 10_000,
             "the read loop never checked its deadline"
         );
-        Ok(vec![self.byte; length.max(1)])
+        buffer.fill(self.byte);
+        Ok(buffer.len())
     }
 
     fn timeout(&self) -> Duration {
@@ -740,7 +744,7 @@ impl SerialPort for Foreign {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.reads += 1;
         assert!(
             self.reads < 10_000,
@@ -751,8 +755,11 @@ impl SerialPort for Foreign {
             // the minimum read, so only the foreign-id deadline check can end the exchange.
             self.pending.extend([0xFF, 0xFF, 0x09, 0x02, 0x00, 0xF4]);
         }
-        let available = length.min(self.pending.len());
-        Ok(self.pending.drain(..available).collect())
+        let available = buffer.len().min(self.pending.len());
+        for (slot, byte) in buffer.iter_mut().zip(self.pending.drain(..available)) {
+            *slot = byte;
+        }
+        Ok(available)
     }
 
     fn timeout(&self) -> Duration {

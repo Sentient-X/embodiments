@@ -48,8 +48,10 @@ fn serve(master: OwnedFd, bus: SimBus) {
                 }
                 let packet: Vec<u8> = pending.drain(..total).collect();
                 let _ = port.write_port(&packet);
-                let answer = port.read_port(1024).unwrap_or_default();
-                if !answer.is_empty() && writer.write_all(&answer).is_err() {
+                let mut buffer = [0_u8; 1024];
+                let count = port.read_port(&mut buffer).unwrap_or_default();
+                let answer = &buffer[..count];
+                if !answer.is_empty() && writer.write_all(answer).is_err() {
                     return;
                 }
             }

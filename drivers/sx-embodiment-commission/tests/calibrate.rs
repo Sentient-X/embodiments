@@ -508,8 +508,8 @@ impl sx_embodiment_drivers::serial::SerialPort for Lossy {
         }
         Ok(written)
     }
-    fn read_port(&mut self, length: usize) -> std::io::Result<Vec<u8>> {
-        self.inner.read_port(length)
+    fn read_port(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read_port(buffer)
     }
     fn timeout(&self) -> Duration {
         self.inner.timeout()

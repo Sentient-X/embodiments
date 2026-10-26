@@ -67,7 +67,7 @@ pub fn bytes<P: SerialPort>(
             result: CommResult::RxCorrupt,
         });
     }
-    Ok(data)
+    Ok(data.to_vec())
 }
 
 fn word(data: &[u8], at: usize) -> u16 {
