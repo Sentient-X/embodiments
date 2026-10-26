@@ -14,9 +14,8 @@
 //! from `sx_embodiment_drivers::Dynamics` over the static upper body's description, gravity at
 //! the measured position plus friction and inertia for the plan (`urdf` uses the description
 //! alone; a file is a `dynamics` calibration, applied only to the description it names), each
-//! axis' torque bounded at a quarter of its motor's peak. Those frames go to the chain
-//! directly: the governor passes no feed-forward, so the run keeps its own speed check (every
-//! planned step within the cap, refused at planning) and tracking-error stop.
+//! axis' torque bounded at a quarter of its motor's peak, through the governor
+//! (`ActuatorChain::command_with`), which slews the target and caps the planned velocity.
 //!
 //! `sweep:` and `breakaway:` read the friction sweep plan
 //! (`tools/identify_dynamics.py sweep-plan`, `docs/dynamics/static-upper-body-friction-sweeps.json`):
@@ -62,11 +61,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoAxis, DamiaoChain, Feedforward, FeedforwardLimit};
+use sx_damiao_can::chain::{DamiaoAxis, DamiaoChain};
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::governor::{AxisLimits, Governor};
 use sx_embodiment_drivers::{
-    ActuatorChain, Dynamics, DynamicsCalibration, InstanceDrive, Scratch, UPRIGHT,
+    ActuatorChain, Dynamics, DynamicsCalibration, Feedforward, FeedforwardLimit, InstanceDrive,
+    Scratch, UPRIGHT,
 };
 use sx_zlg_usbcanfd::{ChannelOptions, UsbCanFd};
 
@@ -205,6 +205,8 @@ struct Args {
     torso: bool,
     without: Vec<String>,
     feedforward: Option<String>,
+    /// The supply the motors run on, V, recorded with every run.
+    supply: Option<f64>,
     motion: bool,
 }
 
@@ -222,6 +224,7 @@ fn parse() -> Result<Args, String> {
         torso: false,
         without: Vec::new(),
         feedforward: None,
+        supply: None,
         motion: false,
     };
     while let Some(arg) = args.next() {
@@ -238,14 +241,19 @@ fn parse() -> Result<Args, String> {
             "--with-torso" => parsed.torso = true,
             "--without" => parsed.without.push(value()?),
             "--feedforward" => parsed.feedforward = Some(value()?),
+            "--supply-volts" => {
+                parsed.supply = Some(value()?.parse().map_err(|_| "bad --supply-volts")?);
+            }
             "--move" => parsed.motion = true,
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    if parsed.plan.is_empty() || parsed.record.is_empty() || parsed.drive.is_empty() {
+    let checking = parsed.part == "check";
+    if (parsed.plan.is_empty() && !checking) || parsed.record.is_empty() || parsed.drive.is_empty()
+    {
         return Err("--plan, --record, --drive and --instance are required".into());
     }
-    let known = matches!(parsed.part.as_str(), "holds" | "left" | "right")
+    let known = matches!(parsed.part.as_str(), "holds" | "left" | "right" | "check")
         || parsed.part.starts_with("sweep:")
         || parsed.part.starts_with("breakaway:")
         || parsed.part.starts_with("jog:");
@@ -557,10 +565,14 @@ struct Record {
 /// torque.
 fn write_records(
     out: &mut impl Write,
+    supply: Option<f64>,
     names: &[String],
     ticks: &[Tick],
     records: &[Record],
 ) -> std::io::Result<()> {
+    if let Some(volts) = supply {
+        writeln!(out, "# supply_volts={volts}")?;
+    }
     write!(out, "time_s,segment")?;
     for kind in ["target", "position", "velocity", "torque"] {
         for name in names {
@@ -589,36 +601,121 @@ fn write_records(
     Ok(())
 }
 
-/// The chain inside the governor, or, for feed-forward, alone: the governor carries no
-/// feed-forward, so that mode checks speed at planning and tracking per tick itself.
-enum Driver<P: sx_embodiment_drivers::can::CanPort> {
-    Governed(Governor<DamiaoChain<P>>),
-    Direct(DamiaoChain<P>),
-}
-
-impl<P: sx_embodiment_drivers::can::CanPort> Driver<P> {
-    fn chain(&self) -> &DamiaoChain<P> {
-        match self {
-            Self::Governed(governor) => governor.chain(),
-            Self::Direct(chain) => chain,
+/// `--part check`: read every chain motor and send nothing that changes one: its registers
+/// (`MST_ID`, `CTRL_MODE`, `PMAX`, `VMAX`, `TMAX`, the under- and over-voltage fault thresholds,
+/// the torque constant and gear ratio) through the read-only scan, then one status refresh each
+/// through the read-only observer (fresh, faulted with its code, or missing). Written as JSON
+/// to `--record`, with the supply. Refuses (exit 1) a silent motor, a fault, an over-voltage
+/// threshold at or below the supply, or a limit row the chain would refuse.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
+    use sx_damiao_can::observe::DamiaoObserver;
+    use sx_damiao_can::scan::scan;
+    use sx_embodiment_drivers::{AxisReading, Observe};
+    let adapter = UsbCanFd::open(args.serial.as_deref()).map_err(|e| e.to_string())?;
+    let ids: Vec<u16> = axes.iter().map(|a| a.axis.binding.bus_id).collect();
+    let registers = {
+        let port = adapter
+            .open_channel(args.channel, ChannelOptions::default())
+            .map_err(|e| e.to_string())?;
+        scan(port, ids.clone()).map_err(|e| e.to_string())?
+    };
+    let readings = {
+        let port = adapter
+            .open_channel(args.channel, ChannelOptions::default())
+            .map_err(|e| e.to_string())?;
+        let mut observer = DamiaoObserver::open(port, axes.clone()).map_err(|e| e.to_string())?;
+        observer.read_positions()
+    };
+    let mut problems: Vec<String> = Vec::new();
+    let mut motors = Vec::new();
+    for (axis, reading) in axes.iter().zip(&readings) {
+        let id = axis.axis.binding.bus_id;
+        let found = registers.motors.iter().find(|m| m.slave_id == id);
+        let state = match reading {
+            AxisReading::Fresh { position, .. } => format!("fresh at {position:+.3} rad"),
+            AxisReading::Faulted(code) => {
+                problems.push(format!("{} reports fault {code:#x}", axis.axis.joint));
+                format!("fault {code:#x}")
+            }
+            AxisReading::Missing(reason) => {
+                problems.push(format!("{} is missing ({reason:?})", axis.axis.joint));
+                format!("missing {reason:?}")
+            }
+        };
+        match found {
+            None => problems.push(format!(
+                "{} (id {id:#x}) did not answer its registers",
+                axis.axis.joint
+            )),
+            Some(motor) => {
+                if let (Some(supply), Some(over)) = (args.supply, motor.over_voltage)
+                    && f64::from(over) <= supply
+                {
+                    problems.push(format!(
+                        "{} faults over {over} V, at or below the {supply} V supply",
+                        axis.axis.joint
+                    ));
+                }
+                if let (Some(supply), Some(under)) = (args.supply, motor.under_voltage)
+                    && f64::from(under) >= supply
+                {
+                    problems.push(format!(
+                        "{} faults under {under} V, at or above the {supply} V supply",
+                        axis.axis.joint
+                    ));
+                }
+            }
         }
+        eprintln!(
+            "{:28} id {id:#04x} {state:24} {}",
+            axis.axis.joint,
+            found.map_or_else(
+                || "registers silent".to_owned(),
+                |m| format!(
+                    "mode {:?} PMAX {:?} VMAX {:?} TMAX {:?} UV {:?} V OV {:?} V KT {:?} Gr {:?}",
+                    m.control_mode,
+                    m.p_max,
+                    m.v_max,
+                    m.t_max,
+                    m.under_voltage,
+                    m.over_voltage,
+                    m.torque_constant,
+                    m.gear_ratio
+                )
+            )
+        );
+        motors.push(serde_json::json!({
+            "joint": axis.axis.joint,
+            "id": id,
+            "state": state,
+            "control_mode": found.and_then(|m| m.control_mode),
+            "p_max": found.and_then(|m| m.p_max),
+            "v_max": found.and_then(|m| m.v_max),
+            "t_max": found.and_then(|m| m.t_max),
+            "under_voltage": found.and_then(|m| m.under_voltage),
+            "over_voltage": found.and_then(|m| m.over_voltage),
+            "torque_constant": found.and_then(|m| m.torque_constant),
+            "gear_ratio": found.and_then(|m| m.gear_ratio),
+        }));
     }
-
-    fn stop(&mut self) -> sx_embodiment_drivers::StopReport {
-        match self {
-            Self::Governed(governor) => governor.stop(),
-            Self::Direct(chain) => chain.stop(),
-        }
+    let document = serde_json::json!({
+        "supply_volts": args.supply,
+        "motors": motors,
+        "problems": problems,
+    });
+    std::fs::write(&args.record, format!("{document:#}\n")).map_err(|e| e.to_string())?;
+    if problems.is_empty() {
+        eprintln!("check passed: {} motors read, nothing written", axes.len());
+        Ok(())
+    } else {
+        Err(format!("check failed: {}", problems.join("; ")))
     }
 }
 
 #[allow(clippy::too_many_lines)]
 fn run() -> Result<(), String> {
     let args = parse()?;
-    let plan: Value = serde_json::from_str(
-        &std::fs::read_to_string(&args.plan).map_err(|e| format!("{}: {e}", args.plan))?,
-    )
-    .map_err(|e| e.to_string())?;
     let drive = InstanceDrive::parse(
         &std::fs::read_to_string(&args.drive).map_err(|e| format!("{}: {e}", args.drive))?,
         &args.instance,
@@ -634,6 +731,13 @@ fn run() -> Result<(), String> {
                 || (LEFT_OUT.contains(&joint) && !(args.torso && joint == "torso_joint")))
         })
         .collect();
+    if args.part == "check" {
+        return check(&args, axes);
+    }
+    let plan: Value = serde_json::from_str(
+        &std::fs::read_to_string(&args.plan).map_err(|e| format!("{}: {e}", args.plan))?,
+    )
+    .map_err(|e| e.to_string())?;
     if axes.len() > MAX_AXES {
         return Err(format!("at most {MAX_AXES} axes are recorded"));
     }
@@ -703,8 +807,19 @@ fn run() -> Result<(), String> {
         Some(source) => Some(Model::new(source, &names)?),
         None => None,
     };
-    let mut chain = DamiaoChain::open(port, axes).map_err(|e| e.to_string())?;
+    let chain = DamiaoChain::open(port, axes).map_err(|e| e.to_string())?;
     let width = chain.axes().len();
+    let mut governor = Governor::new(
+        chain,
+        vec![
+            AxisLimits {
+                max_speed: args.speed,
+                max_tracking_error: MAX_TRACKING_ERROR,
+            };
+            width
+        ],
+    )
+    .map_err(|e| format!("{e:?}"))?;
     if model.is_some() {
         let limits: Vec<FeedforwardLimit> = peaks
             .iter()
@@ -713,27 +828,10 @@ fn run() -> Result<(), String> {
                 torque: Some(FEEDFORWARD_SHARE * peak),
             })
             .collect();
-        chain
+        governor
             .set_feedforward_limits(&limits)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("{e:?}"))?;
     }
-    let mut governor = if model.is_some() {
-        Driver::Direct(chain)
-    } else {
-        Driver::Governed(
-            Governor::new(
-                chain,
-                vec![
-                    AxisLimits {
-                        max_speed: args.speed,
-                        max_tracking_error: MAX_TRACKING_ERROR,
-                    };
-                    width
-                ],
-            )
-            .map_err(|e| format!("{e:?}"))?,
-        )
-    };
     let rest = governor
         .chain()
         .last_observed()
@@ -812,25 +910,14 @@ fn run() -> Result<(), String> {
                     at[..width].copy_from_slice(&rest);
                     at
                 };
-                match (
-                    model.feedforward(&tick.target, &speeds, &measured[..width]),
-                    &mut governor,
-                ) {
-                    (Ok(feedforward), Driver::Direct(chain)) => chain
+                match model.feedforward(&tick.target, &speeds, &measured[..width]) {
+                    Ok(feedforward) => governor
                         .command_with(&tick.target, feedforward)
                         .map_err(|e| format!("{e:?}")),
-                    (Ok(_), Driver::Governed(_)) => {
-                        Err("feed-forward needs the direct chain".into())
-                    }
-                    (Err(error), _) => Err(error),
+                    Err(error) => Err(error),
                 }
             }
-            None => match &mut governor {
-                Driver::Governed(governor) => {
-                    governor.command(&tick.target).map_err(|e| format!("{e:?}"))
-                }
-                Driver::Direct(chain) => chain.command(&tick.target).map_err(|e| format!("{e:?}")),
-            },
+            None => governor.command(&tick.target).map_err(|e| format!("{e:?}")),
         };
         let receipt = match commanded {
             Ok(receipt) => receipt,
@@ -904,7 +991,8 @@ fn run() -> Result<(), String> {
         }
     }
     let report = governor.stop();
-    let written = write_records(&mut out, &names, &ticks, &records).and_then(|()| out.flush());
+    let written =
+        write_records(&mut out, args.supply, &names, &ticks, &records).and_then(|()| out.flush());
     if let Err(error) = written {
         eprintln!("sx-identify: the record could not be written: {error}");
     }

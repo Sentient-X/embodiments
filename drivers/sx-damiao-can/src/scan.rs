@@ -92,6 +92,13 @@ pub struct MotorScan {
     pub p_max: Option<f32>,
     pub v_max: Option<f32>,
     pub t_max: Option<f32>,
+    /// `UV_Value` and `OV_Value`: the bus voltages below and above which the motor faults (8,
+    /// 9), V. A supply change is checked against these before anything moves.
+    pub under_voltage: Option<f32>,
+    pub over_voltage: Option<f32>,
+    /// `KT_Value`, the torque constant, and `Gr`, the gear ratio, as the motor holds them.
+    pub torque_constant: Option<f32>,
+    pub gear_ratio: Option<f32>,
 }
 
 impl MotorScan {
@@ -199,6 +206,10 @@ pub fn scan<P: CanPort>(
             p_max: float(read(&mut control, slave_id, DmVariable::PMAX)?),
             v_max: float(read(&mut control, slave_id, DmVariable::VMAX)?),
             t_max: float(read(&mut control, slave_id, DmVariable::TMAX)?),
+            under_voltage: float(read(&mut control, slave_id, DmVariable::UV_Value)?),
+            over_voltage: float(read(&mut control, slave_id, DmVariable::OV_Value)?),
+            torque_constant: float(read(&mut control, slave_id, DmVariable::KT_Value)?),
+            gear_ratio: float(read(&mut control, slave_id, DmVariable::Gr)?),
         });
     }
     Ok(found)

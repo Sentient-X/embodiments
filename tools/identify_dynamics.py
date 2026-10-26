@@ -361,7 +361,8 @@ class Recording:
     @classmethod
     def read(cls, path: Path) -> Recording:
         with path.open() as handle:
-            rows = list(csv.reader(handle))
+            # A leading "# key=value" line is run metadata (the supply voltage).
+            rows = [row for row in csv.reader(handle) if row and not row[0].startswith("#")]
         header = rows[0]
         joints = tuple(name.split(":", 1)[1] for name in header if name.startswith("position:"))
         body = rows[1:]
