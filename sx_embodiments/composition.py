@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from xml.etree import ElementTree as ET
 
-from sx_contracts import AssetFormat, AssetRole, ProvenancedAsset
+from sx_contracts import AssetFormat, AssetRole, ComponentId, ProvenancedAsset
 
 from .assembly import Assembly, Member, Pose
 from .assets import PackagedAsset, description_asset_uri, generated_description
@@ -19,6 +19,7 @@ from .errors import CompositionError
 from .identity import EmbodimentKind, EmbodimentName, Lineage
 from .mechanical import Build, Module, carrier, source
 from .parts import ChainSpec, GripperSpec, MobileBaseSpec
+from .sites import BodySite
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,7 @@ def compose_embodiments(
     components: list[Component] = []
     assets: dict[tuple[str, str], ProvenancedAsset] = {}
     operator_mounts: list[OperatorMount] = []
+    sites: list[BodySite] = []
     for namespace, placed in members.items():
         body = placed.embodiment
         prefix = assembly.prefix(namespace)
@@ -103,6 +105,15 @@ def compose_embodiments(
             assembly.components_of(
                 namespace, body.components, instance_separator=".", carrier=rides
             )
+        )
+        sites.extend(
+            replace(
+                site,
+                name=prefix + site.name,
+                component_id=ComponentId(f"{namespace}.{site.component_id}"),
+                link=prefix + site.link,
+            )
+            for site in body.sites
         )
         operator_mounts.extend(
             replace(
@@ -131,6 +142,7 @@ def compose_embodiments(
         components=tuple(components),
         assets=(*assets.values(), description),
         operator_mounts=tuple(operator_mounts),
+        sites=tuple(sites),
     ).with_assets((*assets.values(), description), urdf=urdf)
     joint_names(composed.components, composed.state, urdf)
     return composed
@@ -180,6 +192,7 @@ def compose_build(
         lineage=Lineage(family="composition"),
         components=tuple(portable_component(component) for component in components),
         assets=assets,
+        sites=build.sites(),
     ).with_assets(assets, urdf=urdf)
     joint_names(composed.components, composed.state, urdf)
     return composed

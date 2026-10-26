@@ -19,15 +19,6 @@ from sx_embodiments.known.g1 import (
     UNITREE_G1_RIGHT_LEG,
     UNITREE_G1_TORSO,
 )
-from sx_embodiments.known.rby1 import (
-    RBY1_HEAD,
-    RBY1_LEFT_ARM,
-    RBY1_LEFT_GRIPPER,
-    RBY1_MJCF,
-    RBY1_RIGHT_ARM,
-    RBY1_RIGHT_GRIPPER,
-    RBY1_TORSO,
-)
 from sx_embodiments.known.universal_robots import (
     UR5E_ARM,
     UR5E_MJCF,
@@ -87,17 +78,8 @@ def test_aloha_parts_match_mjcf() -> None:
         _assert_part_matches(part, ranges)
 
 
-def test_rby1_parts_match_mjcf() -> None:
-    ranges = _joint_ranges(RBY1_MJCF)
-    for part in (
-        RBY1_TORSO,
-        RBY1_RIGHT_ARM,
-        RBY1_LEFT_ARM,
-        RBY1_HEAD,
-        RBY1_RIGHT_GRIPPER,
-        RBY1_LEFT_GRIPPER,
-    ):
-        _assert_part_matches(part, ranges)
+# RBY1's pinned official URDF has different native ranges and first-finger axes from
+# Menagerie's MJCF. Its native parity law lives in test_sites.py against that authority.
 
 
 def test_unitree_g1_parts_match_mjcf() -> None:

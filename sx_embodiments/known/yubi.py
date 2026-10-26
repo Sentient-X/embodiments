@@ -13,6 +13,7 @@ clamped to zero. Per-unit camera calibration remains episode/session evidence.
 
 from typing import Final
 
+from sx_contracts import ComponentId
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import PackagedAsset, packaged_asset
@@ -29,6 +30,7 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
+from ..sites import BodySite
 from ._authoring import bounded_layout
 from .sources import capture_source
 
@@ -197,6 +199,10 @@ YUBI_MODULE: Final = Module(
     module_id=ModuleId("yubi"),
     label="YUBI handheld jaws",
     description=YUBI_HANDS_URDF,
+    sites=(
+        BodySite("left_hand", ComponentId("left_jaw"), "quest_left_controller"),
+        BodySite("right_hand", ComponentId("right_jaw"), "quest_right_controller"),
+    ),
     components=(
         body_component("left_jaw", YUBI_JAW, RootMount("left_hand_root")),
         body_component("right_jaw", YUBI_JAW, RootMount("right_hand_root")),

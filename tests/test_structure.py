@@ -65,6 +65,7 @@ PUBLIC_SURFACE = frozenset(
         "AssetsUnavailableError",
         "BaseMount",
         "Bounds",
+        "BodySite",
         "CameraOptics",
         "CameraOpticsAuthority",
         "ChannelKind",

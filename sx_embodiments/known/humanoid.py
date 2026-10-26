@@ -51,6 +51,8 @@ import math
 from dataclasses import replace
 from typing import Final, Literal
 
+from sx_contracts import ComponentId
+
 from ..assembly import Frame, Pose, Subtree
 from ..assets import (
     AssetFormat,
@@ -92,6 +94,7 @@ from ..parts import (
     Limb,
     SensorModel,
 )
+from ..sites import BodySite
 from ._authoring import bounded_layout
 
 SENTIENT_HUMANOID_URDF: Final = packaged_asset(
@@ -326,6 +329,14 @@ UPPER_BODY_MODULE: Final = Module(
     label="Sentient humanoid torso and arms",
     description=UPPER_BODY,
     components=UPPER_BODY_COMPONENTS,
+    sites=(
+        BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_yaw_link"),
+        BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_yaw_link"),
+        BodySite("left_elbow", ComponentId("left_arm"), "left_elbow_yaw_link"),
+        BodySite("right_elbow", ComponentId("right_arm"), "right_elbow_yaw_link"),
+        BodySite("chest", ComponentId("torso"), "chest_link"),
+        BodySite("pelvis", ComponentId("torso"), "base_link"),
+    ),
     sockets=(
         Socket(
             "neck",

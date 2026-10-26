@@ -13,6 +13,7 @@ left/right Quest passthrough cameras.
 
 from typing import Final
 
+from sx_contracts import ComponentId
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import packaged_asset
@@ -39,6 +40,7 @@ from ..parts import (
     MimicJoint,
     SensorModel,
 )
+from ..sites import BodySite
 from ._authoring import bounded_layout
 
 DAS_GRIPPER_URDF: Final = packaged_asset(
@@ -185,6 +187,11 @@ DAS_UMI_V4_MODULE: Final = Module(
     module_id=ModuleId("das-umi-v4"),
     label="DAS UMI v4 jaws with a Quest 3S headset",
     description=DAS_UMI_V4_URDF,
+    sites=(
+        BodySite("left_hand", ComponentId("left_jaw"), "left_handle"),
+        BodySite("right_hand", ComponentId("right_jaw"), "right_handle"),
+        BodySite("head", ComponentId("head_left"), "quest3s_head"),
+    ),
     components=(
         body_component("left_jaw", DAS_JAW_V4, RootMount("left_base_link")),
         body_component("right_jaw", DAS_JAW_V4, RootMount("right_base_link")),
@@ -250,6 +257,8 @@ QUEST_EGO_MODULE: Final = Module(
     module_id=ModuleId("quest-ego"),
     label="Quest 3S headset",
     description=QUEST_EGO_URDF,
+    # Headset geometry declares only a head site; human hands/torso need actual observations.
+    sites=(BodySite("head", ComponentId("head_left"), "quest3s_head"),),
     components=(
         sensor_component(
             "head_left",

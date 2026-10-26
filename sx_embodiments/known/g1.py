@@ -2,12 +2,15 @@
 
 from typing import Final, Literal
 
+from sx_contracts import ComponentId
+
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb
+from ..sites import BodySite
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -122,6 +125,18 @@ UNITREE_G1_MODULE: Final = Module(
     module_id=ModuleId("unitree-g1"),
     label="Unitree G1",
     description=UNITREE_G1_URDF,
+    # A walking body's ground footprint is a runtime projection, not a rigid pelvis site.
+    sites=(
+        BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_yaw_link"),
+        BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_yaw_link"),
+        BodySite("left_elbow", ComponentId("left_arm"), "left_elbow_link"),
+        BodySite("right_elbow", ComponentId("right_arm"), "right_elbow_link"),
+        BodySite("chest", ComponentId("torso"), "torso_link"),
+        BodySite("pelvis", ComponentId("torso"), "pelvis"),
+        BodySite("head", ComponentId("torso"), "head_link"),
+        BodySite("left_ankle", ComponentId("left_leg"), "left_ankle_roll_link"),
+        BodySite("right_ankle", ComponentId("right_leg"), "right_ankle_roll_link"),
+    ),
     components=(
         body_component("left_leg", UNITREE_G1_LEFT_LEG, RootMount("pelvis"), limb=Limb.LEG),
         body_component("right_leg", UNITREE_G1_RIGHT_LEG, RootMount("pelvis"), limb=Limb.LEG),

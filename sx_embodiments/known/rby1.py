@@ -2,6 +2,8 @@
 
 from typing import Final, Literal
 
+from sx_contracts import ComponentId
+
 from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
@@ -9,6 +11,7 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint, MobileBaseSpec
+from ..sites import BodySite
 from ._authoring import bounded_layout, unbounded_layout
 from .sources import menagerie
 
@@ -50,22 +53,39 @@ RBY1_TORSO: Final = ChainSpec(
     layout=bounded_layout(
         names=tuple(f"torso_{index}" for index in range(6)),
         units=(CoordinateUnit.RADIAN,) * 6,
-        lower=(-0.349066, -1.0472, -2.47837, -0.785398, -0.523599, -1.5708),
-        upper=(0.349066, 1.52173, 1.5708, 1.5708, 0.523599, 1.5708),
+        lower=(-0.261799388, -0.523598776, -2.617993878, -0.785398163, -0.523598776, -2.35619449),
+        upper=(0.261799388, 1.570796327, 1.570796327, 1.570796327, 0.523598776, 2.35619449),
     ),
     home=(0.0,) * 6,
 )
 
 
 def _rby1_arm(side: Literal["left", "right"]) -> ChainSpec:
-    second = (-0.05, 3.14159) if side == "left" else (-3.14159, 0.05)
+    # Physical ranges are the pinned official URDF's, not the alternate MJCF's.
+    second = (-0.017453293, 3.141592654) if side == "left" else (-3.141592654, 0.017453293)
     return ChainSpec(
         part_id=PartId(f"rby1-{side}-arm"),
         layout=bounded_layout(
             names=tuple(f"{side}_arm_{index}" for index in range(7)),
             units=(CoordinateUnit.RADIAN,) * 7,
-            lower=(-2.35619, second[0], -2.0944, -2.61799, -3.14159, -0.872665, -1.5708),
-            upper=(2.35619, second[1], 2.0944, 0.01, 3.14159, 0.872665, 1.5708),
+            lower=(
+                -3.141592654,
+                second[0],
+                -3.141592654,
+                -2.617993878,
+                -3.141592654,
+                -0.872664626,
+                -1.5707963268,
+            ),
+            upper=(
+                3.141592654,
+                second[1],
+                3.141592654,
+                0.017453293,
+                3.141592654,
+                0.872664626,
+                1.5707963268,
+            ),
         ),
         home=(0.0,) * 7,
     )
@@ -78,11 +98,14 @@ def _rby1_gripper(side: Literal["left", "right"]) -> GripperSpec:
         part_id=PartId(f"rby1-{side}-gripper"),
         layout=bounded_layout(
             names=(driven,),
-            units=(CoordinateUnit.RADIAN,),
-            lower=(-0.05,),
-            upper=(0.0,),
+            units=(CoordinateUnit.METER,),
+            lower=(0.0,),
+            upper=(0.05,),
         ),
-        mimic_joints=(MimicJoint(f"gripper_finger_{suffix}2", of=driven, multiplier=1.0),),
+        # Authoritative URDF: both axes point +Y in the common ee frame, but the
+        # opposed fingers have positive and negative ranges. Symmetric jaws use -q.
+        # The alternate Menagerie MJCF uses a different first-finger axis and +q.
+        mimic_joints=(MimicJoint(f"gripper_finger_{suffix}2", of=driven, multiplier=-1.0),),
     )
 
 
@@ -125,6 +148,15 @@ RBY1_MODULE: Final = Module(
     module_id=ModuleId("rby1"),
     label="Rainbow Robotics RB-Y1",
     description=RBY1_URDF,
+    # Named vendor link origins, not inferred joint indices or TCP/tool calibrations.
+    sites=(
+        BodySite("left_wrist", ComponentId("left_arm"), "link_left_arm_6"),
+        BodySite("right_wrist", ComponentId("right_arm"), "link_right_arm_6"),
+        BodySite("left_elbow", ComponentId("left_arm"), "link_left_arm_3"),
+        BodySite("right_elbow", ComponentId("right_arm"), "link_right_arm_3"),
+        BodySite("chest", ComponentId("torso"), "link_torso_5"),
+        BodySite("base", ComponentId("base"), "base"),
+    ),
     components=(
         body_component("base", RBY1_BASE, RootMount("base")),
         body_component("torso", RBY1_TORSO, MountedOn("base", "base"), limb=Limb.TORSO),

@@ -98,6 +98,8 @@ the board answering at ids 1 (left finger) and 2 (right), ``left_gripper`` at 3 
 
 from typing import Final
 
+from sx_contracts import ComponentId
+
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
@@ -121,6 +123,7 @@ from ..layout import (
 from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
+from ..sites import BodySite
 from ._authoring import bounded_layout
 from .zed import EYES, ZED_FRAME, optical_frame, zed_2i_eye, zed_2i_imu
 
@@ -371,6 +374,17 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
             for eye in EYES
         ),
         sensor_component("head_imu", zed_2i_imu(), MountedOn("neck", ZED_FRAME)),
+    ),
+    # Link origins: the wrist roll axis centre, the elbow pitch axis, the chest, and the
+    # grippers' tool points (the description's *_gripper_tcp frames).
+    sites=(
+        BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_roll_link"),
+        BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_roll_link"),
+        BodySite("left_hand", ComponentId("left_gripper"), "left_gripper_tcp"),
+        BodySite("right_hand", ComponentId("right_gripper"), "right_gripper_tcp"),
+        BodySite("left_elbow", ComponentId("left_arm"), "left_elbow_pitch_link"),
+        BodySite("right_elbow", ComponentId("right_arm"), "right_elbow_pitch_link"),
+        BodySite("chest", ComponentId("torso"), "chest_link"),
     ),
 )
 

@@ -7,7 +7,7 @@ from ..identity import EmbodimentId
 
 PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
     EmbodimentId(
-        "e732f747536d88a2ccecd0ce983f3f3fe7e20293aa56ab38d0b82b33204dd69b"
+        "eb64118e45f9f3b9a9a310d2d976d7d19b6e0377260b35767e6e4e55691d4782"
     ): packaged_asset(
         relpath="official/previews/e732f747536d88a2ccecd0ce983f3f3fe7e20293aa56ab38d0b82b33204dd69b.webp",
         sha256="489a653119a2678c165418cb8788e9e315856400096ed6ba0955e5ae64a54aa3",
@@ -24,7 +24,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "6bd52d986599cde9561eb8901825f42a22ca28e09ce7da94b3c76fe54ecc1e44"
+        "118da169a2109aae1b0b9ddcdcabf0b4d3c1a4d37bbca2b9ddf09d9b34762306"
     ): packaged_asset(
         relpath="official/previews/6bd52d986599cde9561eb8901825f42a22ca28e09ce7da94b3c76fe54ecc1e44.webp",
         sha256="523c32e7d9be425797dc44cee2b9e5b6472d622bcf2ddc1c4d3126fe05195fde",
@@ -58,7 +58,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "d8b7cd6420c6fa0cfe51577a3515758da06af3abd770b46812f6c2a7534fc113"
+        "087e6a6bab92c03d8c3f99a5ae59c674522c81e83ce456517acc62a52341db1f"
     ): packaged_asset(
         relpath="official/previews/d8b7cd6420c6fa0cfe51577a3515758da06af3abd770b46812f6c2a7534fc113.webp",
         sha256="927c3caad9cf720df69952366c098e30fa26b65f56a6b0101fb9986a5b77d368",
@@ -75,7 +75,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "55c4e1899b6a0e3aba4ac0a7f8d1da39529d1dcf267846f43df92f98c3dc4399"
+        "d2d26d93ffc63fda0a502b292a6e08ad8cbee0f8b6c297a70eefb8538a3a524d"
     ): packaged_asset(
         relpath="official/previews/55c4e1899b6a0e3aba4ac0a7f8d1da39529d1dcf267846f43df92f98c3dc4399.webp",
         sha256="7377a2a907d92ea5be9dc7326e8c2b804dcbcc91f02cee450c2be034bed6f135",
@@ -92,7 +92,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "314c66aa581e454a5c21535b024baeb25b603e75ebb2234f329fb7404397d172"
+        "738a01a66d4d66cd40a30c8d1e1ae631c10fff51f27ff2fdd44bc69473b728ee"
     ): packaged_asset(
         relpath="official/previews/314c66aa581e454a5c21535b024baeb25b603e75ebb2234f329fb7404397d172.webp",
         sha256="99941baeda5fe12a3242dbf08d2e1ccf3b68e1ce642d6fe743c3fb360e337d15",
@@ -109,7 +109,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "c76ad4f8a10702d04788450f8795fb3eeb5aba4ed4ed328120664362566493b7"
+        "6d21b329e04f7fa1af380db2fd97ea5264af6f3d69445cdb9af9c82038f23c06"
     ): packaged_asset(
         relpath="official/previews/c76ad4f8a10702d04788450f8795fb3eeb5aba4ed4ed328120664362566493b7.webp",
         sha256="344ec4b77c00df69646b3f079f4f8a08db3d5dd44e40f621433554608e6914ee",
@@ -126,7 +126,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "4c63b409d2b192e8a1deecab1f607fe76a8be15568943de8e97ade4ef5f05583"
+        "d5f2aad80bcb7bb4ff1eabfdf401b7f4910a89f4d12a731a8c8e24c177090bc5"
     ): packaged_asset(
         relpath="humanoid_pkg/previews/4c63b409d2b192e8a1deecab1f607fe76a8be15568943de8e97ade4ef5f05583.webp",
         sha256="83611778a1e1f078653610cd9bd1fff44fbffc015ed7c43228a64769fb37425e",
@@ -143,7 +143,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc"
+        "36a0ef645a3b6881d2126714ec6a556e3942bba8242c59614d2c626de1c0a1b7"
     ): packaged_asset(
         relpath="humanoid_pkg/previews/24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc.webp",
         sha256="8c8742c91ec2f76eb16691a11c4e7735b393d9ef47bc9699365664599fd92879",
@@ -177,7 +177,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "dfbf4bc54e7413b9273cffa23106247f317712108cb04cbf82ef41b47475c4ad"
+        "cb773b4749b1c2e514ed508f205d7d0ce9b88107e70a37e7cf9a1a3a7da74635"
     ): packaged_asset(
         relpath="official/previews/dfbf4bc54e7413b9273cffa23106247f317712108cb04cbf82ef41b47475c4ad.webp",
         sha256="8b5655ab2d4f256ce9c994d684778ac8aa9c0343497b8f50e1b7c50a18c0f9c6",
@@ -194,7 +194,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "89727a3d6c8cb40fd8b34b847b64de1531027a63774ffcc97dac3c869bf4e05c"
+        "1b34a6078aa4626682feff6fe90387fb843d72e02406932ca7478362a82e5def"
     ): packaged_asset(
         relpath="so101/previews/89727a3d6c8cb40fd8b34b847b64de1531027a63774ffcc97dac3c869bf4e05c.webp",
         sha256="680d5de1a392b8e0256272b7ddc99931138cbf90024a952155ebed952fc0c7f4",
@@ -211,7 +211,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "8309129b63fa861722882a9b8ea3af27817a5599c932f376eb62e570ac93a784"
+        "0627e3ff516bfce1e7a36f79b70d88f9d15dfa0dfcd37e75db719f61af8650dd"
     ): packaged_asset(
         relpath="so101/previews/8309129b63fa861722882a9b8ea3af27817a5599c932f376eb62e570ac93a784.webp",
         sha256="d42de80ec8f502d68995187318fac548529c03d27f3bde59d2ca94288103cc14",
@@ -228,7 +228,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa"
+        "c89d7c0245b01fc1449c4d6e6018ddffa3f2982e30d84b8b2a5f552ecae6cd04"
     ): packaged_asset(
         relpath="b601_dm/previews/6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa.webp",
         sha256="3b842894e5094a3f48aa1e249ebb25aaa63278057768a44d886ccba494e6464a",
@@ -245,7 +245,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "2c6d382021ddd6e4812fe4efa7b4258d59316cc27ac6f9a7ecc4958a482c1cc5"
+        "02c1d900f114c14a64bcb97b8efc5ddb10f3771c6429456888f8eaf96b262804"
     ): packaged_asset(
         relpath="b601_dm/previews/2c6d382021ddd6e4812fe4efa7b4258d59316cc27ac6f9a7ecc4958a482c1cc5.webp",
         sha256="abbfea2ce1c6da7b9e9b10c4f71e160bd91bb78d2eb0733f8c416916fad5265b",
@@ -262,7 +262,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "e861fe89e10cc5855645395746b42295da3cf8e76b47ab921e06dccaf5352062"
+        "d9e26c49189112eaa50024924189655a4d1fb163233749ecaed4eea234972f4d"
     ): packaged_asset(
         relpath="official/previews/e861fe89e10cc5855645395746b42295da3cf8e76b47ab921e06dccaf5352062.webp",
         sha256="4ab0bf08431f918e088fc891bcc335935fb8ea5d571f701d54e4400d139d0451",
@@ -279,7 +279,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "489575efc4f083f869e05f427eafaf6a94a559ef488b294e6632f74cead4285c"
+        "1414e2d85d67d3e7281442cd11bd9cf83ecaa56534fccabfc945f05154eaf400"
     ): packaged_asset(
         relpath="b601_dm/previews/489575efc4f083f869e05f427eafaf6a94a559ef488b294e6632f74cead4285c.webp",
         sha256="abbfea2ce1c6da7b9e9b10c4f71e160bd91bb78d2eb0733f8c416916fad5265b",
@@ -296,7 +296,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "e8f855b6e5c2eeab5249a78f8ce525fec5ce78f8f98c6e775c972e65a15dd906"
+        "e0ab7cb06e777f30cc991ba80eee93c4e83b62e203f0a018ab53b3c6dc5f054b"
     ): packaged_asset(
         relpath="ai_worker/previews/e8f855b6e5c2eeab5249a78f8ce525fec5ce78f8f98c6e775c972e65a15dd906.webp",
         sha256="9070b294059cb1fae6491783a99af1f62468da6c8e538b58567236cf0e70ddc4",
@@ -313,7 +313,7 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "3ff42e92777d55330b4d53335c0a828d7dd8c9c61a5241a32812775068a8e7ab"
+        "a15663f4e92cdd9ee75057e4f0392f3e2df64a2c1ba86caa39247b67da7eb4e8"
     ): packaged_asset(
         relpath="humanoid_pkg/previews/3ff42e92777d55330b4d53335c0a828d7dd8c9c61a5241a32812775068a8e7ab.webp",
         sha256="8c8742c91ec2f76eb16691a11c4e7735b393d9ef47bc9699365664599fd92879",
