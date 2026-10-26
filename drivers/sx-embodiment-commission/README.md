@@ -93,6 +93,18 @@ sx-commission calibrate --restore <journal>
   That measurement settled the `Goal_Speed` unit on 2026-10-26: steps per second, with the
   firmware never slower than 50 (the default `--goal-speed 20` runs at 50 steps/s, about
   0.077 rad/s); see `sx-feetech-serial`'s README.
+- `range --ids 1-6 --joints <names> [--full-turn <ids>] --out <file>` is a hand-guided
+  calibration that writes nothing (every packet through the read-only port, no journal). It
+  refuses unless every listed servo reads `Torque_Enable` 0. The person puts every joint at
+  its middle and presses Enter: the homing offset that makes that pose read 2047 (`LeRobot`'s
+  `int(4095 / 2)`) is computed from `raw = (present + held offset) mod 4096`, not written.
+  Then the person moves each joint through its full travel while a live line per joint shows
+  now/min/max in ticks and degrees (about 50 Hz), all in the new frame; Enter ends it and the
+  `LeRobot` calibration keyed by joint is written to `--out`. `apply --move` then writes each
+  entry's `homing_offset` and limits under `Lock` 0 → 1, refusing a servo that holds torque;
+  `--protection neck-defaults` also resets `Max_Torque_Limit`/`Protection_Current`/
+  `Overload_Torque` (and the live `Torque_Limit`) to 1000/310/80 where a servo differs,
+  printing each change first.
 - A sweep's end is one of `Load`, `NoProgress` (a stop), `Stuck` (it never moved a lead's
   worth, so it proves no stop), `Limit` (its position limit, or a stall within a lead of it,
   where the goal is clamped) and `MaxTravel`. A move that stops short without load holds where
@@ -172,8 +184,22 @@ gripper as `5B91028463` (ids 1, 2) and the left as `5AB0158173` (ids 3, 4):
 sx-jog --drive <drive.json> --commissioning <commissioning.json>
        [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]...
        [--exclude <joint,...>] [--speed 0.2] [--log <ticks.jsonl>]
+       [--at-end home|start|release]
        (--joint <joint> --delta-deg <deg> [--hold-seconds <s>] | --sequence <joint:deg|pause:s,...>)
 ```
+
+When the moves are done the body ends as `--at-end` says (`sx_embodiment_drivers::AtEnd`,
+`Governor::end`). `home`, the default, returns every joint to its registry home
+(`ChainSpec.home`, rendered into the bindings, where the calibrated zeros put it; a joint whose
+part declares none, a gripper's finger, stays where it is) at half the speed cap,
+tracking-checked, within a deadline, then disables torque. `start` returns to where the body
+rested when it was opened; `release` disables in place. Nothing leaves torque on after the run: a
+Damiao motor's armed `TIMEOUT` would drop it 0.75 s later with fault 0xD. A body nothing drove
+since it was opened or last stopped is never moved, only stopped. A return refuses to start
+while a fault is latched or any joint does not answer a fresh read, and a return that cannot
+finish falls back to the stop where the body is; the run then says why and exits non-zero, as it
+does for a stop that is not proven. A refusal, a fault or Ctrl-C at any time stops the body
+where it is, with no motion.
 
 A step written `&joint:deg` moves with the step after it, so a pose reached by several joints
 (an IK answer) is one coordinated move: put the largest move last, since it sets the duration.
@@ -182,7 +208,7 @@ the ZED looking ahead, at each gripper and at the table between them.
 
 Its old vendor-frame modes are gone, each covered by the layer: `--scan` is `sx-commission
 probe`; `--clear-faults` is the open's own settle phase, which clears a latched 0xD once;
-`--disable-all` is the stop every run ends with; `--slew-to` and `--release-test` are a move and
+`--disable-all` is `--at-end release`; `--slew-to` and `--release-test` are a move and
 a pause in a sequence. `sx-timeout-probe` is gone: the watchdog is armed right before every
 enable, and `sx-damiao-can`'s simulated bus holds the phased bring-up to it.
 
