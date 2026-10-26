@@ -47,6 +47,14 @@
 //!   for, and feedback counts only when it arrived after the phase's frames were sent. Each is
 //!   judged by the feedback's first-byte high nibble ([`MotorState`]). `DM_CAN.py` stores the
 //!   nibble unread and answers a lost register read from its cache.
+//! - **A late answer is data.** A command whose phase ends with a motor unanswered still
+//!   succeeds when any motor answered: that axis is observed as `NaN` and read
+//!   [`MissingReason::Stale`] in [`ActuatorChain::command_readings`], and its answer, when it
+//!   lands, is decoded at the next phase's drain. The governor decides what a missing reading
+//!   means (`sx_embodiment_drivers::governor`: one in a row per axis is tolerated). Until
+//!   2026-10-26 one late answer failed the whole command as `Silent(<id>)` and stopped the run;
+//!   on the static upper body these came from the host parking the adapter's I/O thread
+//!   (`sx_zlg_usbcanfd` now runs it under the time-constraint policy), not from the motors.
 //! - A stop is proven motor by motor: an answer to the disable frames reporting disabled. Answers
 //!   already on the link when the stop begins are drained first, so a late answer to an earlier
 //!   command never counts as the disable's. A silent motor is asked once more with
@@ -115,9 +123,22 @@ const KP_MAX: f64 = 500.0;
 const KD_MAX: f64 = 5.0;
 /// `0x7FF` addresses register requests; no motor may sit on it.
 const MAX_MOTOR_ID: u16 = 0x7FE;
-/// How long a phase awaits feedback (to a disable, a refresh or an MIT frame) once its frames
+/// How long a phase off the tick path awaits feedback (to a disable, a clear or a stop's refresh) once its frames
 /// are sent.
 pub(crate) const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
+/// One classic CAN data frame of 8 bytes on an 11-bit id at the Damiao bus's 1 Mbit/s, at
+/// worst-case bit stuffing with its interframe space: 135 bits. The static upper body measured
+/// about 245 µs per motor for a refresh and its answer (2026-10-26).
+pub(crate) const FRAME_TIME: Duration = Duration::from_micros(135);
+/// What the host adds to a tick's round trip beyond the bus's own time: USB turnaround and the
+/// scheduler. Measured read-only on the static upper body (13 motors, ZLG USBCANFD-200U on
+/// macOS at load 40–70, `sx-identify --part latency`, 2026-10-26): with nusb's event thread at
+/// default priority the slowest answer came 27.5 ms after its phase began (p99 16.4 ms), and in
+/// bursts later still; with it, the adapter's I/O thread and the tick under the time-constraint
+/// policy, p99 3.7 ms and max 10.1 ms over 6000 phases, of which about 3.5 ms is the bus. 25 ms
+/// leaves over twice the worst measured; an answer later still is a stale reading, not a
+/// failure.
+pub(crate) const HOST_MARGIN: Duration = Duration::from_millis(25);
 /// How long a phase awaits register answers: `DM_CAN.py`'s one 0.05 s poll per register.
 pub(crate) const REGISTER_WAIT: Duration = Duration::from_millis(50);
 /// A range of exactly one turn, as the humanoid's shoulder pitches declare to the URDF's
@@ -377,6 +398,30 @@ pub struct DamiaoChain<P> {
     applied: Vec<Feedforward>,
 }
 
+/// How long a phase awaits its answers once its last frame is sent.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Wait {
+    /// This long plus the link's frame allowance: bring-up, a stop, a register exchange, where
+    /// a missed answer refuses or leaves a stop unproven, so the wait is generous.
+    Link(Duration),
+    /// A control tick (a command or a refresh of every motor): the bus's time for every
+    /// request and its answer ([`FRAME_TIME`] each) plus [`HOST_MARGIN`]. A later answer is a
+    /// stale reading, not a failure, so the tick is not held for the link's worst case (the
+    /// ZLG adapter's allowance is 42 ms; the wait before 2026-10-26 was 62 ms).
+    Tick,
+}
+
+impl Wait {
+    fn after_last_frame(self, requests: usize, allowance: Duration) -> Duration {
+        match self {
+            Self::Link(wait) => wait + allowance,
+            Self::Tick => {
+                FRAME_TIME * u32::try_from(2 * requests).unwrap_or(u32::MAX) + HOST_MARGIN
+            }
+        }
+    }
+}
+
 /// What a phase awaits from the motor it sends one frame to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Awaits {
@@ -484,7 +529,7 @@ pub(crate) fn phase<P: CanPort>(
     frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
 ) -> Phase {
     let mut phase = Phase::with_capacity(requests.len());
-    phase_into(control, requests, wait, frame, &mut phase);
+    phase_into(control, requests, Wait::Link(wait), frame, &mut phase);
     phase
 }
 
@@ -492,7 +537,7 @@ pub(crate) fn phase<P: CanPort>(
 pub(crate) fn phase_into<P: CanPort>(
     control: &mut MotorControl<P>,
     requests: &[Request],
-    wait: Duration,
+    wait: Wait,
     mut frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
     phase: &mut Phase,
 ) {
@@ -546,7 +591,7 @@ pub(crate) fn phase_into<P: CanPort>(
             }
         }
     }
-    let deadline = Instant::now() + wait + allowance;
+    let deadline = Instant::now() + wait.after_last_frame(requests.len(), allowance);
     loop {
         stamp(control, requests, phase);
         let pending = (0..requests.len()).any(|index| phase.sent[index] && !phase.answered(index));
@@ -1061,7 +1106,7 @@ impl<P: CanPort> DamiaoChain<P> {
         phase_into(
             &mut self.control,
             &self.every_feedback,
-            FEEDBACK_WAIT,
+            Wait::Tick,
             |control, index, request| {
                 let DamiaoAxis { kp, kd, .. } = motors[index];
                 let (dq, tau) = sent[index];
@@ -1074,25 +1119,28 @@ impl<P: CanPort> DamiaoChain<P> {
         }
         // Recorded only once every frame went out.
         self.applied.copy_from_slice(&applied);
-        self.expect_all(&self.tick, MotorState::Enabled)?;
+        self.expect_answered(&self.tick, MotorState::Enabled)?;
         let feedback = self.feedback()?;
-        let observed: Axes<f64> = self
-            .motors
-            .iter()
-            .zip(feedback.iter())
-            .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
-            .collect();
-        self.command_readings = Some(
-            observed
-                .iter()
-                .zip(&self.tick.received)
-                .map(|(position, received)| AxisReading::Fresh {
-                    position: *position,
-                    // Every motor answered: `expect_all` refuses a silent one.
-                    received: received.unwrap_or_else(Instant::now),
-                })
-                .collect(),
-        );
+        let mut observed: Axes<f64> = Axes::new();
+        let mut readings: Axes<AxisReading> = Axes::new();
+        for (index, (motor, answer)) in self.motors.iter().zip(feedback.iter()).enumerate() {
+            // A motor whose answer missed the phase is data, not a failure: NaN observed, its
+            // reading missing (stale once it ever answered). Its late answer is decoded at the
+            // next phase's drain, so its position is never lost, only not vouched for now.
+            if let Some(received) = self.tick.received[index] {
+                let position = motor.axis.joint_from_actuator(f64::from(answer.position));
+                observed.push(position);
+                readings.push(AxisReading::Fresh { position, received });
+            } else {
+                observed.push(f64::NAN);
+                readings.push(AxisReading::Missing(if self.tick.before[index] > 0 {
+                    MissingReason::Stale
+                } else {
+                    MissingReason::Timeout
+                }));
+            }
+        }
+        self.command_readings = Some(readings);
         Ok(Receipt {
             evidence: Evidence::BusObservedComplete,
             observed,
@@ -1141,6 +1189,29 @@ impl<P: CanPort> DamiaoChain<P> {
         state == expected
             || (!self.motors[index].reports_enable_state
                 && matches!(state, MotorState::Enabled | MotorState::Disabled))
+    }
+
+    /// Require every motor that answered `phase` (one request per motor, in native state
+    /// order) to report `expected`, and at least one to have answered: a motor that missed the
+    /// deadline is the caller's data, a bus where none answered is [`DamiaoChainError::Silent`].
+    fn expect_answered(&self, phase: &Phase, expected: MotorState) -> Result<(), DamiaoChainError> {
+        if !(0..self.ids.len()).any(|index| phase.answered(index)) {
+            return Err(DamiaoChainError::Silent(self.ids[0]));
+        }
+        for (index, bus_id) in self.ids.iter().copied().enumerate() {
+            if !phase.answered(index) {
+                continue;
+            }
+            let state = MotorState::from_err(self.control.motor(bus_id)?.get_error());
+            if !self.in_state(index, state, expected) {
+                return Err(DamiaoChainError::UnexpectedState {
+                    bus_id,
+                    state,
+                    expected,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Require every motor to have answered `phase` (one request per motor, in native state
@@ -1224,7 +1295,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         phase_into(
             &mut self.control,
             &self.every_feedback,
-            FEEDBACK_WAIT,
+            Wait::Tick,
             |control, _, request| control.send_refresh(request.bus_id),
             &mut self.tick,
         );

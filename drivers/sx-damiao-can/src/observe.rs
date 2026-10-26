@@ -31,8 +31,8 @@ use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{Axes, AxisReading, BoundAxis, MissingReason, Observe, validate_chain};
 
 use crate::chain::{
-    Awaits, DamiaoAxis, DamiaoChainError, FEEDBACK_WAIT, LIMIT_REGISTERS, MotorState, Phase,
-    REGISTER_WAIT, Request, every, held_limits, motor_type, phase, phase_into, validate,
+    Awaits, DamiaoAxis, DamiaoChainError, LIMIT_REGISTERS, MotorState, Phase, REGISTER_WAIT,
+    Request, Wait, every, held_limits, motor_type, phase, phase_into, validate,
 };
 use crate::dm_can::{Motor, MotorControl};
 use crate::scan;
@@ -184,7 +184,7 @@ impl<P: CanPort> DamiaoObserver<P> {
         phase_into(
             &mut self.control,
             &self.every_feedback,
-            FEEDBACK_WAIT,
+            Wait::Tick,
             |control, _, request| control.send_refresh(request.bus_id),
             &mut self.tick,
         );

@@ -12,7 +12,9 @@ use crate::binding::BoundAxis;
 pub enum Evidence {
     /// Frames were written; the bus answers nothing.
     DispatchAttempted,
-    /// Every actuator answered this command, reporting itself enabled.
+    /// The bus answered this command: every actuator that answered reported itself enabled;
+    /// one whose answer missed the command's deadline is `NaN` in [`Receipt::observed`] and
+    /// missing in [`ActuatorChain::command_readings`].
     BusObservedComplete,
 }
 

@@ -35,6 +35,17 @@
 //!   cannot be governed. A chain error other than a refusal (the chain may have applied part
 //!   of the command) stops the chain and latches [`GovernorError::Faulted`]; a refusal, which
 //!   changed nothing, is returned as it is.
+//! - **One late answer is data, two are a fault.** An axis the receipt observes as `NaN` (its
+//!   actuator's answer missed the command's deadline: [`AxisReading::Missing`] in
+//!   [`ActuatorChain::command_readings`]) is not tracked that tick, and the next command steps
+//!   from the position last sent. [`MAX_MISSED_IN_A_ROW`] such ticks in a row are tolerated; one
+//!   more stops the chain and latches [`GovernorError::Unanswered`]. Each tick moves an axis at
+//!   most `max_speed` × [`MAX_STEP_INTERVAL`] (10 mrad at 0.5 rad/s), so an axis goes
+//!   unobserved for at most one such step before it is tracked again or stopped, well inside
+//!   the actuators' own communication watchdogs. A late answer is usually the host, not the
+//!   motor: an overloaded macOS scheduler parks a thread for tens of milliseconds (run CSVs of
+//!   2026-10-26 show 50 Hz ticks up to 98 ms apart at load 30–100), and stopping a run on it
+//!   threw away a good run while proving nothing about the body.
 //! - **Unavailable axes** ([`ActuatorChain::unavailable`], marked by commissioning) keep their
 //!   place in every vector but are neither stepped nor tracked: their targets reach no
 //!   actuator, and their observations are `NaN`.
@@ -60,6 +71,10 @@ use crate::rail::AxisDerate;
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
 pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
+
+/// How many commands in a row one axis may go unobserved (`NaN` in the receipt) before the
+/// governor stops the chain.
+pub const MAX_MISSED_IN_A_ROW: u8 = 1;
 
 /// One axis's bounds, in the joint's own unit (rad or m) and per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,6 +145,14 @@ pub enum GovernorError<E> {
         found: usize,
         stop: StopReport,
     },
+    #[error(
+        "joint {joint} went unobserved for {ticks} commands in a row; the chain was stopped and the fault is latched"
+    )]
+    Unanswered {
+        joint: String,
+        ticks: u8,
+        stop: StopReport,
+    },
     #[error("a fault is latched; recover the body and clear it before commanding")]
     Latched,
 }
@@ -140,6 +163,7 @@ impl<E: ChainError> ChainError for GovernorError<E> {
             Self::Chain(error) | Self::Faulted { error, .. } => error.failure(),
             Self::Target(_) | Self::NoStart | Self::Latched => ChainFailure::Refused,
             Self::Tracking { .. } | Self::Unobserved { .. } => ChainFailure::Fault,
+            Self::Unanswered { .. } => ChainFailure::Timeout,
         }
     }
 }
@@ -162,6 +186,8 @@ pub struct Governor<C, K = MonotonicClock> {
     latched: bool,
     /// The chain's unavailable axes, neither stepped nor tracked.
     unavailable: Vec<usize>,
+    /// Per axis, the commands in a row whose receipt did not observe it.
+    missed: Vec<u8>,
     /// The chain's derated axes, already applied to `limits` and `torque_caps`.
     derated: Vec<AxisDerate>,
     /// The largest feed-forward torque each axis is sent, N·m, where a derate bounds it.
@@ -196,6 +222,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         }
         let positive = |value: f64| value.is_finite() && value > 0.0;
         let chain_unavailable = chain.unavailable();
+        let width = axes.len();
         if let Some((axis, _)) = axes.iter().zip(&limits).find(|(_, limit)| {
             !(positive(limit.max_speed)
                 && positive(limit.max_tracking_error)
@@ -230,6 +257,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             start: None,
             latched: false,
             unavailable: chain_unavailable,
+            missed: vec![0; width],
             derated,
             torque_caps,
         })
@@ -300,6 +328,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ) -> GovernorError<C::Error> {
         self.latched = true;
         self.held = None;
+        self.missed.fill(0);
         let stop = self.chain.stop();
         make(stop)
     }
@@ -382,6 +411,30 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         (positions, speeds)
     }
 
+    /// Count each available axis' unobserved (`NaN`) commands in a row, restarting at an
+    /// observed one; the first axis past [`MAX_MISSED_IN_A_ROW`], counting nothing then.
+    fn count_missed(&mut self, observed: &[f64]) -> Option<usize> {
+        let past = observed.iter().enumerate().find(|(index, value)| {
+            !self.unavailable.contains(index)
+                && value.is_nan()
+                && self.missed[*index] >= MAX_MISSED_IN_A_ROW
+        });
+        if let Some((index, _)) = past {
+            return Some(index);
+        }
+        for (index, value) in observed.iter().enumerate() {
+            if self.unavailable.contains(&index) {
+                continue;
+            }
+            self.missed[index] = if value.is_nan() {
+                self.missed[index] + 1
+            } else {
+                0
+            };
+        }
+        None
+    }
+
     /// Slew toward `joints` and command the chain, with `feedforward` when given.
     fn drive(
         &mut self,
@@ -441,13 +494,20 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 stop,
             }));
         }
+        if let Some(index) = self.count_missed(&receipt.observed[..width]) {
+            let joint = self.chain.axes()[index].joint.clone();
+            let ticks = self.missed[index] + 1;
+            return Err(self.fault(|stop| GovernorError::Unanswered { joint, ticks, stop }));
+        }
         let strayed = receipt
             .observed
             .iter()
             .zip(&next)
             .zip(self.limits.iter().zip(self.chain.axes()))
             .enumerate()
-            .filter(|(index, _)| !self.unavailable.contains(index))
+            .filter(|(index, ((observed, _), _))| {
+                !(self.unavailable.contains(index) || observed.is_nan())
+            })
             .map(|(_, pair)| pair)
             .find(|((observed, sent), (limit, _))| {
                 !within(**observed, **sent, limit.max_tracking_error)
@@ -527,6 +587,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn stop(&mut self) -> StopReport {
         self.held = None;
+        self.missed.fill(0);
         self.chain.stop()
     }
 
@@ -557,6 +618,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn clear_faults(&mut self) {
         self.latched = false;
+        self.missed.fill(0);
         self.held = None;
         self.chain.clear_faults();
     }
@@ -595,6 +657,8 @@ mod tests {
         fail: Option<ChainFailure>,
         /// Observe only the first axis.
         short: bool,
+        /// An axis whose answer misses every command while set: observed as NaN.
+        silent: Option<usize>,
         /// Where the last command's answer observed each axis; `None` once stopped.
         at: Option<Vec<f64>>,
         /// What the chain reports derated.
@@ -639,6 +703,7 @@ mod tests {
             stops: 0,
             fail: None,
             short: false,
+            silent: None,
             at: None,
             derated: Vec::new(),
             feedforward: Vec::new(),
@@ -668,8 +733,11 @@ mod tests {
                 return Err(FakeError(failure));
             }
             self.sent.push(joints.to_vec());
-            let observed: Vec<f64> = joints.iter().map(|joint| joint + self.lag).collect();
+            let mut observed: Vec<f64> = joints.iter().map(|joint| joint + self.lag).collect();
             self.at = Some(observed.clone());
+            if let Some(index) = self.silent {
+                observed[index] = f64::NAN;
+            }
             Ok(Receipt {
                 evidence: crate::chain::Evidence::BusObservedComplete,
                 observed: if self.observes {
@@ -773,6 +841,37 @@ mod tests {
     }
 
     #[test]
+    fn one_late_answer_is_tolerated_and_two_in_a_row_stop_the_chain() {
+        let (mut governor, clock) = governed(fake(true));
+        governor.command(&[0.0, 0.5]).expect("hold");
+        governor.chain_mut().silent = Some(1);
+        clock.advance(Duration::from_millis(20));
+        governor
+            .command(&[0.0, 0.5])
+            .expect("one late answer is data");
+        governor.chain_mut().silent = None;
+        clock.advance(Duration::from_millis(20));
+        governor
+            .command(&[0.0, 0.5])
+            .expect("answered again: the count restarts");
+        governor.chain_mut().silent = Some(1);
+        clock.advance(Duration::from_millis(20));
+        governor
+            .command(&[0.0, 0.5])
+            .expect("a single late answer again");
+        clock.advance(Duration::from_millis(20));
+        assert!(matches!(
+            governor.command(&[0.0, 0.5]),
+            Err(GovernorError::Unanswered { ref joint, ticks: 2, .. }) if joint == "b"
+        ));
+        assert_eq!(governor.chain().stops, 1);
+        assert!(matches!(
+            governor.command(&[0.0, 0.5]),
+            Err(GovernorError::Latched)
+        ));
+    }
+
+    #[test]
     fn a_stalled_caller_earns_no_bigger_step() {
         let (mut governor, clock) = governed(fake(true));
         governor.command(&[0.0, 0.5]).expect("hold");
@@ -820,13 +919,14 @@ mod tests {
     }
 
     #[test]
-    fn a_nan_observation_is_a_tracking_fault() {
+    fn an_axis_never_observed_stops_on_its_second_command() {
         let mut chain = fake(true);
         chain.lag = f64::NAN;
         let (mut governor, _) = governed(chain);
+        governor.command(&[0.0, 0.5]).expect("one unobserved tick");
         assert!(matches!(
             governor.command(&[0.0, 0.5]),
-            Err(GovernorError::Tracking { .. })
+            Err(GovernorError::Unanswered { ticks: 2, .. })
         ));
     }
 

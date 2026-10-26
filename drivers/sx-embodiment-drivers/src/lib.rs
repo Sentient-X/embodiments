@@ -70,7 +70,8 @@ pub use dynamics::{
     Scratch, UPRIGHT,
 };
 pub use governor::{
-    AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
+    AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,
+    MAX_STEP_INTERVAL, MonotonicClock,
 };
 pub use inertial::{
     InertialQuantity, InertialSample, InertialSensor, InertialSource, MAX_INERTIAL_HZ, Stillness,
