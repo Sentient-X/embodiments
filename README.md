@@ -205,7 +205,7 @@ glTF Y-up over one identity node per link, named exactly the link, holding that 
 its own frame (primitives tessellated, meshes decimated to a triangle budget, URDF colours); and
 `pack.json`, both digests, per-link triangle counts and the gripper tool frames by side. A viewer
 sets each link node to its pose in the root frame. `sx_embodiment_drivers::kinematics::Tree`
-parses the URDF once and answers every link's pose (`Tree::link_poses`), mimics folded onto their
+parses the URDF once, lists the joints that place it with kinds and limits (`Tree::joints`), and answers every link's pose (`Tree::link_poses`), mimics folded onto their
 leader, so a headset needs only joint positions. `tools/render_packs.py` renders the committed
 packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
 the crate's `tree-poses.json`, Python's poses at seeded positions that `Tree` is held equal to.
