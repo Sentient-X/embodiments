@@ -25,6 +25,7 @@ pub const USAGE: &str = "usage:
                               [--widen <ticks>] [--move] [--json]
                               [motion settings]
   sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
+  sx-commission calibrate apply --bus <tty> --calibration <file> --move
   sx-commission calibrate --restore <journal>
 
   Without --move, gripper and jog only read and print what they would do.
@@ -50,6 +51,8 @@ pub enum Mode {
         id: u8,
         to: u16,
     },
+    /// Write a measured calibration's position limits to its servos, kept across power cycles.
+    Apply(PathBuf),
     Restore(PathBuf),
 }
 
@@ -145,6 +148,7 @@ fn number<T: std::str::FromStr>(flag: &str, text: &str) -> Result<T, String> {
 /// # Errors
 ///
 /// What is wrong with them.
+#[allow(clippy::too_many_lines)] // one flag table and one mode table, read top to bottom
 pub fn parse(words: &[String]) -> Result<Args, String> {
     let mut words = words.iter().map(String::as_str).peekable();
     let mode_word = match words.peek() {
@@ -168,6 +172,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         hold: Duration::ZERO,
     };
     let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
+    let mut calibration = None;
     while let Some(flag) = words.next() {
         let mut value = || words.next().ok_or(format!("{flag} needs a value"));
         let sweep = &mut args.sweep;
@@ -183,6 +188,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--widen" => args.widen = Some(number(flag, value()?)?),
             "--closed" => args.closed = closed(value()?)?,
             "--restore" => restore = Some(PathBuf::from(value()?)),
+            "--calibration" => calibration = Some(PathBuf::from(value()?)),
             "--journal-dir" => args.journal_dir = PathBuf::from(value()?),
             "--trace" => args.trace = Some(PathBuf::from(value()?)),
             "--hold-seconds" => {
@@ -233,6 +239,12 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             }
             Mode::Goto { id, to }
         }
+        (Some("apply"), None) => {
+            let Some(path) = calibration else {
+                return Err("apply needs --calibration <file>".to_owned());
+            };
+            Mode::Apply(path)
+        }
         (Some(other), None) => return Err(format!("unknown calibrate mode {other}")),
         (None, None) => return Err("calibrate needs a mode".to_owned()),
     };
@@ -271,10 +283,13 @@ pub fn run<P: SerialPort>(
     let result = match &args.mode {
         Mode::Restore(path) => restore(args, path, &mut open, stop, &mut out),
         Mode::Read => read_mode(args, &mut open, &mut out),
+        Mode::Apply(_) if !args.moves => Err(CalibrateError::Refused(
+            "apply writes the servos' limits: pass --move".to_owned(),
+        )),
         Mode::Gripper | Mode::Jog { .. } | Mode::Goto { .. } if !args.moves => {
             dry_run(args, &mut open, &mut out)
         }
-        Mode::Gripper | Mode::Jog { .. } | Mode::Goto { .. } => {
+        Mode::Gripper | Mode::Jog { .. } | Mode::Goto { .. } | Mode::Apply(_) => {
             moving(args, &mut open, stop, &mut out)
         }
     };
@@ -561,6 +576,7 @@ fn moving<P: SerialPort>(
                     "seconds": arrival.elapsed.as_secs_f64(),
                     "ticks_per_second": arrival.ticks_per_second() })
         }),
+        Mode::Apply(ref path) => apply(path, &mut session, out),
         _ => gripper(args, &mut session, out),
     };
     let report = session.close();
@@ -669,4 +685,52 @@ fn restore<P: SerialPort>(
         out.code = 3;
     }
     Ok(())
+}
+
+/// The limits of a calibration file: `sx-commission calibrate gripper --json`'s output, or a
+/// `LeRobot` calibration keyed by joint, each entry carrying `id`, `range_min` and `range_max`.
+fn limits_in(path: &std::path::Path) -> Result<Vec<(u8, u16, u16)>, CalibrateError> {
+    let refuse = |why: String| CalibrateError::Refused(format!("{}: {why}", path.display()));
+    let text = std::fs::read_to_string(path).map_err(|e| refuse(e.to_string()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| refuse(e.to_string()))?;
+    let entries = value.get("calibration").unwrap_or(&value);
+    let serde_json::Value::Object(entries) = entries else {
+        return Err(refuse("not a calibration object".to_owned()));
+    };
+    entries
+        .iter()
+        .map(|(key, entry)| {
+            let field = |name: &str| {
+                entry
+                    .get(name)
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| refuse(format!("{key} has no {name}")))
+            };
+            let narrow = |name: &str| {
+                field(name).and_then(|n| {
+                    u16::try_from(n).map_err(|_| refuse(format!("{key}'s {name} {n}")))
+                })
+            };
+            let id = u8::try_from(field("id")?).map_err(|_| refuse(format!("{key}'s id")))?;
+            Ok((id, narrow("range_min")?, narrow("range_max")?))
+        })
+        .collect()
+}
+
+fn apply<P: SerialPort>(
+    path: &std::path::Path,
+    session: &mut Session<P>,
+    out: &mut Out<'_>,
+) -> Result<serde_json::Value, CalibrateError> {
+    let mut applied = Vec::new();
+    for (id, min, max) in limits_in(path)? {
+        let (was_min, was_max) = session.commit_limits(id, min, max)?;
+        let _ = writeln!(
+            out.stdout,
+            "servo {id}: limits {was_min}..{was_max} -> {min}..{max}, kept across power cycles"
+        );
+        applied.push(json!({ "id": id, "was": [was_min, was_max], "now": [min, max] }));
+    }
+    Ok(json!({ "applied": applied }))
 }

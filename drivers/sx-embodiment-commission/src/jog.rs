@@ -36,12 +36,15 @@ const SETTLE: Duration = Duration::from_millis(400);
 pub enum Step {
     /// Move axis `axis` by `delta` (its unit, rad or m) from where the run has put it.
     Move { axis: usize, delta: f64 },
+    /// Move axis `axis` by `delta` together with the next step: it takes no time of its own,
+    /// so the governor slews it while the next move runs (written `&joint:degrees`).
+    With { axis: usize, delta: f64 },
     /// Hold every target for this long.
     Pause(Duration),
 }
 
 /// Parse `joint:degrees` and `pause:seconds` steps, comma-separated, against the body's joint
-/// names in native state order.
+/// names in native state order; `&joint:degrees` moves with the step after it.
 ///
 /// # Errors
 ///
@@ -50,12 +53,15 @@ pub fn parse_sequence(sequence: &str, joints: &[String]) -> Result<Vec<Step>, St
     sequence
         .split(',')
         .map(|step| {
+            let (with, step) = step
+                .strip_prefix('&')
+                .map_or((false, step), |rest| (true, rest));
             let (name, amount) = step.split_once(':').ok_or(format!("bad step {step}"))?;
             let amount: f64 = amount.parse().map_err(|_| format!("bad step {step}"))?;
             if !amount.is_finite() {
                 return Err(format!("bad step {step}"));
             }
-            if name == "pause" {
+            if name == "pause" && !with {
                 return Duration::try_from_secs_f64(amount)
                     .map(Step::Pause)
                     .map_err(|_| format!("bad pause {step}"));
@@ -64,9 +70,11 @@ pub fn parse_sequence(sequence: &str, joints: &[String]) -> Result<Vec<Step>, St
                 .iter()
                 .position(|joint| joint == name)
                 .ok_or(format!("{name} is no joint of this body"))?;
-            Ok(Step::Move {
-                axis,
-                delta: amount.to_radians(),
+            let delta = amount.to_radians();
+            Ok(if with {
+                Step::With { axis, delta }
+            } else {
+                Step::Move { axis, delta }
             })
         })
         .collect()
@@ -312,7 +320,7 @@ where
         .last_observed()
         .ok_or("the body reports no rest position")?;
     if let Some(axis) = steps.iter().find_map(|step| match step {
-        Step::Move { axis, .. } if *axis >= width => Some(*axis),
+        Step::Move { axis, .. } | Step::With { axis, .. } if *axis >= width => Some(*axis),
         _ => None,
     }) {
         return Err(format!("axis {axis} is not in this body of {width}"));
@@ -325,6 +333,10 @@ where
             Step::Move { axis, delta } => {
                 target[axis] += delta;
                 Duration::from_secs_f64(delta.abs() / speed.max(1e-3)) + SETTLE
+            }
+            Step::With { axis, delta } => {
+                target[axis] += delta;
+                Duration::ZERO
             }
             Step::Pause(lasts) => lasts,
         };

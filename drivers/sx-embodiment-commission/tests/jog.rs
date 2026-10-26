@@ -179,3 +179,15 @@ fn a_jog_logs_the_slewed_command_and_keeps_the_out_of_service_torso_in_its_place
     }
     assert!(lines[0]["motors"][elbow]["tau"].is_number());
 }
+
+#[test]
+fn an_ampersand_step_moves_with_the_next() {
+    let joints = vec!["a".to_owned(), "b".to_owned()];
+    let steps = jog::parse_sequence("&a:10,b:-20,pause:1", &joints).expect("parses");
+    assert!(
+        matches!(steps[0], Step::With { axis: 0, delta } if (delta - 10f64.to_radians()).abs() < 1e-12)
+    );
+    assert!(matches!(steps[1], Step::Move { axis: 1, .. }));
+    assert!(matches!(steps[2], Step::Pause(_)));
+    assert!(jog::parse_sequence("&pause:1", &joints).is_err());
+}
