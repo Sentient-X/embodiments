@@ -349,6 +349,23 @@ where
             }
             Step::Pause(lasts) => lasts,
         };
+        // A move a person typed past where its joint may go is refused, not cut short: the
+        // governor would bring it in to the edge and the run would wait out a move it never
+        // makes. The rule is the governor's own (`CommandRange::admissible`).
+        if let Step::Move { axis, .. } | Step::With { axis, .. } = *step {
+            let at = governor.last_observed().map(|at| at[axis]);
+            let admissible = governor.commandable()[axis].admissible(at);
+            if !admissible.admits(target[axis]) {
+                failure = Some(format!(
+                    "{} to {:.4} is outside where it may go [{:.4}, {:.4}]",
+                    governor.axes()[axis].joint,
+                    target[axis],
+                    admissible.lower,
+                    admissible.upper
+                ));
+                break 'steps;
+            }
+        }
         let ticks = lasts.as_nanos().div_ceil(period.as_nanos().max(1));
         for _ in 0..ticks {
             if stop.load(Ordering::SeqCst) {

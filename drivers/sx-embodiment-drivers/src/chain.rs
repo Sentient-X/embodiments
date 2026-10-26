@@ -58,6 +58,21 @@ impl CommandRange {
         }
     }
 
+    /// The one admissible-target rule: where a command may put this axis, given `at`, where
+    /// it was last observed. Inside the range, or no further out than the joint already is
+    /// ([`CommandRange::reaching`]), plus [`READ_NOISE_RAD`] for the reading moving between the
+    /// observation a command was planned on and the one it is checked against. With no finite
+    /// observation, the range itself. Every check of a target against the range uses it:
+    /// [`check_reach`] (each chain) and the [`crate::Governor`], which brings a target outside
+    /// it in to its nearest edge rather than refusing it.
+    #[must_use]
+    pub fn admissible(self, at: Option<f64>) -> Self {
+        match at {
+            Some(at) if at.is_finite() => self.reaching(at).slack(READ_NOISE_RAD),
+            _ => self,
+        }
+    }
+
     /// This range widened to include `at`, where the joint is now:
     /// `[min(lower, at), max(upper, at)]`. A position that is not finite widens nothing.
     #[must_use]
@@ -77,8 +92,8 @@ impl CommandRange {
 /// a joint held where it rests outside its range is refused for a 10 µrad inward wobble.
 pub const READ_NOISE_RAD: f64 = 2e-3;
 
-/// Refuse a vector of the wrong width, or a value outside its axis's range widened to where
-/// the axis is now ([`CommandRange::reaching`]): `at`, one position per axis, or the plain
+/// Refuse a vector of the wrong width, or a value outside its axis's admissible interval
+/// ([`CommandRange::admissible`]) from `at`, one observed position per axis, or the plain
 /// ranges when the chain observes none.
 ///
 /// # Errors
@@ -98,8 +113,7 @@ pub fn check_reach(
     }
     let at = at.filter(|at| at.len() == joints.len());
     for (index, ((axis, range), joint)) in axes.iter().zip(ranges).zip(joints).enumerate() {
-        let reach = at.map_or(*range, |at| range.reaching(at[index]).slack(READ_NOISE_RAD));
-        if !reach.admits(*joint) {
+        if !range.admissible(at.map(|at| at[index])).admits(*joint) {
             return Err(TargetError::OutOfBounds {
                 joint: axis.joint.clone(),
                 value: *joint,
@@ -541,13 +555,13 @@ mod tests {
         assert!(reach(1.2 + 2.0 * READ_NOISE_RAD).is_err());
         // Without an observation, the plain range.
         assert!(check_reach(&axes, &ranges, None, &[0.9 + 0.5 * READ_NOISE_RAD]).is_err());
-        // The declared bounds admit a target no further out than the joint is now.
-        let within = |joint: f64| {
-            crate::masked::check_available(&axes, &[], Some((&ranges, Some(&at))), &[joint])
-        };
-        assert_eq!(within(1.1), Ok(()));
-        assert_eq!(within(1.2 + 0.5 * READ_NOISE_RAD), Ok(()));
-        assert!(within(1.2 + 2.0 * READ_NOISE_RAD).is_err());
-        assert!(crate::masked::check_available(&axes, &[], None, &[1.1]).is_err());
+        // The one rule, as the chain and the governor read it.
+        let admissible = ranges[0].admissible(Some(1.2));
+        assert!(admissible.admits(1.1) && admissible.admits(1.2 + 0.5 * READ_NOISE_RAD));
+        assert!(!admissible.admits(1.2 + 2.0 * READ_NOISE_RAD));
+        assert_eq!(ranges[0].admissible(None), ranges[0]);
+        assert_eq!(ranges[0].admissible(Some(f64::NAN)), ranges[0]);
+        // A position stated outright is held to the declared bounds.
+        assert!(crate::masked::check_available(&axes, &[], &[1.1]).is_err());
     }
 }

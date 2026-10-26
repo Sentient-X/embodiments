@@ -28,8 +28,12 @@
 //!   `[min(lower, now), max(upper, now)]`, `now` being the chain's latest observation
 //!   ([`ActuatorChain::last_observed`]) or, for a chain that observes nothing, the position
 //!   last sent. A joint resting outside its range can hold or move toward it at `max_speed`,
-//!   never further out, and the interval shrinks as it comes in; the same rule is the chain's.
-//!   Nothing is refused or latched for where a joint rests.
+//!   never further out, and the interval shrinks as it comes in; the same rule is the chain's
+//!   ([`CommandRange::admissible`]). A finite target outside that interval is not refused: it
+//!   is brought in to the interval's nearest edge, so a caller that read the joint a moment
+//!   before the chain did (a joint drifting further out while idle) is never stopped for it,
+//!   and no caller keeps a range check of its own. Nothing is refused or latched for where a
+//!   joint rests.
 //! - **Fail closed.** Every receipt must observe every axis: a short or empty observation stops
 //!   the chain and latches [`GovernorError::Unobserved`], so a chain that observes nothing
 //!   cannot be governed. A chain error other than a refusal (the chain may have applied part
@@ -279,7 +283,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ///
     /// Refuses a vector of the wrong width or outside the declared bounds.
     pub fn start_at(&mut self, joints: &[f64]) -> Result<(), TargetError> {
-        check_available(self.chain.axes(), &self.unavailable, None, joints)?;
+        check_available(self.chain.axes(), &self.unavailable, joints)?;
         self.start = Some(Axes::from_slice(joints));
         self.held = None;
         Ok(())
@@ -379,7 +383,12 @@ fn slew(
     range: CommandRange,
     now: f64,
 ) -> (f64, f64) {
+    // The target brought inside the range widened to where the joint is first, so the axis
+    // brakes onto the edge rather than meeting it at speed; every step stays inside it too.
+    // ([`CommandRange::admissible`] adds read noise to this for checks against a later
+    // reading; a command itself never uses that slack.)
     let reach = range.reaching(now);
+    let target = target.clamp(reach.lower, reach.upper);
     if dt <= 0.0 {
         return (value.clamp(reach.lower, reach.upper), speed);
     }
@@ -462,6 +471,33 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         None
     }
 
+    /// Refuse a vector of the wrong width, or a target that is not a number on an available
+    /// axis. Any finite target is taken: each step moves toward it only as far as it is
+    /// admissible ([`CommandRange::admissible`]), so one outside its axis's range is brought in
+    /// to the nearest edge from where the joint is, never refused for where the joint has moved
+    /// since the caller read it.
+    fn check_finite(&self, joints: &[f64]) -> Result<(), TargetError> {
+        let axes = self.chain.axes();
+        if joints.len() != axes.len() {
+            return Err(TargetError::Width {
+                expected: axes.len(),
+                actual: joints.len(),
+            });
+        }
+        match axes
+            .iter()
+            .zip(joints)
+            .enumerate()
+            .find(|(index, (_, value))| !self.unavailable.contains(index) && !value.is_finite())
+        {
+            Some((_, (refused, value))) => Err(TargetError::OutOfBounds {
+                joint: refused.joint.clone(),
+                value: *value,
+            }),
+            None => Ok(()),
+        }
+    }
+
     /// Slew toward `joints` and command the chain, with `feedforward` when given.
     fn drive(
         &mut self,
@@ -471,15 +507,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         if self.latched {
             return Err(GovernorError::Latched);
         }
-        // Inside the declared bounds, or no further out than the joint already is (a joint
-        // resting outside them is held there or brought in, never sent further out).
-        let at = self.chain.last_observed();
-        check_available(
-            self.chain.axes(),
-            &self.unavailable,
-            Some((self.chain.commandable(), at.as_deref())),
-            joints,
-        )?;
+        self.check_finite(joints)?;
         let now = self.clock.now();
         let held = match self.held.take() {
             Some(held) => held,
@@ -925,10 +953,9 @@ mod tests {
         let (mut governor, _) = governed(chain);
         governor.command(&[0.9, 0.0]).expect("from past the edge");
         assert!(close(&governor.chain().sent[0], &[0.945, 0.0]));
-        assert!(matches!(
-            governor.command(&[1.5, 0.0]),
-            Err(GovernorError::Target(_))
-        ));
+        // Asked past every bound: brought in to the edge of where it may go, not refused.
+        governor.command(&[1.5, 0.0]).expect("brought in");
+        assert!(governor.chain().sent[1][0] <= 0.95 + 1e-12);
     }
 
     #[test]
@@ -1170,6 +1197,30 @@ mod tests {
             assert!(sent[0] >= -0.9 - 1e-12, "{sent:?}");
         }
         assert!((sent[0] + 0.9).abs() < 1e-12);
+    }
+
+    /// Bench 2026-10-26: an arm resting just past its limit drifted further out while idle,
+    /// the station commanded where it then read it, and the governor, checking against its
+    /// older observation, refused and the run safe-stopped. A target further out than the
+    /// joint is, or past every bound, is brought in to the interval's edge, never refused; a
+    /// target that is not a number still is.
+    #[test]
+    fn a_target_further_out_than_the_joint_is_brought_in_not_refused() {
+        let (mut governor, clock) = resting(1.2);
+        for target in [1.2 + 0.0119, 5.0, 1.2] {
+            let sent = step(&mut governor, &clock, &[target, 0.5]);
+            assert!(sent[0] <= 1.2 + 1e-12, "{target} sent {sent:?}");
+        }
+        assert_eq!(governor.chain().stops, 0, "nothing refused or latched");
+        clock.advance(MAX_STEP_INTERVAL);
+        assert!(matches!(
+            governor.command(&[f64::NAN, 0.5]),
+            Err(GovernorError::Target(TargetError::OutOfBounds { .. }))
+        ));
+        assert!(matches!(
+            governor.command(&[0.0]),
+            Err(GovernorError::Target(TargetError::Width { .. }))
+        ));
     }
 
     #[test]
