@@ -7,8 +7,15 @@
 //!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1]
 //!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>]
 //!             [--feedforward-ramp-s 2] [--supply-volts 48|<model>=<V>,*=<V>] [--supply-source <s>]
-//!             [--move]
+//!             [--move] [--seconds 30]
 //! ```
+//!
+//! `--part latency` moves nothing: it polls every chain motor through the read-only observer
+//! (one status refresh each, the chain's own phase) every 20 ms for `--seconds`, and writes to
+//! `--record` each motor's round trip from the poll's start to its answer being taken (p50,
+//! p90, p99, p99.9, max, µs), the polls it missed by reason, the poll durations, the frames the
+//! adapter received that no poll took (answers that came after their poll gave up), and the
+//! adapter's counters (lost to a full ring, refused or failed batches, stalls, recoveries).
 //!
 //! `jog:<joint>` (sweep plan) moves the joint from its staging pose 0.5 rad at 0.3 rad/s,
 //! holds 2 s, and back, twice (`jog:<n>:+|-`, `hold:<n>:+|-`): the bench test of tracking.
@@ -218,6 +225,8 @@ struct Args {
     /// What feeds the motors (`boost-converter`, `battery`, ...), recorded with every run.
     source: Option<String>,
     motion: bool,
+    /// How long `--part latency` polls.
+    seconds: f64,
 }
 
 fn parse() -> Result<Args, String> {
@@ -238,6 +247,7 @@ fn parse() -> Result<Args, String> {
         ramp: 2.0,
         source: None,
         motion: false,
+        seconds: 30.0,
     };
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -266,16 +276,25 @@ fn parse() -> Result<Args, String> {
                 parsed.supply = Some(text);
             }
             "--move" => parsed.motion = true,
+            "--seconds" => {
+                parsed.seconds = value()?.parse().map_err(|_| "bad --seconds")?;
+                if !(parsed.seconds.is_finite() && parsed.seconds > 0.0 && parsed.seconds <= 3600.0)
+                {
+                    return Err("--seconds is in (0, 3600]".into());
+                }
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    let checking = parsed.part == "check";
+    let checking = matches!(parsed.part.as_str(), "check" | "latency");
     if (parsed.plan.is_empty() && !checking) || parsed.record.is_empty() || parsed.drive.is_empty()
     {
         return Err("--plan, --record, --drive and --instance are required".into());
     }
-    let known = matches!(parsed.part.as_str(), "holds" | "left" | "right" | "check")
-        || parsed.part.starts_with("sweep:")
+    let known = matches!(
+        parsed.part.as_str(),
+        "holds" | "left" | "right" | "check" | "latency"
+    ) || parsed.part.starts_with("sweep:")
         || parsed.part.starts_with("breakaway:")
         || parsed.part.starts_with("jog:");
     if !known {
@@ -798,6 +817,146 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     }
 }
 
+/// Put this thread under the host's real-time policy for a 20 ms loop, where it has one
+/// (macOS: Mach's time-constraint policy, `sx_zlg_usbcanfd::macos::time_constraint`), so an
+/// overloaded host does not park the tick for tens of milliseconds. Refusal is reported and
+/// the loop runs as before.
+fn realtime_loop() {
+    #[cfg(target_os = "macos")]
+    if let Err(code) = sx_zlg_usbcanfd::macos::time_constraint(PERIOD, PERIOD / 4, PERIOD / 2) {
+        eprintln!(
+            "sx-identify: the time-constraint policy was refused ({code}); ticks may run late"
+        );
+    }
+}
+
+/// `--part latency`: see the module docs. Sends only status refreshes and register reads.
+#[allow(
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
+    use sx_damiao_can::observe::DamiaoObserver;
+    use sx_embodiment_drivers::{AxisReading, MissingReason, Observe};
+    let adapter = UsbCanFd::open(args.serial.as_deref()).map_err(|e| e.to_string())?;
+    let port = adapter
+        .open_channel(args.channel, ChannelOptions::default())
+        .map_err(|e| e.to_string())?;
+    let mut observer = DamiaoObserver::open(port, axes.clone()).map_err(|e| e.to_string())?;
+    let polls = (args.seconds / PERIOD.as_secs_f64()).ceil() as usize;
+    let count = axes.len();
+    // Reserved before the first poll: the loop allocates nothing.
+    let mut trips: Vec<Vec<u32>> = (0..count).map(|_| Vec::with_capacity(polls)).collect();
+    let mut durations: Vec<u32> = Vec::with_capacity(polls);
+    let mut missed = vec![[0_u64; 4]; count];
+    let mut faulted = vec![0_u64; count];
+    let mut events: Vec<(f64, usize, MissingReason, u32)> = Vec::with_capacity(1024);
+    let channel_before = observer.port().stats();
+    let device_before = adapter.stats();
+    realtime_loop();
+    let began = Instant::now();
+    let mut next = began;
+    for _ in 0..polls {
+        let start = Instant::now();
+        let readings = observer.read_positions();
+        let took = start.elapsed();
+        durations.push(u32::try_from(took.as_micros()).unwrap_or(u32::MAX));
+        for (index, reading) in readings.iter().enumerate() {
+            match reading {
+                AxisReading::Fresh { received, .. } => trips[index].push(
+                    u32::try_from(received.saturating_duration_since(start).as_micros())
+                        .unwrap_or(u32::MAX),
+                ),
+                AxisReading::Missing(reason) => {
+                    let slot = match reason {
+                        MissingReason::Timeout => 0,
+                        MissingReason::Stale => 1,
+                        MissingReason::Corrupt => 2,
+                        MissingReason::Unavailable => 3,
+                    };
+                    missed[index][slot] += 1;
+                    if events.len() < events.capacity() {
+                        events.push((
+                            start.duration_since(began).as_secs_f64(),
+                            index,
+                            *reason,
+                            u32::try_from(took.as_micros()).unwrap_or(u32::MAX),
+                        ));
+                    }
+                }
+                AxisReading::Faulted(_) => faulted[index] += 1,
+            }
+        }
+        next += PERIOD;
+        match next.checked_duration_since(Instant::now()) {
+            Some(wait) => thread::sleep(wait),
+            None => next = Instant::now(),
+        }
+    }
+    let elapsed = began.elapsed().as_secs_f64();
+    let channel_after = observer.port().stats();
+    let device_after = adapter.stats();
+    let quantiles = |values: &mut Vec<u32>| {
+        values.sort_unstable();
+        let at = |q: f64| {
+            values
+                .get(((values.len().saturating_sub(1)) as f64 * q).round() as usize)
+                .copied()
+        };
+        serde_json::json!({
+            "n": values.len(), "p50": at(0.5), "p90": at(0.9), "p99": at(0.99),
+            "p999": at(0.999), "max": values.last().copied(),
+        })
+    };
+    let mut answered = 0_u64;
+    let mut motors = Vec::new();
+    for (index, axis) in axes.iter().enumerate() {
+        answered += trips[index].len() as u64;
+        let summary = quantiles(&mut trips[index]);
+        eprintln!(
+            "{:28} id {:#04x} rtt us {summary} missed t/s/c/u {:?} faulted {}",
+            axis.axis.joint, axis.axis.binding.bus_id, missed[index], faulted[index]
+        );
+        motors.push(serde_json::json!({
+            "joint": axis.axis.joint,
+            "id": axis.axis.binding.bus_id,
+            "rtt_us": summary,
+            "missed": {"timeout": missed[index][0], "stale": missed[index][1],
+                       "corrupt": missed[index][2], "unavailable": missed[index][3]},
+            "faulted": faulted[index],
+        }));
+    }
+    let received = channel_after.rx_frames - channel_before.rx_frames;
+    let poll_us = quantiles(&mut durations);
+    eprintln!(
+        "{polls} polls in {elapsed:.1} s; poll us {poll_us}; frames received {received}, taken by a poll {answered}, late or unclaimed {}",
+        received.saturating_sub(answered)
+    );
+    let document = serde_json::json!({
+        "polls": polls,
+        "seconds": elapsed,
+        "load_average": std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output()
+            .ok().map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned()),
+        "poll_us": poll_us,
+        "frames_received": received,
+        "frames_taken_by_a_poll": answered,
+        "late_or_unclaimed": received.saturating_sub(answered),
+        "channel_before": channel_before,
+        "channel_after": channel_after,
+        "device_before": device_before,
+        "device_after": device_after,
+        "motors": motors,
+        "misses": events.iter().map(|(t, index, reason, took)| serde_json::json!({
+            "t": t, "joint": axes[*index].axis.joint, "reason": format!("{reason:?}"), "poll_us": took,
+        })).collect::<Vec<_>>(),
+    });
+    std::fs::write(&args.record, format!("{document:#}\n")).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 fn run() -> Result<(), String> {
     let args = parse()?;
@@ -818,6 +977,9 @@ fn run() -> Result<(), String> {
         .collect();
     if args.part == "check" {
         return check(&args, axes);
+    }
+    if args.part == "latency" {
+        return latency(&args, axes);
     }
     let plan: Value = serde_json::from_str(
         &std::fs::read_to_string(&args.plan).map_err(|e| format!("{}: {e}", args.plan))?,
@@ -974,6 +1136,11 @@ fn run() -> Result<(), String> {
     let mut outcome = Ok(());
     let mut segment_start = Instant::now();
     let mut last: Option<Record> = None;
+    // Where each axis last answered: the model's input, carried over a tick whose answer came
+    // late (NaN in the receipt and the CSV; the governor tolerates one in a row per axis).
+    let mut answered = [0.0; MAX_AXES];
+    answered[..width].copy_from_slice(&rest);
+    realtime_loop();
     for (index, tick) in ticks.iter().enumerate() {
         if stop.load(Ordering::SeqCst) {
             outcome = Err("stopped by the operator".to_owned());
@@ -991,13 +1158,7 @@ fn run() -> Result<(), String> {
                 for (axis, speed) in speeds.iter_mut().enumerate() {
                     *speed = (following[axis] - tick.target[axis]) / PERIOD.as_secs_f64();
                 }
-                let measured = if let Some(previous) = last {
-                    previous.position
-                } else {
-                    let mut at = [0.0; MAX_AXES];
-                    at[..width].copy_from_slice(&rest);
-                    at
-                };
+                let measured = answered;
                 let share = (begin.elapsed().as_secs_f64() / args.ramp).min(1.0);
                 match model.feedforward(&tick.target, &speeds, &measured[..width], share) {
                     Ok(feedforward) => governor
@@ -1031,6 +1192,11 @@ fn run() -> Result<(), String> {
             record.torque[axis] = f64::from(answer.torque) * gains[axis];
         }
         records.push(record);
+        for (at, q) in answered.iter_mut().zip(&record.position).take(width) {
+            if q.is_finite() {
+                *at = *q;
+            }
+        }
         if let Some(axis) = (0..width)
             .find(|&axis| (tick.target[axis] - record.position[axis]).abs() > MAX_TRACKING_ERROR)
         {

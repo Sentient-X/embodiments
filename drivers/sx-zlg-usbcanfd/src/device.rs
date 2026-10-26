@@ -35,6 +35,10 @@ pub const DEVICES: [(u16, u16); 2] = [(0x04CC, 0x1240), (0x3068, 0x0009)];
 pub const DEFAULT_TRANSMIT_TIMEOUT_MS: u32 = 20;
 /// How long the I/O thread sleeps with nothing to do before it looks again.
 const IDLE_RECHECK: Duration = Duration::from_millis(100);
+/// How much of a receive's wait is spun rather than slept: a sleeping thread wakes late
+/// (macOS: about 0.75 ms at p50 for a default thread, README "Waiting on macOS"), so the last
+/// stretch before the deadline is polled, and an answer landing just before it is taken.
+const SPIN_TAIL: Duration = Duration::from_millis(1);
 
 /// Why an adapter or channel could not be opened or used.
 #[derive(Debug, Error)]
@@ -120,7 +124,8 @@ impl Default for Options {
 /// How a caller waiting for a frame waits.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub enum ReceiveWait {
-    /// Sleep until the I/O thread delivers a frame: no CPU while waiting.
+    /// Sleep until the I/O thread delivers a frame, polling only the last millisecond before
+    /// the deadline (`SPIN_TAIL`), which a sleeping thread would overshoot.
     #[default]
     Block,
     /// Poll without sleeping, a CPU core per waiting caller, for whatever the wake-up costs.
@@ -624,6 +629,7 @@ fn start_io(
     let io = std::thread::Builder::new()
         .name("zlg-usbcanfd-io".to_owned())
         .spawn(move || {
+            io_thread_realtime();
             thread_shared.set_io_thread(std::thread::current());
             let engine = Engine::new(
                 thread_shared.clone(),
@@ -637,6 +643,34 @@ fn start_io(
         .map_err(|error| format!("I/O thread: {error}"))?;
     let _ = started.recv();
     Ok(io)
+}
+
+/// Put the threads every answer passes through under the host's real-time policy: this I/O
+/// thread and, on macOS, nusb's `nusb-events`, which delivers every USB completion. On an
+/// overloaded host (macOS at load 30–100 parked default threads for 30–100 ms on 2026-10-26)
+/// either one at default priority held answers past their phase's deadline, and the chain read
+/// a motor as silent (`Silent(<id>)`) though it had answered. Each does under 0.1 ms of work
+/// per wake (the I/O thread about 6 % of a core at 250 Hz, README), inside the computation it
+/// asks for. A refusal leaves a thread at default priority, reported once.
+fn io_thread_realtime() {
+    #[cfg(target_os = "macos")]
+    {
+        let (period, computation, constraint) = (
+            Duration::from_millis(1),
+            Duration::from_micros(250),
+            Duration::from_millis(1),
+        );
+        if let Err(code) = crate::macos::time_constraint(period, computation, constraint) {
+            eprintln!("zlg-usbcanfd: the I/O thread's time-constraint policy was refused ({code})");
+        }
+        match crate::macos::time_constraint_named("nusb-events", period, computation, constraint) {
+            Ok(0) => eprintln!("zlg-usbcanfd: no nusb-events thread to put under time constraint"),
+            Ok(_) => {}
+            Err(code) => {
+                eprintln!("zlg-usbcanfd: nusb-events' time-constraint policy was refused ({code})");
+            }
+        }
+    }
 }
 
 /// The I/O thread: step the engine, and park when nothing moved until a completion, a queued
@@ -863,7 +897,8 @@ impl Channel {
     }
 
     /// The next received frame of any format before `deadline`, waiting as the channel's
-    /// [`ReceiveWait`] says: asleep until the I/O thread delivers one, or polling.
+    /// [`ReceiveWait`] says: asleep until the I/O thread delivers one (polling the last
+    /// millisecond before `deadline`), or polling throughout.
     ///
     /// # Errors
     ///
@@ -903,9 +938,15 @@ impl Channel {
             if now >= deadline {
                 return Ok(None);
             }
+            if deadline - now <= SPIN_TAIL {
+                drop(rx);
+                std::hint::spin_loop();
+                rx = lock(&state.rx);
+                continue;
+            }
             rx = state
                 .rx_ready
-                .wait_timeout(rx, deadline - now)
+                .wait_timeout(rx, (deadline - now).saturating_sub(SPIN_TAIL))
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }

@@ -508,3 +508,62 @@ fn a_fault_that_persists_after_its_clear_still_refuses_the_open() {
     ));
     assert!(commands_to(&bus, id, 0xFB).is_empty());
 }
+
+#[test]
+fn a_late_answer_to_a_command_is_a_stale_reading_and_two_in_a_row_stop_the_governor() {
+    use sx_embodiment_drivers::{AxisReading, GovernorError, MissingReason};
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let elbow = index_of("right_elbow_pitch_joint");
+    let id = axes[elbow].axis.binding.bus_id;
+    let chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    let limits = vec![
+        AxisLimits {
+            max_speed: 0.25,
+            max_tracking_error: 0.2,
+        };
+        15
+    ];
+    let mut governed = Governor::new(chain, limits).expect("limits");
+    governed.command(&rest).expect("every motor answers");
+    // The elbow's answer misses one command (the 2026-10-26 `Silent(0x13)`): data, not a stop.
+    bus.kill(id);
+    let receipt = governed
+        .command(&rest)
+        .expect("one late answer is tolerated");
+    assert!(receipt.observed[elbow].is_nan());
+    let readings = governed.command_readings().expect("readings");
+    assert_eq!(readings[elbow], AxisReading::Missing(MissingReason::Stale));
+    assert_eq!(
+        readings.iter().filter(|reading| reading.is_fresh()).count(),
+        14
+    );
+    bus.state().dead.remove(&id);
+    let receipt = governed.command(&rest).expect("it answers again");
+    assert!((receipt.observed[elbow] - rest[elbow]).abs() < 1e-3);
+    // Two misses in a row stop the chain and latch the fault.
+    bus.kill(id);
+    governed.command(&rest).expect("the first miss");
+    assert!(matches!(
+        governed.command(&rest),
+        Err(GovernorError::Unanswered { ref joint, ticks: 2, .. }) if joint == "right_elbow_pitch_joint"
+    ));
+}
+
+#[test]
+fn a_command_no_motor_answers_is_silent() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let ids: Vec<u16> = axes.iter().map(|axis| axis.axis.binding.bus_id).collect();
+    let mut chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("every motor answers");
+    for id in &ids {
+        bus.kill(*id);
+    }
+    assert!(matches!(
+        chain.command(&rest),
+        Err(DamiaoChainError::Silent(_))
+    ));
+}

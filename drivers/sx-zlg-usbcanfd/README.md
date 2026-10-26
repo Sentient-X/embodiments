@@ -156,9 +156,18 @@ wake 0.76–0.77 ms late at p50 (p99 3.2–5.8 ms), and a thread blocked on a co
 late enough to put 2.6 ms on the round trip's p99. Under Mach's
 `THREAD_TIME_CONSTRAINT_POLICY` (`macos::time_constraint`) the same sleeps wake 9 µs late at
 p50 (p99 44 µs), and the blocking receive has the spinning one's tail at an eighth of the CPU
-(table). So a blocking receive is the default, and the robot's real-time layer puts its loop
-threads under the time-constraint policy (the design doc covers it); `--realtime` does the same
-for the bench thread, and `ReceiveWait::Spin` stays an opt-in for a thread that cannot have it.
+(table). So a blocking receive is the default (it polls only its last millisecond), the
+adapter puts its own I/O thread and nusb's `nusb-events` completion thread under the
+time-constraint policy when it opens (`macos::time_constraint_named`), and a control loop puts
+its own thread under it (`sx-identify` does); `--realtime` does the same for the bench thread,
+and `ReceiveWait::Spin` stays an opt-in for a thread that cannot have it.
+
+Until 2026-10-26 no thread on the answer path had the policy, though this section said the
+robot's layer set it. On a Mac at load 30–100 the default-priority `nusb-events` thread was
+parked for 30–100 ms in bursts, and the static upper body's Damiao chain read a motor as
+`Silent(<id>)` mid-run. Measured read-only (`sx-identify --part latency`, 13 motors, refresh
+phases at 50 Hz): round trip p50/p99/max 4.0/16.4/27.5 ms before, 3.5/3.7/10.1 ms with the three
+threads constrained, against about 3.5 ms of bus time.
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check

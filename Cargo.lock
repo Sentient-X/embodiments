@@ -1336,6 +1336,7 @@ version = "0.1.0"
 name = "sx-zlg-usbcanfd"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mach2 0.5.0",
  "nusb",
  "objc2",
