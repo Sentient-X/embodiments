@@ -254,13 +254,16 @@ fn checksum(bytes: &[u8]) -> u8 {
         .fold(0_u8, |total, byte| total.wrapping_add(*byte))
 }
 
-fn status(id: u8, params: &[u8]) -> Vec<u8> {
-    let mut body = vec![id, u8::try_from(params.len() + 2).unwrap_or(u8::MAX), 0];
-    body.extend_from_slice(params);
-    let mut packet = vec![0xFF, 0xFF];
-    packet.extend_from_slice(&body);
-    packet.push(checksum(&body));
-    packet
+/// One status packet from `id` carrying `params`, queued in `inbox`.
+fn status(inbox: &mut VecDeque<u8>, id: u8, params: &[u8]) {
+    let head = [id, u8::try_from(params.len() + 2).unwrap_or(u8::MAX), 0];
+    let sum = !params
+        .iter()
+        .fold(!checksum(&head), |total, byte| total.wrapping_add(*byte));
+    inbox.extend([0xFF, 0xFF]);
+    inbox.extend(head);
+    inbox.extend(params);
+    inbox.push_back(sum);
 }
 
 impl SimState {
@@ -277,8 +280,11 @@ impl SimState {
                     }
                     if let Some(registers) = self.servos.get(servo) {
                         let start = usize::from(*address);
-                        let reply = status(*servo, &registers[start..start + usize::from(*count)]);
-                        self.inbox.extend(reply);
+                        status(
+                            &mut self.inbox,
+                            *servo,
+                            &registers[start..start + usize::from(*count)],
+                        );
                     }
                 }
             }
@@ -305,22 +311,22 @@ impl SimState {
         let Some(registers) = self.servos.get_mut(id) else {
             return;
         };
-        let reply = match (*instruction, params) {
-            (INST_PING, []) => status(*id, &[]),
+        let inbox = &mut self.inbox;
+        match (*instruction, params) {
+            (INST_PING, []) => status(inbox, *id, &[]),
             (INST_READ, [address, count]) => {
                 let start = usize::from(*address);
-                status(*id, &registers[start..start + usize::from(*count)])
+                status(inbox, *id, &registers[start..start + usize::from(*count)]);
             }
             (INST_WRITE, [address, data @ ..]) => {
                 if !self.ignored.contains(&(*id, *address)) {
                     let start = usize::from(*address);
                     registers[start..start + data.len()].copy_from_slice(data);
                 }
-                status(*id, &[])
+                status(inbox, *id, &[]);
             }
-            _ => return,
-        };
-        self.inbox.extend(reply);
+            _ => {}
+        }
     }
 }
 
@@ -337,11 +343,14 @@ impl SerialPort for SimBus {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let mut state = self.state();
-        let available = length.min(state.inbox.len());
+        let available = buffer.len().min(state.inbox.len());
         state.read += available;
-        Ok(state.inbox.drain(..available).collect())
+        for (slot, byte) in buffer.iter_mut().zip(state.inbox.drain(..available)) {
+            *slot = byte;
+        }
+        Ok(available)
     }
 
     fn timeout(&self) -> Duration {
@@ -352,6 +361,53 @@ impl SerialPort for SimBus {
 
     fn is_packet_timeout(&mut self) -> bool {
         self.state().inbox.is_empty()
+    }
+}
+
+/// A simulated bus that allocates nothing once warmed: the same servos answering as
+/// [`SimBus`], owned rather than shared and recording no packets. It is what a test measures a
+/// tick's allocations on.
+pub struct Steady {
+    state: SimState,
+}
+
+impl Steady {
+    /// The servos of `bus`, taken as they stand, with room for every answer queued.
+    #[must_use]
+    pub fn from(bus: &SimBus) -> Self {
+        let mut state = std::mem::take(&mut *bus.state());
+        state.inbox.reserve(4096);
+        Self { state }
+    }
+}
+
+impl SerialPort for Steady {
+    fn clear_port(&mut self) -> io::Result<()> {
+        self.state.inbox.clear();
+        Ok(())
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        self.state.answer(packet);
+        Ok(packet.len())
+    }
+
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let available = buffer.len().min(self.state.inbox.len());
+        for (slot, byte) in buffer.iter_mut().zip(self.state.inbox.drain(..available)) {
+            *slot = byte;
+        }
+        Ok(available)
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(10)
+    }
+
+    fn set_packet_timeout(&mut self, _packet_length: usize) {}
+
+    fn is_packet_timeout(&mut self) -> bool {
+        self.state.inbox.is_empty()
     }
 }
 
@@ -384,8 +440,8 @@ impl SerialPort for RealTime {
         self.bus.write_port(packet)
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        self.bus.read_port(length)
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.bus.read_port(buffer)
     }
 
     fn timeout(&self) -> Duration {

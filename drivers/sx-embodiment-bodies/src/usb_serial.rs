@@ -220,16 +220,14 @@ impl SerialPort for ServoLink {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let waiting = usize::try_from(self.stream.bytes_to_read().map_err(io::Error::other)?)
             .unwrap_or(usize::MAX);
-        let mut buffer = vec![0_u8; length.min(waiting)];
-        if buffer.is_empty() {
-            return Ok(buffer);
+        let take = buffer.len().min(waiting);
+        if take == 0 {
+            return Ok(0);
         }
-        let read = self.stream.read(&mut buffer)?;
-        buffer.truncate(read);
-        Ok(buffer)
+        self.stream.read(&mut buffer[..take])
     }
 
     fn timeout(&self) -> Duration {

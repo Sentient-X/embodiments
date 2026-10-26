@@ -761,3 +761,41 @@ fn a_silent_or_alerting_servo_is_marked_on_its_own_axis() {
     assert!(read[0].is_fresh());
     assert_eq!(read[1], AxisReading::Faulted(0x80));
 }
+
+#[test]
+fn a_steady_command_and_read_tick_allocates_nothing() {
+    let golden = golden();
+    let mut chain = open(&golden, &[&enabling(&golden), &[sync_read_held(&golden)]]);
+    let rest = chain.last_observed().expect("rest").to_vec();
+    // The first command enables every servo: not a steady tick.
+    chain.command(&rest).expect("the first command");
+    let held = sync_read_held(&golden);
+    let port = chain.port_mut();
+    port.quiet = true;
+    port.repeat
+        .push((bytes(&held.request), bytes(&held.response)));
+    for exchange in positions() {
+        port.repeat
+            .push((bytes(&exchange.request), bytes(&exchange.response)));
+    }
+    port.pending.reserve(4096);
+    chain.command(&rest).expect("a warm command");
+    chain.read_positions();
+    let ticks = allocation_counter::measure(|| {
+        for _ in 0..100 {
+            let receipt = chain.command(&rest).expect("a steady command");
+            assert!(receipt.observed.iter().all(|joint| joint.is_finite()));
+            let readings = chain.read_positions();
+            assert!(readings.iter().all(AxisReading::is_fresh));
+        }
+    });
+    assert_eq!(
+        ticks.count_total, 0,
+        "100 commands and reads allocated {} times ({} bytes)",
+        ticks.count_total, ticks.bytes_total
+    );
+    let seen = allocation_counter::measure(|| {
+        std::hint::black_box(vec![0_u8; 16]);
+    });
+    assert!(seen.count_total > 0, "the counter sees an allocation");
+}

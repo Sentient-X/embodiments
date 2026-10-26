@@ -30,6 +30,10 @@ pub struct FakePort {
     pub expected: VecDeque<(Vec<u8>, Vec<u8>)>,
     pub pending: VecDeque<u8>,
     pub written: Vec<Vec<u8>>,
+    /// Once the expectations run out, requests answered every time they come: a steady tick
+    /// replayed. With `quiet`, nothing is recorded, so the port allocates nothing once warmed.
+    pub repeat: Vec<(Vec<u8>, Vec<u8>)>,
+    pub quiet: bool,
 }
 
 impl FakePort {
@@ -51,7 +55,18 @@ impl SerialPort for FakePort {
     }
 
     fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
-        self.written.push(packet.to_vec());
+        if self.expected.is_empty()
+            && let Some((_, response)) = self
+                .repeat
+                .iter()
+                .find(|(request, _)| request.as_slice() == packet)
+        {
+            self.pending.extend(response);
+            return Ok(packet.len());
+        }
+        if !self.quiet {
+            self.written.push(packet.to_vec());
+        }
         // A broadcast has no answer: it consumes an expectation only when one names it.
         let broadcast = packet.get(4) == Some(&0xFE);
         if broadcast
@@ -69,9 +84,12 @@ impl SerialPort for FakePort {
         Ok(packet.len())
     }
 
-    fn read_port(&mut self, length: usize) -> io::Result<Vec<u8>> {
-        let available = length.min(self.pending.len());
-        Ok(self.pending.drain(..available).collect())
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let available = buffer.len().min(self.pending.len());
+        for (slot, byte) in buffer.iter_mut().zip(self.pending.drain(..available)) {
+            *slot = byte;
+        }
+        Ok(available)
     }
 
     fn timeout(&self) -> Duration {

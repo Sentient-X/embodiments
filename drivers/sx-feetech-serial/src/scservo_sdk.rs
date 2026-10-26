@@ -63,7 +63,7 @@
 //!   four-byte reads and writes, and `sms_sts`'s position, speed and wheel-mode helpers are
 //!   left out.
 
-use sx_embodiment_drivers::serial::SerialPort;
+use sx_embodiment_drivers::serial::{Packet, SerialPort};
 
 // scservo_def.py
 pub const BROADCAST_ID: u8 = 0xFE;
@@ -248,21 +248,20 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
     }
 
     /// Receive one status packet.
-    pub fn rx_packet(&mut self) -> (Vec<u8>, CommResult) {
-        let mut rxpacket: Vec<u8> = Vec::new();
+    pub fn rx_packet(&mut self) -> (Packet, CommResult) {
+        let mut rxpacket = Packet::new();
 
         let result;
         let mut wait_length: usize = 6; // minimum length (HEADER0 HEADER1 ID LENGTH ERROR CHKSUM)
 
         loop {
-            let Ok(bytes) = self
-                .port_handler
-                .read_port(wait_length.saturating_sub(rxpacket.len()))
-            else {
+            if rxpacket
+                .read_from(&mut self.port_handler, wait_length)
+                .is_err()
+            {
                 result = CommResult::RxFail;
                 break;
-            };
-            rxpacket.extend(bytes);
+            }
             let rx_length = rxpacket.len();
             if rx_length >= wait_length {
                 // find packet header
@@ -283,7 +282,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
                     {
                         // unavailable ID or unavailable Length or unavailable Error
                         // remove the first byte in the packet
-                        rxpacket.remove(0);
+                        rxpacket.drop_front(1);
                         if self.port_handler.is_packet_timeout() {
                             result = timed_out(rxpacket.len());
                             break;
@@ -321,7 +320,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
                     break;
                 }
                 // remove unnecessary packets
-                rxpacket.drain(0..idx);
+                rxpacket.drop_front(idx);
                 if self.port_handler.is_packet_timeout() {
                     result = timed_out(rxpacket.len());
                     break;
@@ -340,7 +339,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
     ///
     /// Returns the answer (`None` when none was due or the send failed), the result, and the
     /// answer's error byte.
-    pub fn tx_rx_packet(&mut self, txpacket: &mut [u8]) -> (Option<Vec<u8>>, CommResult, u8) {
+    pub fn tx_rx_packet(&mut self, txpacket: &mut [u8]) -> (Option<Packet>, CommResult, u8) {
         let mut error = 0;
 
         // tx packet
@@ -383,9 +382,9 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
     }
 
     /// Read `length` bytes from `address`: the data, the result, the servo's error byte.
-    pub fn read_tx_rx(&mut self, scs_id: u8, address: u8, length: u8) -> (Vec<u8>, CommResult, u8) {
+    pub fn read_tx_rx(&mut self, scs_id: u8, address: u8, length: u8) -> (Packet, CommResult, u8) {
         let mut txpacket = [0_u8; 8];
-        let mut data = Vec::new();
+        let mut data = Packet::new();
 
         if scs_id > BROADCAST_ID {
             return (data, CommResult::NotAvailable, 0);
@@ -434,7 +433,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
         let Ok(length) = u8::try_from(data.len()) else {
             return (CommResult::TxError, 0);
         };
-        let mut txpacket = vec![0_u8; data.len() + 7];
+        let mut txpacket = Packet::zeroed(data.len() + 7);
 
         txpacket[PKT_ID] = scs_id;
         txpacket[PKT_LENGTH] = length.saturating_add(3);
@@ -467,7 +466,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
             return CommResult::TxError;
         };
         // 8: HEADER0 HEADER1 ID LEN INST START_ADDR DATA_LEN ... CHKSUM
-        let mut txpacket = vec![0_u8; param.len() + 8];
+        let mut txpacket = Packet::zeroed(param.len() + 8);
 
         txpacket[PKT_ID] = BROADCAST_ID;
         // 4: INST START_ADDR DATA_LEN ... CHKSUM
@@ -492,7 +491,7 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
             return CommResult::TxError;
         };
         // 8: HEADER0 HEADER1 ID LEN INST START_ADDR DATA_LEN CHKSUM
-        let mut txpacket = vec![0_u8; param.len() + 8];
+        let mut txpacket = Packet::zeroed(param.len() + 8);
 
         txpacket[PKT_ID] = BROADCAST_ID;
         txpacket[PKT_LENGTH] = param_length.saturating_add(4); // INST START_ADDR DATA_LEN CHKSUM
@@ -507,19 +506,18 @@ impl<P: SerialPort> ProtocolPacketHandler<P> {
 
     /// `syncReadRx`: every byte of `param_length` servos' answers of `data_length` bytes, or
     /// what arrived before the wait ran out.
-    pub fn sync_read_rx(&mut self, data_length: u8, param_length: usize) -> (CommResult, Vec<u8>) {
+    pub fn sync_read_rx(&mut self, data_length: u8, param_length: usize) -> (CommResult, Packet) {
         let wait_length = (6 + usize::from(data_length)) * param_length;
         self.port_handler.set_packet_timeout(wait_length);
-        let mut rxpacket: Vec<u8> = Vec::new();
+        let mut rxpacket = Packet::new();
         let result = loop {
-            let Ok(bytes) = self
-                .port_handler
-                .read_port(wait_length.saturating_sub(rxpacket.len()))
-            else {
+            if rxpacket
+                .read_from(&mut self.port_handler, wait_length)
+                .is_err()
+            {
                 break CommResult::RxFail;
-            };
-            rxpacket.extend(bytes);
-            if rxpacket.len() >= wait_length {
+            }
+            if rxpacket.len() >= wait_length.min(sx_embodiment_drivers::serial::PACKET_MAX) {
                 break CommResult::Success;
             }
             // check timeout
@@ -537,7 +535,7 @@ pub struct GroupSyncRead {
     data_length: u8,
     /// In insertion order, as the vendor's `dict` keeps it: each servo's error byte, then its
     /// data, once read.
-    data_dict: Vec<(u8, Option<Vec<u8>>)>,
+    data_dict: Vec<(u8, Option<Packet>)>,
 }
 
 impl GroupSyncRead {
@@ -568,7 +566,10 @@ impl GroupSyncRead {
         for (_, data) in &mut self.data_dict {
             *data = None;
         }
-        let param: Vec<u8> = self.data_dict.iter().map(|(id, _)| *id).collect();
+        let mut param = Packet::new();
+        for (id, _) in &self.data_dict {
+            param.push(*id);
+        }
         let result = ph.sync_read_tx(self.start_address, self.data_length, &param);
         if result != CommResult::Success {
             return result;
@@ -630,7 +631,7 @@ impl GroupSyncRead {
 
 /// `GroupSyncRead.readRx`: `scs_id`'s error byte and `data_length` bytes from the replies in
 /// `rxpacket`, found by its `FF FF id` header and checked by its checksum.
-fn read_rx(rxpacket: &[u8], scs_id: u8, data_length: u8) -> Option<Vec<u8>> {
+fn read_rx(rxpacket: &[u8], scs_id: u8, data_length: u8) -> Option<Packet> {
     let data_length = usize::from(data_length);
     let rx_length = rxpacket.len();
     let mut rx_index = 0;
@@ -658,7 +659,7 @@ fn read_rx(rxpacket: &[u8], scs_id: u8, data_length: u8) -> Option<Vec<u8>> {
         let mut cal_sum = scs_id
             .wrapping_add(u8::try_from(data_length + 2).unwrap_or(u8::MAX))
             .wrapping_add(error);
-        let mut data = vec![error];
+        let mut data = Packet::from_slice(&[error]);
         data.extend_from_slice(&rxpacket[rx_index..rx_index + data_length]);
         for byte in &rxpacket[rx_index..rx_index + data_length] {
             cal_sum = cal_sum.wrapping_add(*byte);
@@ -682,9 +683,9 @@ pub struct GroupSyncWrite {
     start_address: u8,
     data_length: u8,
     is_param_changed: bool,
-    param: Vec<u8>,
+    param: Packet,
     /// In insertion order, as the vendor's `dict` keeps it.
-    data_dict: Vec<(u8, Vec<u8>)>,
+    data_dict: Vec<(u8, Packet)>,
 }
 
 impl GroupSyncWrite {
@@ -694,7 +695,7 @@ impl GroupSyncWrite {
             start_address,
             data_length,
             is_param_changed: false,
-            param: Vec::new(),
+            param: Packet::new(),
             data_dict: Vec::new(),
         }
     }
@@ -704,7 +705,7 @@ impl GroupSyncWrite {
             return;
         }
 
-        self.param = Vec::new();
+        self.param.clear();
 
         for (scs_id, data) in &self.data_dict {
             if data.is_empty() {
@@ -728,7 +729,7 @@ impl GroupSyncWrite {
             return false;
         }
 
-        self.data_dict.push((scs_id, data.to_vec()));
+        self.data_dict.push((scs_id, Packet::from_slice(data)));
 
         self.is_param_changed = true;
         true

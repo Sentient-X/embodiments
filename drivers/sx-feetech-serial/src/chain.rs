@@ -156,9 +156,9 @@ pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
 use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
-    ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
-    TargetError, check_reach, fresh_positions, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
+    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
+    StopReport, TargetError, check_reach, fresh_positions, validate_chain,
 };
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
@@ -475,9 +475,13 @@ pub struct FeetechChain<P> {
     faults: Vec<(u16, u8)>,
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
-    observed: Option<Vec<f64>>,
+    observed: Option<Axes<f64>>,
     /// Each servo's reading from the last command's SYNC READ; none since open or a stop.
-    command_readings: Option<Vec<AxisReading>>,
+    command_readings: Option<Axes<AxisReading>>,
+    /// The command's SYNC READ of every servo, its servos added at open and reused.
+    reader: GroupSyncRead,
+    /// The command's SYNC WRITE of every goal, refilled each command in buffers it keeps.
+    writer: GroupSyncWrite,
     /// Per servo, whether its approach limit was written and read back.
     approach_limited: Vec<bool>,
     /// The servos the last enable found resting outside their calibrated limits, and the
@@ -659,12 +663,19 @@ impl<P: SerialPort> FeetechChain<P> {
             faults: Vec::new(),
             observed: None,
             command_readings: None,
+            reader: GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH),
+            writer: GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2),
             approach_limited: Vec::new(),
             held_inside: Vec::new(),
         };
         chain.is_calibrated()?;
         chain.configure()?;
-        chain.observed = fresh_positions(&chain.present_positions());
+        for servo in &chain.servos {
+            if !chain.reader.add_param(servo.scs_id()) {
+                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
+            }
+        }
+        chain.observed = fresh_positions(&chain.present_positions()).map(Axes::from);
         Ok(chain)
     }
 
@@ -862,17 +873,12 @@ impl<P: SerialPort> FeetechChain<P> {
     /// its limits again. Each servo's [`AxisReading`] is kept as the command's readings: missing
     /// (`Timeout`: the vendor's read cannot tell a corrupt answer from none), faulted with its
     /// error flags, or faulted with 0 for a torque or approach limit it no longer holds.
-    fn sync_read_positions(&mut self) -> Result<Vec<f64>, FeetechChainError> {
-        let mut reader = GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH);
-        for servo in &self.servos {
-            if !reader.add_param(servo.scs_id()) {
-                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
-            }
-        }
-        let _ = reader.tx_rx_packet(&mut self.sms.ph);
+    fn sync_read_positions(&mut self) -> Result<Axes<f64>, FeetechChainError> {
+        let _ = self.reader.tx_rx_packet(&mut self.sms.ph);
+        let reader = &self.reader;
         let received = Instant::now();
         let end = self.sms.ph.scs_getend();
-        let mut readings = Vec::with_capacity(self.servos.len());
+        let mut readings: Axes<AxisReading> = Axes::new();
         for index in 0..self.servos.len() {
             let servo = &self.servos[index];
             let id = servo.scs_id();
@@ -1064,10 +1070,10 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 };
                 servo.goal_position(goal)
             })
-            .collect::<Result<Vec<u16>, _>>()?;
-        let mut writer = GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2);
+            .collect::<Result<Axes<u16>, _>>()?;
+        self.writer.clear_param();
         for (servo, goal) in self.servos.iter().zip(goals) {
-            if !writer.add_param(
+            if !self.writer.add_param(
                 servo.scs_id(),
                 &[self.sms.ph.scs_lobyte(goal), self.sms.ph.scs_hibyte(goal)],
             ) {
@@ -1081,16 +1087,16 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             self.enable_torque()?;
             self.enabled = true;
         }
-        match writer.tx_packet(&mut self.sms.ph) {
+        match self.writer.tx_packet(&mut self.sms.ph) {
             CommResult::Success => {
                 let observed = self.sync_read_positions()?;
                 self.observed = observed
                     .iter()
                     .all(|joint| joint.is_finite())
-                    .then(|| observed.clone());
+                    .then_some(observed);
                 Ok(Receipt {
                     evidence: Evidence::DispatchAttempted,
-                    observed: observed.into(),
+                    observed,
                     feedback: sx_embodiment_drivers::Axes::new(),
                 })
             }
@@ -1151,7 +1157,7 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 self.faults.push(*fault);
             }
         }
-        self.observed = fresh_positions(&self.present_positions());
+        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
         self.command_readings = None;
         report
     }
@@ -1161,18 +1167,14 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         self.present_positions()
     }
 
-    fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         self.command_readings
-            .as_deref()
-            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// Where every servo was read at open, after the last stop, or by the last command's SYNC
     /// READ, when every servo answered.
-    fn last_observed(&self) -> Option<sx_embodiment_drivers::Axes<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         self.observed
-            .as_deref()
-            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain: four exchanges per servo,

@@ -1208,6 +1208,7 @@ dependencies = [
 name = "sx-dynamixel-serial"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "serde",
  "serde_json",
  "sha2",
@@ -1278,10 +1279,12 @@ dependencies = [
 name = "sx-feetech-serial"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "serde",
  "serde_json",
  "sha2",
  "sx-embodiment-drivers",
+ "sx-feetech-serial",
  "thiserror 2.0.21",
 ]
 
