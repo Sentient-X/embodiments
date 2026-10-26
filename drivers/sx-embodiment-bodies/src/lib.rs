@@ -279,6 +279,48 @@ impl ServoCalibrations {
     pub fn of(&self, port: &str, bus_id: u16) -> Option<MotorCalibration> {
         self.0.get(port).and_then(|bus| bus.get(&bus_id)).copied()
     }
+
+    /// These calibrations and, for every port `commissioning` names that these do not cover,
+    /// the robot directory's own calibration of it, [`calibration_file`] in `directory`, where
+    /// there is one: the robot instance's commissioned unit calibrations, which
+    /// `sx-commission calibrate apply --robot` writes once the servos hold them. Returns the
+    /// ports read from the directory with them.
+    ///
+    /// # Errors
+    ///
+    /// A calibration file that exists but cannot be read or parsed.
+    pub fn with_robot_directory(
+        mut self,
+        directory: &std::path::Path,
+        commissioning: &Commissioning,
+    ) -> Result<(Self, Vec<String>), OpenError> {
+        let mut read = Vec::new();
+        for port in commissioning.ports.keys() {
+            if self.0.contains_key(port) {
+                continue;
+            }
+            let path = directory.join(calibration_file(port));
+            let document = match std::fs::read_to_string(&path) {
+                Ok(document) => document,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(OpenError::Document(format!("{}: {error}", path.display())));
+                }
+            };
+            self = self
+                .with_lerobot(port, &document)
+                .map_err(|error| OpenError::Document(format!("{}: {error}", path.display())))?;
+            read.push(port.clone());
+        }
+        Ok((self, read))
+    }
+}
+
+/// The file a robot directory keeps a serial port's unit calibration in, beside its
+/// `commissioning.json`: `<port>.calibration.json`, a `LeRobot` calibration keyed by joint.
+#[must_use]
+pub fn calibration_file(port: &str) -> String {
+    format!("{port}.calibration.json")
 }
 
 /// A body this crate composes, by the content id its bindings carry.

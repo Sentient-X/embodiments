@@ -72,21 +72,22 @@
 //!   open, with torque still off, the `Acceleration` (41) and `Goal_Speed` (46, `sms_sts.py`'s
 //!   memory table) of each servo whose [`ServoConfiguration`] carries an approach limit are
 //!   written from its [`ApproachLimit`] (the joint's rad/s and rad/s², through the binding's
-//!   reduction, in the vendor's units of 0.732 rpm and 8.7 °/s² per step, rounded down) and
+//!   reduction, in encoder steps per second and 100 steps/s² per step, rounded down) and
 //!   read back; open refuses a servo that does not hold them. `LeRobot` leaves `Goal_Speed` at
 //!   0, which the servo reads as its full speed, and writes `Acceleration` 254; here they
 //!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
 //!   where it rests, is approached at the limit. A servo without one (the SO-101 follower's)
 //!   keeps `LeRobot`'s registers and is never given a goal its limits would clamp.
 //!
-//!   **The `Goal_Speed` unit is unverified.** 0.732 rpm per step is the vendor's own
-//!   `sms_sts/write.py` comment ("V=60 * 0.732=43.92rpm"); Feetech's STS documentation and its
-//!   other examples give the register in steps/s (1/4096 rev/s, about 0.0147 rpm), about 50
-//!   times slower per step. Rounded down from either reading, 0.25 rad/s is slow: 3 steps is
-//!   0.23 rad/s at 0.732 rpm and 0.005 rad/s at steps/s, so neither reading moves a servo faster
-//!   than its declared limit; the second only makes the approach crawl. Which one the firmware
-//!   uses is settled by a supervised one-servo check at bring-up (time a known move at a known
-//!   `Goal_Speed`), and then this note and [`SPEED_STEP_RAD_PER_S`] become the measured value.
+//!   **`Goal_Speed` is in encoder steps per second** (1/4096 rev/s), measured on the static
+//!   upper body's STS3215s (firmware 3.10) on 2026-10-26: a timed 100-tick move ran at 50
+//!   steps/s with `Goal_Speed` 3 and with 20, and a finger given `Goal_Speed` 52 moved one tick
+//!   per 20 ms in the station's log. Below 50 the firmware still runs at 50 steps/s
+//!   ([`SLOWEST_GOAL_SPEED`]), so a limit that rounds below it is refused rather than run
+//!   faster than declared. The vendor's `sms_sts/write.py` comment ("V=60 * 0.732=43.92rpm")
+//!   reads one step as 0.732 rpm, which is 50 steps/s: taken per register step, as this chain
+//!   did before, it made every declared approach about 50 times slower than declared (4 rad/s
+//!   wrote 52, about 0.08 rad/s, and the governor's tracking stop fired on every gripper move).
 //!
 //!   Those registers are RAM: a servo whose power cycles while its USB link stays up comes back with
 //!   `Goal_Speed` 0 (full speed) and torque off. So the limit is never trusted for the
@@ -101,8 +102,13 @@
 //!   into them, so a servo resting outside drives to its nearest limit the instant torque comes
 //!   on. The chain makes that move explicit: such a servo's goal is written as `Present_Position`
 //!   clamped into its calibrated limits, recorded in [`FeetechChain::held_inside`], and only
-//!   when the servo's approach limit was confirmed by this same enable's read-back, so the
-//!   move runs at that limit. A servo resting outside without one (the SO-101 follower's)
+//!   when the servo's approach limit was confirmed by this same enable's read-back. That
+//!   pull-in is the one move no governor bounds, so it runs at [`BRING_UP_APPROACH`] (or the
+//!   servo's own limit where that is slower), written and read back before torque comes on;
+//!   the first command whose SYNC READ finds the servo inside its limits raises it to its
+//!   declared approach ([`FeetechChain::pulling_in`] lists the servos still coming in). A
+//!   raise that fails leaves the servo at the slow limit and is tried again on the next
+//!   command. A servo resting outside without one (the SO-101 follower's)
 //!   refuses the enable ([`FeetechChainError::RestsOutside`]): move it inside by hand. Open and
 //!   every stop report the unclamped rest through [`ActuatorChain::last_observed`], outside the
 //!   axis's commandable range.
@@ -237,18 +243,21 @@ pub struct ServoConfiguration {
     pub approach: Option<ApproachLimit>,
 }
 
-/// One `Goal_Speed` step: 0.732 rpm, in rad/s (`sms_sts/write.py`: "V=60 * 0.732=43.92rpm").
-/// Unverified: Feetech's documentation reads the register in steps/s, about 50 times slower
-/// per step; both are slow (see the module's header), and bring-up measures which holds.
-pub const SPEED_STEP_RAD_PER_S: f64 = 0.732 * std::f64::consts::TAU / 60.0;
-/// One `Acceleration` step: 8.7 °/s², in rad/s² (`sms_sts/write.py`: "A=50 * 8.7deg/s^2").
-pub const ACCELERATION_STEP_RAD_PER_S2: f64 = 8.7 * std::f64::consts::PI / 180.0;
+/// One `Goal_Speed` step: one encoder step per second, in rad/s (measured; see the module's
+/// header).
+pub const SPEED_STEP_RAD_PER_S: f64 = std::f64::consts::TAU / RESOLUTION;
+/// The slowest the firmware moves: a `Goal_Speed` from 1 to 49 runs at 50 steps/s (measured),
+/// the vendor's "0.732 rpm".
+pub const SLOWEST_GOAL_SPEED: u16 = 50;
+/// One `Acceleration` step: 100 steps/s², in rad/s² (the vendor's "8.7deg/s^2", 8.79 exactly).
+pub const ACCELERATION_STEP_RAD_PER_S2: f64 = 100.0 * std::f64::consts::TAU / RESOLUTION;
 /// `Goal_Speed`'s largest magnitude below its sign bit.
 const GOAL_SPEED_MAX: u32 = 32_767;
 
 /// The `Goal_Speed` and `Acceleration` register values that move an actuator geared at
 /// `reduction` no faster than `approach`, rounded down; `None` when a value rounds to 0, which
-/// the servo reads as no limit at all, or does not fit its register.
+/// the servo reads as no limit at all, when the speed rounds below [`SLOWEST_GOAL_SPEED`],
+/// which the firmware would run faster than asked, or when a value does not fit its register.
 #[must_use]
 pub fn approach_registers(approach: &ApproachLimit, reduction: f64) -> Option<(u16, u8)> {
     let (speed, acceleration) = approach.steps(
@@ -256,7 +265,21 @@ pub fn approach_registers(approach: &ApproachLimit, reduction: f64) -> Option<(u
         (SPEED_STEP_RAD_PER_S, GOAL_SPEED_MAX),
         (ACCELERATION_STEP_RAD_PER_S2, 254),
     )?;
-    Some((u16::try_from(speed).ok()?, u8::try_from(acceleration).ok()?))
+    let speed = u16::try_from(speed).ok()?;
+    if speed < SLOWEST_GOAL_SPEED {
+        return None;
+    }
+    Some((speed, u8::try_from(acceleration).ok()?))
+}
+
+/// The registers a servo resting outside its limits is pulled in at: [`BRING_UP_APPROACH`],
+/// or `declared` where that is slower, each register the slower of the two. `None` when
+/// `declared` is already no faster, so there is nothing to raise once the servo is inside.
+#[must_use]
+pub fn pull_in_registers(declared: (u16, u8), reduction: f64) -> Option<(u16, u8)> {
+    let bring_up = approach_registers(&BRING_UP_APPROACH, reduction)?;
+    let slower = (declared.0.min(bring_up.0), declared.1.min(bring_up.1));
+    (slower != declared).then_some(slower)
 }
 
 /// One bound axis with what its Feetech servo needs beyond the registry's binding.
@@ -372,6 +395,20 @@ impl FeetechServo {
     }
 }
 
+impl FeetechServo {
+    /// Whether `joint` lies within the unit's calibrated limit registers
+    /// (`range_min..=range_max` through [`FeetechServo::joint_from_raw`]), where the firmware
+    /// holds any goal: a servo resting there is no longer being pulled in.
+    #[must_use]
+    pub fn within_limits(&self, joint: f64) -> bool {
+        let ends = [
+            self.joint_from_raw(i32::from(self.calibration.range_min)),
+            self.joint_from_raw(i32::from(self.calibration.range_max)),
+        ];
+        (ends[0].min(ends[1])..=ends[0].max(ends[1])).contains(&joint)
+    }
+}
+
 /// `value` rounded to float32, the precision targets are converted at.
 fn float32(value: f64) -> f64 {
     // Rounding to float32 is the intended conversion.
@@ -484,6 +521,9 @@ pub struct FeetechChain<P> {
     writer: GroupSyncWrite,
     /// Per servo, whether its approach limit was written and read back.
     approach_limited: Vec<bool>,
+    /// Per servo, whether it is being pulled in from outside its limits at its pull-in
+    /// registers, not yet raised to its declared approach.
+    pulling_in: Vec<bool>,
     /// The servos the last enable found resting outside their calibrated limits, and the
     /// goal each was given inside them.
     held_inside: Vec<HeldInside>,
@@ -666,6 +706,7 @@ impl<P: SerialPort> FeetechChain<P> {
             reader: GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH),
             writer: GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2),
             approach_limited: Vec::new(),
+            pulling_in: Vec::new(),
             held_inside: Vec::new(),
         };
         chain.is_calibrated()?;
@@ -777,6 +818,7 @@ impl<P: SerialPort> FeetechChain<P> {
     /// and read both back, so the servo itself moves slowly toward whatever goal it is given.
     fn limit_approach(&mut self) -> Result<(), FeetechChainError> {
         self.approach_limited = vec![false; self.servos.len()];
+        self.pulling_in = vec![false; self.servos.len()];
         for index in 0..self.servos.len() {
             self.hold_approach(index, true)?;
         }
@@ -797,13 +839,25 @@ impl<P: SerialPort> FeetechChain<P> {
             .transpose()
     }
 
-    /// Prove servo `index` holds the approach limit it declares: read its `Acceleration` and
-    /// `Goal_Speed` (one read of 41..=47), and where they differ (or `rewrite`) write them and
-    /// read them again. A servo whose power cycled while its link stayed up has lost them: the
-    /// registers are RAM and come back as `Goal_Speed` 0, full speed. Only a servo that reads
-    /// them back is approach-limited; one that does not is refused.
+    /// The approach registers servo `index` should hold now: its pull-in registers while it
+    /// is being pulled in from outside its limits, else the ones it declares.
+    fn expected_registers(&self, index: usize) -> Result<Option<(u16, u8)>, FeetechChainError> {
+        let declared = self.approach_registers(index)?;
+        if !self.pulling_in.get(index).copied().unwrap_or(false) {
+            return Ok(declared);
+        }
+        let reduction = self.servos[index].axis.binding.reduction;
+        Ok(declared.map(|declared| pull_in_registers(declared, reduction).unwrap_or(declared)))
+    }
+
+    /// Prove servo `index` holds the approach limit it should now ([`Self::expected_registers`]):
+    /// read its `Acceleration` and `Goal_Speed` (one read of 41..=47), and where they differ
+    /// (or `rewrite`) write them and read them again. A servo whose power cycled while its link
+    /// stayed up has lost them: the registers are RAM and come back as `Goal_Speed` 0, full
+    /// speed. Only a servo that reads them back is approach-limited; one that does not is
+    /// refused.
     fn hold_approach(&mut self, index: usize, rewrite: bool) -> Result<(), FeetechChainError> {
-        let Some((speed, acceleration)) = self.approach_registers(index)? else {
+        let Some((speed, acceleration)) = self.expected_registers(index)? else {
             return Ok(());
         };
         let (bus_id, scs_id) = {
@@ -873,17 +927,20 @@ impl<P: SerialPort> FeetechChain<P> {
     /// its limits again. Each servo's [`AxisReading`] is kept as the command's readings: missing
     /// (`Timeout`: the vendor's read cannot tell a corrupt answer from none), faulted with its
     /// error flags, or faulted with 0 for a torque or approach limit it no longer holds.
+    /// A servo being pulled in that this read finds inside its limits is then raised to its
+    /// declared approach ([`Self::raise_pulled_in`]).
     fn sync_read_positions(&mut self) -> Result<Axes<f64>, FeetechChainError> {
         let _ = self.reader.tx_rx_packet(&mut self.sms.ph);
         let reader = &self.reader;
         let received = Instant::now();
         let end = self.sms.ph.scs_getend();
         let mut readings: Axes<AxisReading> = Axes::new();
+        let mut arrived = false;
         for index in 0..self.servos.len() {
             let servo = &self.servos[index];
             let id = servo.scs_id();
             let torque = reader.get_data1(id, SMS_STS_TORQUE_ENABLE);
-            let approach = match self.approach_registers(index)? {
+            let approach = match self.expected_registers(index)? {
                 None => true,
                 Some((speed, acceleration)) => {
                     reader.get_data1(id, SMS_STS_ACC) == Some(acceleration)
@@ -905,6 +962,10 @@ impl<P: SerialPort> FeetechChain<P> {
                     received,
                 },
             };
+            arrived |= self.pulling_in[index]
+                && reading
+                    .position()
+                    .is_some_and(|joint| servo.within_limits(joint));
             if !approach {
                 self.approach_limited[index] = false;
             }
@@ -917,8 +978,40 @@ impl<P: SerialPort> FeetechChain<P> {
             .iter()
             .map(|reading| reading.position().unwrap_or(f64::NAN))
             .collect();
+        if arrived {
+            self.raise_pulled_in(&readings);
+        }
         self.command_readings = Some(readings);
         Ok(observed)
+    }
+
+    /// Raise every servo being pulled in whose `reading` is inside its limits to its declared
+    /// approach, written and read back. A raise that fails leaves the servo at its pull-in
+    /// registers, still pulling in, and is tried on the next command; a servo the failure left
+    /// holding neither is caught by the next SYNC READ and enabled afresh.
+    fn raise_pulled_in(&mut self, readings: &[AxisReading]) {
+        for (index, reading) in readings.iter().enumerate() {
+            let inside = reading
+                .position()
+                .is_some_and(|joint| self.servos[index].within_limits(joint));
+            if !self.pulling_in[index] || !inside {
+                continue;
+            }
+            self.pulling_in[index] = false;
+            if self.hold_approach(index, true).is_err() {
+                self.pulling_in[index] = true;
+            }
+        }
+    }
+
+    /// The servos being pulled in from outside their limits at their pull-in registers, by bus
+    /// id, not yet raised to their declared approach.
+    pub fn pulling_in(&self) -> impl Iterator<Item = u16> + '_ {
+        self.servos
+            .iter()
+            .zip(&self.pulling_in)
+            .filter(|(_, pulling)| **pulling)
+            .map(|(servo, _)| servo.axis.binding.bus_id)
     }
 
     /// The status flags every stop since the last [`ActuatorChain::clear_faults`] reported,
@@ -953,7 +1046,9 @@ impl<P: SerialPort> FeetechChain<P> {
 
     /// `FeetechMotorsBus.enable_torque`: `Torque_Enable` 1, then `Lock` 1, on every servo.
     fn enable_torque(&mut self) -> Result<(), FeetechChainError> {
-        // Prove every declared approach limit still holds: a servo that power-cycled has lost it.
+        // Prove every declared approach limit still holds: a servo that power-cycled has lost it,
+        // and one an earlier enable was pulling in may still hold its slower pull-in registers.
+        self.pulling_in.fill(false);
         for index in 0..self.servos.len() {
             self.hold_approach(index, false)?;
         }
@@ -974,6 +1069,15 @@ impl<P: SerialPort> FeetechChain<P> {
             let goal = if (i32::from(range_min)..=i32::from(range_max)).contains(&present) {
                 register
             } else if self.approach_limited[index] {
+                // The pull-in is the one move no governor bounds: at the slower pull-in
+                // registers, confirmed before torque comes on, until a command finds it inside.
+                let declared = self.approach_registers(index)?;
+                let reduction = self.servos[index].axis.binding.reduction;
+                if declared.is_some_and(|declared| pull_in_registers(declared, reduction).is_some())
+                {
+                    self.pulling_in[index] = true;
+                    self.hold_approach(index, true)?;
+                }
                 // Inside `range_min..=range_max`, both below 4096: positive, so its
                 // sign-magnitude encoding is itself.
                 let goal = if present < i32::from(range_min) {
