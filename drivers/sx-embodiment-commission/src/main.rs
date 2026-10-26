@@ -5,7 +5,7 @@
 //! sx-commission commission --bindings <file>... [--instance <id> --pod <id> --revision <n>]
 //!                          [--rail <selector>=<volts>]... [--derate <rad/s>,<decided>]
 //!                          [--json] [--write <dir>]
-//! sx-commission calibrate read|gripper|jog --bus <tty> ... [--move]
+//! sx-commission calibrate read|gripper|jog|goto|range|apply --bus <tty> ... [--move]
 //! sx-commission calibrate --restore <journal>
 //! ```
 //!
@@ -55,13 +55,14 @@ fn calibrate(words: &[String]) -> ExitCode {
         println!("{}", cli::USAGE);
         return ExitCode::SUCCESS;
     }
-    let args = match cli::parse(words) {
+    let mut args = match cli::parse(words) {
         Ok(args) => args,
         Err(error) => {
             eprintln!("{error}\n{}", cli::USAGE);
             return ExitCode::from(2);
         }
     };
+    args.redraw = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let stop = Arc::new(AtomicUsize::new(0));
     for signal in [
         signal_hook::consts::SIGINT,
@@ -312,7 +313,7 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
         };
         write("commissioning.json".to_owned(), document)?;
         for (port, value) in &calibrations {
-            write(format!("{port}.calibration.json"), value)?;
+            write(sx_embodiment_bodies::calibration_file(port), value)?;
         }
     } else if args.write.is_none() && matched.is_some() {
         eprintln!("dry run: nothing written (pass --write <dir>)");

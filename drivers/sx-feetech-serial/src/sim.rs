@@ -6,8 +6,9 @@
 //! params checksum`) is answered with a status packet: READ with the registers asked for,
 //! WRITE by storing and acknowledging, SYNC WRITE (broadcast) by storing each servo's bytes
 //! with no answer, SYNC READ by each live servo's status packet in the order asked. A servo with torque on moves toward its goal as simulated time passes
-//! ([`SimBus::advance`]), no faster than its `Goal_Speed` (in the vendor's steps of 0.732 rpm;
-//! 0, as the firmware reads it, is no limit: at once), the goal clamped into its
+//! ([`SimBus::advance`]), no faster than its `Goal_Speed`, in encoder steps per second as the
+//! STS3215 reads it (measured 2026-10-26; 1 to 49 run at the firmware's slowest, 50 steps/s;
+//! 0 is no limit: at once), the goal clamped into its
 //! `Min_Angle_Limit`..`Max_Angle_Limit` as the firmware clamps it (the register keeps what was
 //! written; limits of 0..0 clamp nothing); one with torque off rests where it was
 //! put (mid-range at first, or [`SimBus::rest_at`]). A servo marked dead answers
@@ -189,8 +190,9 @@ impl SimBus {
             let next = if speed == 0 {
                 goal
             } else {
-                // Steps per second at `speed` steps of 0.732 rpm: 4096 * 0.732 / 60 each.
-                let travel = f64::from(speed) * 4096.0 * 0.732 / 60.0 * elapsed.as_secs_f64()
+                // `Goal_Speed` is steps per second, never slower than the firmware's 50.
+                let steps_per_second = speed.max(i32::from(crate::chain::SLOWEST_GOAL_SPEED));
+                let travel = f64::from(steps_per_second) * elapsed.as_secs_f64()
                     + carry.get(id).copied().unwrap_or_default();
                 // A sub-step is the servo's whole resolution: it shows a step or nothing, and
                 // keeps the rest for the next slice of time.
@@ -526,7 +528,7 @@ mod tests {
             state
                 .servos
                 .values()
-                .all(|r| (r[41], r[46], r[47]) == (3, 3, 0))
+                .all(|r| (r[41], r[46], r[47]) == (3, 162, 0))
         );
     }
 
@@ -580,10 +582,10 @@ mod tests {
         assert!(observed.iter().all(|joint| joint.is_finite()));
         let state = bus.state();
         let registers = &state.servos[&3];
-        assert_eq!((registers[40], registers[41], registers[46]), (1, 3, 3));
+        assert_eq!((registers[40], registers[41], registers[46]), (1, 3, 162));
         let rewrote = state.written[written..]
             .iter()
-            .any(|packet| packet[2] == 3 && packet[4..7] == [0x03, 46, 3]);
+            .any(|packet| packet[2] == 3 && packet[4..7] == [0x03, 46, 162]);
         assert!(rewrote);
     }
 
@@ -681,6 +683,169 @@ mod tests {
                 .iter()
                 .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 42, low, high]),
             "the clamped goal was written before torque came on"
+        );
+    }
+
+    #[test]
+    fn goal_speed_is_steps_per_second_and_never_slower_than_fifty() {
+        // 4 rad/s and 16 rad/s² on a direct-drive servo: 2607 steps/s and 104 * 100 steps/s².
+        assert_eq!(
+            crate::chain::approach_registers(
+                &crate::ApproachLimit {
+                    speed: 4.0,
+                    acceleration: 16.0
+                },
+                1.0
+            ),
+            Some((2607, 104))
+        );
+        // Below the firmware's slowest 50 steps/s the servo would run faster than declared.
+        assert_eq!(
+            crate::chain::approach_registers(
+                &crate::ApproachLimit {
+                    speed: 0.07,
+                    acceleration: 0.5
+                },
+                1.0
+            ),
+            None
+        );
+        let moved = |speed: u16, elapsed: Duration| {
+            let bus = calibrated_bus();
+            {
+                let mut state = bus.state();
+                let registers = state.servos.get_mut(&1).expect("servo 1");
+                registers[46..48].copy_from_slice(&speed.to_le_bytes());
+                registers[42..44].copy_from_slice(&3000_u16.to_le_bytes());
+                registers[40] = 1;
+            }
+            bus.advance(elapsed);
+            bus.present(1) - 2000
+        };
+        assert_eq!(moved(2607, Duration::from_millis(100)), 260);
+        // Measured on the robot: Goal_Speed 3 and 20 both moved 50 steps a second.
+        assert_eq!(moved(3, Duration::from_secs(1)), 50);
+        assert_eq!(moved(20, Duration::from_secs(1)), 50);
+    }
+
+    /// The neck's servos with a fast declared approach, as the station runs them.
+    fn neck_fast() -> Vec<crate::FeetechServo> {
+        let mut servos = neck_like();
+        for servo in &mut servos {
+            servo.configuration.approach = Some(crate::ApproachLimit {
+                speed: 4.0,
+                acceleration: 16.0,
+            });
+        }
+        servos
+    }
+
+    #[test]
+    fn a_servo_resting_outside_is_pulled_in_at_the_bring_up_approach_then_raised_once_inside() {
+        let bus = calibrated_bus();
+        bus.rest_at(2, 3303);
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        let registers = |id: u8| {
+            let state = bus.state();
+            let r = &state.servos[&id];
+            (r[41], u16::from_le_bytes([r[46], r[47]]))
+        };
+        assert_eq!(
+            registers(2),
+            (104, 2607),
+            "open writes the declared approach"
+        );
+        let before = bus.state().written.len();
+        let observed = chain
+            .command(&[0.0; 6])
+            .expect("enabled and commanded")
+            .observed;
+        assert!(
+            observed.iter().all(|joint| joint.is_finite()),
+            "{observed:?}"
+        );
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+        assert_eq!(
+            registers(2),
+            (3, 162),
+            "pulled in at 0.25 rad/s and 0.5 rad/s²"
+        );
+        assert!(
+            (1..=6)
+                .filter(|id| *id != 2)
+                .all(|id| registers(id) == (104, 2607))
+        );
+        {
+            let state = bus.state();
+            let written = &state.written[before..];
+            let enable = written
+                .iter()
+                .position(|packet| packet[2] == 2 && packet[4..7] == [0x03, 40, 1])
+                .expect("servo 2 enabled");
+            assert!(
+                written[..enable]
+                    .iter()
+                    .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 46, 162, 0]),
+                "the slow pull-in was written before torque came on"
+            );
+        }
+        // 100 ms at 162 steps/s: 16 ticks, where the declared 2607 would have been 260.
+        bus.advance(Duration::from_millis(100));
+        assert_eq!(bus.present(2), 3303 - 16);
+        chain.command(&[0.0; 6]).expect("commanded");
+        assert_eq!(chain.pulling_in().count(), 1, "still outside: still slow");
+        assert_eq!(registers(2), (3, 162));
+        // Inside its limits, the next command raises it to its declared approach.
+        bus.advance(Duration::from_secs(1));
+        assert!(bus.present(2) <= 3200);
+        let observed = chain.command(&[0.0; 6]).expect("commanded").observed;
+        assert!(
+            observed.iter().all(|joint| joint.is_finite()),
+            "{observed:?}"
+        );
+        assert_eq!(chain.pulling_in().count(), 0);
+        assert_eq!(registers(2), (104, 2607));
+        // And the raise holds: the next command's read accepts it.
+        let observed = chain.command(&[0.0; 6]).expect("commanded").observed;
+        assert!(observed.iter().all(|joint| joint.is_finite()));
+        // A stop and a fresh enable with the servo inside pulls nothing in.
+        assert!(chain.stop().is_proven());
+        chain.command(&[0.0; 6]).expect("re-enabled");
+        assert_eq!(chain.pulling_in().count(), 0);
+        assert_eq!(registers(2), (104, 2607));
+    }
+
+    #[test]
+    fn a_raise_that_fails_leaves_the_servo_slow_and_is_tried_again() {
+        let bus = calibrated_bus();
+        bus.rest_at(2, 3303);
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        chain.command(&[0.0; 6]).expect("enabled and commanded");
+        bus.advance(Duration::from_secs(1));
+        bus.state()
+            .ignored
+            .insert((2, crate::scservo_sdk::SMS_STS_GOAL_SPEED_L));
+        // The raise's speed write is not taken; the servo is still at its pull-in registers.
+        let _ = chain.command(&[0.0; 6]);
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+        let speed = {
+            let state = bus.state();
+            u16::from_le_bytes([state.servos[&2][46], state.servos[&2][47]])
+        };
+        assert_eq!(speed, 162, "never left faster than its pull-in");
+        bus.state().ignored.clear();
+        // Whatever the failed raise left, the next commands bring it to its declared limit.
+        for _ in 0..3 {
+            let _ = chain.command(&[0.0; 6]);
+        }
+        assert_eq!(chain.pulling_in().count(), 0);
+        let state = bus.state();
+        assert_eq!(
+            (
+                state.servos[&2][41],
+                u16::from_le_bytes([state.servos[&2][46], state.servos[&2][47]])
+            ),
+            (104, 2607)
         );
     }
 
@@ -790,5 +955,61 @@ mod tests {
         // adapter latency. Two servos: 14 + 10 + 48 = 72 bytes, 720 us.
         assert_eq!(command_bytes(6), 184);
         assert_eq!(command_bytes(2), 72);
+    }
+
+    #[test]
+    fn a_reenable_with_torque_still_on_never_writes_the_declared_speed_to_a_servo_outside() {
+        let bus = calibrated_bus();
+        bus.rest_at(2, 3303);
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        chain.command(&[0.0; 6]).expect("enabled");
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+        bus.advance(Duration::from_millis(100));
+        assert!(bus.present(2) > 3200, "still outside");
+        // One missed SYNC READ answer from another servo: the chain marks itself disabled but
+        // turns no torque off.
+        bus.kill(5);
+        let _ = chain.command(&[0.0; 6]);
+        bus.state().dead.remove(&5);
+        assert_eq!(bus.state().torque(2), 1, "servo 2 still holds torque");
+        let before = bus.state().written.len();
+        chain.command(&[0.0; 6]).expect("re-enabled");
+        let state = bus.state();
+        let [low, high] = 2607_u16.to_le_bytes();
+        assert!(
+            !state.written[before..]
+                .iter()
+                .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 46, low, high]),
+            "the re-enable wrote the declared 2607 steps/s to servo 2 while it rested outside"
+        );
+        let registers = &state.servos[&2];
+        assert_eq!(
+            (
+                registers[41],
+                u16::from_le_bytes([registers[46], registers[47]])
+            ),
+            (3, 162),
+            "still pulled in slowly"
+        );
+        drop(state);
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn a_high_reduction_is_still_pulled_in_no_faster_than_bring_up() {
+        // Declared 0.5 rad/s and 0.3 rad/s² at reduction 100: bring-up's acceleration (0.5
+        // rad/s²) overflows the register, yet its speed (0.25 rad/s) is half the declared one.
+        let declared = crate::chain::approach_registers(
+            &crate::ApproachLimit {
+                speed: 0.5,
+                acceleration: 0.3,
+            },
+            100.0,
+        )
+        .expect("declared fits");
+        let (speed, acceleration) =
+            crate::chain::pull_in_registers(declared, 100.0).expect("a slower pull-in");
+        assert!(speed <= declared.0 / 2 + 1, "{speed} vs {declared:?}");
+        assert_eq!(acceleration, declared.1);
     }
 }

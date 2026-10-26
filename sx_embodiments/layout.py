@@ -108,6 +108,34 @@ class SupplyRange:
         return self.min_volts <= volts <= self.max_volts
 
 
+#: The fastest servo approach a body may declare: one turn a second (an STS3215 turns about
+#: 4.7 rad/s unloaded, so a limit above this limits nothing). The drivers refuse it too.
+MAX_SERVO_APPROACH_RAD_S: Final = 2.0 * math.pi
+
+
+@dataclass(frozen=True, slots=True)
+class ServoApproach:
+    """The speed a serial bus's servos approach any goal at, on the servo itself (a Feetech
+    STS3215's ``Goal_Speed`` and ``Acceleration`` registers), in rad/s and rad/s² of the servo's
+    output through its binding's reduction (a RANGE_0_100 finger's joint maps its calibrated
+    range onto its declared one, so its joint may move up to about 15 % faster).
+
+    A driver setting per bus, rendered into the driver bindings beside the axes and outside the
+    body's identity: the governor bounds every commanded step, and this is the servo's own
+    backstop for a goal its position limits clamp. A servo resting outside those limits is pulled
+    in at the slower of this and the driver's bring-up approach.
+    """
+
+    speed: float
+    acceleration: float
+
+    def __post_init__(self) -> None:
+        if not all(math.isfinite(v) and v > 0.0 for v in (self.speed, self.acceleration)):
+            raise LayoutError("actuator", "servo approach must be positive finite rad/s, rad/s²")
+        if self.speed > MAX_SERVO_APPROACH_RAD_S:
+            raise LayoutError("actuator", "a servo approach above one turn a second limits nothing")
+
+
 @dataclass(frozen=True, slots=True)
 class ActuatorRating:
     """A tested product's ratings, as its vendor publishes them.

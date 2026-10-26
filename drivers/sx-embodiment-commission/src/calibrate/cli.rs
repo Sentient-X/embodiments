@@ -9,11 +9,14 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_feetech_serial::scan::{ReadOnlyPort, STS3215_BAUD};
-use sx_feetech_serial::scservo_sdk::ProtocolPacketHandler;
+use sx_feetech_serial::scservo_sdk::{
+    ProtocolPacketHandler, SMS_STS_MAX_ANGLE_LIMIT_L, SMS_STS_MIN_ANGLE_LIMIT_L, SMS_STS_OFS_L,
+};
 
 use super::CalibrateError;
 use super::journal::Journal;
 use super::motion::{Closed, JogEvent, JogPlan, Sweep, Watch, go_to, jog, sweep_finger};
+use super::range::{self, Prompt, RangePlan, StdinPrompt};
 use super::read::{self, read_bus};
 use super::session::{Session, Slow};
 
@@ -25,10 +28,18 @@ pub const USAGE: &str = "usage:
                               [--widen <ticks>] [--move] [--json]
                               [motion settings]
   sx-commission calibrate goto --bus <tty> --id <n> --to <ticks> [--widen <ticks>] [--move]
+  sx-commission calibrate range --bus <tty> --ids 1-6 [--joints a,b,..] [--full-turn 5]
+                                [--out <file>]
   sx-commission calibrate apply --bus <tty> --calibration <file> --move
+                                [--robot <robot dir> --port <port>] [--protection neck-defaults]
   sx-commission calibrate --restore <journal>
 
   Without --move, gripper and jog only read and print what they would do.
+  range writes nothing: with every servo limp, a person shows each joint's middle (Enter),
+  then moves each through its full travel (Enter ends); it prints and writes (--out) a LeRobot
+  calibration keyed by joint. apply --move writes a file's homing offsets and limits, and
+  with --robot/--port installs it as the robot's commissioned <port>.calibration.json, which
+  the station and the bench tools load by default.
   motion settings (defaults): --goal-speed 20 --acceleration 5 --torque-limit 250
     --load-threshold 150 --lead 20 --backoff 30 --stall-ms 600 --min-progress 3
     --max-travel 1500 --inset 10 --max-seconds 180 --baud 1000000 --journal-dir <dir>
@@ -51,7 +62,10 @@ pub enum Mode {
         id: u8,
         to: u16,
     },
-    /// Write a measured calibration's position limits to its servos, kept across power cycles.
+    /// Record each joint's middle and travel, shown by hand, as a calibration; writes nothing.
+    Range,
+    /// Write a measured calibration's homing offsets and position limits to its servos, kept
+    /// across power cycles.
     Apply(PathBuf),
     Restore(PathBuf),
 }
@@ -75,7 +89,42 @@ pub struct Args {
     pub trace: Option<PathBuf>,
     /// How long `jog` holds at its target.
     pub hold: Duration,
+    /// `range`: each id's joint name, the calibration's keys.
+    pub joints: Vec<String>,
+    /// `range`: joints that turn without end, given 0..4095.
+    pub full_turn: Vec<u8>,
+    /// `range`: where the calibration is written.
+    pub out: Option<PathBuf>,
+    /// `apply`: protection registers to set as well.
+    pub protection: Option<Protection>,
+    /// `apply`: the robot directory, and the port in it, whose commissioned calibration the
+    /// applied file becomes.
+    pub install: Option<(PathBuf, String)>,
+    /// `range`: redraw the live lines in place (standard output is a terminal).
+    pub redraw: bool,
 }
+
+/// A servo's torque protection, as `Max_Torque_Limit` (16), `Protection_Current` (28) and
+/// `Overload_Torque` (36), with `Torque_Limit` (48, RAM, loaded from 16 at power-on) set to
+/// match.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Protection {
+    pub max_torque: u16,
+    pub protection_current: u16,
+    pub overload_torque: u8,
+}
+
+/// The SO-101 neck's arm servos as found on the static upper body on 2026-10-26 (ids 1..5):
+/// what a servo still holding the SO-101 gripper's 500 / 250 / 25 is reset to.
+pub const NECK_DEFAULTS: Protection = Protection {
+    max_torque: 1000,
+    protection_current: 310,
+    overload_torque: 80,
+};
+
+const MAX_TORQUE_LIMIT: u8 = 16;
+const PROTECTION_CURRENT: u8 = 28;
+const OVERLOAD_TORQUE: u8 = 36;
 
 /// The settings a gripper sweep starts from: slow, weak and quick to give up.
 #[must_use]
@@ -170,9 +219,16 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         journal_dir: Journal::default_dir(),
         trace: None,
         hold: Duration::ZERO,
+        joints: Vec::new(),
+        full_turn: Vec::new(),
+        out: None,
+        protection: None,
+        install: None,
+        redraw: false,
     };
     let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
     let mut calibration = None;
+    let (mut robot, mut port) = (None, None);
     while let Some(flag) = words.next() {
         let mut value = || words.next().ok_or(format!("{flag} needs a value"));
         let sweep = &mut args.sweep;
@@ -208,6 +264,20 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--max-travel" => sweep.max_travel = number(flag, value()?)?,
             "--inset" => args.inset = number(flag, value()?)?,
             "--max-seconds" => args.max_seconds = number(flag, value()?)?,
+            "--joints" => {
+                args.joints = value()?
+                    .split(',')
+                    .map(|name| name.trim().to_owned())
+                    .collect();
+            }
+            "--full-turn" => args.full_turn = ids(value()?)?,
+            "--out" => args.out = Some(PathBuf::from(value()?)),
+            "--robot" => robot = Some(PathBuf::from(value()?)),
+            "--port" => port = Some(value()?.to_owned()),
+            "--protection" => match value()? {
+                "neck-defaults" => args.protection = Some(NECK_DEFAULTS),
+                other => return Err(format!("--protection knows neck-defaults, not {other}")),
+            },
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -239,6 +309,22 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             }
             Mode::Goto { id, to }
         }
+        (Some("range"), None) => {
+            if args.ids.is_empty() {
+                return Err("range needs --ids".to_owned());
+            }
+            if !args.joints.is_empty() && args.joints.len() != args.ids.len() {
+                return Err(format!(
+                    "--joints names {} joints for {} ids",
+                    args.joints.len(),
+                    args.ids.len()
+                ));
+            }
+            if args.moves {
+                return Err("range writes nothing; apply --move writes its file".to_owned());
+            }
+            Mode::Range
+        }
         (Some("apply"), None) => {
             let Some(path) = calibration else {
                 return Err("apply needs --calibration <file>".to_owned());
@@ -248,6 +334,15 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         (Some(other), None) => return Err(format!("unknown calibrate mode {other}")),
         (None, None) => return Err("calibrate needs a mode".to_owned()),
     };
+    args.install = match (robot, port) {
+        (Some(robot), Some(port)) => Some((robot, port)),
+        (None, None) => None,
+        _ => return Err("--robot and --port go together".to_owned()),
+    };
+    if (args.protection.is_some() || args.install.is_some()) && !matches!(args.mode, Mode::Apply(_))
+    {
+        return Err("--protection, --robot and --port go with apply".to_owned());
+    }
     if !matches!(args.mode, Mode::Restore(_)) && args.bus.is_none() {
         return Err("--bus <tty> is required".to_owned());
     }
@@ -270,8 +365,36 @@ pub struct Out<'a> {
 /// the exit code.
 pub fn run<P: SerialPort>(
     args: &Args,
+    open: impl FnMut(&str, u32) -> io::Result<P>,
+    stop: &Arc<AtomicUsize>,
+    stdout: &mut dyn io::Write,
+    stderr: &mut dyn io::Write,
+) -> u8 {
+    if matches!(args.mode, Mode::Range) {
+        return run_with(args, open, stop, &mut StdinPrompt::new(), stdout, stderr);
+    }
+    run_with(args, open, stop, &mut NoPrompt, stdout, stderr)
+}
+
+/// The prompt of a mode that asks nothing.
+struct NoPrompt;
+
+impl Prompt for NoPrompt {
+    fn wait(&mut self) -> Result<(), CalibrateError> {
+        Err(CalibrateError::Refused("this mode asks nothing".to_owned()))
+    }
+
+    fn pressed(&mut self) -> bool {
+        true
+    }
+}
+
+/// [`run`] with the person's Enter presses read from `prompt`.
+pub fn run_with<P: SerialPort>(
+    args: &Args,
     mut open: impl FnMut(&str, u32) -> io::Result<P>,
     stop: &Arc<AtomicUsize>,
+    prompt: &mut dyn Prompt,
     stdout: &mut dyn io::Write,
     stderr: &mut dyn io::Write,
 ) -> u8 {
@@ -283,6 +406,7 @@ pub fn run<P: SerialPort>(
     let result = match &args.mode {
         Mode::Restore(path) => restore(args, path, &mut open, stop, &mut out),
         Mode::Read => read_mode(args, &mut open, &mut out),
+        Mode::Range => range_mode(args, &mut open, stop, prompt, &mut out),
         Mode::Apply(_) if !args.moves => Err(CalibrateError::Refused(
             "apply writes the servos' limits: pass --move".to_owned(),
         )),
@@ -576,7 +700,12 @@ fn moving<P: SerialPort>(
                     "seconds": arrival.elapsed.as_secs_f64(),
                     "ticks_per_second": arrival.ticks_per_second() })
         }),
-        Mode::Apply(ref path) => apply(path, &mut session, out),
+        Mode::Apply(ref path) => {
+            apply(path, args.protection, &mut session, out).and_then(|value| match &args.install {
+                Some((robot, port)) => install(path, robot, port, out).map(|()| value),
+                None => Ok(value),
+            })
+        }
         _ => gripper(args, &mut session, out),
     };
     let report = session.close();
@@ -687,9 +816,21 @@ fn restore<P: SerialPort>(
     Ok(())
 }
 
-/// The limits of a calibration file: `sx-commission calibrate gripper --json`'s output, or a
-/// `LeRobot` calibration keyed by joint, each entry carrying `id`, `range_min` and `range_max`.
-fn limits_in(path: &std::path::Path) -> Result<Vec<(u8, u16, u16)>, CalibrateError> {
+/// One servo's entry in a calibration file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Entry {
+    id: u8,
+    /// `Homing_Offset`, where the file carries one (a `LeRobot` calibration does; a `gripper`
+    /// run's output's is the offset the servo already held).
+    homing_offset: Option<i16>,
+    range_min: u16,
+    range_max: u16,
+}
+
+/// The entries of a calibration file: `sx-commission calibrate gripper --json`'s output, or a
+/// `LeRobot` calibration keyed by joint (`calibrate range`'s), each entry carrying `id`,
+/// `range_min`, `range_max` and optionally `homing_offset`.
+fn entries_in(path: &std::path::Path) -> Result<Vec<Entry>, CalibrateError> {
     let refuse = |why: String| CalibrateError::Refused(format!("{}: {why}", path.display()));
     let text = std::fs::read_to_string(path).map_err(|e| refuse(e.to_string()))?;
     let value: serde_json::Value =
@@ -713,24 +854,214 @@ fn limits_in(path: &std::path::Path) -> Result<Vec<(u8, u16, u16)>, CalibrateErr
                 })
             };
             let id = u8::try_from(field("id")?).map_err(|_| refuse(format!("{key}'s id")))?;
-            Ok((id, narrow("range_min")?, narrow("range_max")?))
+            let homing_offset = match entry.get("homing_offset") {
+                None => None,
+                Some(offset) => Some(
+                    offset
+                        .as_i64()
+                        .and_then(|n| i16::try_from(n).ok())
+                        .filter(|n| n.unsigned_abs() <= 2047)
+                        .ok_or_else(|| refuse(format!("{key}'s homing_offset {offset}")))?,
+                ),
+            };
+            let (range_min, range_max) = (narrow("range_min")?, narrow("range_max")?);
+            if range_min >= range_max || range_max > super::MAX_TICK {
+                return Err(refuse(format!("{key}'s range {range_min}..{range_max}")));
+            }
+            Ok(Entry {
+                id,
+                homing_offset,
+                range_min,
+                range_max,
+            })
         })
         .collect()
 }
 
+/// `Homing_Offset`'s register value: sign-magnitude at bit 11.
+fn offset_register(offset: i16) -> u16 {
+    let magnitude = offset.unsigned_abs() & 0x07FF;
+    if offset < 0 {
+        magnitude | (1 << super::HOMING_OFFSET_SIGN_BIT)
+    } else {
+        magnitude
+    }
+}
+
 fn apply<P: SerialPort>(
     path: &std::path::Path,
+    protection: Option<Protection>,
     session: &mut Session<P>,
     out: &mut Out<'_>,
 ) -> Result<serde_json::Value, CalibrateError> {
+    let entries = entries_in(path)?;
     let mut applied = Vec::new();
-    for (id, min, max) in limits_in(path)? {
-        let (was_min, was_max) = session.commit_limits(id, min, max)?;
+    for entry in &entries {
+        let id = entry.id;
+        let mut writes = Vec::new();
+        if let Some(offset) = entry.homing_offset {
+            writes.push((SMS_STS_OFS_L, 2, offset_register(offset)));
+        }
+        writes.push((SMS_STS_MIN_ANGLE_LIMIT_L, 2, entry.range_min));
+        writes.push((SMS_STS_MAX_ANGLE_LIMIT_L, 2, entry.range_max));
+        let before = session.commit(id, &writes)?;
+        let was = |address: u8| {
+            writes
+                .iter()
+                .position(|(a, _, _)| *a == address)
+                .map(|index| before[index])
+        };
+        let was_offset = was(SMS_STS_OFS_L).map(|raw| {
+            ProtocolPacketHandler::<()>::scs_tohost(raw & 0x0FFF, super::HOMING_OFFSET_SIGN_BIT)
+        });
+        let (was_min, was_max) = (
+            was(SMS_STS_MIN_ANGLE_LIMIT_L).unwrap_or_default(),
+            was(SMS_STS_MAX_ANGLE_LIMIT_L).unwrap_or_default(),
+        );
+        let offset_text = match (was_offset, entry.homing_offset) {
+            (Some(was), Some(now)) => format!("homing_offset {was} -> {now}, "),
+            _ => String::new(),
+        };
         let _ = writeln!(
             out.stdout,
-            "servo {id}: limits {was_min}..{was_max} -> {min}..{max}, kept across power cycles"
+            "servo {id}: {offset_text}limits {was_min}..{was_max} -> {}..{}, kept across power \
+             cycles",
+            entry.range_min, entry.range_max
         );
-        applied.push(json!({ "id": id, "was": [was_min, was_max], "now": [min, max] }));
+        applied.push(json!({
+            "id": id,
+            "was": { "homing_offset": was_offset, "range_min": was_min, "range_max": was_max },
+            "now": { "homing_offset": entry.homing_offset, "range_min": entry.range_min,
+                     "range_max": entry.range_max },
+        }));
     }
-    Ok(json!({ "applied": applied }))
+    let mut protected = Vec::new();
+    if let Some(p) = protection {
+        for entry in &entries {
+            let id = entry.id;
+            let current = (
+                session.register(id, MAX_TORQUE_LIMIT, 2)?,
+                session.register(id, PROTECTION_CURRENT, 2)?,
+                session.register(id, OVERLOAD_TORQUE, 1)?,
+            );
+            let wanted = (
+                p.max_torque,
+                p.protection_current,
+                u16::from(p.overload_torque),
+            );
+            if current == wanted {
+                let _ = writeln!(
+                    out.stdout,
+                    "servo {id}: protection already {}/{}/{}",
+                    wanted.0, wanted.1, wanted.2
+                );
+                continue;
+            }
+            let _ = writeln!(
+                out.stdout,
+                "servo {id}: protection Max_Torque {} -> {}, Protection_Current {} -> {}, \
+                 Overload_Torque {} -> {}, Torque_Limit -> {}",
+                current.0, wanted.0, current.1, wanted.1, current.2, wanted.2, wanted.0
+            );
+            session.commit(
+                id,
+                &[
+                    (MAX_TORQUE_LIMIT, 2, wanted.0),
+                    (PROTECTION_CURRENT, 2, wanted.1),
+                    (OVERLOAD_TORQUE, 1, wanted.2),
+                    (super::TORQUE_LIMIT, 2, wanted.0),
+                ],
+            )?;
+            protected.push(json!({ "id": id, "was": [current.0, current.1, current.2],
+                                   "now": [wanted.0, wanted.1, wanted.2] }));
+        }
+    }
+    Ok(json!({ "applied": applied, "protection": protected }))
+}
+
+/// Make the applied file the robot directory's commissioned calibration of `port`, written
+/// beside its `commissioning.json` and renamed into place, once every servo holds it.
+fn install(
+    applied: &std::path::Path,
+    robot: &std::path::Path,
+    port: &str,
+    out: &mut Out<'_>,
+) -> Result<(), CalibrateError> {
+    let refuse = |why: String| CalibrateError::Refused(why);
+    let text = std::fs::read_to_string(applied)
+        .map_err(|e| refuse(format!("{}: {e}", applied.display())))?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|e| refuse(format!("{}: {e}", applied.display())))?;
+    let entries = value.get("calibration").unwrap_or(&value);
+    // The file the station reads: a LeRobot calibration, checked as the station parses it.
+    let document = format!("{entries:#}\n");
+    sx_embodiment_bodies::ServoCalibrations::new()
+        .with_lerobot(port, &document)
+        .map_err(|e| refuse(format!("{}: {e}", applied.display())))?;
+    std::fs::create_dir_all(robot).map_err(|e| refuse(format!("{}: {e}", robot.display())))?;
+    let path = robot.join(sx_embodiment_bodies::calibration_file(port));
+    let staging = path.with_extension("json.next");
+    std::fs::write(&staging, &document)
+        .and_then(|()| std::fs::rename(&staging, &path))
+        .map_err(|e| refuse(format!("{}: {e}", path.display())))?;
+    let _ = writeln!(
+        out.stdout,
+        "installed {} as {port}'s commissioned calibration: the station and the bench tools load \
+         it by default",
+        path.display()
+    );
+    Ok(())
+}
+
+fn range_mode<P: SerialPort>(
+    args: &Args,
+    open: &mut impl FnMut(&str, u32) -> io::Result<P>,
+    stop: &Arc<AtomicUsize>,
+    prompt: &mut dyn Prompt,
+    out: &mut Out<'_>,
+) -> Result<(), CalibrateError> {
+    let port = open_bus(open, bus(args), args.baud)?;
+    let plan = RangePlan {
+        ids: args.ids.clone(),
+        joints: args.joints.clone(),
+        full_turn: args.full_turn.clone(),
+        period: Duration::from_millis(20),
+        print_every: 5,
+        redraw: args.redraw,
+    };
+    let joints = range::measure(port, &plan, prompt, stop, out.stdout)?;
+    let calibration = range::calibration_json(&joints);
+    let _ = writeln!(out.stdout, "\nMeasured (nothing was written to any servo):");
+    for joint in &joints {
+        let _ = writeln!(
+            out.stdout,
+            "  {:>28} id {:2}: homing_offset {:5}  range {:4}..{:4}  ({:+.1}° .. {:+.1}°)",
+            joint.joint,
+            joint.id,
+            joint.homing_offset,
+            joint.range_min,
+            joint.range_max,
+            range::degrees(joint.range_min),
+            range::degrees(joint.range_max)
+        );
+        for warning in range::warnings(joint, args.full_turn.contains(&joint.id)) {
+            let _ = writeln!(out.stdout, "    warning: {warning}");
+        }
+    }
+    let text = format!("{calibration:#}\n");
+    if let Some(path) = &args.out {
+        std::fs::write(path, &text)
+            .map_err(|e| CalibrateError::Refused(format!("{}: {e}", path.display())))?;
+        let _ = writeln!(
+            out.stdout,
+            "wrote {}; to make it the servos' own: sx-commission calibrate apply --bus {} \
+             --calibration {} --move",
+            path.display(),
+            bus(args),
+            path.display()
+        );
+    } else {
+        let _ = write!(out.stdout, "{text}");
+    }
+    Ok(())
 }

@@ -11,9 +11,12 @@
 //! port, each a contiguous run of one bus kind, and [`BodyBindings::on`] keeps one kind's axes
 //! for a crate that drives only that kind.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::approach::ApproachLimit;
 use crate::binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
     UNCALIBRATED_ZERO, validate_chain,
@@ -30,6 +33,21 @@ pub struct BodyBindings {
     /// The ports whose bindings the registry marks provisional (`ActuatorBinding.provisional`):
     /// not yet verified on the robot, so not driven unless a supervised bring-up opts in.
     pub provisional: Vec<String>,
+    /// Per serial-servo port, the speed its servos approach any goal at on the servo itself
+    /// (the registry's `ServoApproach`, a driver setting outside the body's identity); a port
+    /// without one keeps the servo's own default.
+    pub approach: BTreeMap<String, ApproachLimit>,
+}
+
+/// The fastest servo approach limit a registry may declare, rad/s: one turn a second. An
+/// STS3215 turns about 4.7 rad/s unloaded, so a limit above this limits nothing.
+pub const MAX_APPROACH_SPEED: f64 = std::f64::consts::TAU;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Approach {
+    speed: f64,
+    acceleration: f64,
 }
 
 #[derive(Deserialize)]
@@ -38,6 +56,8 @@ struct Document {
     embodiment: String,
     id: String,
     axes: Vec<Axis>,
+    #[serde(default)]
+    approach: BTreeMap<String, Approach>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +112,16 @@ pub enum BodyError {
         embodiment: String,
         ports: Vec<String>,
     },
+    #[error(
+        "{embodiment}'s approach for port {port} names no serial-servo port of its axes, or is \
+         not a positive finite speed (at most one turn a second) and acceleration"
+    )]
+    Approach { embodiment: String, port: String },
+    #[error(
+        "{embodiment}'s port {port} declares no servo approach limit, and its servos are not \
+         opened at their full speed"
+    )]
+    NoApproach { embodiment: String, port: String },
     #[error("{embodiment}'s port {port} has both provisional and verified bindings")]
     MixedProvisional { embodiment: String, port: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]
@@ -125,6 +155,7 @@ impl BodyBindings {
             embodiment,
             id,
             axes,
+            approach,
         } = serde_json::from_str(document)
             .map_err(|error| BodyError::Document(error.to_string()))?;
         let mut provisional: Vec<String> = Vec::new();
@@ -175,11 +206,37 @@ impl BodyBindings {
             })
             .collect::<Result<Vec<_>, BodyError>>()?;
         validate_chain(&axes)?;
+        let positive = |value: f64| value.is_finite() && value > 0.0;
+        let approach = approach
+            .into_iter()
+            .map(|(port, limit)| {
+                let serial = |axis: &BoundAxis| axis.binding.bus.wire().ends_with("_serial");
+                if axes.iter().any(|axis| axis.port == port && serial(axis))
+                    && positive(limit.speed)
+                    && positive(limit.acceleration)
+                    && limit.speed <= MAX_APPROACH_SPEED
+                {
+                    Ok((
+                        port,
+                        ApproachLimit {
+                            speed: limit.speed,
+                            acceleration: limit.acceleration,
+                        },
+                    ))
+                } else {
+                    Err(BodyError::Approach {
+                        embodiment: embodiment.clone(),
+                        port,
+                    })
+                }
+            })
+            .collect::<Result<BTreeMap<_, _>, BodyError>>()?;
         Ok(Self {
             embodiment,
             id,
             axes,
             provisional,
+            approach,
         })
     }
 
@@ -297,6 +354,51 @@ mod tests {
     const DOCUMENT: &str = r#"{"embodiment": "b", "id": "0", "axes": [
         {"joint": "j1", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
          "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": -1, "reduction": 2.0}]}"#;
+
+    #[test]
+    fn a_ports_servo_approach_is_read_and_a_wrong_one_refused() {
+        let serial = DOCUMENT
+            .replace("damiao_dm4310", "feetech_sts3215")
+            .replace("damiao_can", "feetech_serial")
+            .replace("\"can\"", "\"neck\"");
+        let with = |approach: &str| {
+            serial.replacen(
+                "\"reduction\": 2.0}]}",
+                &format!("\"reduction\": 2.0}}], \"approach\": {approach}}}"),
+                1,
+            )
+        };
+        let body = BodyBindings::parse(&with(r#"{"neck": {"speed": 4.0, "acceleration": 16.0}}"#))
+            .expect("parses");
+        assert_eq!(
+            body.approach.get("neck"),
+            Some(&ApproachLimit {
+                speed: 4.0,
+                acceleration: 16.0
+            })
+        );
+        assert!(
+            BodyBindings::parse(DOCUMENT)
+                .expect("parses")
+                .approach
+                .is_empty()
+        );
+        for wrong in [
+            r#"{"arm": {"speed": 4.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 0.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 40.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 4.0}}"#,
+        ] {
+            assert!(BodyBindings::parse(&with(wrong)).is_err(), "{wrong}");
+        }
+        // A CAN bus has no servo approach.
+        let can = DOCUMENT.replacen(
+            "\"reduction\": 2.0}]}",
+            "\"reduction\": 2.0}], \"approach\": {\"can\": {\"speed\": 4.0, \"acceleration\": 16.0}}}",
+            1,
+        );
+        assert!(BodyBindings::parse(&can).is_err());
+    }
 
     #[test]
     fn a_rendered_body_parses_uncalibrated() {
