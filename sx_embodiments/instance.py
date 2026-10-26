@@ -24,6 +24,7 @@ from .calibration import (
     CalibrationError,
     CalibrationId,
     CameraUnitCalibration,
+    DynamicsCalibration,
     JointUnitCalibration,
     RigidCalibration,
     RigidReference,
@@ -200,11 +201,19 @@ class ResolvedFrame:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolvedDynamics:
+    measured: CalibrationId
+    calibration: DynamicsCalibration
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedInstance:
     instance: RobotInstance
     cameras: tuple[ResolvedCamera, ...]
     joints: tuple[ResolvedJoint, ...]
     frames: tuple[ResolvedFrame, ...]
+    #: The identified dynamics, or ``None`` where the description's inertials stand.
+    dynamics: ResolvedDynamics | None = None
 
     def joint(self, slot: Slot) -> ResolvedJoint:
         found = next((joint for joint in self.joints if joint.slot == slot), None)
@@ -245,6 +254,7 @@ def resolve(
 
     by_slot: dict[Slot, tuple[CalibrationId, CameraUnitCalibration | JointUnitCalibration]] = {}
     frames: list[ResolvedFrame] = []
+    dynamics: ResolvedDynamics | None = None
     for identity, calibration in sorted(supplied.items()):
         match calibration:
             case CameraUnitCalibration() | JointUnitCalibration():
@@ -271,6 +281,11 @@ def resolve(
                     if unit not in slot_of:
                         raise InstanceError(f"unit {unit} is not placed in this instance")
                 frames.append(ResolvedFrame(identity, calibration))
+            case DynamicsCalibration():
+                if dynamics is not None:
+                    raise InstanceError("an instance selects one dynamics calibration")
+                require_dynamics(embodiment, calibration, slot_of)
+                dynamics = ResolvedDynamics(identity, calibration)
     if frames:
         require_frames(
             embodiment, tuple(frame.calibration for frame in frames), embodiment.urdf_bytes
@@ -320,7 +335,7 @@ def resolve(
                 joint.range,
             )
         )
-    return ResolvedInstance(instance, tuple(cameras), tuple(joints), tuple(frames))
+    return ResolvedInstance(instance, tuple(cameras), tuple(joints), tuple(frames), dynamics)
 
 
 def drive_document(embodiment: Embodiment, resolved: ResolvedInstance) -> dict[str, JsonValue]:
@@ -354,6 +369,34 @@ def drive_document(embodiment: Embodiment, resolved: ResolvedInstance) -> dict[s
         "instance": str(resolved.instance.id),
         "joints": joints,
     }
+
+
+def require_dynamics(
+    embodiment: Embodiment,
+    calibration: DynamicsCalibration,
+    placed: Mapping[UnitSerial, Slot],
+) -> None:
+    """The calibration was identified against this body's description, names only its links
+    and moving joints, and fitted only units placed in this instance."""
+    if calibration.description_sha256 != embodiment.urdf.sha256:
+        raise InstanceError("the dynamics calibration was identified against another description")
+    links = description_links(embodiment.urdf_bytes)
+    absent = [item.link for item in calibration.links if item.link not in links]
+    if absent:
+        raise InstanceError(f"the dynamics calibration names absent links {absent}")
+    root = ET.fromstring(embodiment.urdf_bytes)  # nosec B314 - registry-owned description
+    moving = {
+        name
+        for joint in root.iter("joint")
+        if (name := joint.get("name")) is not None
+        and joint.get("type") in ("revolute", "continuous", "prismatic")
+    }
+    unknown = [item.joint for item in calibration.joints if item.joint not in moving]
+    if unknown:
+        raise InstanceError(f"the dynamics calibration names joints that do not move: {unknown}")
+    for unit in calibration.units:
+        if unit not in placed:
+            raise InstanceError(f"unit {unit} is not placed in this instance")
 
 
 def description_links(urdf: bytes) -> frozenset[str]:

@@ -13,5 +13,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 roxmltree = { version = "0.21", default-features = false, features = ["std"] }
 
+[dev-dependencies]
+allocation-counter = "0.8"
+
 [lints]
 workspace = true

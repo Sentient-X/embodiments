@@ -38,6 +38,7 @@ pub mod chain;
 pub mod chains;
 pub mod composite;
 pub mod drive;
+pub mod dynamics;
 pub mod governor;
 pub mod inertial;
 pub mod kinematics;
@@ -59,6 +60,10 @@ pub use chain::{
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
+pub use dynamics::{
+    Dynamics, DynamicsCalibration, DynamicsError, JointFriction, LinkInertia, STANDARD_GRAVITY,
+    Scratch, UPRIGHT,
+};
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
 };

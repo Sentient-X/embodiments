@@ -1,12 +1,14 @@
 """What was measured about one physical unit, kept apart from the design it was built to.
 
-Three kinds cover every calibration the platform keeps:
+Four kinds cover every calibration the platform keeps:
 
 - :class:`CameraUnitCalibration`: one camera unit's intrinsics at one image profile.
 - :class:`RigidCalibration`: one rigid transform between two frames of a body, either
   absolute or a correction of the description's own edge (mount corrections, hand-eye,
   stereo pairs and depth-to-colour alignment are all this).
 - :class:`JointUnitCalibration`: one actuator or encoder unit's zero, direction and range.
+- :class:`DynamicsCalibration`: one built robot's identified mass properties and joint
+  friction, replacing the description's estimated inertials for exactly that description.
 
 Each carries a :class:`Measurement` (method, time, residual, evidence) and is identified by
 the digest of its document. Calibration never moves an embodiment id: a robot instance
@@ -58,6 +60,8 @@ class CalibrationMethod(StrEnum):
         "board_episode_fit"  # a board seen in a recorded episode, solved over the chain
     )
     HOMING = "homing"  # the unit was set at a known pose and its reading taken as the zero
+    #: Held poses and an excitation trajectory, motor torque fitted by weighted least squares
+    DYNAMICS_IDENTIFICATION = "dynamics_identification"
     UNRECORDED = "unrecorded"  # a sealed form that never said how it was measured
 
 
@@ -65,6 +69,7 @@ class ResidualUnit(StrEnum):
     PIXEL = "pixel"
     METRE = "metre"
     RADIAN = "radian"
+    NEWTON_METRE = "newton_metre"
 
 
 class EvidenceKind(StrEnum):
@@ -310,7 +315,130 @@ class JointUnitCalibration:
                 raise CalibrationError("a measured joint range is finite and increasing")
 
 
-Calibration = CameraUnitCalibration | RigidCalibration | JointUnitCalibration
+@dataclass(frozen=True, slots=True)
+class LinkInertia:
+    """One link's mass properties on its own frame, the ten numbers joint torque is linear in.
+
+    ``first_moment`` is mass times the centre of mass (kg·m); ``inertia`` is the tensor about
+    the link's origin (kg·m², ``xx, xy, xz, yy, yz, zz``), as
+    ``sx_embodiment_drivers::LinkInertia`` reads it.
+    """
+
+    link: str
+    mass: float
+    first_moment: tuple[float, float, float]
+    inertia: tuple[float, float, float, float, float, float]
+
+    def __post_init__(self) -> None:
+        if not self.link.strip() or self.link != self.link.strip():
+            raise CalibrationError("a link inertia names its link")
+        if not is_physical_inertia(self.mass, self.first_moment, self.inertia):
+            raise CalibrationError(
+                f"{self.link}: no distribution of mass has these properties (a negative mass, "
+                "or principal moments that break the triangle inequality)"
+            )
+
+
+def is_physical_inertia(
+    mass: float, first_moment: tuple[float, ...], inertia: tuple[float, ...]
+) -> bool:
+    """Whether non-negative mass can be spread to give these properties: mass at least zero, and
+    about the centre of mass a tensor whose second moment ``tr(I)/2 - I`` is positive
+    semidefinite (non-negative principal moments obeying the triangle inequality)."""
+    values = (mass, *first_moment, *inertia)
+    if len(first_moment) != 3 or len(inertia) != 6:
+        return False
+    if not all(math.isfinite(value) for value in values) or mass < 0.0:
+        return False
+    if mass == 0.0:
+        return all(abs(value) <= 1e-12 for value in (*first_moment, *inertia))
+    centre = tuple(value / mass for value in first_moment)
+    squared = sum(value * value for value in centre)
+    xx, xy, xz, yy, yz, zz = inertia
+    about = ((xx, xy, xz), (xy, yy, yz), (xz, yz, zz))
+    at_centre = [
+        [
+            about[i][j] - mass * ((squared if i == j else 0.0) - centre[i] * centre[j])
+            for j in range(3)
+        ]
+        for i in range(3)
+    ]
+    half_trace = (at_centre[0][0] + at_centre[1][1] + at_centre[2][2]) / 2.0
+    second = [
+        [(half_trace if i == j else 0.0) - at_centre[i][j] for j in range(3)] for i in range(3)
+    ]
+    tolerance = 1e-9 * max(abs(half_trace), 1e-12)
+    slack = tolerance * max(tolerance, 1.0)
+    pairs = all(
+        second[i][i] * second[j][j] - second[i][j] ** 2 >= -slack
+        for i, j in ((0, 1), (0, 2), (1, 2))
+    )
+    (a, b, c), (d, e, f), (g, h, k) = second
+    determinant = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g)
+    return (
+        all(second[i][i] >= -tolerance for i in range(3))
+        and pairs
+        and determinant >= -slack * max(tolerance, 1.0)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class JointFriction:
+    """What one joint's drive adds to rigid-body torque: Coulomb friction (applied with sign
+    ``tanh(velocity / stiction_velocity)``), viscous friction and reflected rotor inertia."""
+
+    joint: str
+    coulomb: float
+    viscous: float
+    armature: float
+
+    def __post_init__(self) -> None:
+        if not self.joint.strip() or self.joint != self.joint.strip():
+            raise CalibrationError("a joint friction names its joint")
+        if not all(
+            math.isfinite(value) and value >= 0.0
+            for value in (self.coulomb, self.viscous, self.armature)
+        ):
+            raise CalibrationError(f"{self.joint}: friction and armature are finite and >= 0")
+
+
+@dataclass(frozen=True, slots=True)
+class DynamicsCalibration:
+    """One built robot's identified dynamics, valid only for the description it was fitted to.
+
+    ``links`` replace the description's inertials link by link (a link not listed keeps the
+    design estimate); ``joints`` carry each identified joint's friction. ``units`` are the
+    actuator units whose torque readings were fitted. The description is never edited:
+    ``sx_embodiment_drivers::Dynamics::calibrated`` applies this record over it, and refuses
+    it for any other description.
+    """
+
+    description_sha256: Sha256Digest
+    stiction_velocity: float
+    links: tuple[LinkInertia, ...]
+    joints: tuple[JointFriction, ...]
+    units: tuple[UnitSerial, ...]
+    measurement: Measurement
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "description_sha256", Sha256Digest(self.description_sha256))
+        if not (math.isfinite(self.stiction_velocity) and self.stiction_velocity > 0.0):
+            raise CalibrationError("the stiction velocity is a positive speed")
+        names = [item.link for item in self.links]
+        if names != sorted(set(names)):
+            raise CalibrationError("dynamics links are unique and sorted")
+        joints = [item.joint for item in self.joints]
+        if joints != sorted(set(joints)):
+            raise CalibrationError("dynamics joints are unique and sorted")
+        if not self.links and not self.joints:
+            raise CalibrationError("a dynamics calibration identifies something")
+        for unit in self.units:
+            _require_unit(unit)
+        if len(set(self.units)) != len(self.units) or list(self.units) != sorted(self.units):
+            raise CalibrationError("dynamics units are unique and sorted")
+
+
+Calibration = CameraUnitCalibration | RigidCalibration | JointUnitCalibration | DynamicsCalibration
 
 
 def calibration_to_dict(calibration: Calibration) -> dict[str, JsonValue]:
@@ -344,6 +472,31 @@ def calibration_to_dict(calibration: Calibration) -> dict[str, JsonValue]:
                 "zero_offset": calibration.zero_offset,
                 "direction": calibration.direction,
                 "range": list(calibration.range) if calibration.range is not None else None,
+            }
+        case DynamicsCalibration():
+            body = {
+                "kind": "dynamics",
+                "description_sha256": calibration.description_sha256,
+                "stiction_velocity": calibration.stiction_velocity,
+                "links": [
+                    {
+                        "link": item.link,
+                        "mass": item.mass,
+                        "first_moment": list(item.first_moment),
+                        "inertia": list(item.inertia),
+                    }
+                    for item in calibration.links
+                ],
+                "joints": [
+                    {
+                        "joint": item.joint,
+                        "coulomb": item.coulomb,
+                        "viscous": item.viscous,
+                        "armature": item.armature,
+                    }
+                    for item in calibration.joints
+                ],
+                "units": list(calibration.units),
             }
     return {
         "schema": CALIBRATION_SCHEMA,
@@ -412,7 +565,58 @@ def calibration_from_dict(document: Mapping[str, object]) -> Calibration:
             range=(bounds[0], bounds[1]) if bounds is not None else None,
             measurement=measurement,
         )
+    if kind == "dynamics":
+        _exact(document, {"description_sha256", "stiction_velocity", "links", "joints", "units"})
+        return _dynamics_from_dict(document, measurement)
     raise CalibrationError(f"unknown calibration kind {kind!r}")
+
+
+def _dynamics_from_dict(
+    document: Mapping[str, object], measurement: Measurement
+) -> DynamicsCalibration:
+    links = document.get("links")
+    joints = document.get("joints")
+    units = document.get("units")
+    if not isinstance(links, list) or not isinstance(joints, list) or not isinstance(units, list):
+        raise CalibrationError("dynamics links, joints and units are lists")
+    parsed_links: list[LinkInertia] = []
+    for item in cast("list[object]", links):
+        entry = _object(item, "link inertia")
+        if set(entry) != {"link", "mass", "first_moment", "inertia"}:
+            raise CalibrationError("a link inertia has exactly link, mass, first_moment, inertia")
+        moment = _numbers(entry, "first_moment")
+        tensor = _numbers(entry, "inertia")
+        if len(moment) != 3 or len(tensor) != 6:
+            raise CalibrationError("a first moment has 3 numbers and an inertia tensor 6")
+        parsed_links.append(
+            LinkInertia(
+                link=_text(entry, "link"),
+                mass=_number(entry, "mass"),
+                first_moment=(moment[0], moment[1], moment[2]),
+                inertia=(tensor[0], tensor[1], tensor[2], tensor[3], tensor[4], tensor[5]),
+            )
+        )
+    parsed_joints: list[JointFriction] = []
+    for item in cast("list[object]", joints):
+        entry = _object(item, "joint friction")
+        if set(entry) != {"joint", "coulomb", "viscous", "armature"}:
+            raise CalibrationError("a joint friction has exactly joint, coulomb, viscous, armature")
+        parsed_joints.append(
+            JointFriction(
+                joint=_text(entry, "joint"),
+                coulomb=_number(entry, "coulomb"),
+                viscous=_number(entry, "viscous"),
+                armature=_number(entry, "armature"),
+            )
+        )
+    return DynamicsCalibration(
+        description_sha256=Sha256Digest(_text(document, "description_sha256")),
+        stiction_velocity=_number(document, "stiction_velocity"),
+        links=tuple(parsed_links),
+        joints=tuple(parsed_joints),
+        units=tuple(UnitSerial(_string(unit, "unit")) for unit in cast("list[object]", units)),
+        measurement=measurement,
+    )
 
 
 def matrix_from_pose(
