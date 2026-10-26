@@ -59,6 +59,7 @@ mod body;
 mod geometry;
 mod math;
 mod model;
+pub mod placement;
 mod qp;
 mod solve;
 
