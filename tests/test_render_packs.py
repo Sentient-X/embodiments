@@ -96,6 +96,10 @@ def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
     urdf = (directory / "robot.urdf").read_bytes()
     assert document["schema"] == SCHEMA
     assert document["urdf_sha256"] == hashlib.sha256(urdf).hexdigest()
+    mount = _tool().body(name).base_mount
+    assert document["support"] == (
+        None if mount is None else {"frame": mount.frame, "kind": str(mount.kind)}
+    )
     points = _collision_points(_tool().body(name), urdf)
     assert {c["link"] for c in document["capsules"]} == set(points)
     for link, vertices in points.items():

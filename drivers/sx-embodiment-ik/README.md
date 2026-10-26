@@ -8,7 +8,7 @@ crate to draw its ghost.
 ```rust
 let body = Body::static_upper_body(); // left, right, head
 let caps = Caps::declared(&body, 0.25)?.at_most(governor_speed);
-let mut ik = Ik::new(body, caps, Settings::default(), vec![table])?;
+let mut ik = Ik::new(body, caps, Settings::default(), Vec::new())?; // + the body's declared table
 ik.reset(); // on engage
 let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
 // step.q, step.qdot: every axis; step.limbs[i]: residual, reach, binding constraints
@@ -23,7 +23,9 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   1.5x its least-norm joint motion, and holding still moves nothing
   (`a_small_hand_move_is_a_small_joint_move`).
 - **Hard constraints:** joint limits with braking, speed and acceleration caps, a 0.01 rad
-  per-tick step, and self and table collision. Collision is checked on capsule proxies,
+  per-tick step, and self and table collision. The table is the body's own: its base mount
+  declares it in `collision.json` (`support`, the mount frame's z = 0 plane, solid below
+  everywhere within reach), and every `Ik` adds it to the scene it is given. Collision is checked on capsule proxies,
   with each pair's approach planned to stop before a 1 cm margin.
 - **Unreachable targets:** the solver degrades smoothly and reports
   `Reach::Unreachable` with the residual.

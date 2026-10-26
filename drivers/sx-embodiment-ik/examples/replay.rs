@@ -34,7 +34,7 @@
 use std::time::Instant;
 
 use serde_json::Value;
-use sx_embodiment_ik::{Active, Body, Caps, Ik, Obstacle, Reach, Settings, Target};
+use sx_embodiment_ik::{Active, Body, Caps, Ik, Reach, Settings, Target};
 
 /// Every axis available.
 const ALL: [bool; 64] = [true; 64];
@@ -50,13 +50,6 @@ fn settings() -> Settings {
     Settings {
         deadline: std::time::Duration::from_secs(1),
         ..Settings::default()
-    }
-}
-
-fn table() -> Obstacle {
-    Obstacle {
-        min: [-1.0, -1.0, -0.8],
-        max: [0.05, 1.0, 0.0],
     }
 }
 
@@ -225,14 +218,14 @@ fn main() {
             station_body.clone(),
             station_caps.clone(),
             settings(),
-            vec![table()],
+            Vec::new(),
         )
         .expect("station");
         let mut ghost = Ik::new(
             station_body.clone(),
             ghost_caps.clone(),
             settings(),
-            vec![table()],
+            Vec::new(),
         )
         .expect("ghost");
         let rest = ik.rest().to_vec();

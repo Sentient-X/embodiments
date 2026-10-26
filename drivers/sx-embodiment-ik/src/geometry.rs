@@ -1,4 +1,4 @@
-//! Collision proxies (`collision.json`, `sx.collision-proxies/v1`) and the distances between
+//! Collision proxies (`collision.json`, `sx.collision-proxies/v2`) and the distances between
 //! them and the scene.
 
 use serde::Deserialize;
@@ -7,7 +7,10 @@ use crate::IkError;
 use crate::math::{V3, add, dot, norm, scale, sub};
 use crate::model::Model;
 
-pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v1";
+pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v2";
+
+/// How far a declared support reaches from its frame, m: past any limb's reach.
+const SUPPORT_REACH_M: f64 = 3.0;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +26,16 @@ struct Document {
     adjacent_joints: u32,
     #[allow(dead_code)]
     generated_by: String,
+    support: Option<SupportDocument>,
+}
+
+/// The surface the body stands on: the `z = 0` plane of `frame`, solid below.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SupportDocument {
+    frame: String,
+    #[allow(dead_code)]
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -63,6 +76,10 @@ pub struct Proxies {
     pub capsules: Vec<Capsule>,
     /// Capsule index pairs on links that are neither ignored nor rigidly joined.
     pub pairs: Vec<(usize, usize)>,
+    /// The surface the body stands on, as its embodiment declares it (its base mount): the
+    /// mount frame's `z = 0` plane, solid below everywhere within reach. A link below the top
+    /// is in collision.
+    pub support: Option<Obstacle>,
 }
 
 impl Proxies {
@@ -70,8 +87,9 @@ impl Proxies {
     ///
     /// # Errors
     ///
-    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v1` or names a link
-    /// the tree lacks.
+    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v2`, names a link
+    /// the tree lacks, or declares a support on a frame that moves or is not level with the
+    /// root.
     pub fn parse(json: &str, model: &Model) -> Result<Self, IkError> {
         let document: Document =
             serde_json::from_str(json).map_err(|e| IkError::Proxies(e.to_string()))?;
@@ -119,8 +137,39 @@ impl Proxies {
                 }
             }
         }
-        Ok(Self { capsules, pairs })
+        let support = match &document.support {
+            None => None,
+            Some(declared) => Some(support(model, link(&declared.frame)?, &declared.frame)?),
+        };
+        Ok(Self {
+            capsules,
+            pairs,
+            support,
+        })
     }
+}
+
+/// The support under `frame` as a box in the root frame: the frame must be fixed to the root
+/// and level with it, so its `z = 0` plane is a root-frame height.
+fn support(model: &Model, frame: usize, name: &str) -> Result<Obstacle, IkError> {
+    if !model.above(frame).is_empty() {
+        return Err(IkError::Proxies(format!(
+            "support frame {name:?} moves with a joint"
+        )));
+    }
+    let zero = vec![0.0; model.axes().len()];
+    let pose = model.poses(&zero).links[frame];
+    if (pose.r[2][2] - 1.0).abs() > 1e-9 {
+        return Err(IkError::Proxies(format!(
+            "support frame {name:?} is not level with the root"
+        )));
+    }
+    let [x, y, z] = pose.t;
+    let reach = SUPPORT_REACH_M;
+    Ok(Obstacle {
+        min: [x - reach, y - reach, z - reach],
+        max: [x + reach, y + reach, z],
+    })
 }
 
 /// Whether no moving joint lies between two links: nothing can change their distance.

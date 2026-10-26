@@ -14,7 +14,7 @@
 
 use sx_embodiment_drivers::kinematics::Tree;
 use sx_embodiment_ik::{
-    Body, Caps, Ik, Obstacle, Reach, STATIC_UPPER_BODY_URDF, Settings, Solve, Target,
+    Active, Body, Caps, Ik, Reach, STATIC_UPPER_BODY_URDF, Settings, Solve, Target,
 };
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
@@ -30,14 +30,6 @@ fn settings() -> Settings {
 const ALL: [bool; 64] = [true; 64];
 
 const DT: f64 = 0.01;
-
-/// The table the base is clamped to: its top is the root frame's z = 0, behind the base edge.
-fn table() -> Obstacle {
-    Obstacle {
-        min: [-1.0, -1.0, -0.8],
-        max: [0.05, 1.0, 0.0],
-    }
-}
 
 struct Rng(u64);
 
@@ -60,7 +52,7 @@ fn ik(speed_cap: Option<f64>) -> Ik {
         Some(cap) => caps.at_most(cap),
         None => caps,
     };
-    Ik::new(body, caps, settings(), vec![table()]).expect("ik")
+    Ik::new(body, caps, settings(), Vec::new()).expect("ik")
 }
 
 /// Ghost caps: fast enough that only reach, limits and collision matter.
@@ -71,7 +63,7 @@ fn ghost() -> Ik {
         *speed = 4.0;
         *accel = 400.0;
     }
-    Ik::new(body, caps, settings(), vec![table()]).expect("ik")
+    Ik::new(body, caps, settings(), Vec::new()).expect("ik")
 }
 
 /// A random posture inside every limit, each solved axis within `spread` of rest, whose
@@ -153,6 +145,41 @@ fn forward_kinematics_is_the_trees() {
                 assert!((x - y).abs() < 1e-12, "{x} != {y}");
             }
         }
+    }
+}
+
+/// The table is the embodiment's: its base mount declares the support, and every solver of the
+/// body has it without being told. The top is the base's z = 0 plane, solid below everywhere
+/// within reach (under and in front of the arms, where they touched it on 2026-10-26).
+#[test]
+fn the_declared_table_is_in_every_scene_and_the_arms_stay_above_it() {
+    let mut ik = ik(Some(0.5));
+    let table = ik.scene()[0];
+    assert_eq!(Some(table), ik.body().proxies().support);
+    assert_eq!(table.max[2], 0.0);
+    assert!(table.min[0] < -1.0 && table.max[0] > 1.0, "{table:?}");
+    // Both tools asked well below the top, in front of the body: the arms stop above it.
+    let mut q = rest(&ik);
+    let below = |y: f64| {
+        Some(Target::Pose {
+            translation_m: [0.35, y, -0.2],
+            rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+        })
+    };
+    let targets = [below(0.2), below(-0.2), None];
+    for _ in 0..400 {
+        q = ik
+            .step(&q, &ALL[..q.len()], &targets, DT)
+            .expect("step")
+            .q
+            .clone();
+    }
+    let (clearance, a, b) = ik.clearance(&q);
+    assert!(clearance >= 0.0, "{a} into {b} by {clearance}");
+    let frames = ik.body().model().poses(&q);
+    for limb in 0..2 {
+        let tool = ik.body().frame(&frames, limb).t;
+        assert!(tool[2] > 0.0, "tool {limb} at {tool:?}");
     }
 }
 
@@ -529,20 +556,28 @@ fn a_small_hand_move_is_a_small_joint_move() {
             .fold(0.0, f64::max);
         let mut sweep = vec![0.0_f64; q.len()];
         let mut last = None;
+        let mut blocked = false;
         for _ in 0..300 {
             let step = ik
                 .step(&q, &ALL[..q.len()], &targets, DT)
                 .expect("step")
                 .clone();
             q.copy_from_slice(&step.q);
+            blocked |= step.limbs[..2].iter().flat_map(|l| &l.active).any(|a| {
+                matches!(
+                    a,
+                    Active::Limit { .. } | Active::SelfCollision { .. } | Active::Obstacle { .. }
+                )
+            });
             for &axis in &solved {
                 sweep[axis] = sweep[axis].max((q[axis] - start[axis]).abs());
             }
             last = Some(step);
         }
-        if last.expect("a step").limbs[..2]
-            .iter()
-            .any(|l| l.reach != Reach::Tracking)
+        if blocked
+            || last.expect("a step").limbs[..2]
+                .iter()
+                .any(|l| l.reach != Reach::Tracking)
         {
             continue; // a limit, the other arm or the table stops it: not this test's case
         }
