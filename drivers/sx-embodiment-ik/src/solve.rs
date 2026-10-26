@@ -59,8 +59,14 @@ impl Caps {
 pub struct Settings {
     /// How many metres of tool position error one radian of orientation error weighs.
     pub orientation_m_per_rad: f64,
-    /// Posture weight toward rest, per rad^2 (position error is per m^2): small enough to
-    /// decide only what the tasks leave free.
+    /// Weight on each tick's joint step, per rad^2 (position error is per m^2): the damped
+    /// least-squares term. It makes the answer the smallest joint motion that closes the
+    /// error, keeps a near-singular arm from spending its free direction, and costs a task
+    /// direction with Jacobian gain `s` m/rad only `damping / s^2` of its error per tick.
+    pub damping: f64,
+    /// Posture weight toward the anchor (the measured posture at engage, [`Ik::reset`]), per
+    /// rad^2: far below `damping`, so the free direction returns to where the operator
+    /// started at `posture_weight / damping` of its offset per tick, never swings.
     pub posture_weight: f64,
     /// Posture weight for an axis that moves more than one limb (a torso).
     pub shared_posture_weight: f64,
@@ -93,6 +99,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             orientation_m_per_rad: 0.15,
+            damping: 1e-4,
             posture_weight: 1e-6,
             shared_posture_weight: 1e-5,
             limit_margin_rad: 0.01,
@@ -260,6 +267,10 @@ pub struct Ik {
     settings: Settings,
     scene: Vec<Obstacle>,
     rest: Vec<f64>,
+    /// The posture the free direction is drawn to: the measured posture at the first step
+    /// after [`Ik::reset`].
+    anchor: Vec<f64>,
+    anchored: bool,
     /// (capsule, obstacle) pairs checked: on a moving link, and apart at rest.
     scene_pairs: Vec<(usize, usize)>,
     /// Per solved column: moves more than one limb.
@@ -389,6 +400,8 @@ impl Ik {
             caps,
             settings,
             scene,
+            anchor: rest.clone(),
+            anchored: false,
             rest,
             scene_pairs,
             shared,
@@ -420,27 +433,24 @@ impl Ik {
         &self.settings
     }
 
-    /// The posture the null space is drawn to (every axis): zero, held inside each limit.
+    /// The neutral posture (every axis): zero, held inside each limit. Scene pairs are those
+    /// apart here.
     #[must_use]
     pub fn rest(&self) -> &[f64] {
         &self.rest
     }
 
-    /// Set the posture the null space is drawn to (every axis, [`crate::Model::axes`] order).
-    ///
-    /// # Errors
-    ///
-    /// [`IkError::Positions`] or [`IkError::NonFinite`] when it is not one finite position
-    /// per axis.
-    pub fn set_rest(&mut self, rest: &[f64]) -> Result<(), IkError> {
-        self.check_positions(rest)?;
-        self.rest.copy_from_slice(rest);
-        Ok(())
+    /// The posture the free direction is drawn to: the measured posture at engage.
+    #[must_use]
+    pub fn anchor(&self) -> &[f64] {
+        &self.anchor
     }
 
-    /// Forget the last commanded velocity: the next step starts from standing still (engage).
+    /// Engage: forget the last commanded velocity, so the next step starts from standing
+    /// still, and anchor posture at the next step's measured positions.
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
+        self.anchored = false;
     }
 
     fn check_positions(&self, q: &[f64]) -> Result<(), IkError> {
@@ -544,8 +554,12 @@ impl Ik {
             }
         }
         let deadline = deadline_after(self.settings.deadline);
+        if !self.anchored {
+            self.anchor.copy_from_slice(q);
+            self.anchored = true;
+        }
         self.body.model.poses_into(q, &mut self.work.frames);
-        self.cost(q, targets);
+        self.cost(q, targets, dt);
         self.bounds(q, dt);
         for (column, &axis) in self.body.solved.iter().enumerate() {
             if !available[axis] {
@@ -588,8 +602,9 @@ impl Ik {
         Ok(&self.step)
     }
 
-    /// `1/2 dq' H dq + g' dq`: tool position, orientation (or pointing), then posture.
-    fn cost(&mut self, q: &[f64], targets: &[Option<Target>]) {
+    /// `1/2 dq' H dq + g' dq`: tool position, orientation (or pointing), the step itself
+    /// (damping), then posture toward the anchor.
+    fn cost(&mut self, q: &[f64], targets: &[Option<Target>], dt: f64) {
         let body = &self.body;
         let s = &self.settings;
         let w = &mut self.work;
@@ -616,10 +631,16 @@ impl Ik {
                         rotation_xyzw,
                     },
                 ) => {
-                    let e_p = clamp_norm(sub(*translation_m, pose.t), s.max_error_m);
+                    // Each error is closed no faster than the limb can still stop on it (as a
+                    // collision row's approach is): asking for the whole error in one tick
+                    // overshoots against the acceleration caps, and the overshoot wanders
+                    // the arm's free direction tick after tick.
+                    let e_p = sub(*translation_m, pose.t);
                     let goal = from_quaternion(*rotation_xyzw);
-                    let e_r =
-                        clamp_norm(log(&mat_mul(&goal, &transpose(&pose.r))), s.max_error_rad);
+                    let e_r = log(&mat_mul(&goal, &transpose(&pose.r)));
+                    let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
+                    let e_p = clamp_norm(scale(e_p, share), s.max_error_m);
+                    let e_r = clamp_norm(scale(e_r, share), s.max_error_rad);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
@@ -656,11 +677,9 @@ impl Ik {
             } else {
                 s.posture_weight
             };
-            let error = self.rest[axis] - q[axis];
-            w.h[column * n + column] += 2.0 * weight;
+            let error = self.anchor[axis] - q[axis];
+            w.h[column * n + column] += 2.0 * (weight + s.damping);
             w.g[column] -= 2.0 * weight * error;
-            // A floor under the Hessian, far below any weight.
-            w.h[column * n + column] += 1e-10;
         }
     }
 
@@ -1060,6 +1079,99 @@ fn least_squares(h: &mut [f64], g: &mut [f64], row: &[f64], target: f64, weight:
         for j in 0..n {
             h[i * n + j] += 2.0 * weight * row[i] * row[j];
         }
+    }
+}
+
+/// The share of a pose error one tick closes, along the error's own straight line: no more
+/// than the limb can still stop on, as a collision row's approach is planned.
+///
+/// The joint motion per unit of the error is its damped least-squares direction
+/// `d = A' (A A' + damping I)^-1 e/|e|` over the task rows `A = [Jv; rho Jw]`, the QP's own
+/// answer to it, and the error closes at most at the acceleration the tightest axis allows
+/// along `d`. Asking for the whole error at once overshoots against the acceleration caps,
+/// and the overshoot wanders the arm's free direction tick after tick; near a singularity
+/// `d` is large and the approach slows instead.
+#[allow(clippy::too_many_arguments)]
+fn approach(
+    e_p: V3,
+    e_r: V3,
+    jv: &[V3],
+    jw: &[V3],
+    solved: &[usize],
+    caps: &Caps,
+    s: &Settings,
+    dt: f64,
+) -> f64 {
+    let rho = s.orientation_m_per_rad;
+    let e = [
+        e_p[0],
+        e_p[1],
+        e_p[2],
+        rho * e_r[0],
+        rho * e_r[1],
+        rho * e_r[2],
+    ];
+    let length = e.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if length < 1e-12 {
+        return 1.0;
+    }
+    let row = |a: usize, axis: usize| {
+        if a < 3 {
+            jv[axis][a]
+        } else {
+            rho * jw[axis][a - 3]
+        }
+    };
+    let mut m = [[0.0; 6]; 6];
+    for (a, line) in m.iter_mut().enumerate() {
+        for (b, cell) in line.iter_mut().enumerate() {
+            *cell = solved.iter().map(|&axis| row(a, axis) * row(b, axis)).sum();
+        }
+        line[a] += s.damping;
+    }
+    let mut y = e.map(|v| v / length);
+    cholesky_solve(&mut m, &mut y);
+    let mut accel = f64::INFINITY;
+    for &axis in solved {
+        let d: f64 = (0..6).map(|a| row(a, axis) * y[a]).sum::<f64>().abs();
+        if d > 1e-12 {
+            accel = accel.min(caps.accel[axis] / d);
+        }
+    }
+    if !accel.is_finite() {
+        return 1.0;
+    }
+    length.min(braking(length, s.braking_share * accel, dt)) / length
+}
+
+/// Solve `m x = b` in place for a symmetric positive definite 6x6 `m` (`b` becomes `x`).
+fn cholesky_solve(m: &mut [[f64; 6]; 6], b: &mut [f64; 6]) {
+    for j in 0..6 {
+        let mut diagonal = m[j][j];
+        for k in 0..j {
+            diagonal -= m[j][k] * m[j][k];
+        }
+        let diagonal = diagonal.max(1e-18).sqrt();
+        m[j][j] = diagonal;
+        for i in j + 1..6 {
+            let mut v = m[i][j];
+            for k in 0..j {
+                v -= m[i][k] * m[j][k];
+            }
+            m[i][j] = v / diagonal;
+        }
+    }
+    for i in 0..6 {
+        for k in 0..i {
+            b[i] -= m[i][k] * b[k];
+        }
+        b[i] /= m[i][i];
+    }
+    for i in (0..6).rev() {
+        for k in i + 1..6 {
+            b[i] -= m[k][i] * b[k];
+        }
+        b[i] /= m[i][i];
     }
 }
 

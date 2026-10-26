@@ -14,7 +14,14 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
 // step.q, step.qdot: every axis; step.limbs[i]: residual, reach, binding constraints
 ```
 
-- **Costs:** tool position, then orientation (0.15 m per rad), then posture in the null space.
+- **Costs:** tool position, then orientation (0.15 m per rad), a damping term on each
+  tick's joint step (damped least squares: the smallest joint motion that closes the error),
+  then posture toward the anchor, the measured posture at engage (`Ik::reset`), never a fixed
+  rest. Each pose error is closed no faster than the limb can still stop on it along its
+  damped least-squares direction, so a step command never overshoots against the
+  acceleration caps and wanders the free direction: a 3 cm hand move costs at most about
+  1.5x its least-norm joint motion, and holding still moves nothing
+  (`a_small_hand_move_is_a_small_joint_move`).
 - **Hard constraints:** joint limits with braking, speed and acceleration caps, a 0.01 rad
   per-tick step, and self and table collision. Collision is checked on capsule proxies,
   with each pair's approach planned to stop before a 1 cm margin.

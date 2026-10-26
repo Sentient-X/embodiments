@@ -414,3 +414,159 @@ fn an_unavailable_axis_is_held_and_the_vector_keeps_its_length() {
     }
     assert!(ik.step(&q, &available[1..], &targets, DT).is_err());
 }
+
+/// The least-norm joint step (every axis) that moves both hands' tools by `shift` metres with
+/// their orientations held, from a finite-difference Jacobian (orientation weighted as the
+/// solver weighs it): the least any solver can move the joints for this move.
+fn least_norm_move(ik: &Ik, q: &[f64], shift: [f64; 3]) -> Vec<f64> {
+    const ROWS: usize = 12;
+    let solved = ik.body().solved();
+    let rho = ik.settings().orientation_m_per_rad;
+    let frames = |q: &[f64]| {
+        let poses = ik.body().model().poses(q);
+        [ik.body().frame(&poses, 0), ik.body().frame(&poses, 1)]
+    };
+    let base = frames(q);
+    let h = 1e-6;
+    let columns: Vec<[f64; ROWS]> = solved
+        .iter()
+        .map(|&axis| {
+            let mut moved = q.to_vec();
+            moved[axis] += h;
+            let after = frames(&moved);
+            let mut column = [0.0; ROWS];
+            for (limb, (f, b)) in after.iter().zip(&base).enumerate() {
+                let d = |i: usize, j: usize| (0..3).map(|k| f.r[i][k] * b.r[j][k]).sum::<f64>();
+                let o = 6 * limb;
+                for k in 0..3 {
+                    column[o + k] = (f.t[k] - b.t[k]) / h;
+                }
+                column[o + 3] = rho * 0.5 * (d(2, 1) - d(1, 2)) / h;
+                column[o + 4] = rho * 0.5 * (d(0, 2) - d(2, 0)) / h;
+                column[o + 5] = rho * 0.5 * (d(1, 0) - d(0, 1)) / h;
+            }
+            column
+        })
+        .collect();
+    // dq = J' (J J' + eps I)^-1 e, by Gauss-Jordan elimination.
+    let mut e = [0.0; ROWS];
+    e[..3].copy_from_slice(&shift);
+    e[6..9].copy_from_slice(&shift);
+    let mut m = [[0.0; ROWS + 1]; ROWS];
+    for a in 0..ROWS {
+        for b in 0..ROWS {
+            m[a][b] = columns.iter().map(|c| c[a] * c[b]).sum::<f64>();
+        }
+        m[a][a] += 1e-9;
+        m[a][ROWS] = e[a];
+    }
+    for i in 0..ROWS {
+        let pivot = (i..ROWS)
+            .max_by(|&x, &y| m[x][i].abs().total_cmp(&m[y][i].abs()))
+            .expect("a row");
+        m.swap(i, pivot);
+        for r in 0..ROWS {
+            if r != i {
+                let f = m[r][i] / m[i][i];
+                let pivot_row = m[i];
+                for (cell, p) in m[r][i..].iter_mut().zip(&pivot_row[i..]) {
+                    *cell -= f * p;
+                }
+            }
+        }
+    }
+    let mut dq = vec![0.0; q.len()];
+    for (c, &axis) in columns.iter().zip(solved) {
+        dq[axis] = (0..ROWS).map(|a| c[a] * m[a][ROWS] / m[a][a]).sum();
+    }
+    dq
+}
+
+/// Teleoperation's case: from a posture the operator holds, both hands move 3 cm (up, down,
+/// sideways, forward) with orientation held, at the station's bring-up speed. Holding still
+/// must not move the arm, and every joint must move about as much as its share of the
+/// least-norm answer to the move: a seven-joint arm has a free direction, and a small hand
+/// move must not spend it swinging the forearm and wrist.
+#[test]
+fn a_small_hand_move_is_a_small_joint_move() {
+    let mut ik = ik(Some(0.3));
+    let mut rng = Rng(19);
+    let solved = ik.body().solved().to_vec();
+    let moves = [
+        [0.0, 0.0, 0.03],
+        [0.0, 0.0, -0.03],
+        [0.0, 0.03, 0.0],
+        [0.03, 0.0, 0.0],
+    ];
+    let (mut worst_hold, mut worst_ratio, mut worst_excess, mut worst_joint) =
+        (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    let mut cases = 0;
+    while cases < 40 {
+        let start = random_posture(&ik, &mut rng, 0.05, 1.0);
+        let shift = moves[cases % moves.len()];
+        let hold = pose_targets(&ik, &start);
+        let hold = [hold[0], hold[1], None];
+        let mut targets = hold;
+        for target in &mut targets[..2] {
+            if let Some(Target::Pose { translation_m, .. }) = target {
+                for (t, s) in translation_m.iter_mut().zip(shift) {
+                    *t += s;
+                }
+            }
+        }
+        ik.reset();
+        let mut q = start.clone();
+        for _ in 0..50 {
+            q = ik
+                .step(&q, &ALL[..q.len()], &hold, DT)
+                .expect("step")
+                .q
+                .clone();
+        }
+        let still = solved
+            .iter()
+            .map(|&a| (q[a] - start[a]).abs())
+            .fold(0.0, f64::max);
+        let mut sweep = vec![0.0_f64; q.len()];
+        let mut last = None;
+        for _ in 0..300 {
+            let step = ik
+                .step(&q, &ALL[..q.len()], &targets, DT)
+                .expect("step")
+                .clone();
+            q.copy_from_slice(&step.q);
+            for &axis in &solved {
+                sweep[axis] = sweep[axis].max((q[axis] - start[axis]).abs());
+            }
+            last = Some(step);
+        }
+        if last.expect("a step").limbs[..2]
+            .iter()
+            .any(|l| l.reach != Reach::Tracking)
+        {
+            continue; // a limit, the other arm or the table stops it: not this test's case
+        }
+        cases += 1;
+        let share = least_norm_move(&ik, &start, shift);
+        let least_max = solved.iter().map(|&a| share[a].abs()).fold(0.0, f64::max);
+        let sweep_max = solved.iter().map(|&a| sweep[a]).fold(0.0, f64::max);
+        worst_hold = worst_hold.max(still);
+        worst_ratio = worst_ratio.max(sweep_max / least_max);
+        worst_joint = worst_joint.max(sweep_max);
+        for &axis in &solved {
+            worst_excess = worst_excess.max((sweep[axis] - share[axis].abs()) / least_max);
+        }
+    }
+    eprintln!(
+        "hold {worst_hold:.4} rad, worst joint {worst_joint:.3} rad, {worst_ratio:.2}x the least-norm move, a joint past its share by {worst_excess:.2}x the move"
+    );
+    assert!(
+        worst_hold < 1e-3,
+        "holding still moved a joint {worst_hold} rad"
+    );
+    assert!(worst_ratio < 2.0, "{worst_ratio}x the least-norm move");
+    assert!(
+        worst_excess < 1.0,
+        "a joint went {worst_excess}x the move past its share"
+    );
+}
