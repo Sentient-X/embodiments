@@ -889,6 +889,41 @@ fn every_command_observes_every_servo_through_one_sync_read() {
             assert_eq!(seen.to_bits(), rested.to_bits());
         }
     }
+    assert_eq!(
+        chain.command_readings().expect("readings")[3],
+        AxisReading::Missing(MissingReason::Timeout)
+    );
+    // Servo 4 answers whole, with its overload flag set: its axis is faulted, not measured, so
+    // a body moving on it is refused rather than tracked.
+    let mut flagged = golden.sync_read.clone();
+    let mut response = bytes(&flagged.response);
+    response[3 * 24 + 4] = 0x20; // servo 4's error byte
+    response[3 * 24 + 23] = response[3 * 24 + 23].wrapping_sub(0x20);
+    flagged.response = hex(&response);
+    let mut chain = open(
+        &with(&[
+            &opening(&golden),
+            &golden.torque_enable,
+            std::slice::from_ref(&flagged),
+        ]),
+        "so101",
+    );
+    let observed = chain
+        .command(&golden.goal_positions[0].radians)
+        .expect("command")
+        .observed;
+    assert!(observed[3].is_nan());
+    let readings = chain.command_readings().expect("readings");
+    assert_eq!(readings[3], AxisReading::Faulted(0x20));
+    assert!(
+        readings
+            .iter()
+            .enumerate()
+            .all(|(index, reading)| index == 3 || reading.is_fresh())
+    );
+    // A stop forgets them: no command has answered since.
+    let _ = chain.stop();
+    assert_eq!(chain.command_readings(), None);
 }
 
 #[test]

@@ -177,6 +177,15 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     /// Every chain's, in native state order, or `None` when any chain has none.
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        let mut readings = Vec::with_capacity(self.axes.len());
+        for chain in &self.members {
+            readings.extend(chain.command_readings()?);
+        }
+        Some(readings)
+    }
+
+    /// Every chain's, in native state order, or `None` when any chain has none.
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = Vec::with_capacity(self.axes.len());
         for chain in &self.members {
@@ -244,6 +253,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn last_observed(&self) -> Option<Vec<f64>> {
         (**self).last_observed()
+    }
+
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        (**self).command_readings()
     }
 
     fn approach_speed_limited(&self, axis: usize) -> bool {

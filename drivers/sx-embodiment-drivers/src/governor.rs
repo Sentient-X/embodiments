@@ -551,6 +551,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.chain.last_observed()
     }
 
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        self.chain.command_readings()
+    }
+
     fn approach_speed_limited(&self, axis: usize) -> bool {
         self.chain.approach_speed_limited(axis)
     }

@@ -160,6 +160,12 @@ where
         readings
     }
 
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        let mut readings = self.first.command_readings()?;
+        readings.extend(self.second.command_readings()?);
+        Some(readings)
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = self.first.last_observed()?;
         observed.extend(self.second.last_observed()?);

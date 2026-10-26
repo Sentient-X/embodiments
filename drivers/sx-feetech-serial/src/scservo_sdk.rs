@@ -580,6 +580,20 @@ impl GroupSyncRead {
         result
     }
 
+    /// The status error byte `scs_id` answered with, when its packet arrived whole. The vendor's
+    /// `GroupSyncRead` parses it and never returns it; a caller that must refuse a faulted servo
+    /// reads it here.
+    #[must_use]
+    pub fn get_error(&self, scs_id: u8) -> Option<u8> {
+        self.data_dict
+            .iter()
+            .find(|(id, _)| *id == scs_id)?
+            .1
+            .as_ref()?
+            .first()
+            .copied()
+    }
+
     /// `getData` for one byte: the byte at `address` from `scs_id`'s answer, when its packet
     /// arrived whole.
     #[must_use]

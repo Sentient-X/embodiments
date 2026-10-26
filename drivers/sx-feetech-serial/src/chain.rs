@@ -470,6 +470,8 @@ pub struct FeetechChain<P> {
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
     observed: Option<Vec<f64>>,
+    /// Each servo's reading from the last command's SYNC READ; none since open or a stop.
+    command_readings: Option<Vec<AxisReading>>,
     /// Per servo, whether its approach limit was written and read back.
     approach_limited: Vec<bool>,
     /// The servos the last enable found resting outside their calibrated limits, and the
@@ -572,6 +574,7 @@ impl<P: SerialPort> FeetechChain<P> {
             stop_pending: false,
             faults: Vec::new(),
             observed: None,
+            command_readings: None,
             approach_limited: Vec::new(),
             held_inside: Vec::new(),
         };
@@ -795,9 +798,12 @@ impl<P: SerialPort> FeetechChain<P> {
 
     /// One SYNC READ of every servo's registers from `Torque_Enable` (40) to `Present_Position`
     /// (56..=57), as joint coordinates in native state order. A servo whose answer is missing
-    /// or corrupt, that no longer holds torque, or that no longer holds its declared approach
-    /// limit is `NaN`, which no tracking bound admits; any of those marks the chain disabled, so
-    /// the next enable holds every servo where it rests and proves its limits again.
+    /// or corrupt, that reports error flags, that no longer holds torque, or that no longer
+    /// holds its declared approach limit is `NaN`, which no tracking bound admits; any of those
+    /// marks the chain disabled, so the next enable holds every servo where it rests and proves
+    /// its limits again. Each servo's [`AxisReading`] is kept as the command's readings: missing
+    /// (`Timeout`: the vendor's read cannot tell a corrupt answer from none), faulted with its
+    /// error flags, or faulted with 0 for a torque or approach limit it no longer holds.
     fn sync_read_positions(&mut self) -> Result<Vec<f64>, FeetechChainError> {
         let mut reader = GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH);
         for servo in &self.servos {
@@ -806,8 +812,9 @@ impl<P: SerialPort> FeetechChain<P> {
             }
         }
         let _ = reader.tx_rx_packet(&mut self.sms.ph);
+        let received = Instant::now();
         let end = self.sms.ph.scs_getend();
-        let mut observed = Vec::with_capacity(self.servos.len());
+        let mut readings = Vec::with_capacity(self.servos.len());
         for index in 0..self.servos.len() {
             let servo = &self.servos[index];
             let id = servo.scs_id();
@@ -819,23 +826,34 @@ impl<P: SerialPort> FeetechChain<P> {
                         && reader.get_data2(end, id, SMS_STS_GOAL_SPEED_L) == Some(speed)
                 }
             };
-            let position = reader
-                .get_data2(end, id, SMS_STS_PRESENT_POSITION_L)
-                .filter(|_| torque == Some(1) && approach)
-                .map(|raw| {
-                    servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
+            let reading = match (
+                reader.get_data2(end, id, SMS_STS_PRESENT_POSITION_L),
+                reader.get_error(id),
+            ) {
+                (None, _) | (_, None) => AxisReading::Missing(MissingReason::Timeout),
+                (Some(_), Some(error)) if error != 0 => AxisReading::Faulted(error),
+                (Some(_), Some(_)) if torque != Some(1) || !approach => AxisReading::Faulted(0),
+                (Some(raw), Some(_)) => AxisReading::Fresh {
+                    position: servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
                         raw,
                         PRESENT_POSITION_SIGN_BIT,
-                    ))
-                });
+                    )),
+                    received,
+                },
+            };
             if !approach {
                 self.approach_limited[index] = false;
             }
-            if position.is_none() {
+            if !reading.is_fresh() {
                 self.enabled = false;
             }
-            observed.push(position.unwrap_or(f64::NAN));
+            readings.push(reading);
         }
+        let observed = readings
+            .iter()
+            .map(|reading| reading.position().unwrap_or(f64::NAN))
+            .collect();
+        self.command_readings = Some(readings);
         Ok(observed)
     }
 
@@ -981,6 +999,7 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         }
         // From here the servos may move: what open or the last stop read no longer holds.
         self.observed = None;
+        self.command_readings = None;
         if !self.enabled {
             self.enable_torque()?;
             self.enabled = true;
@@ -1049,6 +1068,7 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             }
         }
         self.observed = fresh_positions(&self.present_positions());
+        self.command_readings = None;
         report
     }
 
@@ -1064,6 +1084,10 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
 
     /// Where every servo was read at open or after the last stop, when no command has been
     /// sent since and every servo answered.
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        self.command_readings.clone()
+    }
+
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.observed.clone()
     }
