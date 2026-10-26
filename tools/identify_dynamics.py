@@ -113,6 +113,7 @@ def collision_checker(
     margin: float = TABLE_MARGIN,
     table_edge: float | None = None,
     resting: Mapping[str, float] | None = None,
+    only: str | None = None,
 ) -> Callable[[Mapping[str, float]], bool]:
     """A conservative self- and table-collision check: MuJoCo's convex hulls of the collision
     meshes, grown by ``TABLE_MARGIN``, and the table top as the plane z = 0 of the base. Pairs
@@ -178,9 +179,17 @@ def collision_checker(
         data.qpos[:] = tree.vector(resting)[order]
         mounted |= touching()
 
+    def counts(pair: tuple[int, int]) -> bool:
+        # With ``only`` (an arm's prefix), a contact counts when that arm is in it: the other
+        # arm is out of the chain, hanging where it hangs.
+        if only is None:
+            return True
+        names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or "" for body in pair]
+        return any(name.startswith(only) for name in names)
+
     def admissible(pose: Mapping[str, float]) -> bool:
         data.qpos[:] = tree.vector(pose)[order]
-        return touching() <= mounted
+        return all(pair in mounted for pair in touching() if counts(pair))
 
     return admissible
 
@@ -384,7 +393,7 @@ TABLE_EDGE = -0.05
 GRAVITY_REACH = 0.7  # rad either side of hanging a gravity pose may go
 #: Clearance for gravity poses, m: smaller than the sweeps', since the poses start from where
 #: the arms physically rest, which the hulls already overlap.
-GRAVITY_CLEARANCE = 0.02
+GRAVITY_CLEARANCE = 0.05
 
 
 def make_gravity_plan(urdf: bytes, side: str, poses: int = 20) -> dict[str, object]:
@@ -394,9 +403,10 @@ def make_gravity_plan(urdf: bytes, side: str, poses: int = 20) -> dict[str, obje
     hanging, chosen greedily for the conditioning of gravity's regressor. The other arm hangs."""
     tree = RigidBodyTree.of(urdf)
     hang = {**dict.fromkeys(tree.axes, 0.0), **HANG}
-    admissible = collision_checker(
-        urdf, tree, GRAVITY_CLEARANCE, table_edge=TABLE_EDGE, resting=hang
-    )
+    # The table top is the whole plane of the base's underside, under and in front of the arms:
+    # every link keeps GRAVITY_CLEARANCE from it and from the body, and nothing already in
+    # contact is excused.
+    admissible = collision_checker(urdf, tree, GRAVITY_CLEARANCE, only=f"{side}_")
     arm = [j for j in ARMS[side] if j not in NOT_SWEPT]
 
     def clear_from_hanging(pose: Mapping[str, float]) -> bool:
@@ -405,8 +415,29 @@ def make_gravity_plan(urdf: bytes, side: str, poses: int = 20) -> dict[str, obje
             for s in np.linspace(0.0, 1.0, 12)
         )
 
-    if not admissible(hang):
-        raise SystemExit("the hanging pose itself is not clear; check TABLE_EDGE")
+    # Start and return through the clear pose nearest to hanging: where the arm hangs is below
+    # the table top in the model (its joint zeros are nominal), so it is never a planned pose.
+    rng = np.random.default_rng(23)
+    via = None
+    for spread in (0.2, 0.4, 0.6, 0.8, 1.0, 1.2):
+        best = None
+        for _ in range(400):
+            pose = dict(hang)
+            for j in arm:
+                limit = tree.limits[j] or (-math.pi, math.pi)
+                low = max(limit[0] + MARGIN, -math.pi + MARGIN)
+                high = min(limit[1] - MARGIN, math.pi - MARGIN)
+                pose[j] = float(np.clip(hang[j] + rng.uniform(-spread, spread), low, high))
+            if admissible(pose):
+                distance = sum((pose[j] - hang[j]) ** 2 for j in arm)
+                if best is None or distance < best[0]:
+                    best = (distance, pose)
+        if best is not None:
+            via = best[1]
+            break
+    if via is None:
+        raise SystemExit(f"no clear pose near the {side} arm's hanging pose")
+    hang.update(via)
     # Inside one turn too: a Damiao joint is commanded only within its single-turn window.
     window = math.pi - MARGIN
     box = {
@@ -477,6 +508,11 @@ class Recording:
         return np.array([i for i, s in enumerate(self.segments) if s == label], dtype=np.intp)
 
 
+#: A held pose is rejected when its recorded window shows a torque step or motion past these.
+HOLD_TORQUE_STEP = 1.0  # N·m between samples
+HOLD_SPEED = 0.05  # rad/s
+
+
 def read_holds(path: Path, record_s: float) -> tuple[list[Hold], dict[str, float]]:
     """Each pose's two holds (from below and above), the last ``record_s`` of each averaged,
     then the two averaged; and the worst joint speed seen while recording."""
@@ -488,6 +524,12 @@ def read_holds(path: Path, record_s: float) -> tuple[list[Hold], dict[str, float
         rows = recording.rows(label)
         recorded = rows[recording.time[rows] >= recording.time[rows[-1]] - record_s]
         pose = label.split(":", 1)[0]
+        # A contact signature rejects the hold: a torque step between samples, or motion.
+        step = float(np.max(np.abs(np.diff(recording.torque[recorded], axis=0)), initial=0.0))
+        moving = float(np.max(np.abs(recording.velocity[recorded]), initial=0.0))
+        if step > HOLD_TORQUE_STEP or moving > HOLD_SPEED:
+            print(f"rejected {label}: torque step {step:.2f} N·m, speed {moving:.3f} rad/s")
+            continue
         by_pose.setdefault(pose, []).append(
             (recording.position[recorded].mean(axis=0), recording.torque[recorded].mean(axis=0))
         )
