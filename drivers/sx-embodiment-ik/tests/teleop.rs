@@ -247,3 +247,26 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
         .expect("a step");
     assert_eq!(step.q[elbow], q[elbow] + REFERENCE_GAP * 2.0);
 }
+
+#[test]
+fn following_starts_only_with_every_driven_hand_at_its_gripper() {
+    let mut solve = teleop(HeadPolicy::Hands);
+    let q = start(&solve);
+    let (left, right) = (tcp(&solve, &q, 0), tcp(&solve, &q, 1));
+    let at = |left: Option<Pose>, right: Option<Pose>| Targets {
+        tcp: [left, right],
+        ..Targets::default()
+    };
+    // No hand driven: nothing to start from.
+    assert!(!solve.may_engage(&q, &at(None, None)));
+    assert!(solve.may_engage(&q, &at(Some(left), Some(right))));
+    assert!(solve.may_engage(&q, &at(Some(left), None)));
+    let mut near = left;
+    near.translation_m[0] += 0.05;
+    assert!(solve.may_engage(&q, &at(Some(near), Some(right))));
+    let mut far = left;
+    far.translation_m[2] += 0.07;
+    assert!(!solve.may_engage(&q, &at(Some(far), Some(right))));
+    let gaps = solve.hand_gaps(&q, &at(Some(far), None));
+    assert!((gaps[0].expect("left") - 0.07).abs() < 1e-9 && gaps[1].is_none());
+}

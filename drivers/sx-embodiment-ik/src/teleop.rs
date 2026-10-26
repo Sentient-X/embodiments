@@ -52,6 +52,11 @@ pub const REFERENCE_GAP: f64 = 0.1;
 /// well-conditioned pointing task.
 pub const GAZE_DISTANCE_M: f64 = 1.0;
 
+/// How close each driven hand's target must be to its gripper's tool point, as the robot
+/// stands, before following starts: control starts from the robot's own pose, never by jumping
+/// to the operator's hands. The station and the headset both ask [`Teleop::may_engage`].
+pub const ENGAGE_RADIUS_M: f64 = 0.06;
+
 /// What the camera (the limb named `head`) looks at; chosen per run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -488,6 +493,35 @@ impl Teleop {
     #[must_use]
     pub const fn grippers(&self) -> &[Option<Gripper>; 2] {
         &self.grippers
+    }
+
+    /// Each driven hand's distance, in metres, from its target to its gripper's tool point at
+    /// `q` (every axis, [`Teleop::model`] order); `None` for a hand with no target.
+    pub fn hand_gaps(&mut self, q: &[f64], targets: &Targets) -> [Option<f64>; 2] {
+        let mut gaps = [None; 2];
+        if q.len() != self.q.len() {
+            return gaps;
+        }
+        self.ik.body().model().poses_into(q, &mut self.frames);
+        for (limb, hand) in self.hand_of.iter().enumerate() {
+            let Some(hand) = *hand else { continue };
+            if let Some(target) = targets.tcp[hand] {
+                let at = self.ik.body().frame(&self.frames, limb).t;
+                let gap = (0..3)
+                    .map(|k| (target.translation_m[k] - at[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                gaps[hand] = Some(gap);
+            }
+        }
+        gaps
+    }
+
+    /// Whether following may start from `q`, where the robot stands: at least one hand is
+    /// driven and every driven hand's target is within [`ENGAGE_RADIUS_M`] of its gripper.
+    pub fn may_engage(&mut self, q: &[f64], targets: &Targets) -> bool {
+        let gaps = self.hand_gaps(q, targets);
+        gaps.iter().any(Option::is_some) && gaps.iter().flatten().all(|gap| *gap <= ENGAGE_RADIUS_M)
     }
 
     /// Engage: the next step seeds from the measured joints, starts from standing still and
