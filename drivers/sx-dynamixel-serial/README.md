@@ -45,9 +45,11 @@ Consumer: `sx-embodiment-bodies`, which opens a body's Dynamixel port beside its
   reverses itself by its `Drive_Mode`); a goal outside the unit's calibrated range is refused,
   since the extended and current-based modes ignore the servo's position limits.
 - **Read-only positions.** `read_positions` reads every servo's `Present_Position` (132), one `READ` per
-  servo; the packet handler clears the port before each, so every value is a fresh answer. A
-  servo that is silent, answers corrupt or reports an error, the hardware-error alert included refuses the whole read. It
-  writes no register: it never enables torque or sends a goal.
+  servo; the packet handler clears the port before each, so every value is a fresh answer. It
+  returns one `AxisReading` per axis in native state order, always all of them: a silent,
+  corrupt or unreachable servo is `Missing` with its reason, one reporting an error, the hardware-error alert included is
+  `Faulted` with the code, and every other servo's reading stands. It writes no register: it
+  never enables torque or sends a goal.
 - **Open at rest.** Open disables torque, so a held pose slumps.
 
 ## Parity

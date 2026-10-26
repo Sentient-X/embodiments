@@ -89,15 +89,15 @@
 //! - **A command observes.** Each command's SYNC READ reports every servo's position, `NaN`
 //!   for one that misses it or no longer holds its limits; either marks the chain disabled.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
 use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, BindingError, BodyError, BoundAxis,
-    ChainError, ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError,
-    validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, AxisReading, BindingError, BodyError,
+    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
+    StopReport, TargetError, fresh_positions, validate_chain,
 };
 use thiserror::Error;
 
@@ -640,7 +640,7 @@ impl<P: SerialPort> DynamixelChain<P> {
         for index in 0..self.servos.len() {
             self.hold_limits(index, true)?;
         }
-        self.observed = self.present_positions().ok();
+        self.observed = fresh_positions(&self.present_positions());
         Ok(())
     }
 
@@ -729,22 +729,32 @@ impl<P: SerialPort> DynamixelChain<P> {
         Ok(LimitsRead(data))
     }
 
-    /// Every servo's `Present_Position` (132..=135), one `READ` per servo, as joint coordinates
-    /// in native state order. Each answer is fresh: the packet handler clears the port before
-    /// it writes each `READ`. Reading writes no register, so nothing moves and torque stays as
-    /// it was.
-    ///
-    /// # Errors
-    ///
-    /// Refuses the whole sample when any servo does not answer, answers corrupt, or reports
-    /// an error, the hardware-error alert included.
-    fn present_positions(&mut self) -> Result<Vec<f64>, DynamixelChainError> {
-        let mut observed = Vec::with_capacity(self.servos.len());
-        for (index, (bus_id, dxl_id)) in self.ids().into_iter().enumerate() {
-            let raw = self.read4(bus_id, dxl_id, PRESENT_POSITION)?;
-            observed.push(self.servos[index].joint_from_raw(signed(raw)));
+    /// Every servo's `Present_Position` (132..=135), one `READ` per servo, as an
+    /// [`AxisReading`] per axis in native state order. Each answer is fresh: the packet handler
+    /// clears the port before it writes each `READ`. A servo that is silent, answers corrupt or
+    /// cannot be reached is missing; one that answers with an error, the hardware-error alert
+    /// included, is faulted with it. The other servos' readings stand. Reading writes no
+    /// register, so nothing moves and torque stays as it was.
+    fn present_positions(&mut self) -> Vec<AxisReading> {
+        let mut readings = Vec::with_capacity(self.servos.len());
+        for (index, (_, dxl_id)) in self.ids().into_iter().enumerate() {
+            let (raw, result, error) = self.ph.read4_byte_tx_rx(dxl_id, PRESENT_POSITION);
+            let received = Instant::now();
+            readings.push(match result {
+                CommResult::Success if error != 0 => AxisReading::Faulted(error),
+                CommResult::Success => AxisReading::Fresh {
+                    position: self.servos[index].joint_from_raw(signed(raw)),
+                    received,
+                },
+                CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
+                CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
+                CommResult::TxFail
+                | CommResult::RxFail
+                | CommResult::TxError
+                | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
+            });
         }
-        Ok(observed)
+        readings
     }
 
     /// One SYNC READ (`GroupSyncRead`, as `sync_read("Present_Position")` reads it, widened)
@@ -941,13 +951,13 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
                 self.faults.push(*fault);
             }
         }
-        self.observed = self.present_positions().ok();
+        self.observed = fresh_positions(&self.present_positions());
         report
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, DynamixelChainError> {
-        self.present_positions().map(Some)
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.present_positions()
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {

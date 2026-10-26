@@ -45,8 +45,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, ChainError, ChainFailure, CommandRange, Receipt, StopReport, TargetError,
-    check_targets,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Receipt, StopReport,
+    TargetError, check_targets,
 };
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
@@ -543,8 +543,8 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     }
 
     /// A read moves nothing, so it passes through even while a fault is latched.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
-        self.chain.read_positions().map_err(GovernorError::Chain)
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.chain.read_positions()
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {
@@ -702,6 +702,10 @@ mod tests {
 
         fn last_observed(&self) -> Option<Vec<f64>> {
             self.observes.then(|| self.rest.clone())
+        }
+
+        fn read_positions(&mut self) -> Vec<AxisReading> {
+            vec![AxisReading::Missing(crate::chain::MissingReason::Timeout); self.axes.len()]
         }
 
         fn approach_speed_limited(&self, axis: usize) -> bool {

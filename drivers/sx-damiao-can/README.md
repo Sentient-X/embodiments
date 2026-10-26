@@ -32,9 +32,12 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
 | Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and the port's `frame_allowance` (on a USB2CAN bridge, 122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms; 192 ms for the humanoid upper body's eleven, 248 ms for the static upper body's fifteen; on `SocketCAN`, whose sends may wait 10 ms for queue room, the static upper body's is 518 ms) |
 
 - **Read-only positions.** `read_positions` drains older replies, snapshots feedback counters,
-  requests status with the vendor's `0xCC` operation, and requires a fresh, expected-state reply
-  from every motor. It applies the existing instance calibration to all coordinates. A missing
-  or faulted reply refuses the whole read; it never enables torque or sends a position target.
+  requests status with the vendor's `0xCC` operation, and returns one `AxisReading` per motor in
+  native state order, always all of them. A motor that answered since the snapshot is `Fresh`
+  (with the instance calibration applied), or `Faulted` with its state code when it reports a
+  fault or a state contradicting the chain's; one that did not is `Missing(Stale)` (its newest
+  answer predates the poll; `Timeout` if it never answered), and a failed link is
+  `Missing(Unavailable)`. It never enables torque or sends a position target.
 - **One bridge, two chains.** Seeed ships one USB2CAN bridge for all seven motors
   (`reBotArm_control_py` `config/rebotarm_dm.yaml`: `/dev/ttyACM0`, 921600 baud); open both
   chains on clones of one `sx_embodiment_drivers::can::SharedCanPort` over a `Usb2CanPort`. The
