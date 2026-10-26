@@ -23,7 +23,7 @@ Consumer: `sx-embodiment-bodies`, which opens a body's Dynamixel port beside its
 | The chain trait | `sx_embodiment_drivers::ActuatorChain`; `DynamixelChainError` implements `ChainError` |
 | A command's evidence | `Receipt<()>`: always `DispatchAttempted`, since the `Goal_Position` SYNC WRITE has no answer; `observed` is the SYNC READ of 102..=135 right after it, `NaN` for a servo that missed it or no longer holds its limits |
 | Where the body rests | `ActuatorChain::last_observed`: every `Present_Position` read at open and after each stop |
-| Approach limit | every servo's `ApproachLimit`, written to `Profile Velocity` (112) and `Profile Acceleration` (108), refused if it rounds to 0 (no limit) and re-proven at every enable and in every SYNC READ; `approach_speed_limited` only while confirmed |
+| Approach limit | every servo's `ApproachLimit`, written to `Profile Velocity` (112) and `Profile Acceleration` (108), refused if it rounds to 0 (no limit) and re-proven at every enable and in every SYNC READ |
 | A stop's proof | `StopReport`: a servo is unproven unless `Torque_Enable` reads back 0; a `Hardware_Error_Status` (or else an error byte) read while stopping is a fault |
 | Fault latch | `DynamixelChain::faults()`, refusing commands until `ActuatorChain::clear_faults()` |
 | The port | `sx_embodiment_drivers::serial::SerialPort` |

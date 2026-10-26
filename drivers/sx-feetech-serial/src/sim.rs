@@ -425,8 +425,9 @@ mod tests {
             rest.iter().take(5).all(|joint| joint.abs() < 1e-3),
             "{rest:?}"
         );
-        chain.command(&[0.0; 6]).expect("commanded");
-        assert_eq!(chain.last_observed(), None);
+        let receipt = chain.command(&[0.0; 6]).expect("commanded");
+        // The command's SYNC READ is where the body is now.
+        assert_eq!(chain.last_observed(), Some(receipt.observed));
         assert_eq!(bus.state().torque(1), 1);
         assert_eq!(bus.state().goal(1), 2000);
         assert!(chain.stop().is_proven());
@@ -461,10 +462,9 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_approach_limit_is_written_read_back_and_claimed() {
+    fn a_declared_approach_limit_is_written_and_read_back() {
         let bus = calibrated_bus();
-        let chain = crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
-        assert!((0..6).all(|axis| chain.approach_speed_limited(axis)));
+        crate::FeetechChain::open(bus.clone(), neck_like()).expect("opens");
         let state = bus.state();
         assert!(
             state
@@ -508,7 +508,7 @@ mod tests {
         let zeros = [0.0; 6];
         assert!(chain.command(&zeros).expect("commanded").observed[2].is_finite());
         bus.power_cycle(3);
-        // The next command's read finds servo 3 limp and unlimited: NaN, no longer limited.
+        // The next command's read finds servo 3 limp and unlimited: NaN.
         let observed = chain.command(&zeros).expect("commanded").observed;
         assert!(observed[2].is_nan());
         assert!(
@@ -517,13 +517,11 @@ mod tests {
                 .enumerate()
                 .all(|(i, joint)| i == 2 || joint.is_finite())
         );
-        assert!(!chain.approach_speed_limited(2));
         // The one after enables afresh: the limit is written again and read back, the servo is
         // held where it rests, and torque comes back on.
         let written = bus.state().written.len();
         let observed = chain.command(&zeros).expect("commanded").observed;
         assert!(observed.iter().all(|joint| joint.is_finite()));
-        assert!(chain.approach_speed_limited(2));
         let state = bus.state();
         let registers = &state.servos[&3];
         assert_eq!((registers[40], registers[41], registers[46]), (1, 3, 3));

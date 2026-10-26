@@ -52,6 +52,15 @@
 //!   0.01 s without reading.
 //! - [`MotorControl::forget_param`] drops one cached register value, so a following read or
 //!   write is judged by the motor's fresh answer; `DM_CAN.py` keeps every value it has seen.
+//! - **Frames without the waits.** Every vendor call sends one frame and then waits or reads
+//!   for that one motor before the caller can address the next, so a chain of fifteen spends
+//!   seconds bringing motors up one at a time. [`MotorControl::send_mit`],
+//!   [`MotorControl::send_command`], [`MotorControl::send_write_param`],
+//!   [`MotorControl::send_read_param`] and [`MotorControl::send_refresh`] send the same frames
+//!   the vendor's calls do and return at once; [`MotorControl::take_feedback`] and
+//!   [`MotorControl::take_param`] decode one received frame as `recv` and
+//!   `recv_set_param_data` do. The chain sends one phase to every motor back to back and awaits
+//!   the answers once ([`crate::chain`]).
 //! - Kept from `DM_CAN.py` as it is: `recv` decodes a register reply arriving on a `MasterID`
 //!   as feedback, as the vendor's `__process_packet` does; replies are consumed by
 //!   `recv_set_param_data` first in every sequence this crate runs.
@@ -279,14 +288,23 @@ pub enum DmCanError {
     Io(#[from] io::Error),
 }
 
-const ENABLE_WAIT: Duration = Duration::from_millis(100);
-pub(crate) const DISABLE_WAIT: Duration = Duration::from_millis(10);
+pub(crate) const ENABLE_WAIT: Duration = Duration::from_millis(100);
+const DISABLE_WAIT: Duration = Duration::from_millis(10);
 const SET_ZERO_WAIT: Duration = Duration::from_millis(100);
 const PARAM_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const SWITCH_MODE_RETRIES: usize = 10;
 const READ_PARAM_RETRIES: usize = 20;
 const CHANGE_PARAM_RETRIES: usize = 20;
 const PARAM_ID: u16 = 0x7FF;
+
+/// The `FF..cmd` control frames: `enable`, `disable`, and Damiao's clear-error frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum MotorCommand {
+    ClearError = 0xFB,
+    Enable = 0xFC,
+    Disable = 0xFD,
+}
 
 /// `MotorControl`: the motors on one CAN link, addressed by `SlaveID`.
 pub struct MotorControl<P> {
@@ -320,6 +338,24 @@ impl<P: CanPort> MotorControl<P> {
         dq: f64,
         tau: f64,
     ) -> Result<(), DmCanError> {
+        self.send_mit(slave_id, kp, kd, q, dq, tau)?;
+        self.recv()
+    }
+
+    /// `controlMIT`'s frame, without its read (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor, a NaN, or the link's failure.
+    pub fn send_mit(
+        &mut self,
+        slave_id: u16,
+        kp: f64,
+        kd: f64,
+        q: f64,
+        dq: f64,
+        tau: f64,
+    ) -> Result<(), DmCanError> {
         let index = self.index(slave_id)?;
         let kp_uint = float_to_uint(kp, 0.0, 500.0, 12)?;
         let kd_uint = float_to_uint(kd, 0.0, 5.0, 12)?;
@@ -337,8 +373,16 @@ impl<P: CanPort> MotorControl<P> {
             low_byte(((kd_uint & 0xf) << 4) | ((tau_uint >> 8) & 0xf)),
             low_byte(tau_uint),
         ];
-        self.send_data(slave_id, data_buf)?;
-        self.recv()
+        self.send_data(slave_id, data_buf)
+    }
+
+    /// One `FF..cmd` control frame, without the vendor's wait (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or the link's failure.
+    pub fn send_command(&mut self, slave_id: u16, command: MotorCommand) -> Result<(), DmCanError> {
+        self.control_cmd(slave_id, command as u8)
     }
 
     /// `enable`: `FF..FC`, wait 0.1 s, read. Damiao advises enabling a few seconds after power-up.
@@ -422,6 +466,16 @@ impl<P: CanPort> MotorControl<P> {
         Ok(())
     }
 
+    /// Decode one received frame as `recv` does (not in `DM_CAN.py`).
+    pub fn take_feedback(&mut self, frame: CanFrame) {
+        self.process_packet(frame.data, frame.id);
+    }
+
+    /// Decode one received frame as `recv_set_param_data` does (not in `DM_CAN.py`).
+    pub fn take_param(&mut self, frame: CanFrame) {
+        self.process_set_param_packet(frame.data, frame.id);
+    }
+
     fn process_packet(&mut self, data: [u8; 8], can_id: u32) {
         let Some(&index) = self.motors_map.get(&can_id) else {
             return;
@@ -494,6 +548,43 @@ impl<P: CanPort> MotorControl<P> {
             data,
         })?;
         Ok(())
+    }
+
+    /// `read_motor_param`'s request frame, without its wait (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or the link's failure.
+    pub fn send_read_param(&mut self, slave_id: u16, rid: DmVariable) -> Result<(), DmCanError> {
+        self.index(slave_id)?;
+        self.read_rid_param(slave_id, rid)
+    }
+
+    /// `change_motor_param`'s write frame, without its polls (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor, a value the register cannot hold, or the link's failure.
+    pub fn send_write_param(
+        &mut self,
+        slave_id: u16,
+        rid: DmVariable,
+        data: f64,
+    ) -> Result<(), DmCanError> {
+        self.index(slave_id)?;
+        self.write_motor_param(slave_id, rid, data)
+    }
+
+    /// `refresh_motor_status`'s request frame, without its read (not in `DM_CAN.py`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or the link's failure.
+    pub fn send_refresh(&mut self, slave_id: u16) -> Result<(), DmCanError> {
+        self.index(slave_id)?;
+        let [can_id_l, can_id_h] = slave_id.to_le_bytes();
+        let data_buf = [can_id_l, can_id_h, 0xCC, 0x00, 0x00, 0x00, 0x00, 0x00];
+        self.send_data(PARAM_ID, data_buf)
     }
 
     fn read_rid_param(&mut self, slave_id: u16, rid: DmVariable) -> Result<(), DmCanError> {
@@ -615,10 +706,7 @@ impl<P: CanPort> MotorControl<P> {
     ///
     /// Returns an unregistered motor or the link's failure.
     pub fn refresh_motor_status(&mut self, slave_id: u16) -> Result<(), DmCanError> {
-        self.index(slave_id)?;
-        let [can_id_l, can_id_h] = slave_id.to_le_bytes();
-        let data_buf = [can_id_l, can_id_h, 0xCC, 0x00, 0x00, 0x00, 0x00, 0x00];
-        self.send_data(PARAM_ID, data_buf)?;
+        self.send_refresh(slave_id)?;
         self.recv()
     }
 

@@ -273,7 +273,9 @@ failure classified as a `ChainFailure`, and a stop becomes a `ProvenStop` only w
 actuator answered stopped. A body spanning two devices or buses is one `Composite` chain, or,
 when its buses are read from its bindings, one `Chains` of any number; `can::SharedCanPort` lets
 chains take turns on one bridge. `Governor` wraps any chain with a per-axis speed bound (each
-command slewed from where the body rests, `last_observed`) and a tracking-error bound that
+command slewed from where the body rests, `last_observed`, inside the chain's range widened to
+where each joint is now, so a joint resting outside is held or brought in, never sent further
+out) and a tracking-error bound that
 stops the chain and latches a fault when the body does not follow; the limits are the
 operator's to pass. The station drives every body through this trait and names no vendor.
 

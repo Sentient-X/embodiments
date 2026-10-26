@@ -1,7 +1,8 @@
 //! Two chains driven as one: a body whose native state order spans two devices or two links.
 //!
 //! The vector is the first chain's axes, then the second's. Every target is checked against both
-//! chains' commandable ranges before either is written; the first is commanded, then the second.
+//! chains' commandable ranges, each widened to where that chain observes the axis now
+//! ([`CommandRange::reaching`]), before either is written; the first is commanded, then the second.
 //! A second chain that fails after the first applied is a [`ChainFailure::Fault`] whatever it
 //! reported, since one device already holds its new target. A stop stops both, whatever the first
 //! answered, and is proven only when both are. A read reads both, whatever either answered.
@@ -13,7 +14,7 @@ use thiserror::Error;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
-    StopReport, TargetError,
+    StopReport, TargetError, check_reach,
 };
 
 /// The first chain's axes, then the second's.
@@ -97,20 +98,20 @@ where
             }
             .into());
         }
-        if let Some((axis, value)) = self
-            .axes
-            .iter()
-            .zip(&self.commandable)
-            .zip(joints)
-            .find_map(|((axis, range), value)| (!range.admits(*value)).then_some((axis, *value)))
-        {
-            return Err(TargetError::OutOfBounds {
-                joint: axis.joint.clone(),
-                value,
-            }
-            .into());
-        }
         let (head, tail) = joints.split_at(self.first.axes().len());
+        let (first_ranges, second_ranges) = self.commandable.split_at(head.len());
+        check_reach(
+            self.first.axes(),
+            first_ranges,
+            self.first.last_observed().as_deref(),
+            head,
+        )?;
+        check_reach(
+            self.second.axes(),
+            second_ranges,
+            self.second.last_observed().as_deref(),
+            tail,
+        )?;
         let first = self.first.command(head).map_err(CompositeError::First)?;
         let second = self.second.command(tail).map_err(CompositeError::Second)?;
         let evidence = if first.evidence == Evidence::BusObservedComplete {
@@ -142,15 +143,6 @@ where
     /// One stop after the other: on a shared link they could not overlap anyway.
     fn stop_budget(&self) -> Duration {
         self.first.stop_budget() + self.second.stop_budget()
-    }
-
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        let first = self.first.axes().len();
-        if axis < first {
-            self.first.approach_speed_limited(axis)
-        } else {
-            self.second.approach_speed_limited(axis - first)
-        }
     }
 
     /// Both chains' reads, the first's axes then the second's. Reading moves nothing.
