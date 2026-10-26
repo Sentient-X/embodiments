@@ -425,6 +425,14 @@ impl SocketCanPort {
         if event.passive {
             self.passive = true;
         }
+        // Error counters back under 128 mean error-active again, whether or not the driver
+        // sends an "active" note.
+        if let Some((tx, rx)) = event.counters
+            && tx < 128
+            && rx < 128
+        {
+            self.passive = false;
+        }
         if event.no_ack {
             self.unanswered = true;
         }

@@ -21,7 +21,8 @@ pub struct CanFrame {
 }
 
 /// What a link knows about its bus, in the words a person at the robot acts on: the device's
-/// health line (a station reports it as the device's health in Fleet). Closed: every transport
+/// health line, for a station to report as the device's health. Diagnostic only: nothing may
+/// gate motion on it (a chain's own answers decide that). Closed: every transport
 /// maps what it sees onto these.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkHealth {
@@ -229,9 +230,11 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
             .map_or_else(|_| Vec::new(), |port| port.counters())
     }
 
+    /// `Unknown` while a chain holds the link (it does for a whole phase): a health poll never
+    /// waits on the bus.
     fn health(&self) -> LinkHealth {
         self.0
-            .lock()
+            .try_lock()
             .map_or(LinkHealth::Unknown, |port| port.health())
     }
 }

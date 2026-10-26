@@ -893,7 +893,9 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
     fn refused(&self, channel: &ChannelShared, status: u8, now: Instant) {
         let mut tx = lock(&channel.tx);
         if tx.refusals == 0 {
-            tx.refusal_rx_mark = channel.counters.rx_frames.load(Ordering::Relaxed);
+            // Frames lost to a full ring arrived too: the bus answered.
+            tx.refusal_rx_mark = channel.counters.rx_frames.load(Ordering::Relaxed)
+                + channel.counters.rx_lost.load(Ordering::Relaxed);
         }
         tx.refusals += 1;
         if tx.refusals >= REFUSALS_BEFORE_RECOVERY {
@@ -1556,5 +1558,38 @@ mod tests {
         engine.rx.complete(&[]);
         engine.step(&mut cx(), now + RX_BACKOFF);
         assert_eq!(engine.rx_errors_in_row, 0);
+    }
+
+    /// A run of refusals remembers how many frames had arrived when it began, so a stall can
+    /// tell an empty bus (nothing since) from a bus that answered meanwhile; an accepted batch
+    /// clears the nothing-answering verdict.
+    #[test]
+    fn a_refusal_run_marks_what_had_arrived_and_an_accepted_batch_clears_the_verdict() {
+        let (mut engine, shared) = engine(1);
+        let now = Instant::now();
+        engine
+            .rx
+            .complete(&transfer(TYPE_CLASSIC, &[classic(0, 0x29)]));
+        engine.step(&mut cx(), now);
+        queue(&shared, 0, 1);
+        engine.step(&mut cx(), now);
+        engine.writer.complete_out();
+        engine.replies.complete(&reply(0, 1, 0));
+        engine.step(&mut cx(), now);
+        let channel = &shared.channels[0];
+        assert_eq!(
+            lock(&channel.tx).refusal_rx_mark,
+            1,
+            "one frame had arrived"
+        );
+        lock(&channel.tx).nothing_answering = true;
+        engine.step(&mut cx(), now + CONFIG.transmit_timeout);
+        queue(&shared, 0, 1);
+        engine.step(&mut cx(), now + CONFIG.transmit_timeout);
+        engine.writer.complete_out();
+        engine.replies.complete(&reply(0, 0, 1));
+        engine.step(&mut cx(), now + CONFIG.transmit_timeout);
+        assert!(!lock(&channel.tx).nothing_answering);
+        assert_eq!(lock(&channel.tx).refusals, 0);
     }
 }

@@ -869,7 +869,8 @@ impl Channel {
                 };
             }
             tx.state = TxState::Recovering;
-            let received = state.counters.rx_frames.load(Ordering::Relaxed);
+            let received = state.counters.rx_frames.load(Ordering::Relaxed)
+                + state.counters.rx_lost.load(Ordering::Relaxed);
             (
                 tx.recoveries_since_success,
                 nothing_answering(cause, received, tx.refusal_rx_mark),
@@ -881,12 +882,14 @@ impl Channel {
             .iter()
             .enumerate()
             .all(|(slot, open)| !open || slot == usize::from(self.index));
-        // An empty bus is not the adapter's fault: restart the channel (cheap, and it clears the
-        // controller's error state) but never escalate to a reopen or a power cycle.
+        // The usual ladder: a channel restart, then a device reopen (what a replug would do, in
+        // case the adapter's CAN side is stuck). An empty bus is not the adapter's fault, so a
+        // silent stall past the ladder restarts the channel again instead of declaring the
+        // adapter dead: the channel works the moment the bus answers.
         let action = match attempt {
-            _ if silent => Some(Recovery::ChannelRestart),
             0 => Some(Recovery::ChannelRestart),
             1 if alone => Some(Recovery::DeviceReopen),
+            _ if silent => Some(Recovery::ChannelRestart),
             _ => None,
         };
         let result = match action {
@@ -917,6 +920,8 @@ impl Channel {
         match (result, action) {
             (Ok(()), Some(_)) if silent => {
                 tx.state = TxState::Running;
+                tx.recoveries_since_success += 1;
+                state.counters.recoveries.fetch_add(1, Ordering::Relaxed);
                 tx.nothing_answering = true;
                 LinkError::NothingAnswering {
                     channel: self.index,
@@ -924,6 +929,7 @@ impl Channel {
             }
             (Ok(()), Some(action)) => {
                 tx.state = TxState::Running;
+                tx.nothing_answering = false;
                 tx.recoveries_since_success += 1;
                 state.counters.recoveries.fetch_add(1, Ordering::Relaxed);
                 LinkError::Recovered {
@@ -1106,8 +1112,14 @@ impl CanPort for Channel {
         if tx.nothing_answering {
             return LinkHealth::NothingAnswering { bus };
         }
+        // Refusals or a stall since the last accepted batch: not answering, whatever came
+        // before (a cable pulled mid-run), until a batch is accepted or the stall is judged.
+        let unsettled =
+            tx.refusals > 0 || matches!(tx.state, TxState::Stalled(_) | TxState::Recovering);
         drop(tx);
-        if self.stats().rx_frames > 0 {
+        if unsettled {
+            LinkHealth::Quiet
+        } else if self.stats().rx_frames > 0 {
             LinkHealth::Answering
         } else {
             LinkHealth::Quiet
