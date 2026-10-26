@@ -6,8 +6,10 @@
 //! demo prints), then `disable`s it. Two deviations from the demo: it switches to `POS_VEL`
 //! where the chain switches to `MIT`, and it refuses nothing where the chain refuses a register
 //! value (below). Command `enable`s each motor when the chain is disabled, then sends one `controlMIT` per
-//! motor holding its target with zero velocity and feed-forward torque. Stop `disable`s every
-//! motor.
+//! motor holding its target. `ActuatorChain::command` sends zero velocity and feed-forward
+//! torque; `DamiaoChain::command_with` sends each axis' planned velocity and model torque,
+//! mapped to the motor through its sign and reduction, bounded per axis (each part off until
+//! bounded) and clamped to the motor's own `VMAX` and `TMAX`. Stop `disable`s every motor.
 //!
 //! What this chain adds over the vendor's calls, and why:
 //!
@@ -182,6 +184,25 @@ impl DamiaoAxis {
     }
 }
 
+/// What a command adds to one axis' position target, at the joint: the planned velocity
+/// (rad/s) and the model's feed-forward torque (N·m), both in joint coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Feedforward {
+    pub velocity: f64,
+    pub torque: f64,
+}
+
+/// How much [`Feedforward`] one axis accepts, at the joint. `None` switches that part off: the
+/// MIT frame carries zero, as the chain did before feed-forward existed. A value is clamped to
+/// its bound, then to the motor's own `VMAX` and `TMAX` registers read at open.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FeedforwardLimit {
+    /// The largest planned speed sent, rad/s; the governor's speed cap is the natural bound.
+    pub velocity: Option<f64>,
+    /// The largest feed-forward torque sent, N·m.
+    pub torque: Option<f64>,
+}
+
 /// The state a feedback frame's first-byte high nibble reports.
 ///
 /// The codes are Damiao's: "DM-J4310-2EC V1.2 Geared Motor User Manual V1.4 2026-09-14" and
@@ -298,6 +319,12 @@ pub enum DamiaoChainError {
         lower: f64,
         upper: f64,
     },
+    #[error("joint {joint} has a non-finite feed-forward velocity or torque")]
+    Feedforward { joint: String },
+    #[error("joint {joint} has a feed-forward bound that is not finite and non-negative")]
+    FeedforwardLimit { joint: String },
+    #[error("expected {expected} feed-forward entries, one per axis, got {found}")]
+    FeedforwardLength { expected: usize, found: usize },
     #[error(transparent)]
     DmCan(#[from] DmCanError),
 }
@@ -314,6 +341,10 @@ pub struct DamiaoChain<P> {
     /// Every motor's answer to the last command, all fresh (a command that misses one fails);
     /// none since open or a stop.
     command_readings: Option<Vec<AxisReading>>,
+    /// Per axis; every part off until [`DamiaoChain::set_feedforward_limits`].
+    feedforward_limits: Vec<FeedforwardLimit>,
+    /// What the last command sent, at the joint, after every clamp.
+    applied: Vec<Feedforward>,
 }
 
 /// Bring each motor up as the vendor does and read its limit registers; see
@@ -466,6 +497,7 @@ impl<P: CanPort> DamiaoChain<P> {
             Err(error) => return Err(disable_all(&mut control, &motors, error)),
         };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
+        let count = motors.len();
         let mut chain = Self {
             control,
             motors,
@@ -475,6 +507,8 @@ impl<P: CanPort> DamiaoChain<P> {
             enabled: false,
             stop_pending: false,
             command_readings: None,
+            feedforward_limits: vec![FeedforwardLimit::default(); count],
+            applied: vec![Feedforward::default(); count],
         };
         if let Err(error) = chain.settle_disabled() {
             return Err(disable_all(&mut chain.control, &chain.motors, error));
@@ -559,6 +593,186 @@ impl<P: CanPort> DamiaoChain<P> {
             MotorState::Fault(code) => Err(DamiaoChainError::FaultPersists { bus_id, code }),
             MotorState::Disabled | MotorState::Enabled => Ok(()),
         }
+    }
+
+    /// Bound, or switch off, each axis' feed-forward, in native state order.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a list of another length and a bound that is not finite and non-negative; the
+    /// bounds in force are kept.
+    pub fn set_feedforward_limits(
+        &mut self,
+        limits: &[FeedforwardLimit],
+    ) -> Result<(), DamiaoChainError> {
+        if limits.len() != self.motors.len() {
+            return Err(DamiaoChainError::FeedforwardLength {
+                expected: self.motors.len(),
+                found: limits.len(),
+            });
+        }
+        for (motor, limit) in self.motors.iter().zip(limits) {
+            let valid = |bound: Option<f64>| bound.is_none_or(|b| b.is_finite() && b >= 0.0);
+            if !(valid(limit.velocity) && valid(limit.torque)) {
+                return Err(DamiaoChainError::FeedforwardLimit {
+                    joint: motor.axis.joint.clone(),
+                });
+            }
+        }
+        self.feedforward_limits.copy_from_slice(limits);
+        Ok(())
+    }
+
+    /// The feed-forward each axis' last MIT frame carried, at the joint, after every clamp:
+    /// what a journal records as the commanded torque beside the measured one.
+    #[must_use]
+    pub fn applied_feedforward(&self) -> &[Feedforward] {
+        &self.applied
+    }
+
+    /// [`ActuatorChain::command`] with each axis' planned velocity and feed-forward torque in
+    /// its MIT frame, each bounded by [`DamiaoChain::set_feedforward_limits`] (a part switched
+    /// off sends zero) and then by the motor's `VMAX` and `TMAX`.
+    ///
+    /// # Errors
+    ///
+    /// As [`ActuatorChain::command`], and refuses before any frame a feed-forward list of
+    /// another length or a non-finite entry.
+    pub fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
+        if feedforward.len() != self.motors.len() {
+            return Err(DamiaoChainError::FeedforwardLength {
+                expected: self.motors.len(),
+                found: feedforward.len(),
+            });
+        }
+        if let Some((motor, _)) = self
+            .motors
+            .iter()
+            .zip(feedforward)
+            .find(|(_, ff)| !(ff.velocity.is_finite() && ff.torque.is_finite()))
+        {
+            return Err(DamiaoChainError::Feedforward {
+                joint: motor.axis.joint.clone(),
+            });
+        }
+        self.drive(joints, Some(feedforward))
+    }
+
+    /// One axis' feed-forward in the motor's own coordinates, `(velocity, torque)`, and what
+    /// that is at the joint. `actuator = g (joint - zero)` with `g = sign * direction *
+    /// reduction`, so velocity scales by `g` and torque, by power, by `1 / g`.
+    fn actuator_feedforward(&self, index: usize, wanted: Feedforward) -> ((f64, f64), Feedforward) {
+        let axis = &self.motors[index].axis;
+        let gain = axis.actuator_from_joint(axis.zero + 1.0);
+        let FeedforwardLimit { velocity, torque } = self.feedforward_limits[index];
+        let MotorLimits { v_max, t_max, .. } = self.limits[index];
+        let (v_max, t_max) = (f64::from(v_max), f64::from(t_max));
+        let speed = velocity.map_or(0.0, |bound| wanted.velocity.clamp(-bound, bound));
+        let effort = torque.map_or(0.0, |bound| wanted.torque.clamp(-bound, bound));
+        let dq = (gain * speed).clamp(-v_max, v_max);
+        let tau = (effort / gain).clamp(-t_max, t_max);
+        (
+            (dq, tau),
+            Feedforward {
+                velocity: dq / gain,
+                torque: tau * gain,
+            },
+        )
+    }
+
+    /// Command each axis' target, with `feedforward` in its MIT frame where given.
+    fn drive(
+        &mut self,
+        joints: &[f64],
+        feedforward: Option<&[Feedforward]>,
+    ) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
+        if self.stop_pending {
+            return Err(DamiaoChainError::StopPending);
+        }
+        check_targets(&self.axes, joints)?;
+        if let Some((motor, joint)) = self
+            .motors
+            .iter()
+            .zip(&self.commandable)
+            .zip(joints)
+            .find(|((_, range), joint)| !range.admits(**joint))
+            .map(|((motor, _), joint)| (motor, joint))
+        {
+            return Err(DamiaoChainError::Uncommandable {
+                joint: motor.axis.joint.clone(),
+                value: *joint,
+            });
+        }
+        let targets: Vec<f64> = self
+            .motors
+            .iter()
+            .zip(joints)
+            .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
+            .collect();
+        if !self.enabled {
+            // A motor power-cycled since open holds its flash TIMEOUT (often none): every
+            // motor's watchdog is rewritten and read back before any motor is enabled.
+            for motor in &self.motors {
+                if let Some(timeout) = motor.can_timeout {
+                    let bus_id = motor.axis.binding.bus_id;
+                    let counts =
+                        timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
+                    write_timeout(&mut self.control, bus_id, counts)?;
+                }
+            }
+            self.control.recv()?;
+            let before = self.feedback_counts()?;
+            // Every motor enabled together, then the first command at once: one at a time with
+            // the vendor's 0.1 s wait, the first motors of a 13-motor chain sat enabled and silent
+            // for 0.7 to 1.3 s and their 0.75 s watchdog latched 0xD (the left arm, 2026-10-26).
+            for index in 0..self.motors.len() {
+                self.control.send_enable(self.bus_id(index))?;
+            }
+            self.await_answers(&before)?;
+            self.expect_all(&before, MotorState::Enabled)?;
+            self.enabled = true;
+        }
+        self.control.recv()?;
+        let before = self.feedback_counts()?;
+        for (index, target) in targets.into_iter().enumerate() {
+            let DamiaoAxis { kp, kd, .. } = self.motors[index];
+            let ((dq, tau), applied) = self.actuator_feedforward(
+                index,
+                feedforward.map_or(Feedforward::default(), |all| all[index]),
+            );
+            self.applied[index] = applied;
+            self.control
+                .control_mit(self.bus_id(index), kp, kd, target, dq, tau)?;
+        }
+        self.command_readings = None;
+        self.await_answers(&before)?;
+        self.expect_all(&before, MotorState::Enabled)?;
+        let received = Instant::now();
+        let feedback = self.feedback()?;
+        let observed: Vec<f64> = self
+            .motors
+            .iter()
+            .zip(&feedback)
+            .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
+            .collect();
+        self.command_readings = Some(
+            observed
+                .iter()
+                .map(|position| AxisReading::Fresh {
+                    position: *position,
+                    received,
+                })
+                .collect(),
+        );
+        Ok(Receipt {
+            evidence: Evidence::BusObservedComplete,
+            observed,
+            feedback,
+        })
     }
 
     /// The limit row each motor reported at open, in native state order.
@@ -809,84 +1023,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
-        if self.stop_pending {
-            return Err(DamiaoChainError::StopPending);
-        }
-        check_targets(&self.axes, joints)?;
-        if let Some((motor, joint)) = self
-            .motors
-            .iter()
-            .zip(&self.commandable)
-            .zip(joints)
-            .find(|((_, range), joint)| !range.admits(**joint))
-            .map(|((motor, _), joint)| (motor, joint))
-        {
-            return Err(DamiaoChainError::Uncommandable {
-                joint: motor.axis.joint.clone(),
-                value: *joint,
-            });
-        }
-        let targets: Vec<f64> = self
-            .motors
-            .iter()
-            .zip(joints)
-            .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
-            .collect();
-        if !self.enabled {
-            // A motor power-cycled since open holds its flash TIMEOUT (often none): every
-            // motor's watchdog is rewritten and read back before any motor is enabled.
-            for motor in &self.motors {
-                if let Some(timeout) = motor.can_timeout {
-                    let bus_id = motor.axis.binding.bus_id;
-                    let counts =
-                        timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
-                    write_timeout(&mut self.control, bus_id, counts)?;
-                }
-            }
-            self.control.recv()?;
-            let before = self.feedback_counts()?;
-            // Every motor enabled together, then the first command at once: one at a time with
-            // the vendor's 0.1 s wait, the first motors of a 13-motor chain sat enabled and silent
-            // for 0.7 to 1.3 s and their 0.75 s watchdog latched 0xD (the left arm, 2026-10-26).
-            for index in 0..self.motors.len() {
-                self.control.send_enable(self.bus_id(index))?;
-            }
-            self.await_answers(&before)?;
-            self.expect_all(&before, MotorState::Enabled)?;
-            self.enabled = true;
-        }
-        self.control.recv()?;
-        let before = self.feedback_counts()?;
-        for (index, target) in targets.into_iter().enumerate() {
-            let DamiaoAxis { kp, kd, .. } = self.motors[index];
-            self.control
-                .control_mit(self.bus_id(index), kp, kd, target, 0.0, 0.0)?;
-        }
-        self.command_readings = None;
-        self.await_answers(&before)?;
-        self.expect_all(&before, MotorState::Enabled)?;
-        let received = Instant::now();
-        let feedback = self.feedback()?;
-        let observed: Vec<f64> = self
-            .motors
-            .iter()
-            .zip(&feedback)
-            .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
-            .collect();
-        self.command_readings = Some(
-            observed
-                .iter()
-                .map(|position| AxisReading::Fresh {
-                    position: *position,
-                    received,
-                })
-                .collect(),
-        );
-        Ok(Receipt {
-            evidence: Evidence::BusObservedComplete,
-            observed,
-            feedback,
-        })
+        self.drive(joints, None)
     }
 
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
@@ -981,7 +1118,10 @@ impl ChainError for DamiaoChainError {
             | Self::Uncommandable { .. }
             | Self::StopPending
             | Self::ClearWhileEnabled
-            | Self::RestingOutside { .. } => ChainFailure::Refused,
+            | Self::RestingOutside { .. }
+            | Self::Feedforward { .. }
+            | Self::FeedforwardLimit { .. }
+            | Self::FeedforwardLength { .. } => ChainFailure::Refused,
             Self::Silent(_) => ChainFailure::Timeout,
             _ => ChainFailure::Fault,
         }

@@ -11,6 +11,7 @@
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::dynamics::LinkInertia;
 use crate::media::Pose;
 
 /// A row-major 4x4 rigid transform in metres.
@@ -186,7 +187,7 @@ pub fn compose(a: &Transform, b: &Transform) -> Transform {
 }
 
 #[allow(clippy::many_single_char_names)] // the axis-angle formula's own names
-fn about([x, y, z]: [f64; 3], angle: f64) -> Transform {
+pub(crate) fn about([x, y, z]: [f64; 3], angle: f64) -> Transform {
     let (s, c) = angle.sin_cos();
     let t = 1.0 - c;
     [
@@ -209,7 +210,7 @@ fn about([x, y, z]: [f64; 3], angle: f64) -> Transform {
     ]
 }
 
-fn along([x, y, z]: [f64; 3], distance: f64) -> Transform {
+pub(crate) fn along([x, y, z]: [f64; 3], distance: f64) -> Transform {
     [
         1.0,
         0.0,
@@ -282,18 +283,18 @@ pub enum TreeError {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct TreeJoint {
-    kind: JointType,
+pub(crate) struct TreeJoint {
+    pub(crate) kind: JointType,
     /// Index into [`Tree::links`].
-    parent: usize,
-    child: usize,
-    origin: Transform,
-    axis: [f64; 3],
+    pub(crate) parent: usize,
+    pub(crate) child: usize,
+    pub(crate) origin: Transform,
+    pub(crate) axis: [f64; 3],
     /// The independent joint this one's position comes from, as `multiplier * leader +
     /// offset` with mimic chains folded; itself with `(1, 0)` when it is independent.
-    leader: String,
-    multiplier: f64,
-    offset: f64,
+    pub(crate) leader: String,
+    pub(crate) multiplier: f64,
+    pub(crate) offset: f64,
 }
 
 /// A description's whole joint tree, parsed once: every link's pose in the root link's frame.
@@ -311,8 +312,10 @@ pub struct Tree {
     links: Vec<String>,
     root: usize,
     /// Parent before child.
-    joints: Vec<TreeJoint>,
+    pub(crate) joints: Vec<TreeJoint>,
     independent: Vec<Axis>,
+    /// Each link's `<inertial>`, in [`Tree::links`] order; zero where the description has none.
+    pub(crate) inertials: Vec<LinkInertia>,
 }
 
 /// One joint whose position places the tree: moving, and mimicking none.
@@ -392,6 +395,36 @@ pub fn from_xyz_rpy([x, y, z]: [f64; 3], [roll, pitch, yaw]: [f64; 3]) -> Transf
         0.0,
         1.0,
     ]
+}
+
+/// A link's `<inertial>` as [`LinkInertia`]: the mass at its origin's centre, the inertia
+/// tensor given there on the origin's axes, carried to the link's own origin and axes.
+fn read_inertial(inertial: Option<roxmltree::Node>, link: &str) -> Result<LinkInertia, TreeError> {
+    let Some(inertial) = inertial else {
+        return Ok(LinkInertia::ZERO);
+    };
+    let origin = child_of(inertial, "origin");
+    let frame = from_xyz_rpy(
+        attribute_floats(origin, "xyz", [0.0; 3])?,
+        attribute_floats(origin, "rpy", [0.0; 3])?,
+    );
+    let mass = child_of(inertial, "mass").map_or(Ok(0.0), |m| number(m, "value", 0.0))?;
+    let tensor = child_of(inertial, "inertia");
+    let read = |key: &str| tensor.map_or(Ok(0.0), |t| number(t, key, 0.0));
+    let about_centre = [
+        read("ixx")?,
+        read("ixy")?,
+        read("ixz")?,
+        read("iyy")?,
+        read("iyz")?,
+        read("izz")?,
+    ];
+    if mass < 0.0 {
+        return Err(TreeError::Malformed(format!(
+            "link {link:?} has a negative mass"
+        )));
+    }
+    Ok(LinkInertia::from_centre(mass, &frame, about_centre))
 }
 
 struct RawJoint {
@@ -540,11 +573,13 @@ impl Tree {
                 .filter(move |n| n.is_element() && n.tag_name().name() == tag)
         };
         let mut links: Vec<String> = Vec::new();
+        let mut inertials: Vec<LinkInertia> = Vec::new();
         for link in elements("link") {
             let name = link
                 .attribute("name")
                 .ok_or_else(|| TreeError::Malformed("a link has no name".into()))?;
             links.push(name.to_owned());
+            inertials.push(read_inertial(child_of(link, "inertial"), name)?);
         }
         let mut raw: Vec<RawJoint> = Vec::new();
         let mut parent_joint: Vec<Option<usize>> = vec![None; links.len()];
@@ -602,6 +637,7 @@ impl Tree {
             root,
             joints,
             independent,
+            inertials,
         })
     }
 
@@ -609,6 +645,10 @@ impl Tree {
     #[must_use]
     pub fn links(&self) -> &[String] {
         &self.links
+    }
+
+    pub(crate) const fn root_index(&self) -> usize {
+        self.root
     }
 
     /// The root link, whose frame every pose is in.
