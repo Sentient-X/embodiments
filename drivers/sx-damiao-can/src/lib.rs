@@ -24,6 +24,6 @@ pub mod static_upper_body;
 pub mod usb2can;
 
 pub use chain::{
-    DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009, DamiaoAxis, DamiaoChain,
-    DamiaoChainError, MotorFeedback, MotorLimits, MotorState,
+    DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009, DAMIAO_DM8009P, DamiaoAxis,
+    DamiaoChain, DamiaoChainError, MotorFeedback, MotorLimits, MotorState,
 };

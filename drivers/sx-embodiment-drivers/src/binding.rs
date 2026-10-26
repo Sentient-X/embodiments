@@ -13,6 +13,10 @@
 //! calibration is applied; until a unit's calibration is supplied, every axis carries
 //! [`UNCALIBRATED_ZERO`] and [`UNCALIBRATED_DIRECTION`].
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use serde::Deserialize;
 use thiserror::Error;
 
 /// One member of the registry's closed `ActuatorModel` vocabulary, by its wire value.
@@ -24,11 +28,12 @@ pub struct ActuatorModel(&'static str);
 
 impl ActuatorModel {
     /// Every member of the registry's `ActuatorModel`, by wire value.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self("feetech_sts3215"),
         Self("damiao_dm4310"),
         Self("damiao_dm4340"),
         Self("damiao_dm8009"),
+        Self("damiao_dm8009p"),
         Self("dynamixel_xl330_m288"),
         Self("dynamixel_xm430_w350"),
     ];
@@ -48,6 +53,51 @@ impl ActuatorModel {
     pub const fn wire(self) -> &'static str {
         self.0
     }
+
+    /// The registry's `ACTUATOR_RATINGS` entry for this model, as `vocabulary.json` carries it.
+    ///
+    /// # Panics
+    ///
+    /// Never for a member of [`Self::ALL`]: the rendered vocabulary rates every one, which
+    /// `tests/vocabulary.rs` holds.
+    #[must_use]
+    pub fn rating(self) -> ActuatorRating {
+        *ratings()
+            .get(self.0)
+            .unwrap_or_else(|| panic!("the registry rates no actuator model {:?}", self.0))
+    }
+}
+
+/// A tested product's ratings: `sx_embodiments.layout.ActuatorRating`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub struct ActuatorRating {
+    /// What torque guards are a share of, N·m.
+    pub peak_torque_nm: f64,
+    /// The supply the vendor specifies, `[min, max]` V inclusive, or `None` where none is
+    /// recorded; the bring-up compares the measured rail against it.
+    pub supply_volts: Option<[f64; 2]>,
+}
+
+impl ActuatorRating {
+    /// Whether `volts` lies in the specified supply range; `None` when none is recorded.
+    #[must_use]
+    pub fn admits_supply(&self, volts: f64) -> Option<bool> {
+        self.supply_volts
+            .map(|[low, high]| (low..=high).contains(&volts))
+    }
+}
+
+fn ratings() -> &'static HashMap<String, ActuatorRating> {
+    #[derive(Deserialize)]
+    struct Vocabulary {
+        ratings: HashMap<String, ActuatorRating>,
+    }
+    static RATINGS: OnceLock<HashMap<String, ActuatorRating>> = OnceLock::new();
+    RATINGS.get_or_init(|| {
+        serde_json::from_str::<Vocabulary>(include_str!("../bindings/vocabulary.json"))
+            .expect("the rendered vocabulary parses")
+            .ratings
+    })
 }
 
 /// One member of the registry's closed `ActuatorBus` vocabulary, by its wire value.

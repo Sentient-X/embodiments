@@ -80,8 +80,66 @@ class ActuatorModel(StrEnum):
     DAMIAO_DM4310 = "damiao_dm4310"
     DAMIAO_DM4340 = "damiao_dm4340"
     DAMIAO_DM8009 = "damiao_dm8009"
+    #: The DM-J8009P-2EC: the DM8009's wire limits ([12.5, 45, 54]) and torque (20 N·m
+    #: nominal, 40 peak) on a crossed-roller output bearing, rated 24 V and run up to 48 V.
+    #: A distinct product, so a body names which one it carries.
+    DAMIAO_DM8009P = "damiao_dm8009p"
     DYNAMIXEL_XL330_M288 = "dynamixel_xl330_m288"
     DYNAMIXEL_XM430_W350 = "dynamixel_xm430_w350"
+
+
+@dataclass(frozen=True, slots=True)
+class SupplyRange:
+    """The supply voltages an actuator is specified to run on, V, both ends inclusive.
+
+    The bring-up compares the measured rail against it before anything moves.
+    """
+
+    min_volts: float
+    max_volts: float
+
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.min_volts) and math.isfinite(self.max_volts)) or not (
+            0.0 < self.min_volts <= self.max_volts
+        ):
+            raise LayoutError("actuator", "supply range requires 0 < min_volts <= max_volts")
+
+    def admits(self, volts: float) -> bool:
+        return self.min_volts <= volts <= self.max_volts
+
+
+@dataclass(frozen=True, slots=True)
+class ActuatorRating:
+    """A tested product's ratings, as its vendor publishes them.
+
+    ``peak_torque_nm`` is what torque guards are a share of. ``supply`` is ``None`` where no
+    vendor range is recorded yet, never a guess.
+    """
+
+    peak_torque_nm: float
+    supply: SupplyRange | None = None
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
+            raise LayoutError("actuator", "peak torque must be a positive finite N·m")
+
+
+#: Every :class:`ActuatorModel`'s rating. Drivers receive it rendered into
+#: ``drivers/sx-embodiment-drivers/bindings/vocabulary.json``.
+ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
+    # 30 kg·cm stall at 12 V.
+    ActuatorModel.FEETECH_STS3215: ActuatorRating(2.94),
+    ActuatorModel.DAMIAO_DM4310: ActuatorRating(7.0),
+    ActuatorModel.DAMIAO_DM4340: ActuatorRating(27.0),
+    ActuatorModel.DAMIAO_DM8009: ActuatorRating(40.0),
+    # openelab.io/products/damiao-brushless-servo-dm-j8009p and
+    # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
+    # output), supports 24-48 V (200 rpm at 48 V), 20/40 N·m nominal/peak, 40-50 A peak.
+    ActuatorModel.DAMIAO_DM8009P: ActuatorRating(40.0, SupplyRange(24.0, 48.0)),
+    # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
+    ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),
+    ActuatorModel.DYNAMIXEL_XM430_W350: ActuatorRating(4.1, SupplyRange(10.0, 14.8)),
+}
 
 
 class ActuatorBus(StrEnum):

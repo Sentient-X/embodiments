@@ -90,3 +90,12 @@ def test_whole_body_layout_exposes_exact_coordinate_kinds() -> None:
     assert state.indices(ChannelKind.BODY_JOINT) == (*range(4, 10), 24, 25)
     assert state.indices(ChannelKind.ARM_JOINT) == tuple(range(10, 24))
     assert state.indices(ChannelKind.GRIPPER) == (26, 27)
+
+
+def test_every_actuator_model_is_rated() -> None:
+    from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorModel, SupplyRange
+
+    assert set(ACTUATOR_RATINGS) == set(ActuatorModel)
+    j8009p = ACTUATOR_RATINGS[ActuatorModel.DAMIAO_DM8009P]
+    assert j8009p.supply == SupplyRange(24.0, 48.0)
+    assert j8009p.supply.admits(48.0) and not j8009p.supply.admits(50.4)
