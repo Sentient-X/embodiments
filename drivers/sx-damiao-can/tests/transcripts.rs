@@ -1,7 +1,11 @@
-//! The crate replays what Damiao's own `DM_CAN.py` did, byte for byte and wait for wait.
+//! The crate sends what Damiao's own `DM_CAN.py` sent, byte for byte and motor by motor.
 //!
 //! `fixtures/dm_can/transcripts.json` is minted by `fixtures/dm_can/mint.py`, which runs the
-//! vendor driver itself; see its header for the sources and the cross-checks.
+//! vendor driver itself; see its header for the sources and the cross-checks. The vendor
+//! brings one motor up at a time, each frame followed by its wait; the chain sends each phase to
+//! every motor back to back and awaits the answers once (`sx_damiao_can::chain`). So a replay
+//! holds every motor's own frames to the vendor's, in the vendor's order for that motor, with
+//! the vendor's answers, and leaves the interleaving across motors and the waits to the chain.
 
 // Parity is bit-for-bit: every float is compared exactly against the vendor's.
 #![allow(clippy::float_cmp)]
@@ -21,6 +25,7 @@ use sx_damiao_can::dm_can::{
     uint_to_float,
 };
 use sx_damiao_can::humanoid::humanoid_upper_body;
+use sx_damiao_can::sim::Sim;
 use sx_damiao_can::usb2can::Usb2CanPort;
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{ActuatorChain, Evidence, InstanceDrive, StopReport};
@@ -217,14 +222,26 @@ fn feedback_on_another_id_or_naming_another_motor_is_dropped() {
     assert_eq!(control.motor(0x01).unwrap().feedback_count, 0);
 }
 
-/// The recorded bus: each write must be the next recorded one, and makes its answers readable;
-/// each wait must be the next recorded wait.
+/// The recorded bus: each write must be the next recorded write to the same motor, and makes
+/// its recorded answers readable. The vendor's waits are not the chain's and are not held.
 struct Replay {
-    events: VecDeque<Value>,
+    /// The recorded writes not yet matched, in recorded order.
+    writes: Vec<Value>,
     pending: Vec<u8>,
-    /// Once the vendor's recording is exhausted, what this crate wrote beyond it: the disables
-    /// a refused open ends with, which the vendor's driver does not send. `None` refuses any.
+    /// What this crate wrote to a motor beyond the vendor's recording of it: the disables a
+    /// refused open ends with, which the vendor's driver does not send. `None` refuses any.
     epilogue: Option<Vec<String>>,
+}
+
+/// The motor a USB2CAN transmit packet addresses: its CAN id, or a register frame's first two
+/// data bytes.
+fn motor_of(packet: &[u8]) -> u16 {
+    let id = u16::from_le_bytes([packet[13], packet[14]]);
+    if id == 0x7FF {
+        u16::from_le_bytes([packet[21], packet[22]])
+    } else {
+        id
+    }
 }
 
 #[derive(Clone)]
@@ -233,49 +250,22 @@ struct ReplayStream(Arc<Mutex<Replay>>);
 impl ReplayStream {
     fn new(events: &[Value]) -> Self {
         Self(Arc::new(Mutex::new(Replay {
-            events: events.iter().cloned().collect(),
+            writes: events
+                .iter()
+                .filter(|event| event.get("write").is_some())
+                .cloned()
+                .collect(),
             pending: Vec::new(),
             epilogue: None,
         })))
     }
 
-    /// The recording, then whatever this crate writes after it, kept for the test to read.
-    fn with_epilogue(events: &[Value]) -> Self {
-        let stream = Self::new(events);
-        stream.0.lock().unwrap().epilogue = Some(Vec::new());
-        stream
-    }
-
-    fn epilogue(&self) -> Vec<String> {
-        self.0.lock().unwrap().epilogue.clone().unwrap_or_default()
-    }
-
     fn port(&self) -> Usb2CanPort<Self> {
-        let waits = self.clone();
-        Usb2CanPort::with_pause(
-            self.clone(),
-            Box::new(move |duration: Duration| {
-                let mut replay = waits.0.lock().unwrap();
-                if replay.events.is_empty() && replay.epilogue.is_some() {
-                    return;
-                }
-                let next = replay.events.pop_front();
-                drop(replay);
-                let seconds = next
-                    .as_ref()
-                    .and_then(|event| event.get("sleep"))
-                    .and_then(Value::as_f64)
-                    .unwrap_or_else(|| panic!("waited {duration:?}; the vendor did {next:?}"));
-                assert!(
-                    (duration.as_secs_f64() - seconds).abs() < 1e-9,
-                    "waited {duration:?}; the vendor waited {seconds} s"
-                );
-            }),
-        )
+        Usb2CanPort::with_pause(self.clone(), Box::new(|_: Duration| {}))
     }
 
     fn remaining(&self) -> usize {
-        self.0.lock().unwrap().events.len()
+        self.0.lock().unwrap().writes.len()
     }
 }
 
@@ -292,24 +282,28 @@ impl Read for ReplayStream {
 impl Write for ReplayStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut replay = self.0.lock().unwrap();
-        if replay.events.is_empty()
-            && let Some(epilogue) = replay.epilogue.as_mut()
-        {
-            epilogue.push(hex(buf));
+        let motor = motor_of(buf);
+        let Some(index) = replay
+            .writes
+            .iter()
+            .position(|event| motor_of(&unhex(event["write"].as_str().unwrap())) == motor)
+        else {
+            match replay.epilogue.as_mut() {
+                Some(epilogue) => epilogue.push(hex(buf)),
+                None => panic!(
+                    "wrote {} to motor {motor}; the vendor sent it nothing more",
+                    hex(buf)
+                ),
+            }
             return Ok(buf.len());
-        }
-        let next = replay.events.pop_front();
-        let expected = next
-            .as_ref()
-            .and_then(|event| event.get("write"))
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| panic!("wrote {}; the vendor did {next:?}", hex(buf)));
+        };
+        let next = replay.writes.remove(index);
         assert_eq!(
             hex(buf),
-            expected,
-            "a written packet differs from the vendor's"
+            next["write"].as_str().unwrap(),
+            "a packet to motor {motor} differs from the vendor's next one to it"
         );
-        for answer in next.as_ref().unwrap()["respond"].as_array().unwrap() {
+        for answer in next["respond"].as_array().unwrap() {
             let bytes = unhex(answer.as_str().unwrap());
             replay.pending.extend(bytes);
         }
@@ -330,41 +324,16 @@ fn disable_frame(id: u16) -> String {
 }
 
 /// A recorded session as this crate drives it: the chain first disables every motor it names,
-/// each with the vendor's 0.01 s disable wait and no answer read, so a motor left enabled by an
-/// earlier run is released before bring-up writes it (`DamiaoChain::open`). The vendor's
-/// recorded traffic follows, its enables sent together (`enabled_together`).
+/// so a motor left enabled by an earlier run is released before bring-up writes it
+/// (`DamiaoChain::open`); the recording has no answers to those. The vendor's recorded traffic
+/// follows unchanged.
 fn opened_after_disables(motors: &[DamiaoAxis], events: &[Value]) -> Vec<Value> {
     motors
         .iter()
-        .flat_map(|motor| {
-            [
-                serde_json::json!({"write": disable_frame(motor.axis.binding.bus_id), "respond": []}),
-                serde_json::json!({"sleep": 0.01}),
-            ]
+        .map(|motor| {
+            serde_json::json!({"write": disable_frame(motor.axis.binding.bus_id), "respond": []})
         })
-        .chain(enabled_together(events))
-        .collect()
-}
-
-/// The vendor's traffic as the chain sends it: every enable frame back to back, without the
-/// 0.1 s `DM_CAN.py` waits after each, so no motor sits enabled and silent past its watchdog.
-fn enabled_together(events: &[Value]) -> Vec<Value> {
-    let enable = |event: &Value| {
-        event
-            .get("write")
-            .and_then(Value::as_str)
-            .is_some_and(|write| write.contains("fffffffffffffffc"))
-    };
-    events
-        .iter()
-        .enumerate()
-        .filter(|(index, event)| {
-            !(event.get("sleep").and_then(Value::as_f64) == Some(0.1)
-                && index
-                    .checked_sub(1)
-                    .is_some_and(|before| enable(&events[before])))
-        })
-        .map(|(_, event)| event.clone())
+        .chain(events.iter().cloned())
         .collect()
 }
 
@@ -513,39 +482,52 @@ fn a_faulted_and_a_silent_motor_leave_the_stop_unproven_and_motion_refused() {
 
 #[test]
 fn a_vmax_no_damiao_table_carries_is_refused_at_open() {
-    let session = session("limit_mismatch");
+    // The vendor's recording of this refusal stops at the second motor; the chain reads every
+    // motor's limits in one phase, so the simulated bus answers for all seven.
     let motors = b601(&nominal()).expect("the B601-DM composes");
-    let stream = ReplayStream::with_epilogue(&opened_after_disables(
-        &motors,
-        session["events"].as_array().unwrap(),
-    ));
     let ids: Vec<u16> = motors
         .iter()
         .map(|motor| motor.axis.binding.bus_id)
         .collect();
-    match DamiaoChain::open(stream.port(), motors) {
+    let bus = Sim::b601(&ids);
+    let recorded = session("limit_mismatch");
+    let error = &recorded["steps"][0]["error"];
+    let id = u16::try_from(error["limit_mismatch"].as_u64().unwrap()).unwrap();
+    #[allow(clippy::cast_possible_truncation)]
+    let reported = f64_of(&error["motor"]) as f32;
+    bus.state()
+        .motors
+        .get_mut(&id)
+        .expect("the motor")
+        .registers
+        .insert(DmVariable::VMAX as u8, reported.to_le_bytes());
+    match DamiaoChain::open(bus.clone(), motors) {
         Err(DamiaoChainError::LimitMismatch {
             bus_id,
             register,
             motor,
         }) => {
-            let error = &session["steps"][0]["error"];
-            assert_eq!(u64::from(bus_id), error["limit_mismatch"].as_u64().unwrap());
+            assert_eq!(bus_id, id);
             assert_eq!(register, DmVariable::VMAX);
-            #[allow(clippy::cast_possible_truncation)]
-            let reported = f64_of(&error["motor"]) as f32;
             assert_eq!(motor, Some(ParamValue::Float(reported)));
         }
         Err(error) => panic!("{error}"),
         Ok(_) => panic!("opened a motor with a VMAX no table carries"),
     }
-    assert_eq!(stream.remaining(), 0);
-    // Beyond the vendor: every motor the chain names is sent its disable, since one brought up
-    // before the refusal may hold torque.
+    // Every motor the chain names is sent its disable last, since one brought up before the
+    // refusal may hold torque.
+    let state = bus.state();
+    let last: Vec<CanFrame> = state.frames[state.frames.len() - ids.len()..].to_vec();
     assert_eq!(
-        stream.epilogue(),
-        ids.iter().map(|id| disable_frame(*id)).collect::<Vec<_>>()
+        last,
+        ids.iter()
+            .map(|id| CanFrame {
+                id: u32::from(*id),
+                data: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD],
+            })
+            .collect::<Vec<_>>()
     );
+    assert!(state.motors.values().all(|motor| motor.state == 0));
 }
 
 #[test]
@@ -566,13 +548,13 @@ fn a_target_outside_the_commandable_range_sends_nothing() {
     targets[0] = 2.7; // inside the URDF's 2.8 rad, past the deployed soft box's 150 deg
     assert!(matches!(
         chain.command(&targets),
-        Err(DamiaoChainError::Uncommandable { .. })
+        Err(DamiaoChainError::Target(_))
     ));
     targets[0] = 0.0;
     targets[6] = 0.05; // inside the finger's stroke, past the gripper motor's open angle
     assert!(matches!(
         chain.command(&targets),
-        Err(DamiaoChainError::Uncommandable { .. })
+        Err(DamiaoChainError::Target(_))
     ));
     assert!(matches!(
         chain.command(&[0.0; 6]),
@@ -617,49 +599,4 @@ fn the_transcripts_are_the_bytes_the_provenance_names() {
         hex(&digest),
         provenance["transcripts.json"]["sha256"].as_str().unwrap()
     );
-}
-
-#[test]
-fn every_recorded_stop_waits_inside_the_chains_stop_budget() {
-    let budget_of = |name: &str| {
-        let session = session(name);
-        let events = session["events"].as_array().unwrap();
-        let opened = usize::try_from(session["steps"][0]["event_count"].as_u64().unwrap()).unwrap();
-        let motors = chain_of(&session);
-        let stream = ReplayStream::new(&opened_after_disables(&motors, &events[..opened]));
-        DamiaoChain::open(stream.port(), motors)
-            .expect("open")
-            .stop_budget()
-    };
-    let budgets = [
-        ("b601-dm", budget_of("session")),
-        (
-            "sentient-humanoid-upper-body",
-            budget_of("humanoid_session"),
-        ),
-    ];
-    for session in transcripts()["sessions"].as_array().unwrap() {
-        let budget = budgets
-            .iter()
-            .find(|(body, _)| session["body"] == *body)
-            .map(|(_, budget)| *budget)
-            .expect("a budget for the session's body");
-        let events = session["events"].as_array().unwrap();
-        let mut start = 0;
-        for step in session["steps"].as_array().unwrap() {
-            let end = usize::try_from(step["event_count"].as_u64().unwrap()).unwrap();
-            if step["step"] == "stop" {
-                let waited: f64 = events[start..end]
-                    .iter()
-                    .filter_map(|event| event.get("sleep").and_then(Value::as_f64))
-                    .sum();
-                assert!(
-                    Duration::from_secs_f64(waited) < budget,
-                    "{}: the stop waited {waited} s against a {budget:?} budget",
-                    session["name"]
-                );
-            }
-            start = end;
-        }
-    }
 }

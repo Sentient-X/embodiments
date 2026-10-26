@@ -29,7 +29,7 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
 | Per-motor answers | `sx_damiao_can::MotorFeedback`: state (`MotorState` from the first-byte nibble), position, velocity, torque, MOS and rotor temperatures |
 | A read-only scan | `sx_damiao_can::scan::scan(port, ids)`: `read_motor_param` of `MST_ID` for each id and, from each motor answering, `ESC_ID`, `CTRL_MODE`, `PMAX`, `VMAX`, `TMAX`, with the arbitration id its replies arrive on, into a `BusScan`; `MotorScan::fits(model)` checks the ranges against the model's row. No mode switch and no enable; it speaks through `scan::ReadOnlyCanPort`, which refuses every frame but a register read (`0x7FF`, `0x33`) before the link. `sx-commission` is its consumer |
 | Limits found at open | `DamiaoChain::limits()`: the `PMAX`, `VMAX`, `TMAX` each motor reported and is scaled by |
-| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, from the crate's own waits, polls and the port's `frame_allowance` (on a USB2CAN bridge, 122 ms for the B601's six arm motors, 52 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 174 ms; 192 ms for the humanoid upper body's eleven, 248 ms for the static upper body's fifteen; on `SocketCAN`, whose sends may wait 10 ms for queue room, the static upper body's is 518 ms) |
+| Stop budget | `ActuatorChain::stop_budget()`: the longest `stop` takes on this chain, two phases (disable all, then refresh the silent), each a frame per motor at the port's `frame_allowance`, a 20 ms answer wait and one more allowance (on a USB2CAN bridge, 68 ms for the B601's six arm motors, 48 ms for its gripper; `open_b601`'s composite stops one after the other, so its budget is their sum, 116 ms; 88 ms for the humanoid upper body's eleven, 104 ms for the static upper body's fifteen; on `SocketCAN`, whose sends may wait 10 ms for queue room, the static upper body's is 392 ms) |
 
 - **Read-only positions.** `read_positions` drains older replies, snapshots feedback counters,
   requests status with the vendor's `0xCC` operation, and returns one `AxisReading` per motor in
@@ -43,22 +43,37 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   chains on clones of one `sx_embodiment_drivers::can::SharedCanPort` over a `Usb2CanPort`. The
   jaw's tactile stream is a separate source and stays outside the chain.
 - **No frame-level API.** Pure frame builders and a per-frame `exchange` are not exposed:
-  every bus operation is a `dm_can::MotorControl` call that sends and reads as `DM_CAN.py`
-  does, and the chain judges the answers.
+  every frame is one `DM_CAN.py` sends, built by `dm_can::MotorControl`, and the chain judges
+  the answers.
+- **Phased bring-up: a departure from the vendor's serial order.** `DM_CAN.py` brings one
+  motor up at a time, each frame followed by its own wait (0.05 s per register, 0.1 s per
+  enable). On the static upper body (ZLG USBCANFD-200U, 2026-10-26) that took over 4 s to open
+  and 2.25 s to enable fifteen motors, and the first motor enabled sat silent for 1.4 s against
+  its 0.75 s `TIMEOUT` and latched fault 0xD before its first command. Every multi-motor
+  operation here is phases: one frame to every motor back to back, then the answers awaited
+  once against one deadline. Open: disable all, MIT mode for all, every limit register, disable
+  and settle (4 round trips, 90 frames for fifteen, no fixed wait). The first command: write
+  every `TIMEOUT`, read every one back, enable all, MIT for all (4 round trips). Stop: disable
+  all, then refresh the silent. Each motor's own frames keep the vendor's order, which
+  `tests/transcripts.rs` holds motor by motor against the vendor's recordings; only the
+  interleaving across motors and the waits differ. A frame refused for a full transmit queue
+  (`WouldBlock`) is sent again as the bus drains, within the port's `frame_allowance`.
 - **Commandable ranges.** `commandable()` is each axis's declared bounds intersected with the
   motor range: for the arm, the URDF limits inside the deployed LeRobot driver's soft box; for
   the gripper, 0..0.045 m, what the motor's -5.0 rad open angle reaches of the 0.0715 m stroke.
-  A command outside it is refused before any frame is sent; a leader should be mapped into it.
-  An axis whose motor range spans more than one turn (the static upper body's forearm yaws) is
-  cut to one turn of the motor's zero, -pi..pi: Damiao's output encoder is single-turn, so
-  outside that window a joint reads as its alias after a power cycle. Open refuses a motor
-  resting more than `chain::REST_TOLERANCE` (0.05 rad) outside its commandable range, which is
-  how an aliased reading shows; a joint turned by hand onto an alias inside the window is not
-  caught.
+  The range limits motion, not state: each command is checked against it widened to where
+  the motor last answered (`CommandRange::reaching`: `[min(lower, now), max(upper, now)]`), so
+  a joint resting outside (the static upper body's left wrist roll, found at -2.937 rad against
+  +/-2.097) can be held or moved toward the range, never further out, and nothing refuses the
+  open for where a joint rests. `Governor` steps within the same interval. An axis whose motor
+  range spans more than one turn (the static upper body's forearm yaws) is cut to one turn of
+  the motor's zero, -pi..pi: Damiao's output encoder is single-turn, so outside that window a
+  joint reads as its alias after a power cycle; an aliased joint is commanded from its alias
+  reading.
 - **Communication timeout.** A `DamiaoAxis` with `can_timeout` has the motor's `TIMEOUT`
   register (0x09, 50 µs per count, Damiao's DM-J4340-2EC manual V1.1 pp. 20 and 30) written in
-  RAM at open and again before every enable, each time confirmed by echo and read-back, and no
-  motor is enabled until every motor confirmed; never saved to flash. An enabled motor that
+  RAM right before every enable, confirmed by echo and read-back, and no motor is enabled
+  until every motor confirmed; the first command follows the enable at once; never saved to flash. An enabled motor that
   hears no command for that long disables itself and reports fault 0xD until power-cycled or
   cleared with `FF..FB`. Open sends that clear (`DamiaoChain::clear_fault`, refused while
   enabled) once to a motor answering 0xD while disabled and still refuses one whose fault

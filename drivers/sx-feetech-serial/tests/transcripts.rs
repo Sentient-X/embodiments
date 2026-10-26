@@ -808,10 +808,9 @@ fn a_line_that_keeps_delivering_foreign_bytes_still_times_out() {
 }
 
 #[test]
-fn the_so101_keeps_lerobots_speed_registers_and_claims_no_approach_limit() {
+fn the_so101_keeps_lerobots_speed_registers() {
     let golden = golden();
-    let chain = open(&opening(&golden), "so101");
-    assert!((0..6).all(|axis| !chain.approach_speed_limited(axis)));
+    open(&opening(&golden), "so101");
     // Nothing writes Goal_Speed (46); Acceleration (41) is configure_motors' 254 alone.
     let writes = |address: u8| {
         golden

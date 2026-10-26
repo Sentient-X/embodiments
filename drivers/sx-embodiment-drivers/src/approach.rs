@@ -3,8 +3,7 @@
 //! A serial servo's firmware can bound its own motion: Feetech STS servos by `Goal_Speed` and
 //! `Acceleration`, Dynamixel X servos by `Profile Velocity` and `Profile Acceleration`. A body
 //! that declares an [`ApproachLimit`] for a servo has its driver write those registers and read
-//! them back, so even a goal far from where the servo rests is approached slowly; the chain
-//! then reports [`crate::ActuatorChain::approach_speed_limited`] for that axis. Each driver
+//! them back, so even a goal far from where the servo rests is approached slowly. Each driver
 //! converts the joint's limit to its vendor's register steps.
 
 /// The fastest a servo moves toward any goal, in the joint's units: rad/s and rad/s².

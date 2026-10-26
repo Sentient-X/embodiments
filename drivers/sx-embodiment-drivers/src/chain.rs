@@ -29,6 +29,11 @@ pub struct Receipt<F> {
 
 /// The joint range a chain commands on one axis: the declared bounds intersected with what
 /// the driver's configuration lets the actuator reach.
+///
+/// The range limits motion, not state. A joint may rest outside it (left there by hand, or
+/// against a stop that reads past the limit); each step may then hold it or move it toward the
+/// range, never further out: the step's interval is [`CommandRange::reaching`] where the joint
+/// is now, and it shrinks as the joint comes in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CommandRange {
     pub lower: f64,
@@ -40,6 +45,51 @@ impl CommandRange {
     pub fn admits(&self, joint: f64) -> bool {
         joint.is_finite() && (self.lower..=self.upper).contains(&joint)
     }
+
+    /// This range widened to include `at`, where the joint is now:
+    /// `[min(lower, at), max(upper, at)]`. A position that is not finite widens nothing.
+    #[must_use]
+    pub const fn reaching(self, at: f64) -> Self {
+        if !at.is_finite() {
+            return self;
+        }
+        Self {
+            lower: self.lower.min(at),
+            upper: self.upper.max(at),
+        }
+    }
+}
+
+/// Refuse a vector of the wrong width, or a value outside its axis's range widened to where
+/// the axis is now ([`CommandRange::reaching`]): `at`, one position per axis, or the plain
+/// ranges when the chain observes none.
+///
+/// # Errors
+///
+/// Returns the width mismatch or the first value outside its interval or not finite.
+pub fn check_reach(
+    axes: &[BoundAxis],
+    ranges: &[CommandRange],
+    at: Option<&[f64]>,
+    joints: &[f64],
+) -> Result<(), TargetError> {
+    if axes.len() != joints.len() {
+        return Err(TargetError::Width {
+            expected: axes.len(),
+            actual: joints.len(),
+        });
+    }
+    let at = at.filter(|at| at.len() == joints.len());
+    for (index, ((axis, range), joint)) in axes.iter().zip(ranges).zip(joints).enumerate() {
+        let reach = at.map_or(*range, |at| range.reaching(at[index]));
+        if !reach.admits(*joint) {
+            return Err(TargetError::OutOfBounds {
+                joint: axis.joint.clone(),
+                value: *joint,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// What a stop's answers proved, actuator by actuator, by bus address.
@@ -164,7 +214,9 @@ pub fn fresh_positions(readings: &[AxisReading]) -> Option<Vec<f64>> {
 pub enum TargetError {
     #[error("expected {expected} values in native state order, got {actual}")]
     Width { expected: usize, actual: usize },
-    #[error("joint {joint} target {value} is outside its declared bounds or not finite")]
+    #[error(
+        "joint {joint} target {value} is outside where it may be commanded (its range, widened to where it is now) or not finite"
+    )]
     OutOfBounds { joint: String, value: f64 },
 }
 
@@ -229,7 +281,8 @@ pub trait ActuatorChain {
     ///
     /// # Errors
     ///
-    /// Refuses a vector outside the commandable ranges before any frame is sent; reports the
+    /// Refuses a vector outside the commandable ranges, each widened to where its axis is now
+    /// ([`CommandRange::reaching`]), before any frame is sent; reports the
     /// link's failure or an actuator whose answer contradicts the command.
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error>;
 
@@ -264,14 +317,6 @@ pub trait ActuatorChain {
         None
     }
 
-    /// Whether the device itself limits how fast axis `axis` (index in native state order)
-    /// moves toward a target, so a target far from where it rests is approached at the device's
-    /// own pace rather than stepped to. A chain that cannot promise this says `false`.
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        let _ = axis;
-        false
-    }
-
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
     fn clear_faults(&mut self) {}
@@ -304,6 +349,30 @@ mod tests {
             ..StopReport::default()
         };
         assert_eq!(report.clone().prove(), Err(report));
+    }
+
+    #[test]
+    fn a_range_reaches_where_the_joint_is_and_no_further() {
+        let range = CommandRange {
+            lower: -1.0,
+            upper: 1.0,
+        };
+        assert_eq!(range.reaching(0.5), range);
+        assert_eq!(
+            range.reaching(-2.5),
+            CommandRange {
+                lower: -2.5,
+                upper: 1.0
+            }
+        );
+        assert_eq!(
+            range.reaching(3.0),
+            CommandRange {
+                lower: -1.0,
+                upper: 3.0
+            }
+        );
+        assert_eq!(range.reaching(f64::NAN), range);
     }
 
     #[test]

@@ -48,9 +48,10 @@
 //!   (`read1ByteTxRx`); a servo is proven stopped only when it reads 0.
 //! - After open and after every stop it reads each servo's `Present_Position`
 //!   (`read2ByteTxRx`, sign-magnitude at bit 15), as `LeRobot` reads an observation, and
-//!   reports it as [`ActuatorChain::last_observed`] until the next command, so a caller can
-//!   start from where the body rests. A servo resting outside its calibrated range is reported
-//!   there, unclamped. A position read that fails reports nothing; it does not fail open.
+//!   reports it as [`ActuatorChain::last_observed`], as it does every command's SYNC READ where
+//!   every servo answered, so a caller can start from where the body rests. A servo resting
+//!   outside its calibrated range is reported there, unclamped. A position read that fails
+//!   reports nothing; it does not fail open.
 //!
 //! A goal position is computed from a joint target in three steps:
 //!
@@ -75,9 +76,8 @@
 //!   read back; open refuses a servo that does not hold them. `LeRobot` leaves `Goal_Speed` at
 //!   0, which the servo reads as its full speed, and writes `Acceleration` 254; here they
 //!   replace that, so a goal the servo's own position limits clamp, or any first goal far from
-//!   where it rests, is approached at the limit: [`ActuatorChain::approach_speed_limited`]
-//!   reports it. A servo without one (the SO-101 follower's) keeps `LeRobot`'s registers and
-//!   reports `false`, so a governor refuses to move it from outside its range.
+//!   where it rests, is approached at the limit. A servo without one (the SO-101 follower's)
+//!   keeps `LeRobot`'s registers and is never given a goal its limits would clamp.
 //!
 //!   **The `Goal_Speed` unit is unverified.** 0.732 rpm per step is the vendor's own
 //!   `sms_sts/write.py` comment ("V=60 * 0.732=43.92rpm"); Feetech's STS documentation and its
@@ -105,7 +105,13 @@
 //!   move runs at that limit. A servo resting outside without one (the SO-101 follower's)
 //!   refuses the enable ([`FeetechChainError::RestsOutside`]): move it inside by hand. Open and
 //!   every stop report the unclamped rest through [`ActuatorChain::last_observed`], outside the
-//!   axis's commandable range, so a governor's approach phase covers that move.
+//!   axis's commandable range.
+//! - **Range limits motion, not state.** Each axis is commanded within its commandable range
+//!   widened to where it was last observed (`CommandRange::reaching`), as every chain is, so a
+//!   governor holds a servo resting outside or steps it in, never further out. The firmware
+//!   cannot hold a goal outside its limits: a servo whose approach limit is confirmed is given
+//!   such a target's nearest in-range goal, which it approaches at that limit; one without is
+//!   refused it.
 //! - **The commandable range is what the unit reaches.** A [`MotorNormMode::Degrees`] axis is
 //!   commanded within its declared bounds intersected with its unit's calibrated reach,
 //!   `normalize(range_min)..normalize(range_max)` through the drive map in the axis's unit
@@ -152,7 +158,7 @@ use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
     ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
-    TargetError, fresh_positions, validate_chain,
+    TargetError, check_reach, fresh_positions, validate_chain,
 };
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
@@ -982,11 +988,30 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             }
             .into());
         }
+        check_reach(
+            &self.axes,
+            &self.commandable,
+            self.observed.as_deref(),
+            joints,
+        )?;
+        // A target outside the range, toward it from where the servo is, goes to the servo as
+        // its nearest in-range goal, which the firmware would clamp it to anyway, only where the
+        // servo approaches any goal at its confirmed limit.
         let goals = self
             .servos
             .iter()
             .zip(joints)
-            .map(|(servo, joint)| servo.goal_position(*joint))
+            .zip(&self.commandable)
+            .enumerate()
+            .map(|(index, ((servo, joint), range))| {
+                let limited = self.approach_limited.get(index).copied().unwrap_or(false);
+                let goal = if limited {
+                    joint.clamp(range.lower, range.upper)
+                } else {
+                    *joint
+                };
+                servo.goal_position(goal)
+            })
             .collect::<Result<Vec<u16>, _>>()?;
         let mut writer = GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2);
         for (servo, goal) in self.servos.iter().zip(goals) {
@@ -1005,11 +1030,18 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             self.enabled = true;
         }
         match writer.tx_packet(&mut self.sms.ph) {
-            CommResult::Success => Ok(Receipt {
-                evidence: Evidence::DispatchAttempted,
-                observed: self.sync_read_positions()?,
-                feedback: Vec::new(),
-            }),
+            CommResult::Success => {
+                let observed = self.sync_read_positions()?;
+                self.observed = observed
+                    .iter()
+                    .all(|joint| joint.is_finite())
+                    .then(|| observed.clone());
+                Ok(Receipt {
+                    evidence: Evidence::DispatchAttempted,
+                    observed,
+                    feedback: Vec::new(),
+                })
+            }
             result => {
                 // Whatever the servos hold now, the next command proves it again.
                 self.enabled = false;
@@ -1077,17 +1109,12 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         self.present_positions()
     }
 
-    /// A servo's, once the approach limit it declares was confirmed.
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        self.approach_limited.get(axis).copied().unwrap_or(false)
-    }
-
-    /// Where every servo was read at open or after the last stop, when no command has been
-    /// sent since and every servo answered.
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
         self.command_readings.clone()
     }
 
+    /// Where every servo was read at open, after the last stop, or by the last command's SYNC
+    /// READ, when every servo answered.
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.observed.clone()
     }

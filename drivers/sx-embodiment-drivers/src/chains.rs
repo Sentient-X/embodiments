@@ -3,7 +3,8 @@
 //! [`Composite`](crate::Composite) is two chains of known types; [`Chains`] is the same rule
 //! over a list, for a body whose buses are read from its bindings, each chain usually boxed
 //! behind one error and feedback type. The vector is each chain's axes in list order. Every
-//! target is checked against every chain's commandable ranges before any chain is written;
+//! target is checked against every chain's commandable ranges, each widened to where that
+//! chain observes the axis now ([`CommandRange::reaching`]), before any chain is written;
 //! then each chain is commanded in order. A chain that fails after an earlier one applied is a
 //! [`ChainFailure::Fault`] whatever it reported, since that earlier device already holds its
 //! new target. A stop stops every chain, whatever an earlier one answered, and is proven only
@@ -26,7 +27,7 @@ use thiserror::Error;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
-    StopReport, TargetError,
+    StopReport, TargetError, check_reach,
 };
 
 /// Chains in native state order, driven as one.
@@ -104,18 +105,18 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             }
             .into());
         }
-        if let Some((axis, value)) = self
-            .axes
-            .iter()
-            .zip(&self.commandable)
-            .zip(joints)
-            .find_map(|((axis, range), value)| (!range.admits(*value)).then_some((axis, *value)))
-        {
-            return Err(TargetError::OutOfBounds {
-                joint: axis.joint.clone(),
-                value,
-            }
-            .into());
+        // Each chain's slice against its ranges widened to where it observes its axes now.
+        let mut first = 0;
+        for chain in &self.members {
+            let width = chain.axes().len();
+            let span = first..first + width;
+            check_reach(
+                chain.axes(),
+                &self.commandable[span.clone()],
+                chain.last_observed().as_deref(),
+                &joints[span],
+            )?;
+            first += width;
         }
         let mut evidence = Evidence::BusObservedComplete;
         let mut observed = Vec::with_capacity(joints.len());
@@ -194,19 +195,6 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         Some(observed)
     }
 
-    /// The chain carrying `axis` answers for it.
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        let mut first = 0;
-        for chain in &self.members {
-            let width = chain.axes().len();
-            if axis < first + width {
-                return chain.approach_speed_limited(axis - first);
-            }
-            first += width;
-        }
-        false
-    }
-
     /// One stop after the other.
     fn stop_budget(&self) -> Duration {
         self.members
@@ -257,10 +245,6 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
         (**self).command_readings()
-    }
-
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        (**self).approach_speed_limited(axis)
     }
 
     fn clear_faults(&mut self) {

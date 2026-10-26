@@ -1,7 +1,7 @@
 //! What keeps the static upper body from moving where or how it should not, on the simulated
-//! Damiao bus: each motor's communication timeout, the one-turn window, the resting check at
-//! open, the governor's slew from where the body rests, and what a stop and a cleared fault
-//! prove.
+//! Damiao bus: each motor's communication timeout, armed right before a phased enable so none
+//! trips; a joint resting outside its range, held or brought in and never sent further out; the
+//! governor's slew from where the body rests; and what a stop and a cleared fault prove.
 
 use std::time::Duration;
 
@@ -30,34 +30,60 @@ fn index_of(joint: &str) -> usize {
         .expect("a joint of the body")
 }
 
-#[test]
-fn open_writes_every_motors_timeout_to_ram_and_reads_it_back() {
-    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
-    let bus = Sim::for_axes(&axes);
-    DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
-    // 0.75 s in the register's 50 µs counts.
-    let counts = 15_000_u32.to_le_bytes();
-    let state = bus.state();
-    for motor in &axes {
-        let id = motor.axis.binding.bus_id.to_le_bytes();
-        let write = CanFrame {
+/// The TIMEOUT write (0x55 to register 0x09) and read frames for `id`.
+fn timeout_frames(id: u16, counts: [u8; 4]) -> (CanFrame, CanFrame) {
+    let id = id.to_le_bytes();
+    (
+        CanFrame {
             id: 0x7FF,
             data: [
                 id[0], id[1], 0x55, 0x09, counts[0], counts[1], counts[2], counts[3],
             ],
-        };
-        let read = CanFrame {
+        },
+        CanFrame {
             id: 0x7FF,
             data: [id[0], id[1], 0x33, 0x09, 0, 0, 0, 0],
-        };
+        },
+    )
+}
+
+#[test]
+fn the_first_enable_writes_every_motors_timeout_to_ram_and_reads_it_back() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    // Open arms no watchdog: it is armed right before the enable.
+    assert!(
+        bus.state()
+            .motors
+            .values()
+            .all(|motor| !motor.registers.contains_key(&0x09))
+    );
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    // 0.75 s in the register's 50 µs counts.
+    let counts = 15_000_u32.to_le_bytes();
+    let state = bus.state();
+    let first_enable = state
+        .frames
+        .iter()
+        .position(|frame| frame.data == [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+        .expect("an enable");
+    for motor in &axes {
+        let (write, read) = timeout_frames(motor.axis.binding.bus_id, counts);
         let write_at = state
             .frames
             .iter()
             .position(|frame| *frame == write)
             .expect("the TIMEOUT write");
+        let read_at = state
+            .frames
+            .iter()
+            .position(|frame| *frame == read)
+            .expect("the TIMEOUT read");
         assert!(
-            state.frames[write_at..].contains(&read),
-            "the TIMEOUT read follows the write"
+            write_at < read_at && read_at < first_enable,
+            "written, read, then enabled"
         );
         assert_eq!(
             state.motors[&motor.axis.binding.bus_id].registers[&0x09],
@@ -74,7 +100,7 @@ fn open_writes_every_motors_timeout_to_ram_and_reads_it_back() {
 }
 
 #[test]
-fn a_motor_that_does_not_hold_its_timeout_refuses_the_open() {
+fn a_motor_that_does_not_hold_its_timeout_is_never_enabled() {
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
     let first = axes[0].axis.binding.bus_id;
     // A timeout below one count is refused before any frame.
@@ -93,46 +119,124 @@ fn a_motor_that_does_not_hold_its_timeout_refuses_the_open() {
         .expect("first")
         .ignored
         .insert(0x09);
+    let mut chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
     assert!(matches!(
-        DamiaoChain::open(bus.clone(), axes),
+        chain.command(&rest),
         Err(DamiaoChainError::TimeoutNotConfirmed { bus_id, counts: 15_000 }) if bus_id == first
     ));
     assert!(bus.state().motors.values().all(|motor| motor.state == 0));
 }
 
 #[test]
-fn a_forearm_resting_past_its_one_turn_window_refuses_the_open() {
+fn bringing_fifteen_motors_up_and_enabling_them_trips_no_watchdog() {
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
-    let forearm = index_of("left_forearm_yaw_joint");
     let bus = Sim::for_axes(&axes);
-    let id = axes[forearm].axis.binding.bus_id;
-    // Inside the declared -6.83..1.88 but more than half a turn from zero.
-    bus.state().motors.get_mut(&id).expect("forearm").q = -4.0;
-    match DamiaoChain::open(bus.clone(), axes.clone()) {
-        Err(DamiaoChainError::RestingOutside { bus_id, .. }) => assert_eq!(bus_id, id),
-        other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    // Four round trips: disable, MIT mode, every limit register, disable and settle; one frame
+    // per motor in each, three in the limit reads, and no fixed wait.
+    assert_eq!(bus.sent(), 15 * 6);
+    assert_eq!(bus.take_waited(), Duration::ZERO);
+    let rest = chain.last_observed().expect("observed at open");
+    let opened = bus.sent();
+    for _ in 0..50 {
+        chain.command(&rest).expect("a command at rest");
+        // A 50 Hz control period between commands, well inside the 0.75 s watchdog.
+        bus.pass(Duration::from_millis(20));
     }
+    // The first command's four round trips: TIMEOUT written, read back, enable, MIT.
+    assert!(bus.state().frames.len() >= opened + 15 * 4);
     assert!(
-        bus.state().motors.values().all(|motor| motor.state == 0),
-        "every motor is left disabled"
+        bus.state().motors.values().all(|motor| motor.state == 1),
+        "no motor latched communication lost"
     );
-    // Just past its stop, inside the tolerance, it opens.
-    bus.state().motors.get_mut(&id).expect("forearm").q = -std::f64::consts::PI - 0.02;
-    DamiaoChain::open(bus, axes).expect("opens at its stop");
+    // The simulated watchdog is real: a motor left silent past it while enabled trips.
+    bus.pass(Duration::from_millis(800));
+    assert!(
+        bus.state()
+            .motors
+            .values()
+            .all(|motor| motor.state == COMMUNICATION_LOST)
+    );
+}
+
+/// The left wrist roll as found on the static upper body (2026-10-26): resting at -2.937 rad
+/// against a range of -2.097..2.096.
+const WRIST_REST: f64 = -2.937;
+
+#[test]
+fn a_joint_resting_outside_its_range_opens_and_is_held_or_brought_in_never_further_out() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let wrist = index_of("left_wrist_roll_joint");
+    let bus = Sim::for_axes(&axes);
+    let id = axes[wrist].axis.binding.bus_id;
+    let actuator = axes[wrist].axis.actuator_from_joint(WRIST_REST);
+    bus.state().motors.get_mut(&id).expect("wrist").q = actuator;
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens where it rests");
+    let rest = chain.last_observed().expect("observed at open");
+    assert!((rest[wrist] - WRIST_REST).abs() < 1e-3, "{}", rest[wrist]);
+    // Held where it rests.
+    chain.command(&rest).expect("held outside its range");
+    // Further out is refused before any frame.
+    let sent = bus.sent();
+    let mut out = rest.clone();
+    out[wrist] = rest[wrist] - 0.01;
+    assert!(matches!(
+        chain.command(&out),
+        Err(DamiaoChainError::Target(_))
+    ));
+    assert_eq!(bus.sent(), sent, "refused before any frame");
+    // Toward the range is taken, and the interval shrinks behind it.
+    let mut inward = rest.clone();
+    inward[wrist] = rest[wrist] + 0.1;
+    chain.command(&inward).expect("moved toward its range");
+    let mut back = rest;
+    back[wrist] = inward[wrist] - 0.05;
+    assert!(matches!(
+        chain.command(&back),
+        Err(DamiaoChainError::Target(_))
+    ));
 }
 
 #[test]
-fn an_upper_arm_reading_its_alias_refuses_the_open() {
+fn a_governed_joint_outside_its_range_comes_in_at_the_speed_bound() {
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
-    let yaw = index_of("left_upper_arm_yaw_joint");
+    let wrist = index_of("left_wrist_roll_joint");
+    let elbow = index_of("right_elbow_pitch_joint");
     let bus = Sim::for_axes(&axes);
-    let id = axes[yaw].axis.binding.bus_id;
-    // A joint at -3.78 rad reads as 2.5 on a single-turn encoder: outside -5.12..0.81.
-    bus.state().motors.get_mut(&id).expect("upper arm").q = 2.5;
-    assert!(matches!(
-        DamiaoChain::open(bus, axes),
-        Err(DamiaoChainError::RestingOutside { bus_id, .. }) if bus_id == id
-    ));
+    let id = axes[wrist].axis.binding.bus_id;
+    bus.state().motors.get_mut(&id).expect("wrist").q =
+        axes[wrist].axis.actuator_from_joint(WRIST_REST);
+    let chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
+    let limits = vec![
+        AxisLimits {
+            max_speed: 0.25,
+            max_tracking_error: 0.2,
+        };
+        15
+    ];
+    let mut governed = Governor::new(chain, limits).expect("limits");
+    let rest = governed.last_observed().expect("rest");
+    // Asked to the wrist's range centre and the elbow (in range) up: both move, each by its
+    // own interval, the wrist only ever inward.
+    let mut target = rest.clone();
+    target[wrist] = 0.0;
+    target[elbow] = 2.5;
+    let mut last = rest[wrist];
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(2));
+        let receipt = governed.command(&target).expect("a governed command");
+        let now = receipt.observed[wrist];
+        assert!(now >= last - 1e-3, "the wrist moved out: {now} from {last}");
+        assert!(
+            now - last <= 0.005 + 1e-3,
+            "faster than the bound: {now} from {last}"
+        );
+        last = now;
+    }
+    assert!(last > rest[wrist], "the wrist came in");
+    assert!(governed.last_observed().expect("observed")[elbow] > rest[elbow]);
+    assert!(governed.stop().is_proven());
 }
 
 #[test]
@@ -193,8 +297,15 @@ fn firmware_that_always_answers_state_1_still_proves_a_stop_and_a_silent_motor_d
     chain.command(&rest).expect("a command at rest");
     let silent = axes[0].axis.binding.bus_id;
     bus.kill(silent);
+    bus.take_waited();
     let report = chain.stop();
     assert_eq!(report.unproven, vec![silent]);
+    // Waiting out the silent motor twice still ends inside the stop's budget.
+    let waited = bus.take_waited();
+    assert!(
+        waited > Duration::ZERO && waited < chain.stop_budget(),
+        "{waited:?}"
+    );
     assert!(chain.command(&rest).is_err());
     // The same firmware read as reporting its state refuses the open: state 1 where disabled.
     let mut reporting = axes;

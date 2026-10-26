@@ -1,21 +1,39 @@
 //! A chain of bound Damiao motors as one `ActuatorChain`, driven through [`crate::dm_can`].
 //!
-//! Every bus operation is a `DM_CAN.py` call; the order they are called in is this chain's.
-//! Open follows the vendor demo's bring-up for each motor (`DM_Motor_Test.py:14-26`, same
-//! commit: `switchControlMode`, then `read_motor_param` of `PMAX`, `VMAX` and `TMAX`, which the
-//! demo prints), then `disable`s it. Two deviations from the demo: it switches to `POS_VEL`
-//! where the chain switches to `MIT`, and it refuses nothing where the chain refuses a register
-//! value (below). Command `enable`s each motor when the chain is disabled, then sends one `controlMIT` per
-//! motor holding its target. `ActuatorChain::command` sends zero velocity and feed-forward
-//! torque; `DamiaoChain::command_with` sends each axis' planned velocity and model torque,
-//! mapped to the motor through its sign and reduction, bounded per axis (each part off until
-//! bounded) and clamped to the motor's own `VMAX` and `TMAX`. Stop `disable`s every motor.
+//! Every frame is one `DM_CAN.py` sends; the order they are sent in is this chain's. Each
+//! motor gets the vendor demo's bring-up (`DM_Motor_Test.py:14-26`, same commit:
+//! `switchControlMode`, then `read_motor_param` of `PMAX`, `VMAX` and `TMAX`, which the demo
+//! prints), then a disable. Two deviations from the demo: it switches to `POS_VEL` where the
+//! chain switches to `MIT`, and it refuses nothing where the chain refuses a register value
+//! (below). Command arms each motor's watchdog and `enable`s it when the chain is disabled,
+//! then sends one `controlMIT` per motor holding its target. `ActuatorChain::command` sends zero
+//! velocity and feed-forward torque; `DamiaoChain::command_with` sends each axis' planned
+//! velocity and model torque, mapped to the motor through its sign and reduction, bounded per
+//! axis (each part off until bounded) and clamped to the motor's own `VMAX` and `TMAX`. Stop
+//! `disable`s every motor.
+//!
+//! **Phases, not one motor at a time.** The vendor's calls bring one motor up at a time, each
+//! frame followed by its own wait (0.05 s per register, 0.1 s per enable): fifteen motors took
+//! over 4 s to open and 2.25 s to enable, and the first motor enabled sat silent for 1.4 s
+//! while the other fourteen were, past the static upper body's 0.75 s `TIMEOUT`, so it latched
+//! fault 0xD, communication lost, before its first command (2026-10-26, ZLG USBCANFD-200U, 14
+//! motors). Here every multi-motor operation is a sequence of phases: one frame to every motor
+//! back to back, then every answer awaited once against one deadline, the phase judged only
+//! once all answered or the deadline passed. Open: disable all; switch all to MIT; read every
+//! motor's `PMAX`, `VMAX` and `TMAX`; disable all and settle. The enable a command starts with:
+//! write every `TIMEOUT`; read every one back; enable all; and the command's `controlMIT` for
+//! all. Stop: disable all; ask the silent once more. Each motor's own frames keep the vendor's
+//! order; only the interleaving across motors and the waits differ. A frame the link refuses
+//! for a full transmit queue (`WouldBlock`, as the ZLG adapter's bounded queue does) is sent
+//! again once the bus drains, within the link's `frame_allowance`. Bring-up of the static upper
+//! body's fifteen is now eight round trips instead of over a hundred, and no motor is ever
+//! silent while enabled for longer than one phase.
 //!
 //! What this chain adds over the vendor's calls, and why:
 //!
-//! - It refuses before any frame: a target outside the axis's commandable range (the declared
-//!   bounds intersected with the motor's configured range), ids or gains the protocol cannot
-//!   carry, a model or bus this crate is not qualified for. `DM_CAN.py` clamps silently.
+//! - It refuses before any frame: ids or gains the protocol cannot carry, a model or bus this
+//!   crate is not qualified for, and a target outside where its axis may be commanded now
+//!   (below). `DM_CAN.py` clamps silently.
 //! - It reads each motor's `PMAX`, `VMAX` and `TMAX` registers at open and scales that motor's
 //!   frames by them, refusing values no Damiao table carries for its model, since a wrong row
 //!   rescales every position, velocity and torque on the wire. Damiao's own tables disagree on
@@ -25,8 +43,10 @@
 //!   motor on another table is `DM_CAN.py`'s `change_limit_param`, which rewrites the row every
 //!   motor of that model shares; this crate rescales the one motor instead
 //!   ([`crate::dm_can::MotorControl::change_limit_param`]).
-//! - After the vendor's own read it waits briefly for each motor's answer, and judges it by the
-//!   feedback's first-byte high nibble ([`MotorState`]). `DM_CAN.py` stores the nibble unread.
+//! - Every answer is awaited fresh: a register's cached value is forgotten before it is asked
+//!   for, and feedback counts only when it arrived after the phase's frames were sent. Each is
+//!   judged by the feedback's first-byte high nibble ([`MotorState`]). `DM_CAN.py` stores the
+//!   nibble unread and answers a lost register read from its cache.
 //! - A stop is proven motor by motor: an answer to the disable frames reporting disabled. Answers
 //!   already on the link when the stop begins are drained first, so a late answer to an earlier
 //!   command never counts as the disable's. A silent motor is asked once more with
@@ -35,43 +55,48 @@
 //!   only weakly, and the motor is named in [`StopReport::unobserved`]. After an unproven stop
 //!   every command is refused until a stop is proven.
 //! - **Communication timeout.** An axis that carries a `can_timeout` has it written to the
-//!   motor's `TIMEOUT` register (0x09) at open and again before every enable (a motor
-//!   power-cycled since comes back with whatever its flash holds), in RAM and never saved to
-//!   flash, then confirmed by the motor's echo and by reading the register back. No motor is
-//!   enabled until every motor confirmed. Damiao's "DM-J4340-2EC User Manual
-//!   V1.1" (2026-09-08; gitee `kit-miao/DM-J4340-2EC` at `c1d567db`, `说明书/`), "Register Map"
-//!   (p. 20: `0x09 TIMEOUT`, uint32) and "Parameter Management" (p. 30: "Time base: 50 μs per
-//!   count. Only effective when the motor is enabled."): an enabled motor that hears no command
-//!   for that long leaves enable mode and reports fault 0xD, communication lost. "Write
-//!   Parameters" (p. 18): a write "takes effect immediately" and is "lost upon power-off" unless
-//!   saved. This crate never sends the save. A motor that tripped keeps reporting 0xD until it
-//!   is power-cycled or sent Damiao's clear frame (`FF..FB`, p. 17), which `DM_CAN.py` does not
-//!   carry: its stop stays unproven. Open's settle step sends the clear frame
-//!   ([`DamiaoChain::clear_fault`]) once to each motor answering 0xD while disabled, then asks
-//!   again, and still refuses a motor whose fault persists. No other fault is cleared at open.
+//!   motor's `TIMEOUT` register (0x09) right before every enable (a motor power-cycled since
+//!   comes back with whatever its flash holds), in RAM and never saved to flash, then confirmed
+//!   by the motor's echo and by reading the register back. No motor is enabled until every
+//!   motor confirmed, and the first command follows the enable at once. Damiao's "DM-J4340-2EC
+//!   User Manual V1.1" (2026-09-08; gitee `kit-miao/DM-J4340-2EC` at `c1d567db`, `说明书/`),
+//!   "Register Map" (p. 20: `0x09 TIMEOUT`, uint32) and "Parameter Management" (p. 30: "Time
+//!   base: 50 μs per count. Only effective when the motor is enabled."): an enabled motor that
+//!   hears no command for that long leaves enable mode and reports fault 0xD, communication
+//!   lost. "Write Parameters" (p. 18): a write "takes effect immediately" and is "lost upon
+//!   power-off" unless saved. This crate never sends the save. A motor that tripped keeps
+//!   reporting 0xD until it is power-cycled or sent Damiao's clear frame (`FF..FB`, p. 17),
+//!   which `DM_CAN.py` does not carry: its stop stays unproven. Open's settle phase sends the
+//!   clear frame ([`DamiaoChain::clear_fault`]) once to each motor answering 0xD while
+//!   disabled, then asks again, and still refuses a motor whose fault persists. No other fault
+//!   is cleared at open.
+//! - **Range limits motion, not state.** Each axis is commanded within its commandable range
+//!   widened to where its motor last answered ([`CommandRange::reaching`]): a joint resting
+//!   outside can be held or moved toward the range, never further out, and the interval
+//!   shrinks as it comes in. `sx_embodiment_drivers::Governor` steps within the same interval.
+//!   Nothing is refused for where a joint rests.
 //! - **One turn.** Damiao's joint motors report the output shaft's position from a single-turn
 //!   absolute encoder (same manual, "Motor Features", p. 5), so after power-up a joint sitting
 //!   more than half a turn from zero reads as its alias within one turn. Where an axis's motor
 //!   range spans more than one turn, its commandable range is cut to the motor's single-turn
-//!   window, -pi..pi in actuator coordinates, so this chain never drives a joint where its
-//!   position would read ambiguously after a power cycle. Where the range spans less than a
-//!   turn, every alias of a position inside it lies outside it. Either way open refuses a motor
-//!   whose disabled answer lies more than [`REST_TOLERANCE`] outside its axis's commandable
-//!   range, the motor's own reading of an aliased or out-of-range joint. A joint turned by hand
-//!   past the window while unpowered, onto an alias inside it, cannot be told apart.
+//!   window, -pi..pi in actuator coordinates, so this chain never drives a joint into where its
+//!   position would read ambiguously after a power cycle. A joint that rests on an alias reads
+//!   as resting there, outside or inside its range, and is commanded from that reading.
 
+use std::io;
 use std::time::{Duration, Instant};
 
-use sx_embodiment_drivers::can::CanPort;
+use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
     ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
-    TargetError, check_targets, validate_chain,
+    TargetError, check_reach, validate_chain,
 };
 use thiserror::Error;
 
 use crate::dm_can::{
-    ControlType, DISABLE_WAIT, DmCanError, DmMotorType, DmVariable, Motor, MotorControl, ParamValue,
+    ControlType, DmCanError, DmMotorType, DmVariable, ENABLE_WAIT, Motor, MotorCommand,
+    MotorControl, ParamValue,
 };
 
 /// `ActuatorModel.DAMIAO_DM4310` in the registry.
@@ -87,11 +112,11 @@ const KP_MAX: f64 = 500.0;
 const KD_MAX: f64 = 5.0;
 /// `0x7FF` addresses register requests; no motor may sit on it.
 const MAX_MOTOR_ID: u16 = 0x7FE;
-const ANSWER_POLLS: usize = 20;
-const ANSWER_POLL_INTERVAL: Duration = Duration::from_millis(1);
-/// How far outside its commandable range, in actuator radians, a motor may rest at open: a
-/// joint against its hard stop reads a little past the limit the stop sits at.
-pub const REST_TOLERANCE: f64 = 0.05;
+/// How long a phase awaits feedback (to a disable, a refresh or an MIT frame) once its frames
+/// are sent.
+const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
+/// How long a phase awaits register answers: `DM_CAN.py`'s one 0.05 s poll per register.
+const REGISTER_WAIT: Duration = Duration::from_millis(50);
 /// A range of exactly one turn, as the humanoid's shoulder pitches declare to the URDF's
 /// rounding, is not cut: it aliases only at its two ends.
 const TURN_SLACK: f64 = 1e-6;
@@ -273,8 +298,6 @@ pub enum DamiaoChainError {
     Gains(u16),
     #[error("bus_id {0} has a motor range that is not finite lower < upper inside its Q_MAX")]
     MotorRange(u16),
-    #[error("joint {joint} target {value} is outside its commandable range")]
-    Uncommandable { joint: String, value: f64 },
     #[error("bus_id {0} did not confirm MIT control mode")]
     ModeNotConfirmed(u16),
     #[error(
@@ -310,15 +333,6 @@ pub enum DamiaoChainError {
     TimeoutRange(u16),
     #[error("bus_id {bus_id} did not confirm its TIMEOUT register at {counts} counts of 50 µs")]
     TimeoutNotConfirmed { bus_id: u16, counts: u32 },
-    #[error(
-        "bus_id {bus_id} rests at {position} rad, outside its commandable motor range {lower}..{upper} rad; move the joint into range, or check for a joint more than half a turn from zero"
-    )]
-    RestingOutside {
-        bus_id: u16,
-        position: f64,
-        lower: f64,
-        upper: f64,
-    },
     #[error("joint {joint} has a non-finite feed-forward velocity or torque")]
     Feedforward { joint: String },
     #[error("joint {joint} has a feed-forward bound that is not finite and non-negative")]
@@ -333,6 +347,8 @@ pub enum DamiaoChainError {
 pub struct DamiaoChain<P> {
     control: MotorControl<P>,
     motors: Vec<DamiaoAxis>,
+    /// Every motor's bus id, in native state order.
+    ids: Vec<u16>,
     axes: Vec<BoundAxis>,
     commandable: Vec<CommandRange>,
     limits: Vec<MotorLimits>,
@@ -347,33 +363,226 @@ pub struct DamiaoChain<P> {
     applied: Vec<Feedforward>,
 }
 
-/// Bring each motor up as the vendor does and read its limit registers; see
-/// [`DamiaoChain::open`].
+/// What a phase awaits from the motor it sends one frame to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Awaits {
+    /// A feedback frame that arrived after the phase's frames were sent.
+    Feedback,
+    /// The motor's answer about one register, its cached value forgotten first.
+    Register(DmVariable),
+}
+
+/// One frame of a phase: the motor it goes to and what is awaited back.
+#[derive(Clone, Copy, Debug)]
+struct Request {
+    bus_id: u16,
+    awaits: Awaits,
+}
+
+/// One request per motor of `ids`, each awaiting the same.
+fn every(ids: &[u16], awaits: Awaits) -> Vec<Request> {
+    ids.iter()
+        .map(|bus_id| Request {
+            bus_id: *bus_id,
+            awaits,
+        })
+        .collect()
+}
+
+/// What one phase saw, request by request.
+struct Phase {
+    /// Whether the link took the request's frame.
+    sent: Vec<bool>,
+    /// Each request's motor's feedback count before the phase's frames.
+    before: Vec<u64>,
+    /// When each request's answer was first seen.
+    received: Vec<Option<Instant>>,
+    /// Whether every answer already on the link was taken before the frames were sent, so none
+    /// of them can pass for this phase's.
+    drained: bool,
+    /// The first link failure; every frame was still attempted.
+    failure: Option<DmCanError>,
+}
+
+impl Phase {
+    fn answered(&self, index: usize) -> bool {
+        self.received[index].is_some()
+    }
+
+    /// The phase, unless the link failed in it.
+    fn checked(mut self) -> Result<Self, DmCanError> {
+        self.failure.take().map_or(Ok(self), Err)
+    }
+}
+
+/// How long a full transmit queue is waited out in one slice, taking answers meanwhile.
+const QUEUE_SLICE: Duration = Duration::from_millis(1);
+
+/// Decode one received frame as the phase's kind of answer.
+fn take<P: CanPort>(control: &mut MotorControl<P>, frame: CanFrame, registers: bool) {
+    if registers {
+        control.take_param(frame);
+    } else {
+        control.take_feedback(frame);
+    }
+}
+
+/// Stamp `now` on every request whose answer is in.
+fn stamp<P: CanPort>(control: &MotorControl<P>, requests: &[Request], phase: &mut Phase) {
+    let now = Instant::now();
+    for (index, request) in requests.iter().enumerate() {
+        if phase.received[index].is_some() || !phase.sent[index] {
+            continue;
+        }
+        let Ok(motor) = control.motor(request.bus_id) else {
+            continue;
+        };
+        let answered = match request.awaits {
+            Awaits::Feedback => motor.feedback_count > phase.before[index],
+            Awaits::Register(rid) => motor.get_param(rid).is_some(),
+        };
+        if answered {
+            phase.received[index] = Some(now);
+        }
+    }
+}
+
+/// One phase: every request's frame sent back to back by `frame`, then the answers read until
+/// each request has its own or `wait` (plus the link's frame allowance) has passed since the
+/// last frame. A frame the link refuses for a full transmit queue is sent again as the queue
+/// drains, for up to the link's frame allowance. Every frame is attempted whatever an earlier
+/// one met.
+fn phase<P: CanPort>(
+    control: &mut MotorControl<P>,
+    requests: &[Request],
+    wait: Duration,
+    mut frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
+) -> Phase {
+    let registers = requests
+        .iter()
+        .any(|request| matches!(request.awaits, Awaits::Register(_)));
+    let drained = if registers {
+        control.recv_set_param_data()
+    } else {
+        control.recv()
+    };
+    let mut phase = Phase {
+        sent: vec![false; requests.len()],
+        before: Vec::with_capacity(requests.len()),
+        received: vec![None; requests.len()],
+        drained: drained.is_ok(),
+        failure: drained.err(),
+    };
+    for request in requests {
+        phase.before.push(
+            control
+                .motor(request.bus_id)
+                .map_or(0, |motor| motor.feedback_count),
+        );
+        if let Awaits::Register(rid) = request.awaits {
+            let _ = control.forget_param(request.bus_id, rid);
+        }
+    }
+    let allowance = control.port().frame_allowance();
+    for (index, request) in requests.iter().enumerate() {
+        let give_up = Instant::now() + allowance;
+        let result = loop {
+            match frame(control, index, *request) {
+                Err(DmCanError::Io(error))
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < give_up =>
+                {
+                    let until = (Instant::now() + QUEUE_SLICE).min(give_up);
+                    match control.port_mut().receive_until(until) {
+                        Ok(Some(answer)) => take(control, answer, registers),
+                        Ok(None) => {}
+                        Err(error) => break Err(DmCanError::Io(error)),
+                    }
+                }
+                other => break other,
+            }
+        };
+        match result {
+            Ok(()) => phase.sent[index] = true,
+            Err(error) => {
+                phase.failure.get_or_insert(error);
+            }
+        }
+    }
+    let deadline = Instant::now() + wait + allowance;
+    loop {
+        stamp(control, requests, &mut phase);
+        let pending = (0..requests.len()).any(|index| phase.sent[index] && !phase.answered(index));
+        if !pending {
+            break;
+        }
+        match control.port_mut().receive_until(deadline) {
+            Ok(Some(answer)) => take(control, answer, registers),
+            Ok(None) => break,
+            Err(error) => {
+                phase.failure.get_or_insert(DmCanError::Io(error));
+                break;
+            }
+        }
+    }
+    phase
+}
+
+/// The registers open reads from every motor, in the vendor demo's order.
+const LIMIT_REGISTERS: [DmVariable; 3] = [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX];
+
+/// Bring every motor up as the vendor does, in two phases: MIT mode for all, then every limit
+/// register of every motor; see [`DamiaoChain::open`].
 // A register holds the exact float32 of a table literal; equality is the comparison meant.
 #[allow(clippy::float_cmp)]
 fn bring_up<P: CanPort>(
     control: &mut MotorControl<P>,
-    motors: &[DamiaoAxis],
+    ids: &[u16],
 ) -> Result<Vec<MotorLimits>, DamiaoChainError> {
-    let mut limits = Vec::with_capacity(motors.len());
-    for motor in motors {
-        let bus_id = motor.axis.binding.bus_id;
-        if !control.switch_control_mode(bus_id, ControlType::MIT)? {
-            return Err(DamiaoChainError::ModeNotConfirmed(bus_id));
+    let mode = ControlType::MIT as u8;
+    phase(
+        control,
+        &every(ids, Awaits::Register(DmVariable::CTRL_MODE)),
+        REGISTER_WAIT,
+        |control, _, request| {
+            control.send_write_param(request.bus_id, DmVariable::CTRL_MODE, f64::from(mode))
+        },
+    )
+    .checked()?;
+    for bus_id in ids {
+        if control.motor(*bus_id)?.get_param(DmVariable::CTRL_MODE)
+            != Some(ParamValue::Uint32(u32::from(mode)))
+        {
+            return Err(DamiaoChainError::ModeNotConfirmed(*bus_id));
         }
+    }
+    let reads: Vec<Request> = ids
+        .iter()
+        .flat_map(|bus_id| {
+            LIMIT_REGISTERS.map(|register| Request {
+                bus_id: *bus_id,
+                awaits: Awaits::Register(register),
+            })
+        })
+        .collect();
+    phase(control, &reads, REGISTER_WAIT, |control, index, request| {
+        control.send_read_param(
+            request.bus_id,
+            LIMIT_REGISTERS[index % LIMIT_REGISTERS.len()],
+        )
+    })
+    .checked()?;
+    let mut limits = Vec::with_capacity(ids.len());
+    for bus_id in ids.iter().copied() {
         let model = control.motor(bus_id)?.motor_type;
         let row = model.limit_param();
         let mut found = [0.0_f32; 3];
-        for (index, register) in [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX]
-            .into_iter()
-            .enumerate()
-        {
+        for (index, register) in LIMIT_REGISTERS.into_iter().enumerate() {
             let accepted = match register {
                 DmVariable::VMAX => accepted_vmax(model),
                 DmVariable::PMAX => std::iter::once(row[index]).chain(EXTRA_PMAX).collect(),
                 _ => vec![row[index]],
             };
-            let value = control.read_motor_param(bus_id, register)?;
+            let value = control.motor(bus_id)?.get_param(register);
             match value {
                 Some(ParamValue::Float(reported))
                     if accepted.iter().any(|table| reported == narrow(*table)) =>
@@ -399,10 +608,6 @@ fn bring_up<P: CanPort>(
             v_max: found[1],
             t_max: found[2],
         });
-        if let Some(timeout) = motor.can_timeout {
-            let counts = timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
-            write_timeout(control, bus_id, counts)?;
-        }
     }
     Ok(limits)
 }
@@ -415,37 +620,25 @@ fn timeout_counts(timeout: Duration) -> Option<u32> {
         .filter(|counts| *counts > 0)
 }
 
-/// Write `counts` to the motor's `TIMEOUT` register in RAM, then require the motor's echo and
-/// a fresh read of the register to carry it.
-fn write_timeout<P: CanPort>(
-    control: &mut MotorControl<P>,
-    bus_id: u16,
-    counts: u32,
-) -> Result<(), DamiaoChainError> {
-    let refused = DamiaoChainError::TimeoutNotConfirmed { bus_id, counts };
-    control.forget_param(bus_id, DmVariable::TIMEOUT)?;
-    if !control.change_motor_param(bus_id, DmVariable::TIMEOUT, f64::from(counts))? {
-        return Err(refused);
-    }
-    control.forget_param(bus_id, DmVariable::TIMEOUT)?;
-    if control.read_motor_param(bus_id, DmVariable::TIMEOUT)? != Some(ParamValue::Uint32(counts)) {
-        return Err(refused);
-    }
-    Ok(())
-}
-
 /// Send every named motor its disable frame, whatever any answered: the last word of an open
 /// that failed, returned as `refused` unless a disable could not be sent, which is then named
 /// beside it, since that motor may still hold torque.
 fn disable_all<P: CanPort>(
     control: &mut MotorControl<P>,
-    motors: &[DamiaoAxis],
+    ids: &[u16],
     refused: DamiaoChainError,
 ) -> DamiaoChainError {
-    let unsent: Vec<u16> = motors
+    let disabled = phase(
+        control,
+        &every(ids, Awaits::Feedback),
+        FEEDBACK_WAIT,
+        |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+    );
+    let unsent: Vec<u16> = ids
         .iter()
-        .map(|motor| motor.axis.binding.bus_id)
-        .filter(|bus_id| control.disable(*bus_id).is_err())
+        .zip(&disabled.sent)
+        .filter(|(_, sent)| !**sent)
+        .map(|(bus_id, _)| *bus_id)
         .collect();
     if unsent.is_empty() {
         refused
@@ -458,15 +651,15 @@ fn disable_all<P: CanPort>(
 }
 
 impl<P: CanPort> DamiaoChain<P> {
-    /// Validate every axis, bring each motor up as the vendor does, scale each by its own limit
-    /// registers, and leave the chain disabled with every motor's disabled answer in hand.
+    /// Validate every axis, bring every motor up as the vendor does, scale each by its own
+    /// limit registers, and leave the chain disabled with every motor's disabled answer in
+    /// hand, in phases: disable all, MIT mode for all, every limit register, disable and
+    /// settle all.
     ///
     /// # Errors
     ///
     /// Refuses an invalid or unqualified axis, a motor that does not confirm MIT mode or whose
     /// limit registers no Damiao table carries, and a motor that does not answer disabled.
-    // A register holds the exact float32 of a table literal; equality is the comparison meant.
-    #[allow(clippy::float_cmp)]
     pub fn open(port: P, motors: Vec<DamiaoAxis>) -> Result<Self, DamiaoChainError> {
         let axes: Vec<BoundAxis> = motors.iter().map(|motor| motor.axis.clone()).collect();
         validate_chain(&axes)?;
@@ -481,26 +674,34 @@ impl<P: CanPort> DamiaoChain<P> {
                 motor_type(binding.model).ok_or(DamiaoChainError::Unqualified(binding.bus_id))?;
             control.add_motor(Motor::new(model, binding.bus_id, motor.master_id));
         }
-        // Disable every motor before anything is written. A motor left enabled by an earlier
+        let ids: Vec<u16> = motors
+            .iter()
+            .map(|motor| motor.axis.binding.bus_id)
+            .collect();
+        // Disable every motor before anything is written: a motor left enabled by an earlier
         // run (which firmware that does not report its enable state hides) would otherwise
-        // start counting the communication timeout the moment bring-up writes it, and trip
-        // (fault 0xD) while the rest are still being brought up (seen 2026-10-25 on the static
-        // upper body: bring-up of 14 motors takes over 2 s against a 0.75 s timeout).
-        for motor in &motors {
-            control.disable(motor.axis.binding.bus_id)?;
-        }
+        // hold torque through bring-up. Its answers prove nothing yet; they are taken here so
+        // none is mistaken for a register's.
+        phase(
+            &mut control,
+            &every(&ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+        )
+        .checked()?;
         // A motor brought up before a later one failed may hold MIT mode with torque enabled
         // (a motor left enabled by a crashed run answers its mode switch as it is): every motor
         // the chain names is disabled before the failure is returned.
-        let limits = match bring_up(&mut control, &motors) {
+        let limits = match bring_up(&mut control, &ids) {
             Ok(limits) => limits,
-            Err(error) => return Err(disable_all(&mut control, &motors, error)),
+            Err(error) => return Err(disable_all(&mut control, &ids, error)),
         };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
         let count = motors.len();
         let mut chain = Self {
             control,
             motors,
+            ids,
             axes,
             commandable,
             limits,
@@ -511,52 +712,32 @@ impl<P: CanPort> DamiaoChain<P> {
             applied: vec![Feedforward::default(); count],
         };
         if let Err(error) = chain.settle_disabled() {
-            return Err(disable_all(&mut chain.control, &chain.motors, error));
+            return Err(disable_all(&mut chain.control, &chain.ids, error));
         }
-        chain.check_resting()?;
         Ok(chain)
     }
 
-    /// Refuse a motor whose disabled answer lies outside its commandable range by more than
-    /// [`REST_TOLERANCE`], in actuator coordinates.
-    fn check_resting(&self) -> Result<(), DamiaoChainError> {
-        for (motor, range) in self.motors.iter().zip(&self.commandable) {
-            let bus_id = motor.axis.binding.bus_id;
-            let position = f64::from(self.control.motor(bus_id)?.get_position());
-            let ends = [
-                motor.axis.actuator_from_joint(range.lower),
-                motor.axis.actuator_from_joint(range.upper),
-            ];
-            let (lower, upper) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
-            if !(lower - REST_TOLERANCE..=upper + REST_TOLERANCE).contains(&position) {
-                return Err(DamiaoChainError::RestingOutside {
-                    bus_id,
-                    position,
-                    lower,
-                    upper,
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Disable every motor and hold each one's disabled answer. A motor answering
-    /// [`COMMUNICATION_LOST`] is cleared once ([`DamiaoChain::clear_fault`]) and asked again.
+    /// Disable every motor and hold each one's disabled answer. Motors answering
+    /// [`COMMUNICATION_LOST`] are cleared once ([`DamiaoChain::clear_fault`]) and asked again.
     fn settle_disabled(&mut self) -> Result<(), DamiaoChainError> {
-        self.control.recv()?;
-        let before = self.feedback_counts()?;
-        for index in 0..self.motors.len() {
-            self.control.disable(self.bus_id(index))?;
-        }
-        self.await_answers(&before)?;
-        for (index, fresh) in self.fresh(&before)?.into_iter().enumerate() {
-            let bus_id = self.bus_id(index);
-            let state = MotorState::from_err(self.control.motor(bus_id)?.get_error());
-            if fresh && state == MotorState::Fault(COMMUNICATION_LOST) {
-                self.clear_fault(bus_id)?;
+        let disabled = phase(
+            &mut self.control,
+            &every(&self.ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+        )
+        .checked()?;
+        let mut lost = Vec::new();
+        for (index, bus_id) in self.ids.iter().enumerate() {
+            let state = MotorState::from_err(self.control.motor(*bus_id)?.get_error());
+            if disabled.answered(index) && state == MotorState::Fault(COMMUNICATION_LOST) {
+                lost.push(*bus_id);
             }
         }
-        self.expect_all(&before, MotorState::Disabled)
+        if !lost.is_empty() {
+            self.clear(&lost)?;
+        }
+        self.expect_all(&disabled, MotorState::Disabled)
     }
 
     /// Send one motor Damiao's clear-error frame (`FF..FB`) after its disable, then ask for its
@@ -567,32 +748,100 @@ impl<P: CanPort> DamiaoChain<P> {
     /// Refuses while the chain is enabled; returns a motor that stays silent, or whose answer
     /// still carries a fault, as [`DamiaoChainError::FaultPersists`].
     pub fn clear_fault(&mut self, bus_id: u16) -> Result<(), DamiaoChainError> {
+        self.clear(&[bus_id])
+    }
+
+    /// [`DamiaoChain::clear_fault`] for every motor of `ids` at once: a disable phase, a clear
+    /// phase, then a refresh phase, each awaiting its answers so none passes for the next's.
+    fn clear(&mut self, ids: &[u16]) -> Result<(), DamiaoChainError> {
         if self.enabled {
             return Err(DamiaoChainError::ClearWhileEnabled);
         }
-        self.control.disable(bus_id)?;
-        self.control.clear_error(bus_id)?;
-        self.control.recv()?;
-        let before = self.control.motor(bus_id)?.feedback_count;
-        for attempt in 0..ANSWER_POLLS {
-            if attempt == 0 {
-                self.control.refresh_motor_status(bus_id)?;
-            } else {
-                self.control.port_mut().sleep(ANSWER_POLL_INTERVAL);
-                self.control.recv()?;
+        let requests = every(ids, Awaits::Feedback);
+        for command in [MotorCommand::Disable, MotorCommand::ClearError] {
+            phase(
+                &mut self.control,
+                &requests,
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_command(request.bus_id, command),
+            )
+            .checked()?;
+        }
+        let asked = phase(
+            &mut self.control,
+            &requests,
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_refresh(request.bus_id),
+        )
+        .checked()?;
+        for (index, bus_id) in ids.iter().copied().enumerate() {
+            if !asked.answered(index) {
+                return Err(DamiaoChainError::Silent(bus_id));
             }
-            if self.control.motor(bus_id)?.feedback_count > before {
-                break;
+            if let MotorState::Fault(code) =
+                MotorState::from_err(self.control.motor(bus_id)?.get_error())
+            {
+                return Err(DamiaoChainError::FaultPersists { bus_id, code });
             }
         }
-        let motor = self.control.motor(bus_id)?;
-        if motor.feedback_count == before {
-            return Err(DamiaoChainError::Silent(bus_id));
+        Ok(())
+    }
+
+    /// Arm every motor's watchdog, then enable every motor, the last step before the first
+    /// command: a `TIMEOUT` write phase, a read-back phase, then an enable phase, so no motor
+    /// is ever silent while enabled for longer than one phase.
+    fn arm_and_enable(&mut self) -> Result<(), DamiaoChainError> {
+        let mut armed: Vec<(u16, u32)> = Vec::new();
+        for motor in &self.motors {
+            if let Some(timeout) = motor.can_timeout {
+                let bus_id = motor.axis.binding.bus_id;
+                let counts =
+                    timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
+                armed.push((bus_id, counts));
+            }
         }
-        match MotorState::from_err(motor.get_error()) {
-            MotorState::Fault(code) => Err(DamiaoChainError::FaultPersists { bus_id, code }),
-            MotorState::Disabled | MotorState::Enabled => Ok(()),
+        if !armed.is_empty() {
+            let ids: Vec<u16> = armed.iter().map(|(bus_id, _)| *bus_id).collect();
+            let requests = every(&ids, Awaits::Register(DmVariable::TIMEOUT));
+            // A motor power-cycled since open holds its flash TIMEOUT (often none): every
+            // motor's watchdog is written, echoed and read back before any motor is enabled.
+            for write in [true, false] {
+                phase(
+                    &mut self.control,
+                    &requests,
+                    REGISTER_WAIT,
+                    |control, index, request| {
+                        if write {
+                            control.send_write_param(
+                                request.bus_id,
+                                DmVariable::TIMEOUT,
+                                f64::from(armed[index].1),
+                            )
+                        } else {
+                            control.send_read_param(request.bus_id, DmVariable::TIMEOUT)
+                        }
+                    },
+                )
+                .checked()?;
+                for (bus_id, counts) in armed.iter().copied() {
+                    if self.control.motor(bus_id)?.get_param(DmVariable::TIMEOUT)
+                        != Some(ParamValue::Uint32(counts))
+                    {
+                        return Err(DamiaoChainError::TimeoutNotConfirmed { bus_id, counts });
+                    }
+                }
+            }
         }
+        let enabled = phase(
+            &mut self.control,
+            &every(&self.ids, Awaits::Feedback),
+            ENABLE_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Enable),
+        )
+        .checked()?;
+        self.expect_all(&enabled, MotorState::Enabled)?;
+        self.enabled = true;
+        Ok(())
     }
 
     /// Bound, or switch off, each axis' feed-forward, in native state order.
@@ -684,7 +933,9 @@ impl<P: CanPort> DamiaoChain<P> {
         )
     }
 
-    /// Command each axis' target, with `feedforward` in its MIT frame where given.
+    /// Command each axis' target, with `feedforward` in its MIT frame where given: refuse a
+    /// target outside its axis's range widened to where its motor last answered, then (when
+    /// disabled) arm and enable every motor, then one MIT phase.
     fn drive(
         &mut self,
         joints: &[f64],
@@ -693,65 +944,46 @@ impl<P: CanPort> DamiaoChain<P> {
         if self.stop_pending {
             return Err(DamiaoChainError::StopPending);
         }
-        check_targets(&self.axes, joints)?;
-        if let Some((motor, joint)) = self
-            .motors
-            .iter()
-            .zip(&self.commandable)
-            .zip(joints)
-            .find(|((_, range), joint)| !range.admits(**joint))
-            .map(|((motor, _), joint)| (motor, joint))
-        {
-            return Err(DamiaoChainError::Uncommandable {
-                joint: motor.axis.joint.clone(),
-                value: *joint,
-            });
-        }
+        check_reach(
+            &self.axes,
+            &self.commandable,
+            self.last_observed().as_deref(),
+            joints,
+        )?;
         let targets: Vec<f64> = self
             .motors
             .iter()
             .zip(joints)
             .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
             .collect();
+        // Each axis' feed-forward in the motor's coordinates, and what that is at the joint.
+        let sent: Vec<(f64, f64)> = (0..self.motors.len())
+            .map(|index| {
+                let (frame, applied) = self.actuator_feedforward(
+                    index,
+                    feedforward.map_or(Feedforward::default(), |all| all[index]),
+                );
+                self.applied[index] = applied;
+                frame
+            })
+            .collect();
         if !self.enabled {
-            // A motor power-cycled since open holds its flash TIMEOUT (often none): every
-            // motor's watchdog is rewritten and read back before any motor is enabled.
-            for motor in &self.motors {
-                if let Some(timeout) = motor.can_timeout {
-                    let bus_id = motor.axis.binding.bus_id;
-                    let counts =
-                        timeout_counts(timeout).ok_or(DamiaoChainError::TimeoutRange(bus_id))?;
-                    write_timeout(&mut self.control, bus_id, counts)?;
-                }
-            }
-            self.control.recv()?;
-            let before = self.feedback_counts()?;
-            // Every motor enabled together, then the first command at once: one at a time with
-            // the vendor's 0.1 s wait, the first motors of a 13-motor chain sat enabled and silent
-            // for 0.7 to 1.3 s and their 0.75 s watchdog latched 0xD (the left arm, 2026-10-26).
-            for index in 0..self.motors.len() {
-                self.control.send_enable(self.bus_id(index))?;
-            }
-            self.await_answers(&before)?;
-            self.expect_all(&before, MotorState::Enabled)?;
-            self.enabled = true;
-        }
-        self.control.recv()?;
-        let before = self.feedback_counts()?;
-        for (index, target) in targets.into_iter().enumerate() {
-            let DamiaoAxis { kp, kd, .. } = self.motors[index];
-            let ((dq, tau), applied) = self.actuator_feedforward(
-                index,
-                feedforward.map_or(Feedforward::default(), |all| all[index]),
-            );
-            self.applied[index] = applied;
-            self.control
-                .control_mit(self.bus_id(index), kp, kd, target, dq, tau)?;
+            self.arm_and_enable()?;
         }
         self.command_readings = None;
-        self.await_answers(&before)?;
-        self.expect_all(&before, MotorState::Enabled)?;
-        let received = Instant::now();
+        let motors = &self.motors;
+        let answered = phase(
+            &mut self.control,
+            &every(&self.ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, index, request| {
+                let DamiaoAxis { kp, kd, .. } = motors[index];
+                let (dq, tau) = sent[index];
+                control.send_mit(request.bus_id, kp, kd, targets[index], dq, tau)
+            },
+        )
+        .checked()?;
+        self.expect_all(&answered, MotorState::Enabled)?;
         let feedback = self.feedback()?;
         let observed: Vec<f64> = self
             .motors
@@ -762,9 +994,11 @@ impl<P: CanPort> DamiaoChain<P> {
         self.command_readings = Some(
             observed
                 .iter()
-                .map(|position| AxisReading::Fresh {
+                .zip(&answered.received)
+                .map(|(position, received)| AxisReading::Fresh {
                     position: *position,
-                    received,
+                    // Every motor answered: `expect_all` refuses a silent one.
+                    received: received.unwrap_or_else(Instant::now),
                 })
                 .collect(),
         );
@@ -810,70 +1044,23 @@ impl<P: CanPort> DamiaoChain<P> {
         self.control.port()
     }
 
-    fn bus_id(&self, index: usize) -> u16 {
-        self.motors[index].axis.binding.bus_id
+    /// Whether motor `index`'s answered state is `expected`, or (where its firmware does not
+    /// report its enable state) any state but a fault.
+    fn in_state(&self, index: usize, state: MotorState, expected: MotorState) -> bool {
+        state == expected
+            || (!self.motors[index].reports_enable_state
+                && matches!(state, MotorState::Enabled | MotorState::Disabled))
     }
 
-    fn feedback_counts(&self) -> Result<Vec<u64>, DmCanError> {
-        self.motors
-            .iter()
-            .map(|motor| {
-                Ok(self
-                    .control
-                    .motor(motor.axis.binding.bus_id)?
-                    .feedback_count)
-            })
-            .collect()
-    }
-
-    fn fresh(&self, before: &[u64]) -> Result<Vec<bool>, DmCanError> {
-        Ok(self
-            .feedback_counts()?
-            .iter()
-            .zip(before)
-            .map(|(now, then)| now > then)
-            .collect())
-    }
-
-    /// Read until every motor has answered since `before`, polling a few milliseconds at most.
-    fn await_answers(&mut self, before: &[u64]) -> Result<(), DmCanError> {
-        for attempt in 0..ANSWER_POLLS {
-            if self.fresh(before)?.iter().all(|fresh| *fresh) {
-                return Ok(());
-            }
-            if attempt > 0 {
-                self.control.port_mut().sleep(ANSWER_POLL_INTERVAL);
-            }
-            self.control.recv()?;
-        }
-        Ok(())
-    }
-
-    /// Stamp `now` on every motor first seen answering since `before`.
-    fn stamp_answers(
-        &self,
-        before: &[u64],
-        received: &mut [Option<Instant>],
-    ) -> Result<(), DmCanError> {
-        let now = Instant::now();
-        for (stamp, fresh) in received.iter_mut().zip(self.fresh(before)?) {
-            if fresh && stamp.is_none() {
-                *stamp = Some(now);
-            }
-        }
-        Ok(())
-    }
-
-    fn expect_all(&self, before: &[u64], expected: MotorState) -> Result<(), DamiaoChainError> {
-        for (index, fresh) in self.fresh(before)?.into_iter().enumerate() {
-            let bus_id = self.bus_id(index);
-            if !fresh {
+    /// Require every motor to have answered `phase` (one request per motor, in native state
+    /// order) and to report `expected`.
+    fn expect_all(&self, phase: &Phase, expected: MotorState) -> Result<(), DamiaoChainError> {
+        for (index, bus_id) in self.ids.iter().copied().enumerate() {
+            if !phase.answered(index) {
                 return Err(DamiaoChainError::Silent(bus_id));
             }
             let state = MotorState::from_err(self.control.motor(bus_id)?.get_error());
-            let unreported = !self.motors[index].reports_enable_state
-                && matches!(state, MotorState::Enabled | MotorState::Disabled);
-            if state != expected && !unreported {
+            if !self.in_state(index, state, expected) {
                 return Err(DamiaoChainError::UnexpectedState {
                     bus_id,
                     state,
@@ -937,79 +1124,40 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         &self.commandable
     }
 
-    /// Drain older answers, take each motor's feedback count, request status with the
-    /// vendor's `0xCC` operation, and read each motor's answer to that request. A motor that
-    /// answered since the counts were taken is fresh, faulted when it reports a fault code or a
-    /// state contradicting the chain's; one that did not is stale (or, never having answered,
-    /// timed out); a link that failed is unavailable for every motor it could not reach.
+    /// One refresh phase: drain older answers, request status from every motor with the
+    /// vendor's `0xCC` operation, and read the answers. A motor that answered since its frame
+    /// was sent is fresh, faulted when it reports a fault code or a state contradicting the
+    /// chain's; one that did not is stale (or, never having answered, timed out); a link that
+    /// failed is unavailable for every motor it could not reach.
     fn read_positions(&mut self) -> Vec<AxisReading> {
-        let count = self.motors.len();
-        let unavailable = vec![AxisReading::Missing(MissingReason::Unavailable); count];
-        // Drain older answers before taking the high-water mark: a cached open/command answer
-        // cannot masquerade as a fresh read. 0xCC requests feedback only.
-        if self.control.recv().is_err() {
-            return unavailable;
-        }
-        let Ok(before) = self.feedback_counts() else {
-            return unavailable;
-        };
-        let sent: Vec<bool> = (0..count)
-            .map(|index| {
-                self.control
-                    .refresh_motor_status(self.bus_id(index))
-                    .is_ok()
-            })
-            .collect();
-        let mut received: Vec<Option<Instant>> = vec![None; count];
-        let mut link_failed = false;
-        for attempt in 0..ANSWER_POLLS {
-            if self.stamp_answers(&before, &mut received).is_err() {
-                link_failed = true;
-                break;
-            }
-            if received
-                .iter()
-                .zip(&sent)
-                .all(|(answered, sent)| answered.is_some() || !sent)
-            {
-                break;
-            }
-            if attempt > 0 {
-                self.control.port_mut().sleep(ANSWER_POLL_INTERVAL);
-            }
-            if self.control.recv().is_err() {
-                link_failed = true;
-                break;
-            }
-        }
-        if !link_failed && self.stamp_answers(&before, &mut received).is_err() {
-            link_failed = true;
-        }
+        let asked = phase(
+            &mut self.control,
+            &every(&self.ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_refresh(request.bus_id),
+        );
+        let link_failed = asked.failure.is_some();
         let expected = if self.enabled {
             MotorState::Enabled
         } else {
             MotorState::Disabled
         };
-        (0..count)
+        (0..self.ids.len())
             .map(|index| {
-                let bus_id = self.bus_id(index);
-                let Ok(cached) = self.control.motor(bus_id) else {
+                let Ok(cached) = self.control.motor(self.ids[index]) else {
                     return AxisReading::Missing(MissingReason::Unavailable);
                 };
-                let Some(at) = received[index] else {
-                    return AxisReading::Missing(if !sent[index] || link_failed {
+                let Some(at) = asked.received[index] else {
+                    return AxisReading::Missing(if !asked.sent[index] || link_failed {
                         MissingReason::Unavailable
-                    } else if before[index] > 0 {
+                    } else if asked.before[index] > 0 {
                         MissingReason::Stale
                     } else {
                         MissingReason::Timeout
                     });
                 };
                 let code = cached.get_error();
-                let state = MotorState::from_err(code);
-                let unreported = !self.motors[index].reports_enable_state
-                    && matches!(state, MotorState::Enabled | MotorState::Disabled);
-                if state != expected && !unreported {
+                if !self.in_state(index, MotorState::from_err(code), expected) {
                     return AxisReading::Faulted(code);
                 }
                 AxisReading::Fresh {
@@ -1030,46 +1178,41 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         self.command_readings.clone()
     }
 
+    /// A disable phase to every motor, then a refresh phase to any that stayed silent.
     fn stop(&mut self) -> StopReport {
         self.command_readings = None;
         self.enabled = false;
         // Only answers to the disable frames count: whatever is already on the link (a late
-        // answer to the last command) is decoded before the high-water mark is taken.
-        let drained = self.control.recv().is_ok();
-        let Some(before) = self.feedback_counts().ok().filter(|_| drained) else {
-            self.stop_pending = true;
-            return StopReport {
-                unproven: self.motors.iter().map(|m| m.axis.binding.bus_id).collect(),
-                ..StopReport::default()
-            };
-        };
-        for index in 0..self.motors.len() {
-            let _ = self.control.disable(self.bus_id(index));
-        }
-        let _ = self.await_answers(&before);
-        let silent: Vec<u16> = self
-            .fresh(&before)
-            .unwrap_or_default()
-            .into_iter()
-            .enumerate()
-            .filter(|(_, fresh)| !fresh)
-            .map(|(index, _)| self.bus_id(index))
+        // answer to the last command) is decoded before the phase's frames are sent.
+        let disabled = phase(
+            &mut self.control,
+            &every(&self.ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+        );
+        let mut answered: Vec<bool> = (0..self.ids.len())
+            .map(|index| disabled.drained && disabled.answered(index))
             .collect();
-        if !silent.is_empty() {
-            for bus_id in silent {
-                let _ = self.control.refresh_motor_status(bus_id);
+        let silent: Vec<usize> = (0..self.ids.len()).filter(|i| !answered[*i]).collect();
+        if disabled.drained && !silent.is_empty() {
+            let ids: Vec<u16> = silent.iter().map(|index| self.ids[*index]).collect();
+            let asked = phase(
+                &mut self.control,
+                &every(&ids, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_refresh(request.bus_id),
+            );
+            for (slot, index) in silent.into_iter().enumerate() {
+                answered[index] = asked.drained && asked.answered(slot);
             }
-            let _ = self.await_answers(&before);
         }
-        let fresh = self.fresh(&before).unwrap_or_default();
         let mut report = StopReport::default();
-        for index in 0..self.motors.len() {
-            let bus_id = self.bus_id(index);
+        for (index, bus_id) in self.ids.iter().copied().enumerate() {
             let state = self
                 .control
                 .motor(bus_id)
                 .map(|motor| MotorState::from_err(motor.get_error()));
-            match (fresh.get(index).copied().unwrap_or(false), state) {
+            match (answered[index], state) {
                 (true, Ok(MotorState::Disabled)) => {}
                 (true, Ok(MotorState::Enabled)) if !self.motors[index].reports_enable_state => {
                     report.unobserved.push(bus_id);
@@ -1085,15 +1228,13 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         report
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: every
-    /// motor's `disable` and its 0.01 s wait, an answer poll, a `refresh_motor_status` for
-    /// every motor that stayed silent, a second poll, and the link's own allowance for each of
-    /// those frames (`CanPort::frame_allowance`, which counts a send that waits for queue room).
+    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: two
+    /// phases, each a frame per motor that may wait the link's own allowance for queue room
+    /// (`CanPort::frame_allowance`), then the answer wait and one more allowance.
     fn stop_budget(&self) -> Duration {
         let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
-        let polls = u32::try_from(ANSWER_POLLS - 1).unwrap_or(u32::MAX);
         let frame = self.control.port().frame_allowance();
-        DISABLE_WAIT * motors + ANSWER_POLL_INTERVAL * polls * 2 + frame * motors * 2
+        (frame * motors + FEEDBACK_WAIT + frame) * 2
     }
 
     /// Every motor's latest answered position, in joint coordinates: from open, each stop and
@@ -1115,10 +1256,8 @@ impl ChainError for DamiaoChainError {
         match self {
             Self::Body(_)
             | Self::Target(_)
-            | Self::Uncommandable { .. }
             | Self::StopPending
             | Self::ClearWhileEnabled
-            | Self::RestingOutside { .. }
             | Self::Feedforward { .. }
             | Self::FeedforwardLimit { .. }
             | Self::FeedforwardLength { .. } => ChainFailure::Refused,

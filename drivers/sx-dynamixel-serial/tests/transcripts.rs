@@ -486,7 +486,6 @@ fn open_confirms_every_limit_and_observes_where_the_body_rests() {
     assert!(chain.port().expected.is_empty());
     // 0.25 rad/s is 10 steps of 0.229 rev/min, 0.5 rad/s² one of 214.577 rev/min².
     assert_eq!(chain.servos()[0].profile(), Some((10, 1)));
-    assert!(chain.approach_speed_limited(0) && chain.approach_speed_limited(1));
     let rest: Vec<f64> = chain
         .servos()
         .iter()
@@ -617,11 +616,8 @@ fn a_servo_that_lost_its_profile_is_nan_and_the_next_enable_restores_it() {
     let receipt = chain.command(&[0.0, 0.0]).expect("commanded");
     assert!(receipt.observed[0].is_finite());
     assert!(receipt.observed[1].is_nan());
-    assert!(chain.approach_speed_limited(0));
-    assert!(!chain.approach_speed_limited(1));
     let receipt = chain.command(&[0.0, 0.0]).expect("re-enabled");
     assert!(receipt.observed.iter().all(|joint| joint.is_finite()));
-    assert!(chain.approach_speed_limited(1));
     assert!(chain.port().expected.is_empty());
 }
 

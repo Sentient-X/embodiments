@@ -734,10 +734,6 @@ where
         self.0.command_readings()
     }
 
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        self.0.approach_speed_limited(axis)
-    }
-
     fn clear_faults(&mut self) {
         self.0.clear_faults();
     }
@@ -818,13 +814,6 @@ impl ActuatorChain for Body {
         match self {
             Self::B601(chain) => chain.command_readings(),
             Self::Buses(chain) => chain.command_readings(),
-        }
-    }
-
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        match self {
-            Self::B601(chain) => chain.approach_speed_limited(axis),
-            Self::Buses(chain) => chain.approach_speed_limited(axis),
         }
     }
 

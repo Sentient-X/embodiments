@@ -331,8 +331,8 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
     );
     assert_eq!(
         body.last_observed(),
-        None,
-        "a command may have moved the servos"
+        Some(receipt.observed.clone()),
+        "every bus reports where its command's answers observed it"
     );
     assert!(can.state().motors.values().any(|motor| motor.state == 1));
     assert!(torques(&serial, 1));
@@ -646,9 +646,6 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         &mut bridges,
     )
     .expect("open does not refuse a servo resting outside its range");
-    // The Feetech axes bound their own approach; the Damiao ones do not.
-    assert!((0..15).all(|axis| !body.approach_speed_limited(axis)));
-    assert!((15..25).all(|axis| body.approach_speed_limited(axis)));
     // Every Feetech servo holds Goal_Speed 3 and Acceleration 3 (0.25 rad/s, 0.5 rad/s²).
     {
         let state = neck.state();
@@ -889,60 +886,6 @@ fn a_neck_axis_resting_past_its_calibrated_reach_is_brought_in_and_held_at_what_
     let last = *lifts.last().expect("ticks");
     assert!((3030..=3039).contains(&last), "{last}");
     assert!(neck.state().goal(2) <= 3039);
-}
-
-/// A body that does not claim its devices bound their own approach.
-struct Unlimited(Body);
-
-impl ActuatorChain for Unlimited {
-    type Error = <Body as ActuatorChain>::Error;
-    type Feedback = <Body as ActuatorChain>::Feedback;
-
-    fn axes(&self) -> &[sx_embodiment_drivers::BoundAxis] {
-        self.0.axes()
-    }
-
-    fn commandable(&self) -> &[sx_embodiment_drivers::CommandRange] {
-        self.0.commandable()
-    }
-
-    fn command(
-        &mut self,
-        joints: &[f64],
-    ) -> Result<sx_embodiment_drivers::Receipt<Self::Feedback>, Self::Error> {
-        self.0.command(joints)
-    }
-
-    fn stop(&mut self) -> sx_embodiment_drivers::StopReport {
-        self.0.stop()
-    }
-
-    fn stop_budget(&self) -> Duration {
-        self.0.stop_budget()
-    }
-
-    fn last_observed(&self) -> Option<Vec<f64>> {
-        self.0.last_observed()
-    }
-
-    fn read_positions(&mut self) -> Vec<sx_embodiment_drivers::AxisReading> {
-        self.0.read_positions()
-    }
-}
-
-#[test]
-fn without_a_confirmed_approach_limit_the_governor_refuses_a_neck_resting_outside() {
-    let (body, neck, _) = probed_body();
-    let target = rest_held(&body);
-    let mut governed = Governor::new(Unlimited(body), bring_up_limits()).expect("limits");
-    let written = neck.state().written.len();
-    let refused = governed.command(&target).expect_err("refused");
-    assert!(
-        matches!(refused, GovernorError::RestingOutside { .. }),
-        "{refused}"
-    );
-    assert_eq!(neck.state().written.len(), written, "nothing was sent");
-    assert_eq!(neck.state().torque(6), 0);
 }
 
 #[test]

@@ -70,13 +70,11 @@
 //!   `Profile Velocity` and `Profile Acceleration` (e-manual: velocity-based profile, 0.229
 //!   rev/min and 214.577 rev/min² per step; `Drive_Mode` bit 2 clear, which open's calibration
 //!   check holds). Both read 0 as no limit at all, so a limit that rounds below one step, or
-//!   past 32,767, is refused at open. The servo itself then approaches any goal at that pace,
-//!   and [`ActuatorChain::approach_speed_limited`] says so only while the registers were last
-//!   read back as written. They are RAM, reset at power-on, so they are never trusted for the
-//!   chain's life: every enable reads them back (rewriting and reading again where they
-//!   differ, refusing a servo that still does not hold them), and every command's SYNC READ
-//!   covers them, so a servo found unlimited is `NaN`, no longer approach-limited, and the
-//!   next command enables afresh.
+//!   past 32,767, is refused at open. The servo itself then approaches any goal at that pace.
+//!   The registers are RAM, reset at power-on, so they are never trusted for the chain's life:
+//!   every enable reads them back (rewriting and reading again where they differ, refusing a
+//!   servo that still does not hold them), and every command's SYNC READ covers them, so a
+//!   servo found unlimited is `NaN` and the next command enables afresh.
 //! - **Current-based position** (mode 5) pushes with whatever `Goal Current` (102) holds, which
 //!   power-on resets to `Current Limit`: such a servo must declare its `Goal Current`, held and
 //!   checked as its profile is, and any other servo must not.
@@ -380,9 +378,6 @@ pub struct DynamixelChain<P> {
     observed: Option<Vec<f64>>,
     /// Each servo's reading from the last command's SYNC READ; none since open or a stop.
     command_readings: Option<Vec<AxisReading>>,
-    /// Per servo: its profile (and `Goal Current`, where declared) was last read back as
-    /// written, at the last enable or in the last command's SYNC READ.
-    approach_limited: Vec<bool>,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no error.
@@ -514,7 +509,6 @@ impl<P: SerialPort> DynamixelChain<P> {
             faults: Vec::new(),
             observed: None,
             command_readings: None,
-            approach_limited: Vec::new(),
         };
         chain.identify()?;
         chain.is_calibrated()?;
@@ -639,7 +633,6 @@ impl<P: SerialPort> DynamixelChain<P> {
                 self.ph.write1_byte_tx_rx(dxl_id, OPERATING_MODE, mode),
             )?;
         }
-        self.approach_limited = vec![false; self.servos.len()];
         for index in 0..self.servos.len() {
             self.hold_limits(index, true)?;
         }
@@ -674,10 +667,8 @@ impl<P: SerialPort> DynamixelChain<P> {
             (servo.axis.binding.bus_id, servo.dxl_id())
         };
         if !rewrite && limits.held_by(&self.read_limits(bus_id, dxl_id)?) {
-            self.approach_limited[index] = true;
             return Ok(());
         }
-        self.approach_limited[index] = false;
         if let Some(current) = limits.goal_current {
             expect(
                 bus_id,
@@ -715,7 +706,6 @@ impl<P: SerialPort> DynamixelChain<P> {
             limits.velocity,
             read.word(PROFILE_VELOCITY, 4).unwrap_or(0),
         )?;
-        self.approach_limited[index] = true;
         Ok(())
     }
 
@@ -798,9 +788,6 @@ impl<P: SerialPort> DynamixelChain<P> {
                     received,
                 },
             };
-            if !held {
-                self.approach_limited[index] = false;
-            }
             if !reading.is_fresh() {
                 self.enabled = false;
             }
@@ -986,12 +973,6 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
 
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.observed.clone()
-    }
-
-    /// A servo's, while its profile was last read back as written: at the last enable, and
-    /// in every command's SYNC READ since.
-    fn approach_speed_limited(&self, axis: usize) -> bool {
-        self.approach_limited.get(axis).copied().unwrap_or(false)
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo, each

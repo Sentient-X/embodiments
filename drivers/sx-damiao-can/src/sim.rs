@@ -4,18 +4,22 @@
 //! answers what was written, else its model's limit table, a refresh or command answers feedback at the position last
 //! commanded, and enable and disable set the state its feedback reports. A killed motor never
 //! answers. A fault code is latched: enable and disable leave it, and only the clear frame
-//! (`FF..FB`) clears it, to disabled, unless it is persistent. Waits are recorded rather than slept unless `real` is set, as on the bench.
+//! (`FF..FB`) clears it, to disabled, unless it is persistent. Waits are recorded rather than
+//! slept unless `real` is set, as on the bench, and they are the bus's clock: a wait for an
+//! answer that never comes advances it to the deadline. An enabled motor whose `TIMEOUT`
+//! register holds a count and that hears nothing for longer than it latches fault 0xD,
+//! communication lost, as Damiao's manual has the firmware do.
 //! Shared by every suite that drives a Damiao body: this crate's, the bodies crate's and the
 //! station's.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 
-use crate::chain::{DamiaoAxis, motor_type};
+use crate::chain::{COMMUNICATION_LOST, DamiaoAxis, motor_type};
 use crate::dm_can::{DmMotorType, float_to_uint};
 
 /// One simulated motor.
@@ -34,6 +38,32 @@ pub struct SimMotor {
     pub reports_enable_state: bool,
     /// A fault the clear frame (`FF..FB`) does not clear, as a fault whose cause persists.
     pub persistent_fault: bool,
+    /// The bus clock when the motor last heard a frame addressed to it.
+    pub heard: Duration,
+}
+
+/// The `TIMEOUT` register (0x09) and its 50 µs count.
+const TIMEOUT: u8 = 0x09;
+const TIMEOUT_COUNT: Duration = Duration::from_micros(50);
+
+impl SimMotor {
+    /// Latch communication lost if the motor is enabled, its watchdog armed, and it has heard
+    /// nothing for longer than the watchdog by `clock`.
+    fn watch(&mut self, clock: Duration) {
+        let Some(counts) = self
+            .registers
+            .get(&TIMEOUT)
+            .map(|bytes| u32::from_le_bytes(*bytes))
+        else {
+            return;
+        };
+        if self.state == 1
+            && counts > 0
+            && clock.saturating_sub(self.heard) > TIMEOUT_COUNT * counts
+        {
+            self.state = COMMUNICATION_LOST;
+        }
+    }
 }
 
 /// The bus's motors and what crossed it.
@@ -48,6 +78,17 @@ pub struct SimState {
     pub waited: Duration,
     /// Waits really sleep, as on the bench.
     pub real: bool,
+}
+
+impl SimState {
+    /// Advance the bus clock by `duration`, tripping every watchdog it passes.
+    fn advance(&mut self, duration: Duration) {
+        self.waited += duration;
+        let clock = self.waited;
+        for motor in self.motors.values_mut() {
+            motor.watch(clock);
+        }
+    }
 }
 
 /// A simulated bus, shared with the test through its handle.
@@ -72,6 +113,7 @@ impl Sim {
                         ignored: BTreeSet::new(),
                         reports_enable_state: true,
                         persistent_fault: false,
+                        heard: Duration::ZERO,
                     },
                 )
             })
@@ -167,6 +209,11 @@ impl Sim {
     #[must_use]
     pub fn waited(&self) -> Duration {
         self.state().waited
+    }
+
+    /// Let `duration` pass on the bus clock with nothing sent, as a stalled host does.
+    pub fn pass(&self, duration: Duration) {
+        self.state().advance(duration);
     }
 
     /// The waits recorded since the last take.
@@ -286,11 +333,12 @@ impl CanPort for Sim {
         if state.dead.contains(&id) {
             return Ok(());
         }
-        if let Some(reply) = state
-            .motors
-            .get_mut(&id)
-            .and_then(|motor| answer(id, motor, frame))
-        {
+        let clock = state.waited;
+        if let Some(reply) = state.motors.get_mut(&id).and_then(|motor| {
+            motor.watch(clock);
+            motor.heard = clock;
+            answer(id, motor, frame)
+        }) {
             state.inbox.push_back(reply);
         }
         Ok(())
@@ -300,10 +348,19 @@ impl CanPort for Sim {
         Ok(self.state().inbox.pop_front())
     }
 
+    /// An answer if one is pending; else the bus clock runs to `deadline` and nothing came.
+    fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
+        if let Some(frame) = self.state().inbox.pop_front() {
+            return Ok(Some(frame));
+        }
+        self.sleep(deadline.saturating_duration_since(Instant::now()));
+        Ok(self.state().inbox.pop_front())
+    }
+
     fn sleep(&mut self, duration: Duration) {
         let real = {
             let mut state = self.state();
-            state.waited += duration;
+            state.advance(duration);
             state.real
         };
         if real {
