@@ -7,7 +7,7 @@
 //!
 //! 1. [`bridges::enumerate`] lists every USB device this host carries with its vendor and
 //!    product id, serial number, tty or `SocketCAN` interface, and whether this host can open it
-//!    (a ZLG CAN bridge on macOS is present, with no driver).
+//!    (a ZLG CAN bridge has no kernel driver and is opened in userspace, channel by channel).
 //! 2. [`probe::probe`] scans each openable bus with its vendor crate's read-only scan:
 //!    `sx_feetech_serial::scan` on serial bridges (PING and READ only) and
 //!    `sx_damiao_can::scan` on CAN interfaces (register reads only). Each scan speaks through

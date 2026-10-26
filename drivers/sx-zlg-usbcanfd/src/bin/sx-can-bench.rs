@@ -3,14 +3,20 @@
 //! ```text
 //! sx-can-bench zlg [--serial S] [--channel 1] [--in-flight 1|2] [--spin] [--exercise-recovery] [options]
 //! sx-can-bench socketcan <interface> [options]        (Linux, feature socketcan)
+//! sx-can-bench answer <vcanN> [--motors ...]          (Linux, feature socketcan)
 //! ```
+//!
+//! `answer` plays the motors on a virtual interface (`ip link add vcan0 type vcan`): it answers
+//! every register read the bench sends at once, so `socketcan vcan0` measures the host's own
+//! path (socket, wake-up, scheduling) with no bus time in it. It refuses any interface that is
+//! not virtual, so it can never put a frame on a real bus.
 //!
 //! Options: --motors 0x09,0x10,...  (master = send + 0x20; default the static upper body's
 //! fourteen answering motors, without the faulty torso 0x1F) --samples N --rates 50,100,200,250
 //! --seconds S --throughput-seconds S --timeout-ms N --json PATH --max-load L (default 20).
 //!
-//! `--realtime` (macOS) puts the bench thread under Mach's `THREAD_TIME_CONSTRAINT_POLICY`, as
-//! the robot's real-time layer does for its loop threads. `--spin` makes the ZLG channel poll instead of sleeping while it waits for a frame (the
+//! `--realtime` puts the bench thread under the host's real-time policy (`sx_realtime`: Mach's
+//! time constraint on macOS, `SCHED_FIFO` on Linux), as a robot's control loop takes it. `--spin` makes the ZLG channel poll instead of sleeping while it waits for a frame (the
 //! opt-in `ReceiveWait::Spin`). `--exercise-recovery` first checks the stall recovery on the
 //! adapter: it marks the channel stalled twice in a row, so the next sends run a channel
 //! restart and then a device close and open (only the channel lifecycle's commands), and then
@@ -177,11 +183,21 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 bench::process_cpu,
             )
             .map_err(|error| error.to_string())?;
-            (report, serde_json::Value::Null)
+            let counters: serde_json::Map<String, serde_json::Value> =
+                sx_embodiment_drivers::can::CanPort::counters(&port)
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value.into()))
+                    .collect();
+            (report, serde_json::json!({ "counters": counters }))
+        }
+        #[cfg(all(feature = "socketcan", target_os = "linux"))]
+        "answer" => {
+            let interface = interface.ok_or("name the virtual interface, e.g. vcan0")?;
+            return answer(&interface, &config);
         }
         other => {
             return Err(format!(
-                "unknown transport {other} (zlg, or socketcan on Linux with the feature)"
+                "unknown transport {other} (zlg, or socketcan and answer on Linux with the feature)"
             ));
         }
     };
@@ -246,19 +262,51 @@ fn exercise(
     }
 }
 
-/// The bench thread under Mach's time-constraint policy, for the fastest rate's period.
-#[cfg(target_os = "macos")]
+/// The bench thread under the host's real-time policy for the fastest rate's period, as a
+/// robot's control loop takes it (`sx_realtime`: Mach time constraint on macOS, `SCHED_FIFO`
+/// on Linux).
 fn realtime_thread(config: &Config) -> Result<(), String> {
     use std::time::Duration;
     let fastest = config.rates_hz.iter().copied().max().unwrap_or(50).max(1);
     let period = Duration::from_secs_f64(1.0 / f64::from(fastest));
-    sx_zlg_usbcanfd::macos::time_constraint(period, period / 4, period / 2)
-        .map_err(|status| format!("THREAD_TIME_CONSTRAINT_POLICY refused: kern_return {status}"))?;
-    eprintln!("bench thread: THREAD_TIME_CONSTRAINT_POLICY, period {period:?}");
+    sx_realtime::elevate(sx_realtime::Role::ControlLoop { period })
+        .map_err(|refused| format!("--realtime: the policy was {refused}"))?;
+    eprintln!("bench thread: real-time, period {period:?}");
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn realtime_thread(_config: &Config) -> Result<(), String> {
-    Err("--realtime is the macOS time-constraint policy; on Linux use SCHED_FIFO (chrt)".to_owned())
+/// Answer every bench register read on the virtual interface `interface` as the motor it
+/// names would, until killed. Refuses an interface with a device behind it.
+#[cfg(all(feature = "socketcan", target_os = "linux"))]
+fn answer(interface: &str, config: &Config) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+    use sx_embodiment_drivers::can::{CanFrame, CanPort};
+    if let Err(refused) = sx_realtime::elevate(sx_realtime::Role::AnswerPath) {
+        eprintln!("answer: the real-time policy was {refused}");
+    }
+    let mut port =
+        sx_socketcan::SocketCanPort::open_virtual(interface).map_err(|e| e.to_string())?;
+    eprintln!("answering {} motors on {interface}", config.motors.len());
+    loop {
+        let Some(request) = port
+            .receive_until(Instant::now() + Duration::from_secs(1))
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        if !bench::is_allowed(&request) {
+            continue;
+        }
+        let motor = u16::from_le_bytes([request.data[0], request.data[1]]);
+        let Some(&(_, master)) = config.motors.iter().find(|(id, _)| *id == motor) else {
+            continue;
+        };
+        let mut data = request.data;
+        data[4..].copy_from_slice(&12.5_f32.to_le_bytes());
+        port.send(&CanFrame {
+            id: u32::from(master),
+            data,
+        })
+        .map_err(|e| e.to_string())?;
+    }
 }

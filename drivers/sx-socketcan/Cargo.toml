@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
+sx-realtime.workspace = true
 thiserror.workspace = true
 
 # The raw socket and lock calls: libc is already in the lock (serialport's), no new crate.

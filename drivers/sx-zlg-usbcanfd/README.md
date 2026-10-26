@@ -81,10 +81,11 @@ device honours it per batch, as the specification presumes (42 ms at the default
   open (from `/proc/<pid>/fd`; another user's process is not visible without privilege), on macOS
   the I/O Registry's `UsbExclusiveOwner` of the adapter's interface (`pid 1234, sx-station`).
   Otherwise it says "held by another process". `sx-embodiment-bodies` turns it into
-  `OpenError::Busy`; `sx-identify` and `sx-can-bench` print it as is. On Linux, ZLG's kernel
-  module claims the adapter when loaded and exposes its channels as SocketCAN interfaces; then
-  the busy error names no process, and the SocketCAN path (`sx-socketcan`) is the one to use, or
-  the module must be unloaded.
+  `OpenError::Busy`; `sx-identify` and `sx-can-bench` print it as is. ZLG ships **no** Linux kernel or SocketCAN
+  driver for its USB adapters (checked 2026-10-26: its Linux download for the
+  USBCANFD-100U/200U/400U is `usbcanfd_libusb`, a userspace library on libusb, for x64 and
+  aarch64; SocketCAN packages exist only for its PCIe cards, and no community kernel driver for
+  `3068:0009` was found). This crate is the same kind of driver as ZLG's own Linux one.
 - The reset control request (0xFF) is never sent: a failed probe is reported and the adapter left
   as found.
 - CRCs on what the device sends are not checked, as the reference does not; their presence is
@@ -101,7 +102,8 @@ device honours it per batch, as the specification presumes (42 ms at the default
 ## sx-can-bench
 
 A round-trip benchmark generic over `CanPort`, so the same code measures this crate and, on
-Linux, SocketCAN over ZLG's kernel module (`--features socketcan`). It sends only Damiao
+Linux, any SocketCAN interface (`--features socketcan`), including `vcan` with
+`sx-can-bench answer vcan0` playing the motors, which measures the host's own path. It sends only Damiao
 register reads of `PMAX`, `VMAX` and `TMAX` (`0x7FF`, `[id_lo, id_hi, 0x33, rid, 0, 0, 0, 0]`)
 through a guard that refuses every other frame; it refuses a debug build and a 1-minute load
 average of 20 or more.
@@ -161,11 +163,11 @@ answered in 1.1 ms. Opening a freshly plugged adapter configured it through IOUS
 macOS coalesces a default thread's timers: `thread::sleep(3 ms)` and a 3 ms condvar timeout
 wake 0.76–0.77 ms late at p50 (p99 3.2–5.8 ms), and a thread blocked on a condvar is woken
 late enough to put 2.6 ms on the round trip's p99. Under Mach's
-`THREAD_TIME_CONSTRAINT_POLICY` (`macos::time_constraint`) the same sleeps wake 9 µs late at
+`THREAD_TIME_CONSTRAINT_POLICY` (`sx_realtime::elevate`, moved there from this crate) the same sleeps wake 9 µs late at
 p50 (p99 44 µs), and the blocking receive has the spinning one's tail at an eighth of the CPU
 (table). So a blocking receive is the default (it polls only its last millisecond), the
 adapter puts its own I/O thread and nusb's `nusb-events` completion thread under the
-time-constraint policy when it opens (`macos::time_constraint_named`), and a control loop puts
+time-constraint policy when it opens (`sx_realtime::elevate_named`), and a control loop puts
 its own thread under it (`sx-identify` does); `--realtime` does the same for the bench thread,
 and `ReceiveWait::Spin` stays an opt-in for a thread that cannot have it.
 
@@ -179,6 +181,35 @@ threads constrained, against about 3.5 ms of bus time.
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
+
+## Linux
+
+The driver is the same on Linux: `nusb` submits the same queued bulk transfers as usbfs URBs and
+reaps them on its own `nusb-events` thread, so sixteen receive reads stay in flight and
+transmits go out batched, as on macOS. What differs is the host around it (`sx-realtime`):
+
+- **Real-time policy.** When the adapter opens, its I/O thread and `nusb-events` ask for
+  `SCHED_FIFO` at 80 and a control loop for 70 (`sx_realtime::Role`). The process needs
+  `RLIMIT_RTPRIO` of at least 80 (systemd `LimitRTPRIO=80`) or `CAP_SYS_NICE`; without it the
+  open says so once (`real-time policy was refused (1)`) and runs at default priority.
+- **Wake latency.** While the adapter is open it holds `/dev/cpu_dma_latency` at 0, so no core
+  sleeps in an idle state it takes longer to wake from. On the DGX Spark (GB10, `acpi_idle`
+  LPI-2 231 µs and LPI-3 433 µs) this, not the driver, set the host's share of a tick: on
+  `vcan` with 14 motors (`sx-can-bench answer` playing them, no bus time) a cycle's host time
+  was p50 117–265 µs, p99 1.4–1.9 ms, max 2.9–6.9 ms with nothing granted; `SCHED_FIFO` alone
+  made it worse (p50 376–548 µs, 1650 of 2500 cycles missed at 250 Hz: real-time threads are
+  pushed to idle cores); the wake-latency hold alone gave p50 28–50 µs, p99 63–174 µs; both
+  gave p50 41–50 µs, p99 71–81 µs, max 85–353 µs, no misses (2026-10-26). The device file is
+  root-only by default: the robot host grants it with a udev rule
+  (`KERNEL=="cpu_dma_latency", GROUP="<robot group>", MODE="0660"`).
+- **Configuration.** Linux configures the adapter at enumeration; the open only claims
+  interface 0 over usbfs, which needs read-write on `/dev/bus/usb/<bus>/<dev>` (a udev rule on
+  `3068:0009`, the robot's host need).
+
+The bus, not the host, sets a tick: 14 motors are 28 frames, 3780 µs worst case at 1 Mbit/s.
+With the host at under 0.1 ms, a faster tick comes from the bus: the adapter's second channel
+(two buses of seven motors each halve it) or a CAN FD data phase where the motors' firmware
+supports it.
 
 ## macOS
 

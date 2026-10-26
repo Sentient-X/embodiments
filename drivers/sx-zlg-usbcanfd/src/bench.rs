@@ -1,7 +1,8 @@
 //! A CAN round-trip benchmark over any `CanPort`, sending only Damiao register reads.
 //!
-//! The same code measures this crate's userspace path and, on Linux, `SocketCAN` over ZLG's own
-//! kernel module, so the two are compared frame for frame. Every frame goes through
+//! The same code measures this crate's userspace path and, on Linux, any `SocketCAN` interface
+//! (a kernel-driven adapter, a board's controller, or `vcan` for the host's own path), so the
+//! transports are compared frame for frame. Every frame goes through
 //! [`ReadOnly`], which refuses anything but a register read of `PMAX`, `VMAX` or `TMAX`
 //! (`0x7FF`, `[id_lo, id_hi, 0x33, rid, 0, 0, 0, 0]`, the registers `sx_damiao_can` reads at
 //! open, the rule `sx_damiao_can::scan::ReadOnlyCanPort` enforces, narrowed further): an enable,
@@ -110,6 +111,10 @@ impl<P: CanPort> CanPort for ReadOnly<P> {
 
     fn frame_allowance(&self) -> Duration {
         self.0.frame_allowance()
+    }
+
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        self.0.counters()
     }
 }
 

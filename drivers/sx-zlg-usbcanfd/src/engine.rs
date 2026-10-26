@@ -571,7 +571,17 @@ pub struct Engine<R: Pipe, W: Pipe, A: Pipe> {
     next_hold: Option<Instant>,
     batch: Box<[TxFrame; MAX_BATCH]>,
     encoded: Box<[u8; MAX_TX_TRANSFER]>,
+    /// Receive reads held back after [`RX_ERROR_RUN`] failures in a row, resubmitted at
+    /// `rx_resume`: a stalled endpoint or an error storm must not turn the I/O thread, which
+    /// runs at real-time priority, into a busy loop.
+    rx_parked: Vec<R::Buf>,
+    rx_errors_in_row: u32,
+    rx_resume: Option<Instant>,
 }
+
+/// Receive failures in a row after which reads are held back for [`RX_BACKOFF`].
+const RX_ERROR_RUN: u32 = 3;
+const RX_BACKOFF: Duration = Duration::from_millis(1);
 
 impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
     /// An engine with its receive reads queued and one transmit and reply buffer per allowed
@@ -587,6 +597,7 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
             out: out_pool,
             replies: reply_pool,
         } = buffers;
+        let rx_parked = Vec::with_capacity(rx_buffers.len());
         for mut buf in rx_buffers {
             buf.request(config.rx_request);
             rx.submit(buf);
@@ -612,6 +623,9 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
             next_hold: None,
             batch: Box::new([EMPTY_TX; MAX_BATCH]),
             encoded: Box::new([0; MAX_TX_TRANSFER]),
+            rx_parked,
+            rx_errors_in_row: 0,
+            rx_resume: None,
         }
     }
 
@@ -627,7 +641,7 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
 
     /// Do everything that can be done now without waiting.
     pub fn step(&mut self, cx: &mut Context<'_>, now: Instant) -> Step {
-        let mut progressed = self.receive(cx);
+        let mut progressed = self.receive(cx, now);
         progressed |= self.collect_writes(cx);
         progressed |= self.collect_replies(cx, now);
         self.expire(now);
@@ -640,24 +654,39 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
             progressed = true;
         }
         let batch = self.in_flight.front().map(|batch| batch.deadline);
+        let deadline = match (batch, self.next_hold) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         Step {
             progressed,
-            deadline: match (batch, self.next_hold) {
+            deadline: match (deadline, self.rx_resume) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
             },
         }
     }
 
-    fn receive(&mut self, cx: &mut Context<'_>) -> bool {
+    fn receive(&mut self, cx: &mut Context<'_>, now: Instant) -> bool {
         let mut progressed = false;
+        if self.rx_resume.is_some_and(|resume| now >= resume) {
+            self.rx_resume = None;
+            for buf in self.rx_parked.drain(..) {
+                self.rx.submit(buf);
+            }
+            progressed = true;
+        }
         while self.rx.pending() > 0 {
             let Poll::Ready(mut done) = self.rx.poll_complete(cx) else {
                 break;
             };
             progressed = true;
+            let mut park = false;
             match done.status {
-                Ok(()) => self.deliver(done.buf.received(done.len)),
+                Ok(()) => {
+                    self.rx_errors_in_row = 0;
+                    self.deliver(done.buf.received(done.len));
+                }
                 Err(TransferFailure::Cancelled) => continue,
                 Err(TransferFailure::Disconnected) => {
                     self.shared
@@ -669,14 +698,24 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
                         .device
                         .rx_usb_errors
                         .fetch_add(1, Ordering::Relaxed);
+                    self.rx_errors_in_row += 1;
+                    park = self.rx_errors_in_row >= RX_ERROR_RUN;
                 }
             }
             if !self.shared.stop.load(Ordering::Relaxed) {
                 done.buf.request(self.config.rx_request);
-                self.rx.submit(done.buf);
+                if park {
+                    self.rx_parked.push(done.buf);
+                    self.rx_resume.get_or_insert(now + RX_BACKOFF);
+                } else {
+                    self.rx.submit(done.buf);
+                }
             }
         }
-        if self.rx.pending() == 0 && !self.shared.stop.load(Ordering::Relaxed) {
+        if self.rx.pending() == 0
+            && self.rx_parked.is_empty()
+            && !self.shared.stop.load(Ordering::Relaxed)
+        {
             self.shared
                 .set_fatal("no receive read is queued on the device".to_owned());
         }
@@ -1474,5 +1513,36 @@ mod tests {
         assert_eq!(engine.rx_pending(), RX_TRANSFERS - 1);
         engine.shutdown(Duration::from_millis(100));
         assert_eq!(engine.rx_pending(), 0);
+    }
+
+    /// A run of failed receive reads is held back for a moment instead of resubmitted at once,
+    /// so a stalled endpoint cannot spin the real-time I/O thread; the reads come back after
+    /// the backoff and the step names when.
+    #[test]
+    fn a_run_of_receive_failures_backs_off_instead_of_spinning() {
+        let (mut engine, shared) = engine(1);
+        let now = Instant::now();
+        for _ in 0..RX_ERROR_RUN {
+            let buf = engine.rx.queued.pop_front().expect("queued");
+            engine.rx.done.push_back(Done {
+                buf,
+                len: 0,
+                status: Err(TransferFailure::Stall),
+            });
+        }
+        let step = engine.step(&mut cx(), now);
+        assert!(lock(&shared.fatal).is_none(), "held back, not fatal");
+        assert_eq!(
+            engine.rx_pending(),
+            RX_TRANSFERS - 1,
+            "the third read is held"
+        );
+        assert_eq!(step.deadline, Some(now + RX_BACKOFF));
+        engine.step(&mut cx(), now + RX_BACKOFF);
+        assert_eq!(engine.rx_pending(), RX_TRANSFERS);
+        // A read that succeeds ends the run.
+        engine.rx.complete(&[]);
+        engine.step(&mut cx(), now + RX_BACKOFF);
+        assert_eq!(engine.rx_errors_in_row, 0);
     }
 }

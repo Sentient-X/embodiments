@@ -76,11 +76,12 @@ pub trait Host {
     /// Returns why it cannot be opened.
     fn open_serial(&mut self, tty: &str, baud: u32) -> io::Result<Self::Serial>;
 
-    /// Open the `SocketCAN` interface `name`.
+    /// Open the CAN bus `name`: a `SocketCAN` interface, or a userspace channel's identity
+    /// (`<USB serial>:<channel>`).
     ///
     /// # Errors
     ///
-    /// Returns why it cannot be opened, always off Linux.
+    /// Returns why it cannot be opened.
     fn open_can(&mut self, name: &str) -> io::Result<Self::Can>;
 }
 
@@ -99,25 +100,8 @@ impl Default for System {
     }
 }
 
-#[cfg(target_os = "linux")]
-type SystemCan = sx_socketcan::SocketCanPort;
-#[cfg(not(target_os = "linux"))]
-type SystemCan = NoCan;
-
-/// The CAN port of a host without `SocketCAN`: it is never opened.
-#[cfg(not(target_os = "linux"))]
-pub enum NoCan {}
-
-#[cfg(not(target_os = "linux"))]
-impl CanPort for NoCan {
-    fn send(&mut self, _frame: &sx_embodiment_drivers::can::CanFrame) -> io::Result<()> {
-        match *self {}
-    }
-
-    fn receive(&mut self) -> io::Result<Option<sx_embodiment_drivers::can::CanFrame>> {
-        match *self {}
-    }
-}
+/// Any CAN port this host opens, on whichever transport.
+type SystemCan = sx_embodiment_bodies::Port;
 
 impl Host for System {
     type Serial = TtyPort;
@@ -173,14 +157,19 @@ impl Host for System {
         TtyPort::open(tty, baud)
     }
 
-    #[cfg(target_os = "linux")]
     fn open_can(&mut self, name: &str) -> io::Result<SystemCan> {
-        // A busy interface (another of our processes holds its lock) keeps its typed message.
-        sx_socketcan::SocketCanPort::open(name).map_err(io::Error::other)
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn open_can(&mut self, name: &str) -> io::Result<SystemCan> {
+        if let Some((serial, channel)) = sx_embodiment_bodies::system::zlg::parse(name) {
+            return sx_embodiment_bodies::system::zlg::open(name, serial, channel)
+                .map_err(io::Error::other);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // A busy interface (another of our processes holds its lock) keeps its typed message.
+            sx_socketcan::SocketCanPort::open(name)
+                .map(|port| Box::new(port) as SystemCan)
+                .map_err(io::Error::other)
+        }
+        #[cfg(not(target_os = "linux"))]
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!("SocketCAN interface {name} exists only on Linux"),

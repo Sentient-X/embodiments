@@ -16,6 +16,7 @@ sx-embodiment-drivers.workspace = true
 sx-feetech-serial = { path = "../sx-feetech-serial" }
 sx-damiao-can = { path = "../sx-damiao-can" }
 sx-zlg-usbcanfd = { path = "../sx-zlg-usbcanfd" }
+sx-realtime.workspace = true
 # Bench tools open and observe a body through the embodiment layer, never by vendor frames.
 sx-embodiment-bodies = { path = "../sx-embodiment-bodies", features = ["usb-serial", "zlg"] }
 serde.workspace = true

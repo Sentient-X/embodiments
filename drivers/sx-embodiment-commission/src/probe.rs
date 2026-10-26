@@ -79,6 +79,15 @@ pub fn probe<H: Host>(host: &mut H, ids: &Ids) -> std::io::Result<Probe> {
                     scan,
                 });
             }
+            Access::Userspace { channels } => {
+                for channel in channels {
+                    probe.damiao.push(DamiaoBus {
+                        identity: channel.clone(),
+                        interface: channel.clone(),
+                        scan: scan_can(host, channel, ids),
+                    });
+                }
+            }
             Access::SocketCan { interfaces } => {
                 for interface in interfaces {
                     probe.damiao.push(DamiaoBus {

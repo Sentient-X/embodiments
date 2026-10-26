@@ -85,6 +85,10 @@ impl<P: CanPort> CanPort for AskOnlyCanPort<P> {
     fn frame_allowance(&self) -> Duration {
         self.0.frame_allowance()
     }
+
+    fn counters(&self) -> Vec<(&'static str, u64)> {
+        self.0.counters()
+    }
 }
 
 /// How a motor's feedback is scaled.
