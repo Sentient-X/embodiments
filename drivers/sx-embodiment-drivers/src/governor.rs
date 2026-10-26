@@ -210,6 +210,10 @@ pub struct Governor<C, K = MonotonicClock> {
     opened_at: Option<Vec<f64>>,
     /// The first axis whose last target lay outside where it may go, and was brought in.
     brought_in: Option<usize>,
+    /// Each axis's interval (`Held::lower`), kept across a refused command, which re-seeds the
+    /// position from the chain but must not widen the interval; cleared only where the governor
+    /// takes the joint up anew (open, a stop, a fault, `clear_faults`, `start_at`).
+    interval: Option<(Axes<f64>, Axes<f64>)>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -284,6 +288,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             torque_caps,
             opened_at,
             brought_in: None,
+            interval: None,
         })
     }
 
@@ -298,6 +303,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         check_available(self.chain.axes(), &self.unavailable, joints)?;
         self.start = Some(Axes::from_slice(joints));
         self.held = None;
+        self.interval = None;
         Ok(())
     }
 
@@ -366,12 +372,18 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|observed| observed.len() == width)
                 .ok_or(GovernorError::NoStart)?,
         };
-        let (lower, upper) = position
+        let (lower, upper): (Axes<f64>, Axes<f64>) = position
             .iter()
             .zip(self.chain.commandable())
-            .map(|(at, range)| {
+            .enumerate()
+            .map(|(index, (at, range))| {
                 let reach = range.reaching(*at);
-                (reach.lower, reach.upper)
+                match &self.interval {
+                    Some((lower, upper)) => {
+                        (reach.lower.max(lower[index]), reach.upper.min(upper[index]))
+                    }
+                    None => (reach.lower, reach.upper),
+                }
             })
             .unzip();
         Ok(Held {
@@ -390,6 +402,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ) -> GovernorError<C::Error> {
         self.latched = true;
         self.held = None;
+        self.interval = None;
         self.missed.fill(0);
         let stop = self.chain.stop();
         make(stop)
@@ -557,6 +570,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             return Err(GovernorError::Latched);
         }
         self.check_finite(joints)?;
+        if let Some(wanted) = feedforward
+            && wanted.len() != joints.len()
+        {
+            return Err(TargetError::Width {
+                expected: joints.len(),
+                actual: wanted.len(),
+            }
+            .into());
+        }
         let now = self.clock.now();
         let held = match self.held.take() {
             Some(held) => held,
@@ -568,15 +590,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         let (next, velocity, (lower, upper), brought_in) =
             self.step(&held, joints, elapsed.as_secs_f64());
         self.brought_in = brought_in;
+        self.interval = Some((lower, upper));
         let receipt = match feedforward {
             Some(wanted) => {
-                if wanted.len() != next.len() {
-                    return Err(TargetError::Width {
-                        expected: next.len(),
-                        actual: wanted.len(),
-                    }
-                    .into());
-                }
                 let held: Axes<Feedforward> = wanted
                     .iter()
                     .zip(self.limits.iter().zip(&self.torque_caps))
@@ -703,6 +719,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn stop(&mut self) -> StopReport {
         self.held = None;
+        self.interval = None;
         self.missed.fill(0);
         self.chain.stop()
     }
@@ -736,6 +753,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.latched = false;
         self.missed.fill(0);
         self.held = None;
+        self.interval = None;
         self.chain.clear_faults();
     }
 }
@@ -1294,6 +1312,31 @@ mod tests {
             }
             assert_eq!(governor.brought_in(), Some(0));
             assert_eq!(governor.chain().stops, 0);
+        }
+    }
+
+    /// Refute correction pass: a refused command or a malformed feed-forward re-seeded the
+    /// interval from the sagged reading, so alternating one with a good command walked the
+    /// joint out again. The interval survives both; only a stop or a fault takes it up anew.
+    #[test]
+    fn a_refused_or_malformed_command_does_not_widen_the_interval() {
+        for refuse in [true, false] {
+            let mut chain = fake(true);
+            chain.rest = vec![0.85, 0.5];
+            chain.lag = 0.004;
+            let (mut governor, clock) = governed(chain);
+            for _ in 0..200 {
+                clock.advance(MAX_STEP_INTERVAL);
+                if refuse {
+                    governor.chain_mut().fail = Some(ChainFailure::Refused);
+                    assert!(governor.command(&[5.0, 0.5]).is_err());
+                    governor.chain_mut().fail = None;
+                } else {
+                    assert!(governor.command_with(&[5.0, 0.5], &[]).is_err());
+                }
+                let sent = step(&mut governor, &clock, &[5.0, 0.5]);
+                assert!(sent[0] <= 0.9 + 1e-12, "refuse {refuse}: sent {sent:?}");
+            }
         }
     }
 
