@@ -77,10 +77,14 @@ def _sweeps(rng: object, contact: bool = False) -> list[Segment]:
 
 def test_sweeps_recover_friction_and_gravity_and_pick_a_stribeck_model() -> None:
     found = fit_joint("elbow", _sweeps(None), SegmentLimits(peak_torque=27.0))
-    assert found.model in ("m2", "m4", "m5")
+    assert found.model in ("m2", "m4")
     assert found.held_out[found.model] < 0.1
     assert found.held_out["m1"] > found.held_out[found.model]
-    assert abs(found.gravity[0] - GRAVITY[0]) < 0.1 and abs(found.gravity[1] - GRAVITY[1]) < 0.1
+    # Over a short sub-range B cos q and the offset C trade; gravity itself is what is pinned.
+    q = np.linspace(-0.6, 0.6, 25)
+    a, b, c = found.gravity
+    want_g = GRAVITY[0] * np.sin(q) + GRAVITY[1] * np.cos(q) + GRAVITY[2]
+    assert np.max(np.abs(a * np.sin(q) + b * np.cos(q) + c - want_g)) < 0.15
     v = np.array([0.0, 0.1, 0.4])
     want = budget(TRUTH, v, np.zeros(3), np.zeros(3))
     got = budget(found.friction, v, np.zeros(3), np.zeros(3))

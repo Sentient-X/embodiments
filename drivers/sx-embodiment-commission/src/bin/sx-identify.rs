@@ -2,10 +2,21 @@
 //! arms and record what the motors measured, for `tools/identify_dynamics.py fit`.
 //!
 //! ```text
-//! sx-identify --plan <plan.json> --part holds|left|right --record <out.csv>
-//!             --drive <instance-drive.json> --instance <id>
-//!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1] [--with-torso] [--move]
+//! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>
+//!             --record <out.csv> --drive <instance-drive.json> --instance <id>
+//!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1]
+//!             [--with-torso] [--without <joint>]... [--move]
 //! ```
+//!
+//! `sweep:` and `breakaway:` read the friction sweep plan
+//! (`tools/identify_dynamics.py sweep-plan`, `docs/dynamics/static-upper-body-friction-sweeps.json`):
+//! the arms go to the ready pose, then the joint's staging pose, which keeps the swept
+//! joint's whole sub-range clear of the body and the table; then each pass sweeps the joint
+//! from `lower` to `upper` and back at every planned speed the cap allows
+//! (`sweep:<pass>:<speed>:+|-`), or ramps it from the middle of its sub-range at
+//! `breakaway_rate_rad_s` for `breakaway_travel_rad` each way (`break:<pass>:+|-`); back to ready,
+//! then to rest. The torso and `left_wrist_roll_joint` are left out unless asked
+//! (`--with-torso`; `--without` leaves out more).
 //!
 //! The plan (`tools/identify_dynamics.py plan`, runbook `docs/DYNAMICS-IDENTIFICATION.md`)
 //! holds absolute joint positions, so the drive must carry the unit's measured zeros. Every
@@ -17,7 +28,13 @@
 //! (plain PD holds and tracks; what is fitted is what the motors measure), and stopped
 //! (motors disabled) at the end, on Ctrl-C, on any refusal or fault, and when any motor's
 //! torque passes 80 % of its peak. Every tick is one CSV row: time, segment, and each axis'
-//! position (rad), velocity (rad/s) and torque (N·m) at the joint.
+//! commanded target, position (rad), velocity (rad/s) and torque (N·m) at the joint.
+//!
+//! Logging is deferred: each tick stores one fixed-size record into a buffer reserved for
+//! the whole run before the first command, and the CSV is written after the stop. Beyond
+//! the governor and torque guard, a suspected contact stops the run: after a segment's
+//! first 0.3 s, a step in any axis' torque over 2 N·m, or in its tracking error over 0.03 rad,
+//! from one tick to the next.
 //!
 //! Holds: from where the arms rest, each pose is approached once from 0.05 rad below every
 //! joint and once from above, each held `settle_s + record_s`; the fitter averages the last
@@ -46,6 +63,16 @@ const MAX_SPEED: f64 = 0.5;
 const MAX_TRACKING_ERROR: f64 = 0.2;
 /// The share of a motor's peak torque past which the run stops.
 const TORQUE_GUARD: f64 = 0.8;
+/// A torque step (N·m) or tracking-error step (rad) between ticks that suggests contact.
+const CONTACT_TORQUE_STEP: f64 = 2.0;
+const CONTACT_TRACKING_STEP: f64 = 0.03;
+/// How long after a segment starts the contact checks wait (the target's own acceleration).
+const CONTACT_SETTLE: Duration = Duration::from_millis(300);
+/// The most axes one record holds: the static upper body's fifteen Damiao motors.
+const MAX_AXES: usize = 16;
+/// Left out of the chain unless asked: the torso motor is not on the bench chain and the left
+/// wrist roll rests out of its range until its range fix lands.
+const LEFT_OUT: [&str; 2] = ["torso_joint", "left_wrist_roll_joint"];
 
 fn main() -> ExitCode {
     match run() {
@@ -67,6 +94,7 @@ struct Args {
     serial: Option<String>,
     channel: u8,
     torso: bool,
+    without: Vec<String>,
     motion: bool,
 }
 
@@ -82,6 +110,7 @@ fn parse() -> Result<Args, String> {
         serial: None,
         channel: 1,
         torso: false,
+        without: Vec::new(),
         motion: false,
     };
     while let Some(arg) = args.next() {
@@ -96,6 +125,7 @@ fn parse() -> Result<Args, String> {
             "--zlg-serial" => parsed.serial = Some(value()?),
             "--channel" => parsed.channel = value()?.parse().map_err(|_| "bad --channel")?,
             "--with-torso" => parsed.torso = true,
+            "--without" => parsed.without.push(value()?),
             "--move" => parsed.motion = true,
             other => return Err(format!("unknown argument {other}")),
         }
@@ -103,8 +133,11 @@ fn parse() -> Result<Args, String> {
     if parsed.plan.is_empty() || parsed.record.is_empty() || parsed.drive.is_empty() {
         return Err("--plan, --record, --drive and --instance are required".into());
     }
-    if !matches!(parsed.part.as_str(), "holds" | "left" | "right") {
-        return Err("--part is holds, left or right".into());
+    let known = matches!(parsed.part.as_str(), "holds" | "left" | "right")
+        || parsed.part.starts_with("sweep:")
+        || parsed.part.starts_with("breakaway:");
+    if !known {
+        return Err("--part is holds, left, right, sweep:<joint> or breakaway:<joint>".into());
     }
     if !(parsed.speed > 0.0 && parsed.speed <= MAX_SPEED) {
         return Err(format!("--speed is in (0, {MAX_SPEED}] rad/s"));
@@ -167,6 +200,100 @@ fn hold(ticks: &mut Vec<Tick>, segment: &str, at: &[f64], seconds: f64) {
     }
 }
 
+/// Every tick of a sweep or breakaway part (see the header), from `rest` back to `rest`.
+fn schedule_sweep(
+    plan: &Value,
+    part: &str,
+    names: &[String],
+    rest: &[f64],
+    speed: f64,
+) -> Result<Vec<Tick>, String> {
+    let (kind, joint) = part.split_once(':').ok_or("part")?;
+    let sweep = plan["sweeps"]
+        .as_array()
+        .ok_or("the plan has no sweeps; is it a sweep plan?")?
+        .iter()
+        .find(|s| s["joint"] == joint)
+        .ok_or(format!("the plan does not sweep {joint}"))?;
+    let index = names
+        .iter()
+        .position(|n| n == joint)
+        .ok_or(format!("{joint} is not in the chain"))?;
+    let pose_of = |entry: &Value| -> Vec<f64> {
+        names
+            .iter()
+            .zip(rest)
+            .map(|(name, at)| entry.get(name).and_then(Value::as_f64).unwrap_or(*at))
+            .collect()
+    };
+    let ready = pose_of(&plan["ready"]);
+    let staging = pose_of(&sweep["staging"]);
+    let lower = sweep["lower"].as_f64().ok_or("lower")?;
+    let upper = sweep["upper"].as_f64().ok_or("upper")?;
+    let passes = plan["passes"].as_u64().ok_or("passes")?;
+    let dwell = plan["dwell_s"].as_f64().ok_or("dwell_s")?;
+    let at = |q: f64| -> Vec<f64> {
+        let mut pose = staging.clone();
+        pose[index] = q;
+        pose
+    };
+    let mut ticks = Vec::new();
+    travel(&mut ticks, "move", rest, &ready, speed);
+    travel(&mut ticks, "move", &ready, &at(lower), speed);
+    if kind == "sweep" {
+        let speeds = numbers(&plan["speeds_rad_s"])?;
+        for pass in 0..passes {
+            for &v in speeds.iter().filter(|v| **v <= speed + 1e-9) {
+                travel(
+                    &mut ticks,
+                    &format!("sweep:{pass}:{v}:+"),
+                    &at(lower),
+                    &at(upper),
+                    v,
+                );
+                hold(&mut ticks, "move", &at(upper), dwell);
+                travel(
+                    &mut ticks,
+                    &format!("sweep:{pass}:{v}:-"),
+                    &at(upper),
+                    &at(lower),
+                    v,
+                );
+                hold(&mut ticks, "move", &at(lower), dwell);
+            }
+        }
+        travel(&mut ticks, "move", &at(lower), &ready, speed);
+    } else if kind == "breakaway" {
+        let rate = plan["breakaway_rate_rad_s"]
+            .as_f64()
+            .ok_or("breakaway_rate_rad_s")?;
+        let reach = plan["breakaway_travel_rad"]
+            .as_f64()
+            .ok_or("breakaway_travel_rad")?;
+        let middle = f64::midpoint(lower, upper);
+        travel(&mut ticks, "move", &at(lower), &at(middle), speed);
+        for pass in 0..passes {
+            for (sign, label) in [(1.0, "+"), (-1.0, "-")] {
+                hold(&mut ticks, "move", &at(middle), 1.0);
+                let end = middle + sign * reach;
+                travel(
+                    &mut ticks,
+                    &format!("break:{pass}:{label}"),
+                    &at(middle),
+                    &at(end),
+                    rate,
+                );
+                travel(&mut ticks, "move", &at(end), &at(middle), speed.min(0.1));
+            }
+        }
+        travel(&mut ticks, "move", &at(middle), &ready, speed);
+    } else {
+        return Err(format!("unknown part {part}"));
+    }
+    travel(&mut ticks, "move", &ready, rest, speed);
+    Ok(ticks)
+}
+
 /// Every tick of the part, from `rest` back to `rest`, over the chain's `names`.
 #[allow(clippy::too_many_lines)]
 fn schedule(
@@ -176,6 +303,9 @@ fn schedule(
     rest: &[f64],
     speed: f64,
 ) -> Result<Vec<Tick>, String> {
+    if part.starts_with("sweep:") || part.starts_with("breakaway:") {
+        return schedule_sweep(plan, part, names, rest, speed);
+    }
     let mut ticks = Vec::new();
     let pose_of = |entry: &Value, base: &[f64]| -> Vec<f64> {
         names
@@ -276,26 +406,50 @@ fn schedule(
     Ok(ticks)
 }
 
-/// One CSV row: time, segment, every position, then every velocity and torque `at` answers.
-fn record(
-    out: &mut impl Write,
+/// One tick as recorded: fixed size, so the run's buffer is reserved before the first command.
+#[derive(Clone, Copy)]
+struct Record {
     elapsed: Duration,
-    tick: &Tick,
-    observed: &[f64],
-    mut at: impl FnMut(usize) -> (f64, f64),
+    tick: usize,
+    position: [f64; MAX_AXES],
+    velocity: [f64; MAX_AXES],
+    torque: [f64; MAX_AXES],
+}
+
+/// The CSV, written after the run: time, segment, then every target, position, velocity and
+/// torque.
+fn write_records(
+    out: &mut impl Write,
+    names: &[String],
+    ticks: &[Tick],
+    records: &[Record],
 ) -> std::io::Result<()> {
-    write!(out, "{:.4},{}", elapsed.as_secs_f64(), tick.segment)?;
-    for q in observed {
-        write!(out, ",{q:.5}")?;
+    write!(out, "time_s,segment")?;
+    for kind in ["target", "position", "velocity", "torque"] {
+        for name in names {
+            write!(out, ",{kind}:{name}")?;
+        }
     }
-    let answers: Vec<(f64, f64)> = (0..observed.len()).map(&mut at).collect();
-    for (velocity, _) in &answers {
-        write!(out, ",{velocity:.4}")?;
+    writeln!(out)?;
+    let width = names.len();
+    for record in records {
+        let tick = &ticks[record.tick];
+        write!(out, "{:.4},{}", record.elapsed.as_secs_f64(), tick.segment)?;
+        for value in &tick.target {
+            write!(out, ",{value:.5}")?;
+        }
+        for value in &record.position[..width] {
+            write!(out, ",{value:.5}")?;
+        }
+        for value in &record.velocity[..width] {
+            write!(out, ",{value:.4}")?;
+        }
+        for value in &record.torque[..width] {
+            write!(out, ",{value:.4}")?;
+        }
+        writeln!(out)?;
     }
-    for (_, torque) in &answers {
-        write!(out, ",{torque:.4}")?;
-    }
-    writeln!(out)
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -314,8 +468,15 @@ fn run() -> Result<(), String> {
         .axes(&drive)
         .map_err(|e| e.to_string())?
         .into_iter()
-        .filter(|axis| args.torso || axis.axis.joint != "torso_joint")
+        .filter(|axis| {
+            let joint = axis.axis.joint.as_str();
+            !(args.without.iter().any(|w| w == joint)
+                || (LEFT_OUT.contains(&joint) && !(args.torso && joint == "torso_joint")))
+        })
         .collect();
+    if axes.len() > MAX_AXES {
+        return Err(format!("at most {MAX_AXES} axes are recorded"));
+    }
     let names: Vec<String> = axes.iter().map(|a| a.axis.joint.clone()).collect();
     let ranges: Vec<_> = axes.iter().map(DamiaoAxis::commandable).collect();
     // The dry run plans from the middle of each range; the real run from where the arms rest.
@@ -399,20 +560,19 @@ fn run() -> Result<(), String> {
         let _ = ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst));
     }
     let mut out = BufWriter::new(File::create(&args.record).map_err(|e| e.to_string())?);
-    let header: Vec<String> = ["time_s".to_owned(), "segment".to_owned()]
-        .into_iter()
-        .chain(names.iter().map(|n| format!("position:{n}")))
-        .chain(names.iter().map(|n| format!("velocity:{n}")))
-        .chain(names.iter().map(|n| format!("torque:{n}")))
-        .collect();
-    writeln!(out, "{}", header.join(",")).map_err(|e| e.to_string())?;
+    let mut records: Vec<Record> = Vec::with_capacity(ticks.len());
     let begin = Instant::now();
     let mut next = Instant::now();
     let mut outcome = Ok(());
-    for tick in &ticks {
+    let mut segment_start = Instant::now();
+    let mut last: Option<Record> = None;
+    for (index, tick) in ticks.iter().enumerate() {
         if stop.load(Ordering::SeqCst) {
             outcome = Err("stopped by the operator".to_owned());
             break;
+        }
+        if index == 0 || ticks[index - 1].segment != tick.segment {
+            segment_start = Instant::now();
         }
         let receipt = match governor.command(&tick.target) {
             Ok(receipt) => receipt,
@@ -424,32 +584,49 @@ fn run() -> Result<(), String> {
                 break;
             }
         };
-        let mut guarded = None;
-        let written = record(
-            &mut out,
-            begin.elapsed(),
-            tick,
-            &receipt.observed,
-            |index| {
-                let answer = receipt.feedback[index];
-                let torque = f64::from(answer.torque) * gains[index];
-                if torque.abs() > TORQUE_GUARD * peaks[index] {
-                    guarded = Some(format!(
-                        "{} torque {torque:.1} N·m passed {TORQUE_GUARD} of its peak",
-                        names[index]
-                    ));
-                }
-                (f64::from(answer.velocity) / gains[index], torque)
-            },
-        );
-        if let Err(error) = written {
-            outcome = Err(format!("the record could not be written: {error}"));
+        let mut record = Record {
+            elapsed: begin.elapsed(),
+            tick: index,
+            position: [0.0; MAX_AXES],
+            velocity: [0.0; MAX_AXES],
+            torque: [0.0; MAX_AXES],
+        };
+        for (axis, (q, answer)) in receipt.observed.iter().zip(&receipt.feedback).enumerate() {
+            record.position[axis] = *q;
+            record.velocity[axis] = f64::from(answer.velocity) / gains[axis];
+            record.torque[axis] = f64::from(answer.torque) * gains[axis];
+        }
+        records.push(record);
+        let guard = (0..width).find(|&axis| record.torque[axis].abs() > TORQUE_GUARD * peaks[axis]);
+        if let Some(axis) = guard {
+            outcome = Err(format!(
+                "{}: {} torque {:.1} N·m passed {TORQUE_GUARD} of its peak",
+                tick.segment, names[axis], record.torque[axis]
+            ));
             break;
         }
-        if let Some(reason) = guarded {
-            outcome = Err(reason);
-            break;
+        if let Some(previous) = last.filter(|_| segment_start.elapsed() > CONTACT_SETTLE) {
+            let before = &ticks[previous.tick].target;
+            let contact = (0..width).find(|&axis| {
+                let torque_step = (record.torque[axis] - previous.torque[axis]).abs();
+                let error = tick.target[axis] - record.position[axis];
+                let error_before = before[axis] - previous.position[axis];
+                torque_step > CONTACT_TORQUE_STEP
+                    || (error - error_before).abs() > CONTACT_TRACKING_STEP
+            });
+            if let Some(axis) = contact {
+                outcome = Err(format!(
+                    "{}: suspected contact on {}: torque {:.2} -> {:.2} N·m, position {:.3} rad",
+                    tick.segment,
+                    names[axis],
+                    previous.torque[axis],
+                    record.torque[axis],
+                    record.position[axis]
+                ));
+                break;
+            }
         }
+        last = Some(record);
         next += PERIOD;
         if let Some(wait) = next.checked_duration_since(Instant::now()) {
             thread::sleep(wait);
@@ -458,7 +635,11 @@ fn run() -> Result<(), String> {
         }
     }
     let report = governor.stop();
-    let _ = out.flush();
+    let written = write_records(&mut out, &names, &ticks, &records).and_then(|()| out.flush());
+    if let Err(error) = written {
+        eprintln!("sx-identify: the record could not be written: {error}");
+    }
+    eprintln!("recorded {} ticks to {}", records.len(), args.record);
     eprintln!(
         "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",
         report.unproven, report.faults, report.unobserved
