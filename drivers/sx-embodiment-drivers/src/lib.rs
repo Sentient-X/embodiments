@@ -66,7 +66,7 @@ pub use inertial::{
     InertialQuantity, InertialSample, InertialSensor, InertialSource, MAX_INERTIAL_HZ, Stillness,
     Tilt,
 };
-pub use kinematics::{Chain, ChainStep, PlacementError};
+pub use kinematics::{Chain, ChainStep, PlacementError, Tree, TreeError};
 pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,

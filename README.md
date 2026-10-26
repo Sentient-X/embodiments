@@ -198,6 +198,18 @@ without reading the description. `tools/render_driver_bindings.py` renders the c
 `media-plans.json` fixture and `media-poses.json`, seeded mount poses from the description that
 the chain evaluation is held equal to.
 
+What a viewer draws comes from the same description. `sx_embodiments.render_pack.build(robot)`
+(the `render` extra, NumPy) renders a **render pack** (`sx.render-pack/v1`): `robot.urdf`, the
+description's exact bytes; `pack.glb`, one glTF scene whose root `urdf_root` turns URDF Z-up into
+glTF Y-up over one identity node per link, named exactly the link, holding that link's visuals in
+its own frame (primitives tessellated, meshes decimated to a triangle budget, URDF colours); and
+`pack.json`, both digests, per-link triangle counts and the gripper tool frames by side. A viewer
+sets each link node to its pose in the root frame. `sx_embodiment_drivers::kinematics::Tree`
+parses the URDF once and answers every link's pose (`Tree::link_poses`), mimics folded onto their
+leader, so a headset needs only joint positions. `tools/render_packs.py` renders the committed
+packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
+the crate's `tree-poses.json`, Python's poses at seeded positions that `Tree` is held equal to.
+
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,
 each directly driven joint, each encoder-read joint, each declared camera) and the
