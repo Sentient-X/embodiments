@@ -74,8 +74,8 @@ arbitrary joint zeros, links 15..29 mm off along their pitch axes, a base mounte
 wrong way, and at its own zero pose it penetrates the robot (9 mm into ``base_link``, 41 mm
 for the camera); the owner, watching it live, reported it breaking apart. From
 ``so101_shoulder_pan_joint`` down the neck is TheRobotStudio's ``so101_new_calib`` chain
-(SO-ARM100 ``5f6d2b8``, Apache-2.0, vendored as ``source/so101_new_calib.urdf`` and
-``meshes/so101/``) under our names: joint origins, axes and limits, inertials and meshes. Its
+(SO-ARM100 ``5f6d2b8``, Apache-2.0, vendored as ``source/so101_new_calib.urdf``; its meshes
+are the public ``so101`` package's, the same bytes) under our names: joint origins, axes and limits, inertials and meshes. Its
 zeros are LeRobot's calibrated mid-range, so the readings are the joint angles with no offset.
 allisa_bot's base, its custom holder for the camera servo, the camera bracket and the ZED 2i
 meshes ride on it, placed by registering each official part onto allisa_bot's CAD. The base is
@@ -134,8 +134,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="cde441400103731f119d1e0178b85fbb3eb918ce5f21e91638638af4d4cd5ee7",
-    size_bytes=220801,
+    sha256="e78a6c1603b2e38876c3da6d0c332e37d71cf804a9042358293a845f246ae4fe",
+    size_bytes=221351,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

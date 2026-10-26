@@ -54,6 +54,25 @@ def test_every_row_keeps_its_directory_audience() -> None:
     }
 
 
+def test_no_public_bytes_are_also_entitled() -> None:
+    """The store keys bytes by digest and serves a shared digest under the stricter licence.
+
+    A public file copied into an entitled package would refuse public hosts the public file;
+    an entitled description names the public package's file with ``package://sx-embodiments/``.
+    """
+    entitled = {
+        entry.content.sha256
+        for entry in asset_manifest().values()
+        if entry.audience is AssetAudience.ENTITLED
+    }
+    shared = sorted(
+        entry.relpath
+        for entry in asset_manifest().values()
+        if entry.audience is not AssetAudience.ENTITLED and entry.content.sha256 in entitled
+    )
+    assert shared == []
+
+
 def test_a_tree_that_disagrees_with_a_declaration_refuses(tmp_path: Path) -> None:
     tree = tmp_path / "assets"
     shutil.copytree(asset_root() / "so101", tree / "so101")
