@@ -39,6 +39,10 @@ pub struct BodyBindings {
     pub approach: BTreeMap<String, ApproachLimit>,
 }
 
+/// The fastest servo approach limit a registry may declare, rad/s: one turn a second. An
+/// STS3215 turns about 4.7 rad/s unloaded, so a limit above this limits nothing.
+pub const MAX_APPROACH_SPEED: f64 = std::f64::consts::TAU;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Approach {
@@ -109,10 +113,15 @@ pub enum BodyError {
         ports: Vec<String>,
     },
     #[error(
-        "{embodiment}'s approach for port {port} names no port of its axes, or is not a \
-         positive finite speed and acceleration"
+        "{embodiment}'s approach for port {port} names no serial-servo port of its axes, or is \
+         not a positive finite speed (at most one turn a second) and acceleration"
     )]
     Approach { embodiment: String, port: String },
+    #[error(
+        "{embodiment}'s port {port} declares no servo approach limit, and its servos are not \
+         opened at their full speed"
+    )]
+    NoApproach { embodiment: String, port: String },
     #[error("{embodiment}'s port {port} has both provisional and verified bindings")]
     MixedProvisional { embodiment: String, port: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]
@@ -201,9 +210,11 @@ impl BodyBindings {
         let approach = approach
             .into_iter()
             .map(|(port, limit)| {
-                if axes.iter().any(|axis| axis.port == port)
+                let serial = |axis: &BoundAxis| axis.binding.bus.wire().ends_with("_serial");
+                if axes.iter().any(|axis| axis.port == port && serial(axis))
                     && positive(limit.speed)
                     && positive(limit.acceleration)
+                    && limit.speed <= MAX_APPROACH_SPEED
                 {
                     Ok((
                         port,
@@ -346,17 +357,21 @@ mod tests {
 
     #[test]
     fn a_ports_servo_approach_is_read_and_a_wrong_one_refused() {
+        let serial = DOCUMENT
+            .replace("damiao_dm4310", "feetech_sts3215")
+            .replace("damiao_can", "feetech_serial")
+            .replace("\"can\"", "\"neck\"");
         let with = |approach: &str| {
-            DOCUMENT.replacen(
+            serial.replacen(
                 "\"reduction\": 2.0}]}",
                 &format!("\"reduction\": 2.0}}], \"approach\": {approach}}}"),
                 1,
             )
         };
-        let body = BodyBindings::parse(&with(r#"{"can": {"speed": 4.0, "acceleration": 16.0}}"#))
+        let body = BodyBindings::parse(&with(r#"{"neck": {"speed": 4.0, "acceleration": 16.0}}"#))
             .expect("parses");
         assert_eq!(
-            body.approach.get("can"),
+            body.approach.get("neck"),
             Some(&ApproachLimit {
                 speed: 4.0,
                 acceleration: 16.0
@@ -369,12 +384,20 @@ mod tests {
                 .is_empty()
         );
         for wrong in [
-            r#"{"neck": {"speed": 4.0, "acceleration": 16.0}}"#,
-            r#"{"can": {"speed": 0.0, "acceleration": 16.0}}"#,
-            r#"{"can": {"speed": 4.0}}"#,
+            r#"{"arm": {"speed": 4.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 0.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 40.0, "acceleration": 16.0}}"#,
+            r#"{"neck": {"speed": 4.0}}"#,
         ] {
             assert!(BodyBindings::parse(&with(wrong)).is_err(), "{wrong}");
         }
+        // A CAN bus has no servo approach.
+        let can = DOCUMENT.replacen(
+            "\"reduction\": 2.0}]}",
+            "\"reduction\": 2.0}], \"approach\": {\"can\": {\"speed\": 4.0, \"acceleration\": 16.0}}}",
+            1,
+        );
+        assert!(BodyBindings::parse(&can).is_err());
     }
 
     #[test]

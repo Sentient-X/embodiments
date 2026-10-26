@@ -55,3 +55,5 @@ def test_the_static_upper_bodys_servo_approach_is_rendered_by_port() -> None:
     assert set(document["approach"]) == {"neck", "left_gripper", "right_gripper"}
     with pytest.raises(LayoutError):
         ServoApproach(speed=0.0, acceleration=1.0)
+    with pytest.raises(LayoutError):
+        ServoApproach(speed=40.0, acceleration=16.0)

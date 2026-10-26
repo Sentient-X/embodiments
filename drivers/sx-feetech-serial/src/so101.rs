@@ -56,6 +56,7 @@ pub const SO101: FeetechBody = FeetechBody {
     bindings: BINDINGS,
     port: "serial",
     baud: LEROBOT_BAUD,
+    registry_approach: false,
     servos: &[
         arm("shoulder_pan"),
         arm("shoulder_lift"),

@@ -57,6 +57,7 @@ pub const NECK: FeetechBody = FeetechBody {
     bindings: BINDINGS,
     port: "neck",
     baud: LEROBOT_BAUD,
+    registry_approach: true,
     servos: &[
         degrees("so101_shoulder_pan_joint"),
         degrees("so101_shoulder_lift_joint"),
@@ -72,6 +73,7 @@ pub const RIGHT_GRIPPER: FeetechBody = FeetechBody {
     bindings: BINDINGS,
     port: "right_gripper",
     baud: LEROBOT_BAUD,
+    registry_approach: true,
     servos: &[
         finger("right_gripper_left_finger_joint"),
         finger("right_gripper_right_finger_joint"),
@@ -83,6 +85,7 @@ pub const LEFT_GRIPPER: FeetechBody = FeetechBody {
     bindings: BINDINGS,
     port: "left_gripper",
     baud: LEROBOT_BAUD,
+    registry_approach: true,
     servos: &[
         finger("left_gripper_left_finger_joint"),
         finger("left_gripper_right_finger_joint"),
