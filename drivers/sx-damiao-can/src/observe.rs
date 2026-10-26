@@ -28,11 +28,11 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
-use sx_embodiment_drivers::{AxisReading, BoundAxis, MissingReason, Observe, validate_chain};
+use sx_embodiment_drivers::{Axes, AxisReading, BoundAxis, MissingReason, Observe, validate_chain};
 
 use crate::chain::{
-    Awaits, DamiaoAxis, DamiaoChainError, FEEDBACK_WAIT, LIMIT_REGISTERS, MotorState,
-    REGISTER_WAIT, Request, every, held_limits, motor_type, phase, validate,
+    Awaits, DamiaoAxis, DamiaoChainError, FEEDBACK_WAIT, LIMIT_REGISTERS, MotorState, Phase,
+    REGISTER_WAIT, Request, every, held_limits, motor_type, phase, phase_into, validate,
 };
 use crate::dm_can::{Motor, MotorControl};
 use crate::scan;
@@ -104,6 +104,10 @@ pub struct DamiaoObserver<P> {
     motors: Vec<DamiaoAxis>,
     axes: Vec<BoundAxis>,
     scale: Vec<Scale>,
+    /// One status refresh per motor, the shape of every poll.
+    every_feedback: Vec<Request>,
+    /// The poll's buffers, allocated at open and reused every read.
+    tick: Phase,
 }
 
 impl<P: CanPort> DamiaoObserver<P> {
@@ -128,8 +132,17 @@ impl<P: CanPort> DamiaoObserver<P> {
                 motor_type(binding.model).ok_or(DamiaoChainError::Unqualified(binding.bus_id))?;
             control.add_motor(Motor::new(model, binding.bus_id, motor.master_id));
         }
+        let every_feedback = every(
+            &motors
+                .iter()
+                .map(|motor| motor.axis.binding.bus_id)
+                .collect::<Vec<_>>(),
+            Awaits::Feedback,
+        );
         let mut observer = Self {
             control,
+            tick: Phase::with_capacity(motors.len()),
+            every_feedback,
             scale: vec![Scale::Unknown; motors.len()],
             motors,
             axes,
@@ -167,18 +180,19 @@ impl<P: CanPort> DamiaoObserver<P> {
     }
 
     /// One refresh phase, decoded as the chain decodes it, either enable state accepted.
-    fn poll(&mut self) -> Vec<AxisReading> {
-        let ids: Vec<u16> = self.motors.iter().map(|m| m.axis.binding.bus_id).collect();
-        let asked = phase(
+    fn poll(&mut self) -> Axes<AxisReading> {
+        phase_into(
             &mut self.control,
-            &every(&ids, Awaits::Feedback),
+            &self.every_feedback,
             FEEDBACK_WAIT,
             |control, _, request| control.send_refresh(request.bus_id),
+            &mut self.tick,
         );
+        let asked = &self.tick;
         let link_failed = asked.failure.is_some();
-        (0..ids.len())
+        (0..self.every_feedback.len())
             .map(|index| {
-                let Ok(cached) = self.control.motor(ids[index]) else {
+                let Ok(cached) = self.control.motor(self.every_feedback[index].bus_id) else {
                     return AxisReading::Missing(MissingReason::Unavailable);
                 };
                 let Some(at) = asked.received[index] else {
@@ -218,7 +232,7 @@ impl<P: CanPort> Observe for DamiaoObserver<P> {
     /// One status refresh per motor, decoded as [`DamiaoChain`](crate::chain::DamiaoChain)
     /// decodes it; a motor whose scale is unknown or refused is missing (corrupt). A motor of unknown scale that answers
     /// has its limit registers read, and once scaled is polled again before this returns.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         let mut readings = self.poll();
         let mut rescaled = false;
         for (index, reading) in readings.iter_mut().enumerate() {

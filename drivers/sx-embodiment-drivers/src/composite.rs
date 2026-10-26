@@ -211,7 +211,7 @@ where
     }
 
     /// Both chains' reads, the first's axes then the second's. Reading moves nothing.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         let mut readings = self.first.read_positions();
         readings.extend(self.second.read_positions());
         readings
@@ -321,15 +321,15 @@ mod tests {
             )
         }
 
-        fn read_positions(&mut self) -> Vec<AxisReading> {
-            vec![if self.fails.is_some() {
+        fn read_positions(&mut self) -> Axes<AxisReading> {
+            Axes::from_slice(&[if self.fails.is_some() {
                 AxisReading::Missing(crate::chain::MissingReason::Timeout)
             } else {
                 AxisReading::Fresh {
                     position: 0.5,
                     received: std::time::Instant::now(),
                 }
-            }]
+            }])
         }
 
         fn stop(&mut self) -> StopReport {

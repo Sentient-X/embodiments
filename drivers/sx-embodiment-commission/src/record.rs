@@ -86,7 +86,7 @@ pub fn record(
             scope.spawn(move || {
                 let mut next = Instant::now();
                 while !stop.load(Ordering::SeqCst) && Instant::now() < end {
-                    let readings = Axes::from_slice(&bus.read_positions());
+                    let readings = bus.read_positions();
                     let sample = Sample {
                         t: began.elapsed().as_secs_f64(),
                         bus: index,
