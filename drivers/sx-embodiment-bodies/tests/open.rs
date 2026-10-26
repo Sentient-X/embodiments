@@ -1051,28 +1051,90 @@ fn observing_the_static_upper_body_writes_nothing_and_reads_as_the_opened_body_d
 }
 
 #[test]
-fn a_joint_out_of_service_is_left_out_of_the_body_and_its_observer() {
+fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_never_addressed() {
     let drive = drive("sentient-static-upper-body");
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let torso = axes
+        .iter()
+        .position(|axis| axis.axis.joint == "torso_joint")
+        .expect("the torso");
+    let id = axes[torso].axis.binding.bus_id;
+    assert_eq!(id, 0x1F);
     let mut document: serde_json::Value = serde_json::json!({
         "schema": "sx.station-commissioning/v1",
         "instance": drive.instance,
         "pod_id": "pod-a",
         "pod_revision": 3,
         "ports": {"can": "CAN"},
-        "out_of_service": ["torso_joint"],
+        "out_of_service": [],
     });
-    let commissioning =
-        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    // The torso motor is faulty: it never answers, and unmarked it fails the whole open.
     let can = Sim::for_axes(&axes);
-    can.kill(0x1F);
+    can.kill(id);
     let mut bridges = Bridges {
-        buses: BTreeMap::from([("CAN".to_owned(), can)]),
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
         ..Bridges::default()
     };
+    let unmarked =
+        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    assert!(open(&drive, &unmarked, &mut bridges).is_err());
+    document["out_of_service"] = serde_json::json!(["torso_joint"]);
+    let commissioning =
+        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    let addressed = |frame: &sx_embodiment_drivers::can::CanFrame| {
+        frame.id == u32::from(id)
+            || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == id)
+    };
+    // Marked, it opens with all fifteen axes, the torso unavailable.
+    let sent = can.state().frames.len();
     let body = open(&drive, &commissioning, &mut bridges).expect("opens without the torso");
-    assert_eq!(body.axes().len(), 14);
-    assert!(body.axes().iter().all(|axis| axis.joint != "torso_joint"));
+    assert_eq!(body.axes().len(), 15);
+    assert_eq!(body.axes()[torso].joint, "torso_joint");
+    assert_eq!(body.unavailable(), vec![torso]);
+    let unavailable = sx_embodiment_drivers::AxisReading::Missing(
+        sx_embodiment_drivers::MissingReason::Unavailable,
+    );
+    let mut governed = Governor::new(
+        body,
+        vec![
+            AxisLimits {
+                max_speed: 0.25,
+                max_tracking_error: 0.2,
+            };
+            15
+        ],
+    )
+    .expect("limits");
+    let readings = governed.read_positions();
+    assert_eq!(readings[torso], unavailable);
+    assert!(
+        readings
+            .iter()
+            .enumerate()
+            .all(|(index, reading)| index == torso || reading.is_fresh())
+    );
+    let rest = governed.last_observed().expect("rest");
+    assert!(rest[torso].is_nan());
+    // Governed commands drive the other fourteen; the torso is neither stepped nor tracked.
+    let receipt = governed.command(&rest).expect("a governed command");
+    assert_eq!(receipt.observed.len(), 15);
+    assert!(receipt.observed[torso].is_nan());
+    assert!(governed.stop().is_proven());
+    assert!(
+        !can.state().frames[sent..].iter().any(addressed),
+        "the faulty motor is never addressed"
+    );
+    // The observer keeps the same layout, the torso unavailable in its place.
+    let mut observer = observe(
+        &drive,
+        &commissioning,
+        &ServoCalibrations::new(),
+        OpenOptions::default(),
+        &mut bridges,
+    )
+    .expect("observer");
+    assert_eq!(observer.axes().len(), 15);
+    assert_eq!(observer.read_positions()[torso], unavailable);
     document["out_of_service"] = serde_json::json!(["no_such_joint"]);
     let unknown =
         Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");

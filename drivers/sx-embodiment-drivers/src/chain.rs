@@ -368,6 +368,13 @@ pub trait ActuatorChain {
         None
     }
 
+    /// The axes (indices in native state order) commissioning marked unavailable: kept in the
+    /// vector as data, read as [`MissingReason::Unavailable`], observed as `NaN`, and never
+    /// commanded ([`crate::Masked`]). Fixed once the chain is open.
+    fn unavailable(&self) -> Vec<usize> {
+        Vec::new()
+    }
+
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
     fn clear_faults(&mut self) {}

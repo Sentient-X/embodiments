@@ -44,6 +44,7 @@ pub mod inertial;
 pub mod kinematics;
 pub mod layout;
 pub mod lerobot;
+pub mod masked;
 pub mod media;
 pub mod serial;
 
@@ -74,6 +75,7 @@ pub use inertial::{
 };
 pub use kinematics::{Axis, Chain, ChainStep, PlacementError, Tree, TreeError, TreeJoint};
 pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};
+pub use masked::{Masked, check_available};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
     MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,
