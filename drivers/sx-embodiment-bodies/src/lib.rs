@@ -730,6 +730,10 @@ where
         self.0.last_observed()
     }
 
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        self.0.command_readings()
+    }
+
     fn approach_speed_limited(&self, axis: usize) -> bool {
         self.0.approach_speed_limited(axis)
     }
@@ -807,6 +811,13 @@ impl ActuatorChain for Body {
         match self {
             Self::B601(chain) => chain.last_observed(),
             Self::Buses(chain) => chain.last_observed(),
+        }
+    }
+
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        match self {
+            Self::B601(chain) => chain.command_readings(),
+            Self::Buses(chain) => chain.command_readings(),
         }
     }
 

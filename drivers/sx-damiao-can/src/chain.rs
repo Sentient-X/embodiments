@@ -311,6 +311,9 @@ pub struct DamiaoChain<P> {
     limits: Vec<MotorLimits>,
     enabled: bool,
     stop_pending: bool,
+    /// Every motor's answer to the last command, all fresh (a command that misses one fails);
+    /// none since open or a stop.
+    command_readings: Option<Vec<AxisReading>>,
 }
 
 /// Bring each motor up as the vendor does and read its limit registers; see
@@ -471,6 +474,7 @@ impl<P: CanPort> DamiaoChain<P> {
             limits,
             enabled: false,
             stop_pending: false,
+            command_readings: None,
         };
         if let Err(error) = chain.settle_disabled() {
             return Err(disable_all(&mut chain.control, &chain.motors, error));
@@ -858,15 +862,26 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
             self.control
                 .control_mit(self.bus_id(index), kp, kd, target, 0.0, 0.0)?;
         }
+        self.command_readings = None;
         self.await_answers(&before)?;
         self.expect_all(&before, MotorState::Enabled)?;
+        let received = Instant::now();
         let feedback = self.feedback()?;
-        let observed = self
+        let observed: Vec<f64> = self
             .motors
             .iter()
             .zip(&feedback)
             .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
             .collect();
+        self.command_readings = Some(
+            observed
+                .iter()
+                .map(|position| AxisReading::Fresh {
+                    position: *position,
+                    received,
+                })
+                .collect(),
+        );
         Ok(Receipt {
             evidence: Evidence::BusObservedComplete,
             observed,
@@ -874,7 +889,12 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         })
     }
 
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        self.command_readings.clone()
+    }
+
     fn stop(&mut self) -> StopReport {
+        self.command_readings = None;
         self.enabled = false;
         // Only answers to the disable frames count: whatever is already on the link (a late
         // answer to the last command) is decoded before the high-water mark is taken.

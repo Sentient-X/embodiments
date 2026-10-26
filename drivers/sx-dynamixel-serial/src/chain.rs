@@ -378,6 +378,8 @@ pub struct DynamixelChain<P> {
     /// Every servo's position, read at open and after each stop; `None` once a command may
     /// have moved it, or when a read failed.
     observed: Option<Vec<f64>>,
+    /// Each servo's reading from the last command's SYNC READ; none since open or a stop.
+    command_readings: Option<Vec<AxisReading>>,
     /// Per servo: its profile (and `Goal Current`, where declared) was last read back as
     /// written, at the last enable or in the last command's SYNC READ.
     approach_limited: Vec<bool>,
@@ -511,6 +513,7 @@ impl<P: SerialPort> DynamixelChain<P> {
             stop_pending: false,
             faults: Vec::new(),
             observed: None,
+            command_readings: None,
             approach_limited: Vec::new(),
         };
         chain.identify()?;
@@ -759,10 +762,13 @@ impl<P: SerialPort> DynamixelChain<P> {
 
     /// One SYNC READ (`GroupSyncRead`, as `sync_read("Present_Position")` reads it, widened)
     /// of every servo's `Goal Current` (102) through `Present_Position` (132..=135), as joint
-    /// coordinates in native state order. A servo whose answer is missing or corrupt, or that
-    /// no longer holds its limits, is `NaN`, which no tracking bound admits; either marks the
-    /// chain disabled, so the next enable proves every limit again and holds every servo where
-    /// it rests.
+    /// coordinates in native state order. A servo whose answer is missing or corrupt, that
+    /// reports an error (the hardware-error alert included), or that no longer holds its limits
+    /// is `NaN`, which no tracking bound admits; any of those marks the chain disabled, so the
+    /// next enable proves every limit again and holds every servo where it rests. Each servo's
+    /// [`AxisReading`] is kept as the command's readings: missing (`Timeout`; the vendor's read
+    /// stops at the first servo that fails, so every servo is missing then), faulted with its
+    /// error, or faulted with 0 for a limit it no longer holds.
     fn sync_read_positions(&mut self) -> Result<Vec<f64>, DynamixelChainError> {
         let mut reader = GroupSyncRead::new(GOAL_CURRENT, LIMITS_READ_LENGTH);
         for servo in &self.servos {
@@ -771,7 +777,8 @@ impl<P: SerialPort> DynamixelChain<P> {
             }
         }
         let _ = reader.tx_rx_packet(&mut self.ph);
-        let mut observed = Vec::with_capacity(self.servos.len());
+        let received = Instant::now();
+        let mut readings = Vec::with_capacity(self.servos.len());
         for index in 0..self.servos.len() {
             let limits = self.limits(index)?;
             let servo = &self.servos[index];
@@ -782,17 +789,28 @@ impl<P: SerialPort> DynamixelChain<P> {
                 |current| read(GOAL_CURRENT, 2) == Some(u32::from(current)),
             ) && read(PROFILE_ACCELERATION, 4) == Some(limits.acceleration)
                 && read(PROFILE_VELOCITY, 4) == Some(limits.velocity);
-            let position = read(PRESENT_POSITION, 4)
-                .filter(|_| held)
-                .map(|raw| servo.joint_from_raw(signed(raw)));
+            let reading = match (read(PRESENT_POSITION, 4), reader.get_error(id)) {
+                (None, _) | (_, None) => AxisReading::Missing(MissingReason::Timeout),
+                (Some(_), Some(error)) if error != 0 => AxisReading::Faulted(error),
+                (Some(_), Some(_)) if !held => AxisReading::Faulted(0),
+                (Some(raw), Some(_)) => AxisReading::Fresh {
+                    position: servo.joint_from_raw(signed(raw)),
+                    received,
+                },
+            };
             if !held {
                 self.approach_limited[index] = false;
             }
-            if position.is_none() {
+            if !reading.is_fresh() {
                 self.enabled = false;
             }
-            observed.push(position.unwrap_or(f64::NAN));
+            readings.push(reading);
         }
+        let observed = readings
+            .iter()
+            .map(|reading| reading.position().unwrap_or(f64::NAN))
+            .collect();
+        self.command_readings = Some(readings);
         Ok(observed)
     }
 
@@ -894,6 +912,7 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
         }
         // From here the servos may move: what open or the last stop read no longer holds.
         self.observed = None;
+        self.command_readings = None;
         if !self.enabled {
             self.enable_torque()?;
             self.enabled = true;
@@ -952,12 +971,17 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
             }
         }
         self.observed = fresh_positions(&self.present_positions());
+        self.command_readings = None;
         report
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.
     fn read_positions(&mut self) -> Vec<AxisReading> {
         self.present_positions()
+    }
+
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        self.command_readings.clone()
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {

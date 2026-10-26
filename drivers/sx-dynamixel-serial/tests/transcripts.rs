@@ -635,6 +635,33 @@ fn a_servo_missing_from_the_sync_read_is_nan() {
     let mut chain = open(&golden, &[&enabling(&golden), &[partial]]);
     let receipt = chain.command(&[0.0, 0.0]).expect("commanded");
     assert!(receipt.observed.iter().all(|joint| joint.is_nan()));
+    assert!(
+        chain
+            .command_readings()
+            .expect("readings")
+            .iter()
+            .all(|reading| *reading == AxisReading::Missing(MissingReason::Timeout))
+    );
+}
+
+#[test]
+fn a_servo_answering_the_sync_read_with_an_alert_is_faulted() {
+    let golden = golden();
+    // The wrist answers whole, with its hardware-error alert set: its axis is faulted, not
+    // measured, and the finger's reading stands.
+    let mut alerting = sync_read_held(&golden);
+    alerting.response = format!(
+        "{}{}",
+        status(1, 0, &held(&golden, 0, REST)),
+        status(2, 0x80, &held(&golden, 1, REST))
+    );
+    let mut chain = open(&golden, &[&enabling(&golden), &[alerting]]);
+    let receipt = chain.command(&[0.0, 0.0]).expect("commanded");
+    assert!(receipt.observed[0].is_finite());
+    assert!(receipt.observed[1].is_nan());
+    let readings = chain.command_readings().expect("readings");
+    assert!(readings[0].is_fresh());
+    assert_eq!(readings[1], AxisReading::Faulted(0x80));
 }
 
 #[test]

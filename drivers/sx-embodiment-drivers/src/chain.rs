@@ -125,8 +125,10 @@ pub enum MissingReason {
 /// One axis's part of a read: what the actuator answered to this poll, if anything.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AxisReading {
-    /// The joint coordinate from an answer newer than the start of the poll, and when the
-    /// chain received it.
+    /// The joint coordinate from an answer the chain received after the poll began (older
+    /// answers are drained or cleared first), and when it received it. On a bus that cannot
+    /// pair an answer with its request (CAN), a late answer to the previous poll arriving after
+    /// that drain also counts: it is at most one poll interval old.
     Fresh { position: f64, received: Instant },
     /// No usable answer to this poll.
     Missing(MissingReason),
@@ -237,6 +239,15 @@ pub trait ActuatorChain {
     /// dropped. A read never fails as a whole; a link that is down reads every axis
     /// [`MissingReason::Unavailable`].
     fn read_positions(&mut self) -> Vec<AxisReading>;
+
+    /// Each axis's reading from the last command's own observation, in native state order:
+    /// what the bus answered while the body moved, so a caller can keep it beside the command.
+    /// `None` when the chain observes nothing with its commands, or no command has answered
+    /// since open or the last stop. A value in [`Receipt::observed`] that is NaN is an axis
+    /// here that is not [`AxisReading::Fresh`].
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        None
+    }
 
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
     /// prove. The chain stays disabled until the next command.

@@ -821,6 +821,9 @@ pub struct GroupSyncRead {
     last_result: bool,
     /// In insertion order, as the vendor's `dict` keeps it.
     data_dict: Vec<(u8, Vec<u8>)>,
+    /// Each device's status error byte from the last read, in the same order; the vendor's
+    /// `txRxPacket` drops it.
+    errors: Vec<u8>,
 }
 
 impl GroupSyncRead {
@@ -831,6 +834,7 @@ impl GroupSyncRead {
             data_length,
             last_result: false,
             data_dict: Vec::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -845,6 +849,7 @@ impl GroupSyncRead {
 
     pub fn clear_param(&mut self) {
         self.data_dict.clear();
+        self.errors.clear();
     }
 
     /// `txRxPacket`: send the SYNC READ through `ph`, then read every device's answer in the
@@ -862,15 +867,27 @@ impl GroupSyncRead {
         if result != CommResult::Success {
             return result;
         }
+        self.errors.clear();
         for (dxl_id, data) in &mut self.data_dict {
-            let (bytes, result, _) = ph.read_rx(*dxl_id, self.data_length);
+            let (bytes, result, error) = ph.read_rx(*dxl_id, self.data_length);
             *data = bytes;
+            self.errors.push(error);
             if result != CommResult::Success {
                 return result;
             }
         }
         self.last_result = true;
         CommResult::Success
+    }
+
+    /// The status error byte `dxl_id` answered the last read with, when the whole read succeeded.
+    #[must_use]
+    pub fn get_error(&self, dxl_id: u8) -> Option<u8> {
+        if !self.last_result {
+            return None;
+        }
+        let index = self.data_dict.iter().position(|(id, _)| *id == dxl_id)?;
+        self.errors.get(index).copied()
     }
 
     /// `getData`: `data_length` (1, 2 or 4) bytes at `address` from `dxl_id`'s last answer, or
