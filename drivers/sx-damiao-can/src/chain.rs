@@ -126,6 +126,8 @@ const MAX_MOTOR_ID: u16 = 0x7FE;
 /// How long a phase off the tick path awaits feedback (to a disable, a clear or a stop's refresh) once its frames
 /// are sent.
 pub(crate) const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
+/// How many disable phases a stop sends before it reports the motors still unanswered.
+const STOP_ATTEMPTS: usize = 3;
 /// One classic CAN data frame of 8 bytes on an 11-bit id at the Damiao bus's 1 Mbit/s, at
 /// worst-case bit stuffing with its interframe space: 135 bits. The static upper body measured
 /// about 245 µs per motor for a refresh and its answer (2026-10-26).
@@ -571,8 +573,14 @@ pub(crate) fn phase_into<P: CanPort>(
         let give_up = Instant::now() + allowance;
         let result = loop {
             match frame(control, index, *request) {
+                // A full queue, or a link its driver just recovered from a stall without a
+                // replug (the ZLG's `Interrupted`: "this frame was not sent: send again"): wait
+                // for room, reading answers meanwhile, and send the frame again.
                 Err(DmCanError::Io(error))
-                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < give_up =>
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) && Instant::now() < give_up =>
                 {
                     let until = (Instant::now() + QUEUE_SLICE).min(give_up);
                     match control.port_mut().receive_until(until) {
@@ -1357,24 +1365,46 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         self.command_readings
     }
 
-    /// A disable phase to every motor, then a refresh phase to any that stayed silent.
+    /// A disable phase to every motor, again to any that did not answer while the link
+    /// failed, up to [`STOP_ATTEMPTS`] times, then a refresh phase to any that stayed silent.
+    ///
+    /// A link that failed mid-operation (the station's run 11 on 2026-10-26: the CAN link
+    /// failed during a return, and one disable phase on the failing link left every motor
+    /// unproven and enabled until its watchdog latched 0xD) is not given up on after one
+    /// phase: each attempt drains the link again and sends the disable to every motor not yet
+    /// proven disabled.
     fn stop(&mut self) -> StopReport {
         self.command_readings = None;
         self.applied.fill(Feedforward::default());
         self.enabled = false;
-        // Only answers to the disable frames count: whatever is already on the link (a late
-        // answer to the last command) is decoded before the phase's frames are sent.
-        let disabled = phase(
-            &mut self.control,
-            &every(&self.ids, Awaits::Feedback),
-            FEEDBACK_WAIT,
-            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
-        );
-        let mut answered: Vec<bool> = (0..self.ids.len())
-            .map(|index| disabled.drained && disabled.answered(index))
-            .collect();
+        let mut answered = vec![false; self.ids.len()];
+        let mut drained = false;
+        for _ in 0..STOP_ATTEMPTS {
+            let pending: Vec<usize> = (0..self.ids.len()).filter(|i| !answered[*i]).collect();
+            if pending.is_empty() {
+                break;
+            }
+            let ids: Vec<u16> = pending.iter().map(|index| self.ids[*index]).collect();
+            // Only answers to the disable frames count: whatever is already on the link (a
+            // late answer to the last command) is decoded before the phase's frames are sent.
+            let disabled = phase(
+                &mut self.control,
+                &every(&ids, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+            );
+            drained |= disabled.drained;
+            for (slot, index) in pending.into_iter().enumerate() {
+                answered[index] = disabled.drained && disabled.answered(slot);
+            }
+            // Only a link that failed is tried again; a motor that is merely silent on a
+            // working link gets the refresh below, as the vendor's driver does.
+            if disabled.drained && disabled.failure.is_none() {
+                break;
+            }
+        }
         let silent: Vec<usize> = (0..self.ids.len()).filter(|i| !answered[*i]).collect();
-        if disabled.drained && !silent.is_empty() {
+        if drained && !silent.is_empty() {
             let ids: Vec<u16> = silent.iter().map(|index| self.ids[*index]).collect();
             let asked = phase(
                 &mut self.control,
@@ -1408,13 +1438,14 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         report
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: two
-    /// phases, each a frame per motor that may wait the link's own allowance for queue room
+    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants:
+    /// [`STOP_ATTEMPTS`] disable phases and a refresh phase, each a frame per motor that may
+    /// wait the link's own allowance for queue room
     /// (`CanPort::frame_allowance`), then the answer wait and one more allowance.
     fn stop_budget(&self) -> Duration {
         let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
         let frame = self.control.port().frame_allowance();
-        (frame * motors + FEEDBACK_WAIT + frame) * 2
+        (frame * motors + FEEDBACK_WAIT + frame) * u32::try_from(STOP_ATTEMPTS + 1).unwrap_or(4)
     }
 
     /// Every motor's latest answered position, in joint coordinates: from open, each stop and
