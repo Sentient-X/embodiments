@@ -914,7 +914,19 @@ impl<P: CanPort> DamiaoChain<P> {
     /// One axis' feed-forward in the motor's own coordinates, `(velocity, torque)`, and what
     /// that is at the joint. `actuator = g (joint - zero)` with `g = sign * direction *
     /// reduction`, so velocity scales by `g` and torque, by power, by `1 / g`.
-    fn actuator_feedforward(&self, index: usize, wanted: Feedforward) -> ((f64, f64), Feedforward) {
+    ///
+    /// Feed-forward moves where the motor settles: unloaded, `(kd dq + tau) / kp` past the
+    /// target. Both parts are scaled down together so that excursion stays inside the axis'
+    /// commandable range from `target` (actuator coordinates); with `kp` zero nothing is sent.
+    /// A load the feed-forward balances (gravity held near a limit) makes this conservative:
+    /// the joint may sag, away from the push, never past the range.
+    fn actuator_feedforward(
+        &self,
+        index: usize,
+        target: f64,
+        wanted: Feedforward,
+    ) -> ((f64, f64), Feedforward) {
+        let DamiaoAxis { kp, kd, .. } = self.motors[index];
         let axis = &self.motors[index].axis;
         let gain = axis.actuator_from_joint(axis.zero + 1.0);
         let FeedforwardLimit { velocity, torque } = self.feedforward_limits[index];
@@ -922,8 +934,25 @@ impl<P: CanPort> DamiaoChain<P> {
         let (v_max, t_max) = (f64::from(v_max), f64::from(t_max));
         let speed = velocity.map_or(0.0, |bound| wanted.velocity.clamp(-bound, bound));
         let effort = torque.map_or(0.0, |bound| wanted.torque.clamp(-bound, bound));
-        let dq = (gain * speed).clamp(-v_max, v_max);
-        let tau = (effort / gain).clamp(-t_max, t_max);
+        let mut dq = (gain * speed).clamp(-v_max, v_max);
+        let mut tau = (effort / gain).clamp(-t_max, t_max);
+        let range = self.commandable[index];
+        let ends = [
+            axis.actuator_from_joint(range.lower),
+            axis.actuator_from_joint(range.upper),
+        ];
+        let push = kd.mul_add(dq, tau);
+        let margin = if push > 0.0 {
+            (ends[0].max(ends[1]) - target).max(0.0)
+        } else {
+            (target - ends[0].min(ends[1])).max(0.0)
+        };
+        let allowed = kp * margin;
+        if push.abs() > allowed {
+            let scale = allowed / push.abs();
+            dq *= scale;
+            tau *= scale;
+        }
         (
             (dq, tau),
             Feedforward {
@@ -957,16 +986,15 @@ impl<P: CanPort> DamiaoChain<P> {
             .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
             .collect();
         // Each axis' feed-forward in the motor's coordinates, and what that is at the joint.
-        let sent: Vec<(f64, f64)> = (0..self.motors.len())
+        let (sent, applied): (Vec<(f64, f64)>, Vec<Feedforward>) = (0..self.motors.len())
             .map(|index| {
-                let (frame, applied) = self.actuator_feedforward(
+                self.actuator_feedforward(
                     index,
+                    targets[index],
                     feedforward.map_or(Feedforward::default(), |all| all[index]),
-                );
-                self.applied[index] = applied;
-                frame
+                )
             })
-            .collect();
+            .unzip();
         if !self.enabled {
             self.arm_and_enable()?;
         }
@@ -983,6 +1011,8 @@ impl<P: CanPort> DamiaoChain<P> {
             },
         )
         .checked()?;
+        // Recorded only once every frame went out.
+        self.applied.copy_from_slice(&applied);
         self.expect_all(&answered, MotorState::Enabled)?;
         let feedback = self.feedback()?;
         let observed: Vec<f64> = self
@@ -1181,6 +1211,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     /// A disable phase to every motor, then a refresh phase to any that stayed silent.
     fn stop(&mut self) -> StopReport {
         self.command_readings = None;
+        self.applied.fill(Feedforward::default());
         self.enabled = false;
         // Only answers to the disable frames count: whatever is already on the link (a late
         // answer to the last command) is decoded before the phase's frames are sent.

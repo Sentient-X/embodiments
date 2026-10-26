@@ -384,22 +384,58 @@ def is_physical_inertia(
 
 @dataclass(frozen=True, slots=True)
 class JointFriction:
-    """What one joint's drive adds to rigid-body torque: Coulomb friction (applied with sign
-    ``tanh(velocity / stiction_velocity)``), viscous friction and reflected rotor inertia."""
+    """What one joint's drive adds to rigid-body torque, in BAM's friction family (Rhoban's
+    "Better Actuator Models", models M1 to M5; ``sx_embodiment_drivers::JointFriction`` holds
+    the formula): reflected rotor inertia, viscous friction, and a friction budget of Coulomb,
+    Stribeck and drive- and load-torque terms. Every term past ``armature`` is zero for M1."""
 
     joint: str
     coulomb: float
     viscous: float
     armature: float
+    stribeck: float = 0.0
+    stribeck_velocity: float = 0.0
+    stribeck_exponent: float = 0.0
+    load_motor: float = 0.0
+    load_external: float = 0.0
+    load_motor_stribeck: float = 0.0
+    load_external_stribeck: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.joint.strip() or self.joint != self.joint.strip():
             raise CalibrationError("a joint friction names its joint")
-        if not all(
-            math.isfinite(value) and value >= 0.0
-            for value in (self.coulomb, self.viscous, self.armature)
-        ):
-            raise CalibrationError(f"{self.joint}: friction and armature are finite and >= 0")
+        values = (self.coulomb, self.viscous, self.armature, *self.extra)
+        if not all(math.isfinite(value) and value >= 0.0 for value in values):
+            raise CalibrationError(f"{self.joint}: friction terms are finite and >= 0")
+        stribeck_used = (
+            self.stribeck > 0.0
+            or self.load_motor_stribeck > 0.0
+            or self.load_external_stribeck > 0.0
+        )
+        if stribeck_used and not (self.stribeck_velocity > 0.0 and self.stribeck_exponent >= 1.0):
+            raise CalibrationError(
+                f"{self.joint}: Stribeck terms need a positive velocity and an exponent >= 1"
+            )
+
+    @property
+    def extra(self) -> tuple[float, ...]:
+        """The terms past armature, in document order (:data:`FRICTION_TERMS`)."""
+        return tuple(getattr(self, name) for name in FRICTION_TERMS[3:])
+
+
+#: Every friction term a joint carries, in document order.
+FRICTION_TERMS: Final = (
+    "coulomb",
+    "viscous",
+    "armature",
+    "stribeck",
+    "stribeck_velocity",
+    "stribeck_exponent",
+    "load_motor",
+    "load_external",
+    "load_motor_stribeck",
+    "load_external_stribeck",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,12 +524,7 @@ def calibration_to_dict(calibration: Calibration) -> dict[str, JsonValue]:
                     for item in calibration.links
                 ],
                 "joints": [
-                    {
-                        "joint": item.joint,
-                        "coulomb": item.coulomb,
-                        "viscous": item.viscous,
-                        "armature": item.armature,
-                    }
+                    {"joint": item.joint, **{name: getattr(item, name) for name in FRICTION_TERMS}}
                     for item in calibration.joints
                 ],
                 "units": list(calibration.units),
@@ -599,16 +630,10 @@ def _dynamics_from_dict(
     parsed_joints: list[JointFriction] = []
     for item in cast("list[object]", joints):
         entry = _object(item, "joint friction")
-        if set(entry) != {"joint", "coulomb", "viscous", "armature"}:
-            raise CalibrationError("a joint friction has exactly joint, coulomb, viscous, armature")
-        parsed_joints.append(
-            JointFriction(
-                joint=_text(entry, "joint"),
-                coulomb=_number(entry, "coulomb"),
-                viscous=_number(entry, "viscous"),
-                armature=_number(entry, "armature"),
-            )
-        )
+        if set(entry) != {"joint", *FRICTION_TERMS}:
+            raise CalibrationError(f"a joint friction has exactly joint and {FRICTION_TERMS}")
+        terms = {name: _number(entry, name) for name in FRICTION_TERMS}
+        parsed_joints.append(JointFriction(_text(entry, "joint"), **terms))
     return DynamicsCalibration(
         description_sha256=Sha256Digest(_text(document, "description_sha256")),
         stiction_velocity=_number(document, "stiction_velocity"),

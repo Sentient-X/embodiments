@@ -137,23 +137,110 @@ impl LinkInertia {
     }
 }
 
-/// What one independent joint's drive adds to the rigid-body torque.
+/// What one independent joint's drive (motor, gearbox, bearings) adds to the rigid-body torque.
+///
+/// The friction family is BAM's ("Better Actuator Models", Duclusaud and Passault, Rhoban,
+/// <https://github.com/Rhoban/bam>, Apache-2.0; `bam/model.py` at e9a619d, models M1 to M5):
+/// a friction *budget* that resistive friction may reach,
+///
+/// ```text
+/// budget = coulomb + |e τ_ext − m τ_motor|
+///        + s(q̇) (stribeck + |e_s τ_ext − m_s τ_motor|),   s(q̇) = exp(−|q̇ / v_s|^α)
+/// ```
+///
+/// with `τ_motor` the torque the drive delivers and `τ_ext` the load's torque on the joint
+/// (gravity's, `−g(q)`). A non-directional load term is `e = m`. In motion the friction is
+/// `sign(q̇) · budget + viscous · q̇`; at rest it is any torque inside the budget, which a
+/// simulator applies by clipping the stopping torque to it (BAM's `frictionloss`). Feed-forward
+/// uses the moving form with the smooth sign `tanh(q̇ / stiction_velocity)`, so it never
+/// chatters about zero speed and adds nothing at rest, where the direction is unknown.
+/// Every term is zero by default; M1 is `coulomb` and `viscous` alone.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JointFriction {
-    /// Coulomb friction, N·m (N for a prismatic joint), applied with sign `tanh(q̇ / v_s)`.
+    /// Coulomb friction, N·m (N for a prismatic joint).
     pub coulomb: f64,
     /// Viscous friction, N·m·s/rad.
     pub viscous: f64,
     /// Rotor inertia reflected to the joint, kg·m².
     pub armature: f64,
+    /// Extra friction near standstill, N·m, fading as `s(q̇)`.
+    pub stribeck: f64,
+    /// `v_s`, rad/s; zero switches every Stribeck term off.
+    pub stribeck_velocity: f64,
+    /// `α`, the Stribeck curve's exponent, at least 1 where Stribeck terms are used.
+    pub stribeck_exponent: f64,
+    /// `m` and `e`: friction per N·m of drive and load torque through the gearbox.
+    pub load_motor: f64,
+    pub load_external: f64,
+    /// `m_s` and `e_s`: the same near standstill.
+    pub load_motor_stribeck: f64,
+    pub load_external_stribeck: f64,
 }
 
 impl JointFriction {
     fn is_physical(&self) -> bool {
-        [self.coulomb, self.viscous, self.armature]
-            .iter()
-            .all(|v| v.is_finite() && *v >= 0.0)
+        let values = [
+            self.coulomb,
+            self.viscous,
+            self.armature,
+            self.stribeck,
+            self.stribeck_velocity,
+            self.stribeck_exponent,
+            self.load_motor,
+            self.load_external,
+            self.load_motor_stribeck,
+            self.load_external_stribeck,
+        ];
+        let stribeck_used = self.stribeck > 0.0
+            || self.load_motor_stribeck > 0.0
+            || self.load_external_stribeck > 0.0;
+        values.iter().all(|v| v.is_finite() && *v >= 0.0)
+            && (!stribeck_used || (self.stribeck_velocity > 0.0 && self.stribeck_exponent >= 1.0))
+    }
+
+    /// Whether any term depends on the drive or load torque.
+    #[must_use]
+    pub fn is_loaded(&self) -> bool {
+        self.load_motor > 0.0
+            || self.load_external > 0.0
+            || self.load_motor_stribeck > 0.0
+            || self.load_external_stribeck > 0.0
+    }
+
+    /// The friction budget at `speed` with the drive delivering `motor` against a load
+    /// `external`, N·m: the most friction can resist.
+    #[must_use]
+    pub fn budget(&self, speed: f64, motor: f64, external: f64) -> f64 {
+        let moving = self.coulomb + (self.load_external * external - self.load_motor * motor).abs();
+        if self.stribeck_velocity <= 0.0 {
+            return moving;
+        }
+        let fade = (-(speed / self.stribeck_velocity)
+            .abs()
+            .powf(self.stribeck_exponent))
+        .exp();
+        moving
+            + fade
+                * (self.stribeck
+                    + (self.load_external_stribeck * external - self.load_motor_stribeck * motor)
+                        .abs())
+    }
+
+    /// What the drive adds to move at `speed` and `acceleration`: armature, viscous, and the
+    /// budget with the smooth sign `tanh(speed / stiction_velocity)`.
+    #[must_use]
+    pub fn torque(
+        &self,
+        speed: f64,
+        acceleration: f64,
+        motor: f64,
+        external: f64,
+        stiction_velocity: f64,
+    ) -> f64 {
+        self.armature * acceleration
+            + self.viscous * speed
+            + (speed / stiction_velocity).tanh() * self.budget(speed, motor, external)
     }
 }
 
@@ -194,6 +281,13 @@ struct JointEntry {
     coulomb: f64,
     viscous: f64,
     armature: f64,
+    stribeck: f64,
+    stribeck_velocity: f64,
+    stribeck_exponent: f64,
+    load_motor: f64,
+    load_external: f64,
+    load_motor_stribeck: f64,
+    load_external_stribeck: f64,
 }
 
 #[derive(Deserialize)]
@@ -267,6 +361,13 @@ impl DynamicsCalibration {
                         coulomb: entry.coulomb,
                         viscous: entry.viscous,
                         armature: entry.armature,
+                        stribeck: entry.stribeck,
+                        stribeck_velocity: entry.stribeck_velocity,
+                        stribeck_exponent: entry.stribeck_exponent,
+                        load_motor: entry.load_motor,
+                        load_external: entry.load_external,
+                        load_motor_stribeck: entry.load_motor_stribeck,
+                        load_external_stribeck: entry.load_external_stribeck,
                     },
                 )
             })
@@ -296,6 +397,10 @@ pub struct Dynamics {
     /// In [`Tree::joints`] order.
     friction: Vec<JointFriction>,
     stiction_velocity: f64,
+    /// Whether any joint's friction depends on load, so a tick also needs gravity alone.
+    loaded: bool,
+    /// The digest of the description bytes, when read from them.
+    description_sha256: Option<String>,
     /// For each tree joint, the index of the independent joint it moves with.
     leader: Vec<Option<usize>>,
 }
@@ -305,7 +410,21 @@ pub struct Dynamics {
 const DEFAULT_STICTION_VELOCITY: f64 = 0.02;
 
 impl Dynamics {
-    /// The description's own inertials, no friction, under `gravity` (root frame, m/s²).
+    /// A description's dynamics, remembering its digest so only a calibration identified
+    /// against exactly these bytes applies ([`Dynamics::calibrated`]).
+    ///
+    /// # Errors
+    ///
+    /// [`TreeError`] when the description is not a tree.
+    pub fn of(urdf: &str, gravity: [f64; 3]) -> Result<Self, crate::kinematics::TreeError> {
+        let mut dynamics = Self::new(Tree::parse(urdf)?, gravity);
+        dynamics.description_sha256 = Some(sha256_hex(urdf));
+        Ok(dynamics)
+    }
+
+    /// The description's own inertials, no friction, under `gravity` (root frame, m/s²). No
+    /// calibration applies to dynamics built this way; read the description with
+    /// [`Dynamics::of`] to calibrate.
     #[must_use]
     pub fn new(tree: Tree, gravity: [f64; 3]) -> Self {
         let leader = tree
@@ -325,6 +444,8 @@ impl Dynamics {
             inertia: tree.inertials.clone(),
             friction: vec![JointFriction::default(); tree.joints().len()],
             stiction_velocity: DEFAULT_STICTION_VELOCITY,
+            loaded: false,
+            description_sha256: None,
             gravity,
             leader,
             tree,
@@ -337,17 +458,21 @@ impl Dynamics {
     /// # Errors
     ///
     /// [`DynamicsError::Description`] when the calibration was identified against another
-    /// description than `description_sha256` (this tree's bytes), and
-    /// [`DynamicsError::Absent`] or [`DynamicsError::Repeated`] for a link or joint the tree
-    /// lacks or the calibration lists twice.
-    pub fn calibrated(
-        mut self,
-        calibration: &DynamicsCalibration,
-        description_sha256: &str,
-    ) -> Result<Self, DynamicsError> {
-        if calibration.description_sha256 != description_sha256 {
+    /// description than the one these dynamics were read from ([`Dynamics::of`] hashes it;
+    /// dynamics built from a bare [`Tree`] accept none), and [`DynamicsError::Absent`] or
+    /// [`DynamicsError::Repeated`] for a link or joint the tree lacks or the calibration lists
+    /// twice. Which robot's units were fitted is the robot instance's to check
+    /// (`sx_embodiments.instance.resolve`), which selects the calibration this is given.
+    pub fn calibrated(mut self, calibration: &DynamicsCalibration) -> Result<Self, DynamicsError> {
+        let Some(digest) = self.description_sha256.as_deref() else {
             return Err(DynamicsError::Description {
-                expected: description_sha256.to_owned(),
+                expected: "a description read by Dynamics::of".into(),
+                found: calibration.description_sha256.clone(),
+            });
+        };
+        if calibration.description_sha256 != digest {
+            return Err(DynamicsError::Description {
+                expected: digest.to_owned(),
                 found: calibration.description_sha256.clone(),
             });
         }
@@ -364,6 +489,7 @@ impl Dynamics {
                 .ok_or_else(|| DynamicsError::Absent(link.clone()))?;
             self.inertia[index] = *inertia;
         }
+        let mut seen = std::collections::HashSet::new();
         for (joint, friction) in &calibration.joints {
             if !seen.insert(joint.as_str()) {
                 return Err(DynamicsError::Repeated(joint.clone()));
@@ -377,6 +503,7 @@ impl Dynamics {
             self.friction[index] = *friction;
         }
         self.stiction_velocity = calibration.stiction_velocity;
+        self.loaded = self.friction.iter().any(JointFriction::is_loaded);
         Ok(self)
     }
 
@@ -401,6 +528,7 @@ impl Dynamics {
             force: vec![[0.0; 3]; links],
             moment: vec![[0.0; 3]; links],
             rest: vec![0.0; self.tree.joints().len()],
+            held: vec![0.0; self.tree.joints().len()],
         }
     }
 
@@ -445,11 +573,26 @@ impl Dynamics {
         torque: &mut [f64],
     ) -> Result<(), DynamicsError> {
         self.rigid(position, velocity, acceleration, scratch, torque)?;
+        if self.loaded {
+            // The load is gravity's torque on each joint; the drive delivers the rigid torque.
+            let mut held = std::mem::take(&mut scratch.held);
+            let outcome = self.gravity_torque_into(position, scratch, &mut held);
+            scratch.held = held;
+            outcome?;
+        }
         for (index, friction) in self.friction.iter().enumerate() {
-            let speed = velocity[index];
-            torque[index] += friction.armature * acceleration[index]
-                + friction.viscous * speed
-                + friction.coulomb * (speed / self.stiction_velocity).tanh();
+            let external = if self.loaded {
+                -scratch.held[index]
+            } else {
+                0.0
+            };
+            torque[index] += friction.torque(
+                velocity[index],
+                acceleration[index],
+                torque[index],
+                external,
+                self.stiction_velocity,
+            );
         }
         Ok(())
     }
@@ -653,6 +796,8 @@ pub struct Scratch {
     force: Vec<[f64; 3]>,
     moment: Vec<[f64; 3]>,
     rest: Vec<f64>,
+    /// Gravity's holding torque, for load-dependent friction.
+    held: Vec<f64>,
 }
 
 /// One link's motion at its origin, on its own axes.
@@ -670,6 +815,19 @@ impl Motion {
         spin_rate: [0.0; 3],
         acceleration: [0.0; 3],
     };
+}
+
+/// The lowercase hex SHA-256 of a description's bytes, as `sx_embodiments` names it.
+#[must_use]
+pub fn sha256_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 type Matrix = [[f64; 3]; 3];
@@ -730,6 +888,10 @@ fn is_semidefinite(m: &Matrix, tolerance: f64) -> bool {
 mod tests {
     use super::*;
 
+    fn digest(text: &str) -> String {
+        sha256_hex(text)
+    }
+
     const PENDULUM: &str = r#"<robot name="pendulum">
       <link name="base"/>
       <link name="arm">
@@ -761,7 +923,7 @@ mod tests {
     fn friction_adds_armature_viscous_and_a_smooth_coulomb() {
         let tree = Tree::parse(PENDULUM).expect("tree");
         let calibration = DynamicsCalibration {
-            description_sha256: "d".into(),
+            description_sha256: digest(PENDULUM),
             stiction_velocity: 0.05,
             links: vec![],
             joints: vec![(
@@ -770,12 +932,14 @@ mod tests {
                     coulomb: 0.4,
                     viscous: 0.2,
                     armature: 0.03,
+                    ..JointFriction::default()
                 },
             )],
         };
-        let plain = Dynamics::new(tree.clone(), UPRIGHT);
-        let rubbed = Dynamics::new(tree, UPRIGHT)
-            .calibrated(&calibration, "d")
+        let plain = Dynamics::new(tree, UPRIGHT);
+        let rubbed = Dynamics::of(PENDULUM, UPRIGHT)
+            .expect("dynamics")
+            .calibrated(&calibration)
             .expect("calibrated");
         let (q, qd, qdd) = (0.2, 0.1, 2.0);
         let added = rubbed.inverse(&[q], &[qd], &[qdd]).expect("torque")[0]
@@ -792,18 +956,24 @@ mod tests {
     fn a_calibration_of_another_description_or_absent_link_is_refused() {
         let tree = Tree::parse(PENDULUM).expect("tree");
         let mut calibration = DynamicsCalibration {
-            description_sha256: "d".into(),
+            description_sha256: digest(PENDULUM),
             stiction_velocity: 0.02,
             links: vec![("elsewhere".into(), LinkInertia::ZERO)],
             joints: vec![],
         };
-        let dynamics = Dynamics::new(tree, UPRIGHT);
         assert!(matches!(
-            dynamics.clone().calibrated(&calibration, "e"),
+            Dynamics::new(tree, UPRIGHT).calibrated(&calibration),
+            Err(DynamicsError::Description { .. })
+        ));
+        let dynamics = Dynamics::of(PENDULUM, UPRIGHT).expect("dynamics");
+        let mut elsewhere = calibration.clone();
+        elsewhere.description_sha256 = "0".repeat(64);
+        assert!(matches!(
+            dynamics.clone().calibrated(&elsewhere),
             Err(DynamicsError::Description { .. })
         ));
         assert_eq!(
-            dynamics.clone().calibrated(&calibration, "d"),
+            dynamics.clone().calibrated(&calibration),
             Err(DynamicsError::Absent("elsewhere".into()))
         );
         calibration.links = vec![
@@ -811,7 +981,7 @@ mod tests {
             ("arm".into(), LinkInertia::ZERO),
         ];
         assert_eq!(
-            dynamics.calibrated(&calibration, "d"),
+            dynamics.calibrated(&calibration),
             Err(DynamicsError::Repeated("arm".into()))
         );
     }

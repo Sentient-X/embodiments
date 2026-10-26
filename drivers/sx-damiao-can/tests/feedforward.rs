@@ -123,7 +123,13 @@ fn feedforward_maps_through_sign_and_clamps_to_the_bound_and_tmax() {
         velocity: -0.9,
         torque: 2.5,
     };
-    chain.command_with(&rest, &wanted).expect("command");
+    // Mid-range targets, so the excursion bound leaves the feed-forward whole.
+    let mut targets = rest.clone();
+    for index in [wrist, elbow] {
+        let range = chain.commandable()[index];
+        targets[index] = f64::midpoint(range.lower, range.upper);
+    }
+    chain.command_with(&targets, &wanted).expect("command");
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
     for (index, (dq, tau)) in [(wrist, (-0.3, -10.0)), (elbow, (-0.5, 2.5))] {
         let motor = &axes[index];
@@ -133,7 +139,7 @@ fn feedforward_maps_through_sign_and_clamps_to_the_bound_and_tmax() {
             f64::from(reported.v_max),
             f64::from(reported.t_max),
         ];
-        let target = motor.axis.actuator_from_joint(rest[index]);
+        let target = motor.axis.actuator_from_joint(targets[index]);
         assert_eq!(
             last_mit(&bus, motor.axis.binding.bus_id),
             mit_bytes(motor.kp, motor.kd, target, dq, tau, limit),
@@ -181,4 +187,108 @@ fn a_non_finite_feedforward_or_bound_is_refused_before_any_frame() {
         chain.set_feedforward_limits(&limits),
         Err(DamiaoChainError::FeedforwardLimit { .. })
     ));
+}
+
+#[test]
+fn feedforward_never_pushes_a_joint_past_its_range() {
+    let (bus, mut chain, rest) = opened();
+    let elbow = index_of("left_elbow_pitch_joint");
+    let mut limits = vec![FeedforwardLimit::default(); rest.len()];
+    limits[elbow] = FeedforwardLimit {
+        velocity: Some(0.5),
+        torque: Some(5.0),
+    };
+    chain.set_feedforward_limits(&limits).expect("bounds");
+    let range = chain.commandable()[elbow];
+    let mut targets = rest.clone();
+    let mut wanted = vec![Feedforward::default(); rest.len()];
+    // At the upper edge, a push upwards has no room: nothing is sent.
+    targets[elbow] = range.upper;
+    wanted[elbow] = Feedforward {
+        velocity: 0.4,
+        torque: 4.0,
+    };
+    chain.command_with(&targets, &wanted).expect("command");
+    assert_eq!(chain.applied_feedforward()[elbow], Feedforward::default());
+    // 0.05 rad inside it, the unloaded settling point (kd v + tau) / kp stays within 0.05 rad.
+    targets[elbow] = range.upper - 0.05;
+    chain.command_with(&targets, &wanted).expect("command");
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let applied = chain.applied_feedforward()[elbow];
+    let excursion = axes[elbow].kd.mul_add(applied.velocity, applied.torque) / axes[elbow].kp;
+    assert!(excursion > 0.0 && excursion <= 0.05 + 1e-9, "{excursion}");
+    // Pushing away from the edge it is whole.
+    wanted[elbow] = Feedforward {
+        velocity: -0.4,
+        torque: -4.0,
+    };
+    chain.command_with(&targets, &wanted).expect("command");
+    assert_eq!(chain.applied_feedforward()[elbow], wanted[elbow]);
+    let _ = bus;
+    // A stop clears what the record says was sent.
+    let _ = chain.stop();
+    assert!(
+        chain
+            .applied_feedforward()
+            .iter()
+            .all(|ff| *ff == Feedforward::default())
+    );
+}
+
+#[test]
+fn a_geared_axis_scales_velocity_by_its_reduction_and_torque_by_its_inverse() {
+    use sx_damiao_can::b601::b601;
+    let drives: Value = serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");
+    let nominal = &drives["b601-dm"]["nominal"];
+    let drive = InstanceDrive::parse(
+        &nominal.to_string(),
+        nominal["instance"].as_str().expect("instance"),
+    )
+    .expect("drive");
+    let axes = b601(&drive).expect("axes");
+    let gripper = axes
+        .iter()
+        .position(|axis| (axis.axis.binding.reduction - 1.0).abs() > 1e-9)
+        .expect("a geared axis");
+    let gain = axes[gripper]
+        .axis
+        .actuator_from_joint(axes[gripper].axis.zero + 1.0);
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let mut limits = vec![FeedforwardLimit::default(); axes.len()];
+    limits[gripper] = FeedforwardLimit {
+        velocity: Some(1.0),
+        torque: Some(100.0),
+    };
+    chain.set_feedforward_limits(&limits).expect("bounds");
+    let mut targets = chain.last_observed().expect("rest");
+    let range = chain.commandable()[gripper];
+    targets[gripper] = f64::midpoint(range.lower, range.upper);
+    let mut wanted = vec![Feedforward::default(); axes.len()];
+    // Small enough at the joint that nothing clamps: 0.01 rad/s and 0.5 N (or N·m).
+    wanted[gripper] = Feedforward {
+        velocity: 0.01,
+        torque: 0.5,
+    };
+    chain.command_with(&targets, &wanted).expect("command");
+    let reported = chain.limits()[gripper];
+    let limit = [
+        f64::from(reported.p_max),
+        f64::from(reported.v_max),
+        f64::from(reported.t_max),
+    ];
+    let motor = &axes[gripper];
+    assert_eq!(
+        last_mit(&bus, motor.axis.binding.bus_id),
+        mit_bytes(
+            motor.kp,
+            motor.kd,
+            motor.axis.actuator_from_joint(targets[gripper]),
+            gain * 0.01,
+            0.5 / gain,
+            limit
+        )
+    );
+    let applied = chain.applied_feedforward()[gripper];
+    assert!((applied.velocity - 0.01).abs() < 1e-12 && (applied.torque - 0.5).abs() < 1e-12);
 }

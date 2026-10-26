@@ -48,6 +48,7 @@ from sx_embodiments.calibration import (  # noqa: E402
 
 URDF = ROOT / "assets/sentient_static_upper_body/sentient_static_upper_body.urdf"
 FIXTURE = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/dynamics-parity.json"
+FRICTION_FIXTURE = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/friction-parity.json"
 SAMPLES = 12
 STICTION = 0.05
 
@@ -260,5 +261,56 @@ def main() -> None:
     )
 
 
+def mint_friction() -> None:
+    """BAM-family joint friction (M1 to M5 terms all on) at random speeds and loads, from
+    ``sx_embodiments.calibrate.friction.moving_friction``, for ``JointFriction::torque``."""
+    from sx_embodiments.calibrate.friction import moving_friction
+    from sx_embodiments.calibration import FRICTION_TERMS, JointFriction
+
+    rng = np.random.default_rng(7)
+    cases = []
+    for _ in range(8):
+        terms = {
+            "coulomb": rng.uniform(0.0, 2.0),
+            "viscous": rng.uniform(0.0, 1.0),
+            "armature": rng.uniform(0.0, 0.05),
+            "stribeck": rng.uniform(0.0, 1.5),
+            "stribeck_velocity": rng.uniform(0.01, 0.2),
+            "stribeck_exponent": rng.uniform(1.0, 3.0),
+            "load_motor": rng.uniform(0.0, 0.1),
+            "load_external": rng.uniform(0.0, 0.1),
+            "load_motor_stribeck": rng.uniform(0.0, 0.2),
+            "load_external_stribeck": rng.uniform(0.0, 0.2),
+        }
+        friction = JointFriction("j", **{k: float(terms[k]) for k in FRICTION_TERMS})
+        speed = rng.uniform(-1.0, 1.0, 16)
+        acceleration = rng.uniform(-5.0, 5.0, 16)
+        motor = rng.uniform(-20.0, 20.0, 16)
+        external = rng.uniform(-20.0, 20.0, 16)
+        torque = moving_friction(friction, speed, acceleration, motor, external, STICTION)
+        cases.append(
+            {
+                "friction": {k: float(terms[k]) for k in FRICTION_TERMS},
+                "speed": speed.tolist(),
+                "acceleration": acceleration.tolist(),
+                "motor": motor.tolist(),
+                "external": external.tolist(),
+                "torque": torque.tolist(),
+            }
+        )
+    FRICTION_FIXTURE.write_text(
+        json.dumps(
+            {
+                "source": "tools/mint_dynamics_parity.py (mint_friction)",
+                "stiction_velocity": STICTION,
+                "cases": cases,
+            },
+            indent=1,
+        )
+        + "\n"
+    )
+
+
 if __name__ == "__main__":
     main()
+    mint_friction()
