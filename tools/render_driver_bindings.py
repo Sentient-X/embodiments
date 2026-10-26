@@ -74,7 +74,6 @@ from sx_embodiments.layout import (
     BusPort,
     ServoApproach,
 )
-from sx_embodiments.parts import ChainSpec
 from sx_embodiments.media import (
     NO_RIG,
     MediaRig,
@@ -83,6 +82,7 @@ from sx_embodiments.media import (
     media_document,
     mount_pose_at,
 )
+from sx_embodiments.parts import ChainSpec
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.

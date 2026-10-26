@@ -398,9 +398,10 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
 #: slews these joints at up to 3 rad/s (the owner's bench speed, 2026-10-26), below this, so the
 #: governor binds and the servo keeps up, a finger's RANGE_0_100 map asking its servo for up to
 #: 1.15 joint rad/s each. The bring-up's 0.25 rad/s made the neck too slow to follow a head.
+_SERVO_APPROACH: Final = ServoApproach(speed=4.0, acceleration=16.0)
 STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
-    STATIC_UPPER_BODY_NECK_PORT: ServoApproach(speed=4.0, acceleration=16.0),
-    **{port: ServoApproach(speed=4.0, acceleration=16.0) for port, _ in STATIC_UPPER_BODY_GRIPPER_BUSES.values()},
+    STATIC_UPPER_BODY_NECK_PORT: _SERVO_APPROACH,
+    **{port: _SERVO_APPROACH for port, _ in STATIC_UPPER_BODY_GRIPPER_BUSES.values()},
 }
 
 STATIC_UPPER_BODY_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))

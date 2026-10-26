@@ -44,8 +44,9 @@ def test_the_damiao_transcripts_keep_the_same_physical_drive_facts() -> None:
 
 def test_the_static_upper_bodys_servo_approach_is_rendered_by_port() -> None:
     document = json.loads(
-        (TOOL.parents[1] / "drivers/sx-feetech-serial/bindings/sentient-static-upper-body.json")
-        .read_text()
+        (
+            TOOL.parents[1] / "drivers/sx-feetech-serial/bindings/sentient-static-upper-body.json"
+        ).read_text()
     )
     assert document["approach"] == {
         port: {"speed": limit.speed, "acceleration": limit.acceleration}
