@@ -207,6 +207,8 @@ struct Args {
     feedforward: Option<String>,
     /// The supply the motors run on, V, recorded with every run.
     supply: Option<f64>,
+    /// What feeds the motors (`boost-converter`, `battery`, ...), recorded with every run.
+    source: Option<String>,
     motion: bool,
 }
 
@@ -225,6 +227,7 @@ fn parse() -> Result<Args, String> {
         without: Vec::new(),
         feedforward: None,
         supply: None,
+        source: None,
         motion: false,
     };
     while let Some(arg) = args.next() {
@@ -241,6 +244,7 @@ fn parse() -> Result<Args, String> {
             "--with-torso" => parsed.torso = true,
             "--without" => parsed.without.push(value()?),
             "--feedforward" => parsed.feedforward = Some(value()?),
+            "--supply-source" => parsed.source = Some(value()?),
             "--supply-volts" => {
                 parsed.supply = Some(value()?.parse().map_err(|_| "bad --supply-volts")?);
             }
@@ -566,12 +570,16 @@ struct Record {
 fn write_records(
     out: &mut impl Write,
     supply: Option<f64>,
+    source: Option<&str>,
     names: &[String],
     ticks: &[Tick],
     records: &[Record],
 ) -> std::io::Result<()> {
     if let Some(volts) = supply {
         writeln!(out, "# supply_volts={volts}")?;
+    }
+    if let Some(source) = source {
+        writeln!(out, "# supply_source={source}")?;
     }
     write!(out, "time_s,segment")?;
     for kind in ["target", "position", "velocity", "torque"] {
@@ -701,6 +709,7 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     }
     let document = serde_json::json!({
         "supply_volts": args.supply,
+        "supply_source": args.source,
         "motors": motors,
         "problems": problems,
     });
@@ -991,8 +1000,15 @@ fn run() -> Result<(), String> {
         }
     }
     let report = governor.stop();
-    let written =
-        write_records(&mut out, args.supply, &names, &ticks, &records).and_then(|()| out.flush());
+    let written = write_records(
+        &mut out,
+        args.supply,
+        args.source.as_deref(),
+        &names,
+        &ticks,
+        &records,
+    )
+    .and_then(|()| out.flush());
     if let Err(error) = written {
         eprintln!("sx-identify: the record could not be written: {error}");
     }
