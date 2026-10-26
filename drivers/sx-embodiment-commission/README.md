@@ -128,3 +128,34 @@ only reads; and a stale journal. `tests/calibrate_signal.rs` runs the binary on 
 pseudo-terminal whose other end is the simulated servo. It sends SIGTERM, SIGINT and SIGHUP
 while the servo is powered and checks that torque is off, the registers are restored, the
 journal is gone and the exit code is 1.
+
+## Bench tools
+
+Extend these; never write a new vendor-frame script. A bench tool opens or observes the body
+through the embodiment layer (`sx-embodiment-bodies`: `open_with` to drive, `observe` to read
+without writing), from the instance's drive and the station's commissioning. A faulty motor is
+named in the commissioning's `out_of_service`, never skipped in a tool.
+
+| Binary | For | Through the layer? |
+|---|---|---|
+| `sx-commission probe` / `commission` / `calibrate` | find bridges and ids read-only, write `commissioning.json` and calibrations, calibrate a Feetech bus | yes (vendor scan modules behind read-only ports; `calibrate` writes only under `--move`) |
+| `sx-jog` | supervised relative jog, slew, hold/release, clear faults, disable-all on the static upper body | **no**: hand-rolls Damiao frames over ZLG and skips the torso in code; to be rewritten over `open_with` + `Governor` |
+| `sx-record` | record joints while a person moves the body by hand | **no**: hand-rolled Damiao refresh and Feetech reads, raw ticks; to be rewritten as a logger over `observe` |
+| `sx-timeout-probe` | measure a Damiao motor's CAN watchdog | **no**: drives `dm_can` directly; to fold into the layer's ops |
+| `sx-can-bench` (`sx-zlg-usbcanfd`) | ZLG USBCANFD link throughput and latency | transport bench, below the layer by design |
+| `sx-imu-still` (`sx-stereolabs-sensors`) | ZED IMU stillness check | sensor bench, no actuators |
+
+Static upper body on the bench: the ZLG channel is commissioned as
+`A30F115DD0120A949B80:1` (port `can`), the neck CH343 as `5A7C118709` (ids 1-6), the right
+gripper as `5B91028463` (ids 1, 2) and the left as `5AB0158173` (ids 3, 4):
+
+```json
+{"schema": "sx.station-commissioning/v1", "instance": "<instance id>", "pod_id": "<pod>",
+ "pod_revision": 1, "out_of_service": ["torso_joint"],
+ "ports": {"can": "A30F115DD0120A949B80:1", "neck": "5A7C118709",
+           "right_gripper": "5B91028463", "left_gripper": "5AB0158173"}}
+```
+
+Current command lines (pre-rewrite): `sx-jog --joint <joint> --delta-deg <deg> [--speed 0.2]
+--zlg-serial A30F115DD0120A949B80 --channel 1`; `sx-record --out <file.jsonl> --zlg-serial
+A30F115DD0120A949B80 --channel 1 --feetech neck=/dev/<tty>:1,2,3,4,5,6`.

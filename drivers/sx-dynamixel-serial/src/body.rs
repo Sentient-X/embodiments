@@ -14,6 +14,7 @@ use crate::chain::{
     DYNAMIXEL_SERIAL, DynamixelChain, DynamixelChainError, DynamixelServo, MotorCalibration,
     MotorNormMode, OperatingMode,
 };
+use crate::observe::DynamixelObserver;
 
 /// What one joint's servo needs beyond the registry's binding and the unit's calibration.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,5 +128,22 @@ impl DynamixelBody {
         calibration: &[MotorCalibration],
     ) -> Result<DynamixelChain<P>, DynamixelChainError> {
         DynamixelChain::open(port, self.servos(self.calibrated(drive)?, calibration)?)
+    }
+
+    /// Read every servo on `port` as `drive`'s robot drives it, never commanding one: the
+    /// servos [`DynamixelBody::open`] opens, in its order, each read with the calibration
+    /// `calibration` supplies for it in native state order, or with its registers' own where it
+    /// supplies none ([`DynamixelObserver`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns why the observer did not open.
+    pub fn observe<P: SerialPort>(
+        &self,
+        port: P,
+        drive: &InstanceDrive,
+        calibration: &[Option<MotorCalibration>],
+    ) -> Result<DynamixelObserver<P>, DynamixelChainError> {
+        DynamixelObserver::open(port, self.calibrated(drive)?, self.servos, calibration)
     }
 }

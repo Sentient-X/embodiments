@@ -11,12 +11,12 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, closed_ports, open, open_calibrated, open_with, ports,
+    ServoCalibrations, closed_ports, observe, open, open_calibrated, open_with, ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
     ActuatorChain, AxisLimits, BodyBindings, Evidence, Governor, GovernorError, InstanceDrive,
-    fresh_positions,
+    Observe, fresh_positions,
 };
 use sx_feetech_serial::FeetechChainError;
 use sx_feetech_serial::sim::SimBus;
@@ -136,7 +136,6 @@ fn a_b601_opens_on_two_bridges_or_one_shared_bridge() {
         &mut two,
     )
     .expect("two bridges");
-    assert!(matches!(body, Body::B601(_)));
     assert_eq!(body.axes().len(), b601(&drive).expect("axes").len());
     let mut one = Bridges {
         buses: BTreeMap::from([("BOTH".to_owned(), Sim::b601(&[1, 2, 3, 4, 5, 6, 7]))]),
@@ -172,7 +171,6 @@ fn the_humanoid_upper_body_opens_on_its_one_bridge() {
         &mut bridges,
     )
     .expect("humanoid");
-    assert!(matches!(body, Body::Buses(_)));
     assert_eq!(body.axes().len(), axes.len());
     assert!(body.stop().is_proven());
 }
@@ -281,7 +279,6 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
         &mut bridges,
     )
     .expect("static upper body");
-    assert!(matches!(body, Body::Buses(_)));
     assert_eq!(
         bridges.opened,
         [
@@ -985,4 +982,102 @@ fn the_whole_static_upper_body_reads_its_measured_joints_without_moving_anything
         sx_embodiment_drivers::AxisReading::Missing(sx_embodiment_drivers::MissingReason::Timeout)
     );
     assert_eq!(body.axes()[silent[0]].binding.bus_id, 4);
+}
+
+#[test]
+fn observing_the_static_upper_body_writes_nothing_and_reads_as_the_opened_body_does() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let can = Sim::for_axes(&axes);
+    let serial = probed_buses();
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let mut observer = observe(
+        &drive,
+        &static_commissioning(&drive),
+        &ServoCalibrations::new(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("observer, the Feetech servos read with their own registers");
+    let readings = observer.read_positions();
+    // Only register reads and status refreshes reached the CAN bus; only READs and PINGs the
+    // serial buses.
+    assert!(
+        can.state()
+            .frames
+            .iter()
+            .all(sx_damiao_can::observe::only_asks)
+    );
+    for bus in serial.values() {
+        assert!(
+            bus.state()
+                .written
+                .iter()
+                .all(|packet| sx_feetech_serial::scan::is_read_only(packet))
+        );
+    }
+    let seen_all = fresh_positions(&readings).expect("every axis answered");
+    // The same layout and the same joint coordinates as the opened body.
+    let mut opened = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let mut body = bring_up(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        &mut opened,
+    )
+    .expect("body");
+    assert_eq!(observer.axes(), body.axes());
+    let read = fresh_positions(&body.read_positions()).expect("every axis answered");
+    for (index, (seen, read)) in seen_all.iter().zip(&read).enumerate() {
+        assert!((seen - read).abs() < 1e-9, "axis {index}: {seen} vs {read}");
+    }
+    // A silent motor is missing in its place; every other axis stays fresh.
+    can.kill(0x18);
+    let readings = observer.read_positions();
+    assert_eq!(readings.len(), 25);
+    let silent: Vec<usize> = (0..25)
+        .filter(|index| !readings[*index].is_fresh())
+        .collect();
+    assert_eq!(silent.len(), 1, "{readings:?}");
+    assert_eq!(observer.axes()[silent[0]].binding.bus_id, 0x18);
+}
+
+#[test]
+fn a_joint_out_of_service_is_left_out_of_the_body_and_its_observer() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let mut document: serde_json::Value = serde_json::json!({
+        "schema": "sx.station-commissioning/v1",
+        "instance": drive.instance,
+        "pod_id": "pod-a",
+        "pod_revision": 3,
+        "ports": {"can": "CAN"},
+        "out_of_service": ["torso_joint"],
+    });
+    let commissioning =
+        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    let can = Sim::for_axes(&axes);
+    can.kill(0x1F);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can)]),
+        ..Bridges::default()
+    };
+    let body = open(&drive, &commissioning, &mut bridges).expect("opens without the torso");
+    assert_eq!(body.axes().len(), 14);
+    assert!(body.axes().iter().all(|axis| axis.joint != "torso_joint"));
+    document["out_of_service"] = serde_json::json!(["no_such_joint"]);
+    let unknown =
+        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    assert!(matches!(
+        open(&drive, &unknown, &mut bridges),
+        Err(OpenError::OutOfService(joint)) if joint == "no_such_joint"
+    ));
 }

@@ -10,6 +10,7 @@
 
 pub mod body;
 pub mod chain;
+pub mod observe;
 pub mod scan;
 pub mod scservo_sdk;
 #[cfg(any(test, feature = "sim"))]

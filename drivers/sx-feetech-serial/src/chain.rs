@@ -269,7 +269,7 @@ pub struct FeetechServo {
 }
 
 impl FeetechServo {
-    fn scs_id(&self) -> u8 {
+    pub(crate) fn scs_id(&self) -> u8 {
         // Open refuses an address above `MAX_ID`, so the narrowing never saturates.
         u8::try_from(self.axis.binding.bus_id).unwrap_or(u8::MAX)
     }
@@ -507,6 +507,102 @@ fn expect(bus_id: u16, (result, error): (CommResult, u8)) -> Result<(), FeetechC
     Ok(())
 }
 
+/// Refuse axes that are not one valid chain on one port of qualified STS3215s at addressable
+/// ids, before any byte.
+pub(crate) fn qualify(axes: &[BoundAxis]) -> Result<(), FeetechChainError> {
+    validate_chain(axes)?;
+    let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
+    ports.dedup();
+    if ports.len() > 1 {
+        return Err(FeetechChainError::Ports(ports));
+    }
+    for axis in axes {
+        let binding = axis.binding;
+        if binding.bus != FEETECH_SERIAL || binding.model != FEETECH_STS3215 {
+            return Err(FeetechChainError::Unqualified(binding.bus_id));
+        }
+        if binding.bus_id > u16::from(MAX_ID) {
+            return Err(FeetechChainError::Ids(binding.bus_id));
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a calibration whose range is empty or beyond the encoder's resolution.
+pub(crate) fn check_calibration(
+    bus_id: u16,
+    calibration: MotorCalibration,
+) -> Result<(), FeetechChainError> {
+    if calibration.range_min >= calibration.range_max
+        || f64::from(calibration.range_max) >= RESOLUTION
+    {
+        return Err(FeetechChainError::Calibration(bus_id));
+    }
+    Ok(())
+}
+
+/// The calibration a servo's registers hold, read as `LeRobot`'s `read_calibration` reads it:
+/// `Min_Position_Limit`, `Max_Position_Limit` and `Homing_Offset` (sign-magnitude at bit 11).
+/// The STS has no drive-mode register; `LeRobot` records 0, and so does this.
+pub(crate) fn held_calibration<P: SerialPort>(
+    ph: &mut ProtocolPacketHandler<P>,
+    bus_id: u16,
+    scs_id: u8,
+) -> Result<MotorCalibration, FeetechChainError> {
+    let mut read2 = |address: u8| {
+        let (value, result, error) = ph.read2_byte_tx_rx(scs_id, address);
+        expect(bus_id, (result, error)).map(|()| value)
+    };
+    let range_min = read2(SMS_STS_MIN_ANGLE_LIMIT_L)?;
+    let range_max = read2(SMS_STS_MAX_ANGLE_LIMIT_L)?;
+    let offset =
+        ProtocolPacketHandler::<()>::scs_tohost(read2(SMS_STS_OFS_L)?, HOMING_OFFSET_SIGN_BIT);
+    Ok(MotorCalibration {
+        drive_mode: false,
+        // Eleven bits of magnitude always fit.
+        homing_offset: i16::try_from(offset).unwrap_or(i16::MAX),
+        range_min,
+        range_max,
+    })
+}
+
+/// What a read that did not succeed says about its axis: faulted with the servo's error flags
+/// when it answered, else missing for why it did not.
+pub(crate) const fn unanswered(result: CommResult, error: u8) -> AxisReading {
+    match result {
+        CommResult::Success => AxisReading::Faulted(error),
+        CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
+        CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
+        CommResult::TxFail
+        | CommResult::RxFail
+        | CommResult::TxError
+        | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
+    }
+}
+
+/// One servo's `Present_Position` (56..=57), one `READ`, as its axis's reading. The answer is
+/// fresh: the packet handler clears the port before it writes the `READ`. A servo that is
+/// silent, answers corrupt or cannot be reached is missing; one that answers with error flags
+/// is faulted with them. Reading writes no register, so nothing moves and torque stays as it
+/// was.
+pub(crate) fn present_position<P: SerialPort>(
+    ph: &mut ProtocolPacketHandler<P>,
+    servo: &FeetechServo,
+) -> AxisReading {
+    let (raw, result, error) = ph.read2_byte_tx_rx(servo.scs_id(), SMS_STS_PRESENT_POSITION_L);
+    let received = Instant::now();
+    if result != CommResult::Success || error != 0 {
+        return unanswered(result, error);
+    }
+    AxisReading::Fresh {
+        position: servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
+            raw,
+            PRESENT_POSITION_SIGN_BIT,
+        )),
+        received,
+    }
+}
+
 impl<P: SerialPort> FeetechChain<P> {
     /// Validate every servo, prove each answers as a qualified STS3215 holding the calibration
     /// supplied, disable torque and configure every servo, and leave the chain disabled.
@@ -519,28 +615,10 @@ impl<P: SerialPort> FeetechChain<P> {
     /// STS3215, and any servo whose registers disagree with its calibration.
     pub fn open(port: P, servos: Vec<FeetechServo>) -> Result<Self, FeetechChainError> {
         let axes: Vec<BoundAxis> = servos.iter().map(|servo| servo.axis.clone()).collect();
-        validate_chain(&axes)?;
-        let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
-        ports.dedup();
-        if ports.len() > 1 {
-            return Err(FeetechChainError::Ports(ports));
-        }
+        qualify(&axes)?;
         for servo in &servos {
             let binding = servo.axis.binding;
-            if binding.bus != FEETECH_SERIAL || binding.model != FEETECH_STS3215 {
-                return Err(FeetechChainError::Unqualified(binding.bus_id));
-            }
-            if binding.bus_id > u16::from(MAX_ID) {
-                return Err(FeetechChainError::Ids(binding.bus_id));
-            }
-            let MotorCalibration {
-                range_min,
-                range_max,
-                ..
-            } = servo.calibration;
-            if range_min >= range_max || f64::from(range_max) >= RESOLUTION {
-                return Err(FeetechChainError::Calibration(binding.bus_id));
-            }
+            check_calibration(binding.bus_id, servo.calibration)?;
             if servo
                 .configuration
                 .approach
@@ -618,21 +696,16 @@ impl<P: SerialPort> FeetechChain<P> {
             .map(|servo| (servo.axis.binding.bus_id, servo.scs_id(), servo.calibration))
             .collect();
         for (bus_id, scs_id, calibration) in ids {
-            let range_min = self.read2(bus_id, scs_id, SMS_STS_MIN_ANGLE_LIMIT_L)?;
-            let range_max = self.read2(bus_id, scs_id, SMS_STS_MAX_ANGLE_LIMIT_L)?;
-            let homing_offset = ProtocolPacketHandler::<()>::scs_tohost(
-                self.read2(bus_id, scs_id, SMS_STS_OFS_L)?,
-                HOMING_OFFSET_SIGN_BIT,
-            );
-            if range_min != calibration.range_min
-                || range_max != calibration.range_max
-                || homing_offset != i32::from(calibration.homing_offset)
+            let held = held_calibration(&mut self.sms.ph, bus_id, scs_id)?;
+            if held.range_min != calibration.range_min
+                || held.range_max != calibration.range_max
+                || held.homing_offset != calibration.homing_offset
             {
                 return Err(FeetechChainError::Uncalibrated {
                     bus_id,
-                    homing_offset,
-                    range_min,
-                    range_max,
+                    homing_offset: i32::from(held.homing_offset),
+                    range_min: held.range_min,
+                    range_max: held.range_max,
                 });
             }
         }
@@ -775,31 +848,10 @@ impl<P: SerialPort> FeetechChain<P> {
     /// other servos' readings stand. Reading writes no register, so nothing moves and torque
     /// stays as it was.
     fn present_positions(&mut self) -> Vec<AxisReading> {
-        let ids: Vec<u8> = self.servos.iter().map(FeetechServo::scs_id).collect();
-        let mut readings = Vec::with_capacity(ids.len());
-        for (index, scs_id) in ids.into_iter().enumerate() {
-            let (raw, result, error) = self
-                .sms
-                .ph
-                .read2_byte_tx_rx(scs_id, SMS_STS_PRESENT_POSITION_L);
-            let received = Instant::now();
-            readings.push(match result {
-                CommResult::Success if error != 0 => AxisReading::Faulted(error),
-                CommResult::Success => AxisReading::Fresh {
-                    position: self.servos[index].joint_from_raw(
-                        ProtocolPacketHandler::<()>::scs_tohost(raw, PRESENT_POSITION_SIGN_BIT),
-                    ),
-                    received,
-                },
-                CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
-                CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
-                CommResult::TxFail
-                | CommResult::RxFail
-                | CommResult::TxError
-                | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
-            });
-        }
-        readings
+        self.servos
+            .iter()
+            .map(|servo| present_position(&mut self.sms.ph, servo))
+            .collect()
     }
 
     /// One SYNC READ of every servo's registers from `Torque_Enable` (40) to `Present_Position`

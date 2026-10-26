@@ -322,6 +322,21 @@ pub trait ActuatorChain {
     fn clear_faults(&mut self) {}
 }
 
+/// Bound actuators that are only read, never commanded: the read half of an
+/// [`ActuatorChain`], for a recorder or monitor running beside a body nothing drives. A type
+/// implementing only this cannot enable, configure or move an actuator, by construction; each
+/// vendor crate's observer also speaks through a port that refuses any request but a read.
+pub trait Observe {
+    /// The bound axes, in native state order, exactly as the chain opened on the same buses
+    /// lists them.
+    fn axes(&self) -> &[BoundAxis];
+
+    /// One [`AxisReading`] per axis in native state order, in joint coordinates through each
+    /// axis's drive map and unit calibration, as [`ActuatorChain::read_positions`] reports them.
+    /// An axis that did not answer is missing or faulted in its place, never dropped.
+    fn read_positions(&mut self) -> Vec<AxisReading>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
