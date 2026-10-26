@@ -1,9 +1,11 @@
-//! Commissioned USB serial bridges on Linux, found by their USB serial number.
+//! Commissioned USB serial bridges, found by their USB serial number, on Linux and macOS.
 //!
 //! A bridge is identified by the serial number its USB descriptor reports, the same kernel fact
 //! the station's inventory reports devices by, never by a device path: `/dev/ttyACM0` names
-//! whichever bridge enumerated first. The kernel's `sysfs` tree is read for the USB device
-//! whose `serial` is the commissioned one, and its one tty interface is opened raw. Damiao's
+//! whichever bridge enumerated first. On Linux the kernel's `sysfs` tree is read for the USB
+//! device whose `serial` is the commissioned one; on macOS the `IOKit` registry, through
+//! `serialport`'s enumeration, names the device's callout node (`/dev/cu.*`). Its one tty
+//! interface is opened raw. Damiao's
 //! USB2CAN bridge is opened at the rate Seeed's controller uses, 921600 baud; a serial-servo
 //! adapter (Feetech, Dynamixel) at the rate its body's bus runs at, as a [`ServoLink`].
 
@@ -23,26 +25,41 @@ pub const USB2CAN_BAUD: u32 = 921_600;
 /// How long a read waits for bytes before reporting the buffer empty.
 const READ_TIMEOUT: Duration = Duration::from_millis(1);
 
-/// USB2CAN bridges attached to this host.
+/// USB serial bridges attached to this host.
 pub struct UsbSerialPorts {
-    usb_devices: PathBuf,
-    dev: PathBuf,
+    kernel: Kernel,
+}
+
+/// Where the host's USB devices and their serial numbers are read.
+enum Kernel {
+    /// Linux `sysfs`: the USB devices under `usb_devices`, their ttys under `dev`.
+    #[cfg_attr(all(target_os = "macos", not(test)), allow(dead_code))]
+    Sysfs { usb_devices: PathBuf, dev: PathBuf },
+    /// macOS `IOKit`, as `serialport` enumerates it.
+    #[cfg(target_os = "macos")]
+    IoKit,
 }
 
 impl UsbSerialPorts {
     /// This host's kernel view.
     #[must_use]
     pub fn system() -> Self {
-        Self {
+        #[cfg(target_os = "macos")]
+        let kernel = Kernel::IoKit;
+        #[cfg(not(target_os = "macos"))]
+        let kernel = Kernel::Sysfs {
             usb_devices: PathBuf::from("/sys/bus/usb/devices"),
             dev: PathBuf::from("/dev"),
-        }
+        };
+        Self { kernel }
     }
 
     /// The kernel view under `usb_devices` (`/sys/bus/usb/devices`) and `dev`.
     #[cfg(test)]
     pub(crate) fn rooted(usb_devices: PathBuf, dev: PathBuf) -> Self {
-        Self { usb_devices, dev }
+        Self {
+            kernel: Kernel::Sysfs { usb_devices, dev },
+        }
     }
 
     /// The tty of the serial bridge whose USB serial number is `serial`.
@@ -54,45 +71,85 @@ impl UsbSerialPorts {
     /// tty does or a tty and another device both report it, and [`OpenError::Port`] when the
     /// kernel's view cannot be read.
     pub fn tty(&self, serial: &str) -> Result<PathBuf, OpenError> {
-        let port = |reason: String| OpenError::Port {
+        match &self.kernel {
+            Kernel::Sysfs { usb_devices, dev } => sysfs_tty(usb_devices, dev, serial),
+            #[cfg(target_os = "macos")]
+            Kernel::IoKit => iokit_tty(serial),
+        }
+    }
+}
+
+/// The callout node of the one USB serial device reporting `serial`, from `IOKit`.
+///
+/// `IOKit` lists each device twice, as its dial-in `/dev/tty.*` and callout `/dev/cu.*` node; the
+/// callout node is the one a host opens without waiting for carrier detect.
+#[cfg(target_os = "macos")]
+fn iokit_tty(serial: &str) -> Result<PathBuf, OpenError> {
+    let found: Vec<PathBuf> = serialport::available_ports()
+        .map_err(|error| OpenError::Port {
             serial: serial.to_owned(),
-            reason,
-        };
-        let entries = fs::read_dir(&self.usb_devices).map_err(|error| port(error.to_string()))?;
-        let mut found: Vec<PathBuf> = Vec::new();
-        // Devices reporting the serial that carry no tty, such as a SocketCAN adapter.
-        let mut others: Vec<PathBuf> = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| port(error.to_string()))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.contains(':') {
-                continue;
-            }
-            if fs::read_to_string(entry.path().join("serial"))
-                .is_ok_and(|reported| reported.trim() == serial)
-            {
-                let ttys =
-                    interface_ttys(&entry.path()).map_err(|error| port(error.to_string()))?;
-                if ttys.is_empty() {
-                    others.push(entry.path());
-                }
-                found.extend(ttys.iter().map(|tty| self.dev.join(tty)));
-            }
+            reason: error.to_string(),
+        })?
+        .into_iter()
+        .filter(|port| {
+            port.port_name.starts_with("/dev/cu.")
+                && matches!(&port.port_type, serialport::SerialPortType::UsbPort(usb)
+                    if usb.serial_number.as_deref().map(str::trim) == Some(serial))
+        })
+        .map(|port| PathBuf::from(port.port_name))
+        .collect();
+    match found.as_slice() {
+        [] => Err(OpenError::NotAttached(serial.to_owned())),
+        [tty] => Ok(tty.clone()),
+        _ => Err(OpenError::Ambiguous {
+            identity: serial.to_owned(),
+            bridges: found
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+        }),
+    }
+}
+
+/// The tty of the one USB device under `usb_devices` reporting `serial`.
+fn sysfs_tty(usb_devices: &Path, dev: &Path, serial: &str) -> Result<PathBuf, OpenError> {
+    let port = |reason: String| OpenError::Port {
+        serial: serial.to_owned(),
+        reason,
+    };
+    let entries = fs::read_dir(usb_devices).map_err(|error| port(error.to_string()))?;
+    let mut found: Vec<PathBuf> = Vec::new();
+    // Devices reporting the serial that carry no tty, such as a SocketCAN adapter.
+    let mut others: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| port(error.to_string()))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.contains(':') {
+            continue;
         }
-        match (found.as_slice(), others.is_empty()) {
-            ([], _) => Err(OpenError::NotAttached(serial.to_owned())),
-            ([tty], true) => Ok(tty.clone()),
-            // Two ttys, or a tty and another device reporting the same serial: which one is
-            // the commissioned bridge cannot be told.
-            _ => Err(OpenError::Ambiguous {
-                identity: serial.to_owned(),
-                bridges: found
-                    .iter()
-                    .chain(&others)
-                    .map(|path| path.display().to_string())
-                    .collect(),
-            }),
+        if fs::read_to_string(entry.path().join("serial"))
+            .is_ok_and(|reported| reported.trim() == serial)
+        {
+            let ttys = interface_ttys(&entry.path()).map_err(|error| port(error.to_string()))?;
+            if ttys.is_empty() {
+                others.push(entry.path());
+            }
+            found.extend(ttys.iter().map(|tty| dev.join(tty)));
         }
+    }
+    match (found.as_slice(), others.is_empty()) {
+        ([], _) => Err(OpenError::NotAttached(serial.to_owned())),
+        ([tty], true) => Ok(tty.clone()),
+        // Two ttys, or a tty and another device reporting the same serial: which one is
+        // the commissioned bridge cannot be told.
+        _ => Err(OpenError::Ambiguous {
+            identity: serial.to_owned(),
+            bridges: found
+                .iter()
+                .chain(&others)
+                .map(|path| path.display().to_string())
+                .collect(),
+        }),
     }
 }
 
