@@ -164,9 +164,7 @@ def mount_pose(urdf: bytes, link: str) -> MountPose:
             moves_with.append(needed)
     if moves_with:
         return MountPose(root, None, tuple(moves_with), tuple(chain))
-    return MountPose(
-        root, _translation_rotation(kinematics.pose(root, link)), (), tuple(chain)
-    )
+    return MountPose(root, _translation_rotation(kinematics.pose(root, link)), (), tuple(chain))
 
 
 def mount_pose_at(
@@ -234,7 +232,7 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
     binding = next(binding for binding in embodiment.cameras if binding.name == camera.name)
     optics = camera.nominal
     measured = camera.calibration
-    return {
+    view: dict[str, JsonValue] = {
         "camera": camera.name,
         "model": str(binding.camera.model),
         "modality": binding.camera.modality.value,
@@ -254,7 +252,8 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
         ),
         "unit": None if camera.unit is None else str(camera.unit),
         "calibration": None if camera.measured is None else str(camera.measured),
-    } | _placement(embodiment, binding.frame)
+    }
+    return view | _placement(embodiment, binding.frame)
 
 
 def _pose(
@@ -290,17 +289,15 @@ def _inertial(
             raise MediaRigError(f"{component.instance!r} names a track already")
         names.add(component.instance)
         unit = units.get(Slot(SlotKind.COMPONENT, component.instance))
-        sensors.append(
-            {
-                "sensor": component.instance,
-                "model": str(part.model),
-                "unit": None if unit is None else str(unit),
-                "rate_hz": part.rate_hz,
-                "measures": [quantity.value for quantity in part.measures],
-                "mount_from_sensor": _pose(part.mount_from_sensor),
-            }
-            | _placement(embodiment, component.mount.frame)
-        )
+        sensor: dict[str, JsonValue] = {
+            "sensor": component.instance,
+            "model": str(part.model),
+            "unit": None if unit is None else str(unit),
+            "rate_hz": part.rate_hz,
+            "measures": [quantity.value for quantity in part.measures],
+            "mount_from_sensor": _pose(part.mount_from_sensor),
+        }
+        sensors.append(sensor | _placement(embodiment, component.mount.frame))
     return sensors
 
 
@@ -313,7 +310,11 @@ def _step(step: ChainStep) -> dict[str, JsonValue]:
         "follows": (
             None
             if step.follows is None
-            else {"joint": step.follows[0], "multiplier": step.follows[1], "offset": step.follows[2]}
+            else {
+                "joint": step.follows[0],
+                "multiplier": step.follows[1],
+                "offset": step.follows[2],
+            }
         ),
     }
 

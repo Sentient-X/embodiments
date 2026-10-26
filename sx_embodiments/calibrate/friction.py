@@ -339,14 +339,15 @@ def _direction_gap(
         estimates[direction].append((segment.position, implied))
     if not estimates[1] or not estimates[-1]:
         return math.nan
-    q_f = np.concatenate([p for p, _ in estimates[1]])
-    g_f = np.concatenate([g for _, g in estimates[1]])
-    q_b = np.concatenate([p for p, _ in estimates[-1]])
-    g_b = np.concatenate([g for _, g in estimates[-1]])
-    lo, hi = max(q_f.min(), q_b.min()), min(q_f.max(), q_b.max())
+    q_f: Array = np.concatenate([p for p, _ in estimates[1]])
+    g_f: Array = np.concatenate([g for _, g in estimates[1]])
+    q_b: Array = np.concatenate([p for p, _ in estimates[-1]])
+    g_b: Array = np.concatenate([g for _, g in estimates[-1]])
+    lo = max(float(q_f.min()), float(q_b.min()))
+    hi = min(float(q_f.max()), float(q_b.max()))
     if hi <= lo:
         return math.nan
-    grid = np.linspace(lo, hi, 20)
+    grid: Array = np.linspace(lo, hi, 20, dtype=np.float64)
     order_f, order_b = np.argsort(q_f), np.argsort(q_b)
     forward = np.interp(grid, q_f[order_f], g_f[order_f])
     backward = np.interp(grid, q_b[order_b], g_b[order_b])
