@@ -332,7 +332,7 @@ fn disable_frame(id: u16) -> String {
 /// A recorded session as this crate drives it: the chain first disables every motor it names,
 /// each with the vendor's 0.01 s disable wait and no answer read, so a motor left enabled by an
 /// earlier run is released before bring-up writes it (`DamiaoChain::open`). The vendor's
-/// recorded traffic follows unchanged.
+/// recorded traffic follows, its enables sent together (`enabled_together`).
 fn opened_after_disables(motors: &[DamiaoAxis], events: &[Value]) -> Vec<Value> {
     motors
         .iter()
@@ -342,7 +342,29 @@ fn opened_after_disables(motors: &[DamiaoAxis], events: &[Value]) -> Vec<Value> 
                 serde_json::json!({"sleep": 0.01}),
             ]
         })
-        .chain(events.iter().cloned())
+        .chain(enabled_together(events))
+        .collect()
+}
+
+/// The vendor's traffic as the chain sends it: every enable frame back to back, without the
+/// 0.1 s `DM_CAN.py` waits after each, so no motor sits enabled and silent past its watchdog.
+fn enabled_together(events: &[Value]) -> Vec<Value> {
+    let enable = |event: &Value| {
+        event
+            .get("write")
+            .and_then(Value::as_str)
+            .is_some_and(|write| write.contains("fffffffffffffffc"))
+    };
+    events
+        .iter()
+        .enumerate()
+        .filter(|(index, event)| {
+            !(event.get("sleep").and_then(Value::as_f64) == Some(0.1)
+                && index
+                    .checked_sub(1)
+                    .is_some_and(|before| enable(&events[before])))
+        })
+        .map(|(_, event)| event.clone())
         .collect()
 }
 
