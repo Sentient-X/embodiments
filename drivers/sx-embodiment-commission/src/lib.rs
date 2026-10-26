@@ -22,6 +22,7 @@
 //! The `sx-commission` binary runs the three: `probe` reports, `commission` dry-runs, and
 //! writes files only under an explicit `--write <dir>`.
 
+pub mod bench;
 pub mod bridges;
 pub mod calibrate;
 pub mod declared;
@@ -30,5 +31,6 @@ pub mod jog;
 pub mod matching;
 pub mod output;
 pub mod probe;
+pub mod record;
 pub mod sysfs;
 pub mod tty;

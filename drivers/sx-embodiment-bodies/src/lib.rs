@@ -809,6 +809,15 @@ pub struct Observer {
     axes: Vec<BoundAxis>,
 }
 
+impl Observer {
+    /// Each bus's observer, in native state order, so each can be read on its own thread: the
+    /// buses are separate links, and none waits on another.
+    #[must_use]
+    pub fn into_buses(self) -> Vec<BusObserver> {
+        self.buses
+    }
+}
+
 impl Observe for Observer {
     fn axes(&self) -> &[BoundAxis] {
         &self.axes

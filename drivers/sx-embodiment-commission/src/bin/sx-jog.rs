@@ -24,10 +24,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use sx_embodiment_bodies::system::SystemPorts;
-use sx_embodiment_bodies::{Body, Commissioning, OpenOptions, ServoCalibrations, open_with};
+use sx_embodiment_commission::bench::BodyFlags;
 use sx_embodiment_commission::jog::{self, Step, TickLog};
-use sx_embodiment_drivers::{ActuatorChain, AxisLimits, Governor, InstanceDrive};
+use sx_embodiment_drivers::{ActuatorChain, AxisLimits, Governor};
 
 const PERIOD: Duration = Duration::from_millis(20);
 const TRACKING: f64 = 0.2;
@@ -46,11 +45,7 @@ fn main() -> ExitCode {
 
 #[derive(Default)]
 struct Args {
-    drive: String,
-    commissioning: String,
-    calibrations: Vec<(String, String)>,
-    provisional: Vec<String>,
-    exclude: Vec<String>,
+    body: BodyFlags,
     speed: Option<f64>,
     log: Option<String>,
     joint: Option<String>,
@@ -64,20 +59,10 @@ fn parse() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
+        if parsed.body.take(&arg, &mut value)? {
+            continue;
+        }
         match arg.as_str() {
-            "--drive" => parsed.drive = value()?,
-            "--commissioning" => parsed.commissioning = value()?,
-            "--calibration" => {
-                let entry = value()?;
-                let (port, file) = entry
-                    .split_once('=')
-                    .ok_or("--calibration is <port>=<lerobot.json>")?;
-                parsed.calibrations.push((port.to_owned(), file.to_owned()));
-            }
-            "--allow-provisional" => parsed.provisional.push(value()?),
-            "--exclude" => parsed
-                .exclude
-                .extend(value()?.split(',').map(str::to_owned)),
             "--speed" => parsed.speed = Some(value()?.parse().map_err(|_| "bad --speed")?),
             "--log" => parsed.log = Some(value()?),
             "--joint" => parsed.joint = Some(value()?),
@@ -89,49 +74,7 @@ fn parse() -> Result<Args, String> {
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    if parsed.drive.is_empty() || parsed.commissioning.is_empty() {
-        return Err("--drive and --commissioning are required".into());
-    }
     Ok(parsed)
-}
-
-fn read(path: &str) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))
-}
-
-/// The body the drive and commissioning name, opened as a station opens it, with this run's
-/// `--exclude` joints out of service beside the commissioning's.
-fn open_body(args: &Args) -> Result<Body, String> {
-    let document = read(&args.drive)?;
-    let instance = serde_json::from_str::<serde_json::Value>(&document)
-        .map_err(|error| format!("{}: {error}", args.drive))?["instance"]
-        .as_str()
-        .ok_or("the drive names no instance")?
-        .to_owned();
-    let drive = InstanceDrive::parse(&document, &instance).map_err(|error| error.to_string())?;
-    let mut commissioning = Commissioning::parse(&read(&args.commissioning)?, &instance)
-        .map_err(|error| error.to_string())?;
-    commissioning
-        .out_of_service
-        .extend(args.exclude.iter().cloned());
-    let mut calibrations = ServoCalibrations::new();
-    for (port, file) in &args.calibrations {
-        calibrations = calibrations
-            .with_lerobot(port, &read(file)?)
-            .map_err(|error| error.to_string())?;
-    }
-    let provisional: Vec<&str> = args.provisional.iter().map(String::as_str).collect();
-    let options = OpenOptions {
-        allow_provisional: &provisional,
-    };
-    open_with(
-        &drive,
-        &commissioning,
-        &calibrations,
-        options,
-        &mut SystemPorts::system(),
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// The run's steps: a sequence, or one jog and its hold.
@@ -160,7 +103,7 @@ fn run() -> Result<(), String> {
     if !(speed > 0.0 && speed <= 0.5) {
         return Err("--speed is above 0 and at most 0.5 rad/s".into());
     }
-    let body = open_body(&args)?;
+    let body = args.body.open()?;
     let joints: Vec<String> = body.axes().iter().map(|axis| axis.joint.clone()).collect();
     let steps = steps(&args, &joints)?;
     let width = body.axes().len();
