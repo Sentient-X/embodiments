@@ -81,7 +81,9 @@ pub struct Settings {
     /// The most collision rows one tick carries (the closest candidates).
     pub max_rows: usize,
     /// The most any axis moves in one tick, whatever its speed cap: the QP is a
-    /// linearisation, and a collision row is only as true as the step is short.
+    /// linearisation, and a collision row is only as true as the step is short. Each axis's
+    /// step is its cap times the tick ([`Caps`]), so this binds only above 3 rad/s at a 10 ms
+    /// tick (a 0.5 m lever then moves 15 mm a tick against the 10 mm collision margin).
     pub max_step_rad: f64,
     /// The most error one tick tries to close (the QP is a linearisation).
     pub max_error_m: f64,
@@ -107,7 +109,7 @@ impl Default for Settings {
             influence_m: 0.2,
             braking_share: 0.5,
             max_rows: 32,
-            max_step_rad: 0.01,
+            max_step_rad: 0.03,
             max_error_m: 0.1,
             max_error_rad: 0.5,
             tracking_m: 0.005,
@@ -664,16 +666,36 @@ impl Ik {
                         continue;
                     }
                     let u = scale(d, 1.0 / distance);
-                    let e = cross(f, u);
-                    // d(f x u) = (w x f) x u + f x du, du = -(I - uu') v / distance.
+                    // The pointing error as a rotation: about f x u, by the whole angle between
+                    // f and u. The bare cross product vanishes at 180 degrees too, so a camera
+                    // facing straight away from its target never turned (a neck folded behind
+                    // the hands on the bench); there, any axis across f turns it.
+                    let sine = cross(f, u);
+                    let (s_norm, cosine) = (norm(sine), dot(f, u));
+                    let angle = s_norm.atan2(cosine);
+                    let e = if s_norm > 1e-9 {
+                        scale(sine, angle / s_norm)
+                    } else if cosine < 0.0 {
+                        let across = if f[0].abs() < 0.9 {
+                            [1.0, 0.0, 0.0]
+                        } else {
+                            [0.0, 1.0, 0.0]
+                        };
+                        let axis = cross(f, across);
+                        scale(axis, angle / norm(axis))
+                    } else {
+                        [0.0; 3]
+                    };
+                    let e = clamp_norm(e, s.max_error_rad);
+                    // Turn f toward u relative to u's own turn as the camera moves: the
+                    // direction to the point turns at -(u x v) / distance, so the relative
+                    // angular rate is w + (u x v) / distance; ask it for the error's rotation
+                    // (its component along f, a roll, for none).
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| {
-                            let turn = cross(cross(w.jw[axis], f), u);
-                            let v = w.jv[axis];
-                            let along = sub(v, scale(u, dot(u, v)));
-                            turn[k] + cross(f, scale(along, -1.0 / distance))[k]
+                            w.jw[axis][k] + cross(u, w.jv[axis])[k] / distance
                         });
-                        least_squares(&mut w.h, &mut w.g, &w.task, -e[k], rho2);
+                        least_squares(&mut w.h, &mut w.g, &w.task, e[k], rho2);
                     }
                 }
                 _ => {}

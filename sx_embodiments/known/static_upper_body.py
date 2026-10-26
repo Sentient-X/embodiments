@@ -121,6 +121,7 @@ from ..layout import (
     BusPort,
     CoordinateUnit,
     DirectDrive,
+    ServoApproach,
 )
 from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
@@ -140,8 +141,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="e78a6c1603b2e38876c3da6d0c332e37d71cf804a9042358293a845f246ae4fe",
-    size_bytes=221351,
+    sha256="a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7",
+    size_bytes=221402,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -390,6 +391,20 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
         BodySite("chest", ComponentId("torso"), "chest_link"),
     ),
 )
+
+#: How fast each Feetech bus's servos approach any goal on the servo itself, by port. An
+#: STS3215 turns about 4.7 rad/s unloaded (0.222 s/60 deg at 7.4 V); the station's governor
+#: slews these joints at up to 3 rad/s (the owner's bench speed, 2026-10-26), below this, so the
+#: governor binds and the servo keeps up, a finger's RANGE_0_100 map asking its servo for up to
+#: 1.15 joint rad/s each. The bring-up's 0.25 rad/s made the neck too slow to follow a head.
+#: A servo resting outside its calibrated limits is pulled in at the slower bring-up approach
+#: (0.25 rad/s) and raised to this once it reads inside (sx-feetech-serial's pull-in), since no
+#: governor bounds that move. Goal_Speed is in steps/s, measured on the servo.
+_SERVO_APPROACH: Final = ServoApproach(speed=4.0, acceleration=16.0)
+STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
+    STATIC_UPPER_BODY_NECK_PORT: _SERVO_APPROACH,
+    **{port: _SERVO_APPROACH for port, _ in STATIC_UPPER_BODY_GRIPPER_BUSES.values()},
+}
 
 #: The ZED's two eyes as one side-by-side track.
 STATIC_UPPER_BODY_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))

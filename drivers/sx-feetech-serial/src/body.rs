@@ -39,6 +39,10 @@ pub struct FeetechBody {
     pub baud: u32,
     /// Every Feetech joint's setup, in the bindings' native state order.
     pub servos: &'static [ServoSetup],
+    /// Whether this bus's servos take their approach limit from the registry (the bindings'
+    /// `approach` for the port) and refuse to open without one: a body whose servos must never
+    /// run at the firmware's full speed. The SO-101 follower keeps `LeRobot`'s registers.
+    pub registry_approach: bool,
 }
 
 /// Every Feetech body this crate opens.
@@ -102,12 +106,42 @@ impl FeetechBody {
         self.axes(BodyBindings::parse(self.bindings)?.calibrated(drive)?)
     }
 
-    /// Each axis with its setup and its unit's calibration, `calibration` in native state
-    /// order.
+    /// Every joint's setup, in native state order, its servo's approach limit the registry's
+    /// for this port (the bindings' `approach`), else the setup's own.
     ///
     /// # Errors
     ///
-    /// Refuses a calibration list that is not one per servo.
+    /// Bindings that do not parse, and a bus that takes its approach from the registry when
+    /// the registry declares none for its port.
+    pub fn setups(&self) -> Result<Vec<ServoSetup>, BodyError> {
+        let bindings = BodyBindings::parse(self.bindings)?;
+        let approach = bindings.approach.get(self.port).copied();
+        if self.registry_approach && approach.is_none() {
+            return Err(BodyError::NoApproach {
+                embodiment: bindings.embodiment,
+                port: self.port.to_owned(),
+            });
+        }
+        Ok(self
+            .servos
+            .iter()
+            .map(|setup| ServoSetup {
+                configuration: ServoConfiguration {
+                    approach: approach.or(setup.configuration.approach),
+                    ..setup.configuration
+                },
+                ..*setup
+            })
+            .collect())
+    }
+
+    /// Each axis with its setup and its unit's calibration, `calibration` in native state
+    /// order. The servos' own approach limit is the registry's for this port (the bindings'
+    /// `approach`), else the setup's.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a calibration list that is not one per servo, and bindings that do not parse.
     pub fn servos(
         &self,
         axes: Vec<BoundAxis>,
@@ -121,7 +155,7 @@ impl FeetechBody {
         }
         Ok(axes
             .into_iter()
-            .zip(self.servos)
+            .zip(self.setups()?)
             .zip(calibration)
             .map(|((axis, setup), calibration)| FeetechServo {
                 axis,
@@ -161,7 +195,7 @@ impl FeetechBody {
         drive: &InstanceDrive,
         calibration: &[Option<MotorCalibration>],
     ) -> Result<FeetechObserver<P>, FeetechChainError> {
-        FeetechObserver::open(port, self.calibrated(drive)?, self.servos, calibration)
+        FeetechObserver::open(port, self.calibrated(drive)?, &self.setups()?, calibration)
     }
 }
 
@@ -193,5 +227,54 @@ mod tests {
                 .expect("parses")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_registry_approach_bus_takes_its_ports_limit_and_refuses_to_open_without_one() {
+        for body in BODIES {
+            let bindings = BodyBindings::parse(body.bindings).expect("bindings");
+            let declared = bindings.approach.get(body.port).copied();
+            let setups = body.setups().expect("setups");
+            if body.registry_approach {
+                assert!(declared.is_some(), "{} has no approach", body.port);
+                assert!(
+                    setups
+                        .iter()
+                        .all(|setup| setup.configuration.approach == declared)
+                );
+            } else {
+                assert!(
+                    setups
+                        .iter()
+                        .all(|setup| setup.configuration.approach.is_none())
+                );
+            }
+        }
+        // The static upper body's neck and both grippers, with the registry's limits gone.
+        let stripped: &'static str = Box::leak(
+            crate::static_upper_body::BINDINGS
+                .split("\n  \"approach\"")
+                .next()
+                .expect("axes")
+                .trim_end_matches(',')
+                .to_owned()
+                .into_boxed_str(),
+        );
+        let stripped: &'static str = Box::leak(format!("{stripped}\n}}\n").into_boxed_str());
+        for body in [
+            crate::static_upper_body::NECK,
+            crate::static_upper_body::RIGHT_GRIPPER,
+            crate::static_upper_body::LEFT_GRIPPER,
+        ] {
+            let body = FeetechBody {
+                bindings: stripped,
+                ..body
+            };
+            assert!(
+                matches!(body.setups(), Err(BodyError::NoApproach { .. })),
+                "{}",
+                body.port
+            );
+        }
     }
 }

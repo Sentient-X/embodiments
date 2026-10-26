@@ -3,8 +3,12 @@
 //! A serial servo's firmware can bound its own motion: Feetech STS servos by `Goal_Speed` and
 //! `Acceleration`, Dynamixel X servos by `Profile Velocity` and `Profile Acceleration`. A body
 //! that declares an [`ApproachLimit`] for a servo has its driver write those registers and read
-//! them back, so even a goal far from where the servo rests is approached slowly. Each driver
-//! converts the joint's limit to its vendor's register steps.
+//! them back, so no goal is approached faster than the limit: a backstop to the governor, and
+//! the speed at which the firmware pulls a servo resting outside its position limits in when
+//! torque comes on, which no governor bounds. Each driver converts the joint's limit to its
+//! vendor's register steps. A body's limits are registry data per port
+//! (`sx_embodiments.layout.ServoApproach`, rendered as the bindings' `approach`);
+//! [`BRING_UP_APPROACH`] is the slow one a bring-up tool uses.
 
 /// The fastest a servo moves toward any goal, in the joint's units: rad/s and rad/s².
 #[derive(Clone, Copy, Debug, PartialEq)]
