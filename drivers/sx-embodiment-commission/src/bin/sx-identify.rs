@@ -5,7 +5,9 @@
 //! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>
 //!             --record <out.csv> --drive <instance-drive.json> --instance <id>
 //!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1]
-//!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>] [--move]
+//!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>]
+//!             [--feedforward-ramp-s 2] [--supply-volts 48|<model>=<V>,*=<V>] [--supply-source <s>]
+//!             [--move]
 //! ```
 //!
 //! `jog:<joint>` (sweep plan) moves the joint from its staging pose 0.5 rad at 0.3 rad/s,
@@ -142,12 +144,14 @@ impl Model {
         })
     }
 
-    /// Gravity at `measured`, inertia and friction for the plan: `ID(plan) - g(plan) + g(now)`.
+    /// Gravity at `measured`, inertia and friction for the plan: `ID(plan) - g(plan) + g(now)`,
+    /// the torque scaled by `share` (the ramp in).
     fn feedforward(
         &mut self,
         target: &[f64],
         speed: &[f64],
         measured: &[f64],
+        share: f64,
     ) -> Result<&[Feedforward], String> {
         for (axis, &joint) in self.index.iter().enumerate() {
             self.position[joint] = target[axis];
@@ -173,7 +177,8 @@ impl Model {
         for (axis, &joint) in self.index.iter().enumerate() {
             self.out[axis] = Feedforward {
                 velocity: speed[axis],
-                torque: self.planned[joint] - self.held_plan[joint] + self.held_now[joint],
+                torque: share
+                    * (self.planned[joint] - self.held_plan[joint] + self.held_now[joint]),
             };
         }
         Ok(&self.out)
@@ -208,6 +213,8 @@ struct Args {
     /// The supply the motors run on, recorded with every run: one voltage, or per motor model
     /// (`damiao_dm8009=48,*=24`), as given.
     supply: Option<String>,
+    /// Seconds over which feed-forward torque ramps in from zero.
+    ramp: f64,
     /// What feeds the motors (`boost-converter`, `battery`, ...), recorded with every run.
     source: Option<String>,
     motion: bool,
@@ -228,6 +235,7 @@ fn parse() -> Result<Args, String> {
         without: Vec::new(),
         feedforward: None,
         supply: None,
+        ramp: 2.0,
         source: None,
         motion: false,
     };
@@ -246,6 +254,12 @@ fn parse() -> Result<Args, String> {
             "--without" => parsed.without.push(value()?),
             "--feedforward" => parsed.feedforward = Some(value()?),
             "--supply-source" => parsed.source = Some(value()?),
+            "--feedforward-ramp-s" => {
+                parsed.ramp = value()?.parse().map_err(|_| "bad --feedforward-ramp-s")?;
+                if !parsed.ramp.is_finite() || parsed.ramp <= 0.0 {
+                    return Err("--feedforward-ramp-s is positive".into());
+                }
+            }
             "--supply-volts" => {
                 let text = value()?;
                 supply_for(&text, "").map_err(|()| "bad --supply-volts")?;
@@ -490,6 +504,9 @@ fn schedule(
         let approach = holds["approach_rad"].as_f64().ok_or("holds.approach_rad")?;
         let settle = holds["settle_s"].as_f64().ok_or("holds.settle_s")?;
         let record = holds["record_s"].as_f64().ok_or("holds.record_s")?;
+        // A plan may route every pose through one pose (the arms hanging) that the straight
+        // paths to its poses were checked from.
+        let via = holds.get("via").map(|v| pose_of(v, rest));
         let mut at = rest.to_vec();
         for (index, pose) in holds["poses"]
             .as_array()
@@ -498,6 +515,10 @@ fn schedule(
             .enumerate()
         {
             let target = pose_of(pose, rest);
+            if let Some(via) = &via {
+                travel(&mut ticks, "move", &at, via, speed);
+                at.clone_from(via);
+            }
             for (side, sign) in [("below", -1.0), ("above", 1.0)] {
                 let start: Vec<f64> = target.iter().map(|q| q + sign * approach).collect();
                 travel(&mut ticks, "move", &at, &start, speed);
@@ -510,6 +531,10 @@ fn schedule(
                 );
                 at.clone_from(&target);
             }
+        }
+        if let Some(via) = &via {
+            travel(&mut ticks, "move", &at, via, speed);
+            at.clone_from(via);
         }
         travel(&mut ticks, "move", &at, rest, speed);
         return Ok(ticks);
@@ -593,6 +618,7 @@ fn write_records(
     out: &mut impl Write,
     supply: Option<&str>,
     source: Option<&str>,
+    outcome: Option<&str>,
     names: &[String],
     ticks: &[Tick],
     records: &[Record],
@@ -602,6 +628,11 @@ fn write_records(
     }
     if let Some(source) = source {
         writeln!(out, "# supply_source={source}")?;
+    }
+    if let Some(outcome) = outcome {
+        // A motor that went silent is named (Silent(<id>)), so dropouts can be counted per
+        // motor across runs.
+        writeln!(out, "# outcome={}", outcome.replace('\n', " "))?;
     }
     write!(out, "time_s,segment")?;
     for kind in ["target", "position", "velocity", "torque"] {
@@ -813,7 +844,7 @@ fn run() -> Result<(), String> {
         let mut model = Model::new(source, &names)?;
         let still = vec![0.0; names.len()];
         let torque: Vec<String> = model
-            .feedforward(&middle, &still, &middle)?
+            .feedforward(&middle, &still, &middle, 1.0)?
             .iter()
             .zip(&names)
             .map(|(ff, name)| format!("{name} {:+.2}", ff.torque))
@@ -946,7 +977,8 @@ fn run() -> Result<(), String> {
                     at[..width].copy_from_slice(&rest);
                     at
                 };
-                match model.feedforward(&tick.target, &speeds, &measured[..width]) {
+                let share = (begin.elapsed().as_secs_f64() / args.ramp).min(1.0);
+                match model.feedforward(&tick.target, &speeds, &measured[..width], share) {
                     Ok(feedforward) => governor
                         .command_with(&tick.target, feedforward)
                         .map_err(|e| format!("{e:?}")),
@@ -1031,6 +1063,7 @@ fn run() -> Result<(), String> {
         &mut out,
         args.supply.as_deref(),
         args.source.as_deref(),
+        outcome.as_ref().err().map(String::as_str),
         &names,
         &ticks,
         &records,
