@@ -7,7 +7,7 @@ use crate::IkError;
 use crate::body::{Body, Target, Task, world};
 use crate::geometry::{Obstacle, closest_segments, segment_box};
 use crate::math::{
-    Iso, V3, cross, dot, from_quaternion, log, mat_mul, mat_vec, norm, scale, sub, transpose,
+    V3, cross, dot, from_quaternion, log, mat_mul, mat_vec, norm, scale, sub, transpose,
 };
 use crate::model::Frames;
 use crate::qp::Qp;
@@ -95,12 +95,8 @@ pub struct Settings {
     /// The longest one step may take: past it the QP stops and the step holds
     /// ([`Solve::Held`]). The only clock the solver reads.
     pub deadline: Duration,
-    /// A camera's roll toward its level axis weighs this share of its pointing.
-    pub level_share: f64,
-    /// How far a camera keeps each driven tool's line of sight from the body's proxies.
-    pub sight_clearance_m: f64,
-    /// The last stretch of a line of sight, at the tool, that is the tool itself (the
-    /// gripper's fingers and base) and never hides it.
+    /// The last stretch of a camera's line of sight to a tool that is the tool itself (the
+    /// gripper's fingers and base) and never hides it ([`LimbReport::hidden_by`]).
     pub sight_tool_m: f64,
 }
 
@@ -123,8 +119,6 @@ impl Default for Settings {
             tracking_rad: 0.05,
             max_iterations: 40,
             deadline: Duration::from_millis(4),
-            level_share: 0.25,
-            sight_clearance_m: 0.01,
             sight_tool_m: 0.1,
         }
     }
@@ -704,7 +698,7 @@ impl Ik {
                         least_squares(&mut w.h, &mut w.g, &w.task, e_r[k], rho2);
                     }
                 }
-                (Task::LookAt { forward, level }, Target::LookAt { point_m }) => {
+                (Task::LookAt { forward }, Target::LookAt { point_m }) => {
                     let mask = &self.look_columns[index];
                     let f = mat_vec(&pose.r, forward);
                     let d = sub(*point_m, pose.t);
@@ -744,17 +738,6 @@ impl Ik {
                         });
                         least_squares(&mut w.h, &mut w.g, &w.task, e[k], rho2);
                     }
-                    view_rows(
-                        body,
-                        s,
-                        w,
-                        mask,
-                        &self.sight_skip,
-                        pose,
-                        level,
-                        targets,
-                        rho2,
-                    );
                 }
                 _ => {}
             }
@@ -1051,7 +1034,7 @@ impl Ik {
                         &transpose(&pose.r),
                     ))),
                 ),
-                (Task::LookAt { forward, .. }, Some(Target::LookAt { point_m })) => {
+                (Task::LookAt { forward }, Some(Target::LookAt { point_m })) => {
                     let f = mat_vec(&pose.r, forward);
                     let d = sub(*point_m, pose.t);
                     let cos = dot(f, d) / norm(d).max(1e-12);
@@ -1154,126 +1137,34 @@ fn point_row(
     }
 }
 
-/// A camera's rows beyond pointing: its level axis back to horizontal, and each driven
-/// tool's line of sight kept off the body; over the columns `mask` admits.
-#[allow(clippy::too_many_arguments)]
-fn view_rows(
-    body: &Body,
-    s: &Settings,
-    w: &mut Workspace,
-    mask: &[bool],
-    skip: &[bool],
-    pose: Iso,
-    level: Option<V3>,
-    targets: &[Option<Target>],
-    rho2: f64,
-) {
-    // Level: the across axis y's height changes at w . (y x z) as the camera
-    // turns at w; ask it back to zero, below pointing's weight.
-    if let Some(level) = level {
-        let y = mat_vec(&pose.r, level);
-        let tilt = cross(y, [0.0, 0.0, 1.0]);
-        fill_masked(&mut w.task, &body.solved, mask, |axis| {
-            dot(tilt, w.jw[axis])
-        });
-        let roll = (-y[2].clamp(-1.0, 1.0).asin()).clamp(-s.max_error_rad, s.max_error_rad);
-        least_squares(&mut w.h, &mut w.g, &w.task, roll, s.level_share * rho2);
-    }
-    // Clear sight: each driven tool's line of sight kept off the body. The
-    // camera steps around what stands in it (the point of the line nearest the
-    // proxy moves with the camera by its share of the way back to it); the
-    // arms are never moved for the camera's sake.
-    for (tool, wanted) in body.limbs.iter().zip(targets) {
-        if !matches!((tool.task, wanted), (Task::Pose, Some(_))) {
-            continue;
-        }
-        let at = w.frames.links[tool.frame].t;
-        let Some(seen) = sight(body, &w.frames, skip, pose.t, at, s) else {
-            continue;
-        };
-        if seen.gap >= s.sight_clearance_m {
-            continue;
-        }
-        let share = 1.0 - seen.along;
-        fill_masked(&mut w.task, &body.solved, mask, |axis| {
-            share * dot(seen.away, w.jv[axis])
-        });
-        let push = (s.sight_clearance_m - seen.gap).min(s.max_error_m);
-        least_squares(&mut w.h, &mut w.g, &w.task, push, 1.0);
-    }
-}
-
-/// What hides `tool` from the body's first camera at `frames`; `None` in clear sight.
+/// What hides `tool` from the body's first camera at `frames`: the proxy the line of sight
+/// passes through, short of its last [`Settings::sight_tool_m`] (the tool itself). Proxies
+/// on the camera's own neck (`skip`) never stand between it and what it sees.
 fn hidden(body: &Body, frames: &Frames, skip: &[bool], tool: V3, s: &Settings) -> Option<usize> {
     let camera = body
         .limbs
         .iter()
         .find(|l| matches!(l.task, Task::LookAt { .. }))?;
-    sight(body, frames, skip, frames.links[camera.frame].t, tool, s)
-        .filter(|seen| seen.gap < 0.0)
-        .map(|seen| seen.link)
-}
-
-/// The proxy nearest a camera's line of sight to a tool: the line from `eye` to `tool`, short
-/// of its last [`Settings::sight_tool_m`] (the tool itself).
-#[derive(Clone, Copy, Debug)]
-struct Sight {
-    /// Signed distance from the line to the proxy's surface (negative: through it).
-    gap: f64,
-    /// Where on the line from the eye (0) to the tool (1) it passes nearest.
-    along: f64,
-    /// The unit direction from the proxy to the line there.
-    away: V3,
-    link: usize,
-}
-
-fn sight(
-    body: &Body,
-    frames: &Frames,
-    skip: &[bool],
-    eye: V3,
-    tool: V3,
-    s: &Settings,
-) -> Option<Sight> {
+    let eye = frames.links[camera.frame].t;
     let line = sub(tool, eye);
     let length = norm(line);
     if length <= s.sight_tool_m {
         return None;
     }
     let end = [0, 1, 2].map(|k| eye[k] + line[k] * (1.0 - s.sight_tool_m / length));
-    let mut best: Option<Sight> = None;
+    let mut best: Option<(f64, usize)> = None;
     for (capsule, skipped) in body.proxies.capsules.iter().zip(skip) {
         if *skipped {
             continue;
         }
         let (a, b) = world(frames, capsule);
         let (x, y) = closest_segments(eye, end, a, b);
-        let gap = sub(x, y);
-        let centres = norm(gap);
-        let distance = centres - capsule.radius;
-        if best.is_some_and(|b| b.gap <= distance) {
-            continue;
+        let gap = norm(sub(x, y)) - capsule.radius;
+        if gap < 0.0 && best.is_none_or(|(nearest, _)| gap < nearest) {
+            best = Some((gap, capsule.link));
         }
-        let away = if centres > 1e-12 {
-            scale(gap, 1.0 / centres)
-        } else {
-            // Through the proxy's axis: any way across the line clears it.
-            let across = if line[0].abs() < 0.9 * length {
-                [1.0, 0.0, 0.0]
-            } else {
-                [0.0, 1.0, 0.0]
-            };
-            let axis = cross(line, across);
-            scale(axis, 1.0 / norm(axis))
-        };
-        best = Some(Sight {
-            gap: distance,
-            along: dot(sub(x, eye), line) / (length * length),
-            away,
-            link: capsule.link,
-        });
     }
-    best
+    best.map(|(_, link)| link)
 }
 
 /// [`fill`] over the columns `mask` admits; zero elsewhere.

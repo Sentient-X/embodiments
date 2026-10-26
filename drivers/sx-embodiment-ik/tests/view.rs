@@ -1,5 +1,5 @@
-//! The camera's view on the static upper body: it frames both hands, stays level, turns on
-//! its own neck only, and steps around an arm standing between it and a hand.
+//! The camera's view on the static upper body: it frames both hands, turns on its own neck
+//! only, holds steady while the hands move, and says which link hides a hand.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -49,8 +49,8 @@ fn teleop(head: HeadPolicy) -> Teleop {
     Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve")
 }
 
-/// Ghost caps (only reach, limits and collision matter), sight rows on or off.
-fn ghost(sight: bool) -> Ik {
+/// Ghost caps: only reach, limits and collision matter.
+fn ghost() -> Ik {
     let body = Body::static_upper_body();
     let mut caps = Caps::declared(&body, 0.25).expect("caps");
     for (speed, accel) in caps.speed.iter_mut().zip(caps.accel.iter_mut()) {
@@ -59,7 +59,6 @@ fn ghost(sight: bool) -> Ik {
     }
     let settings = Settings {
         deadline: std::time::Duration::from_secs(1),
-        sight_clearance_m: if sight { 0.01 } else { f64::NEG_INFINITY },
         ..Settings::default()
     };
     Ik::new(body, caps, settings, Vec::new()).expect("ik")
@@ -143,13 +142,13 @@ fn both_hands_sit_the_same_angle_from_the_centre_however_far_each_is() {
 }
 
 #[test]
-fn the_picture_stays_level_and_only_the_neck_turns_it() {
+fn only_the_neck_turns_the_camera() {
     let mut solve = teleop(HeadPolicy::Gaze);
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let begun = q.clone();
-    // Both hands held where they are and a gaze well to the side, up and rolled: before, the
-    // torso (it carries both arms) turned with the gaze and the picture rolled with the neck.
+    // Both hands held where they are and a gaze well to the side and up: on main the torso
+    // (it carries both arms) turned 9 mrad with the gaze, swinging both hands.
     let (left, right) = (tcp(&body, &q, 0), tcp(&body, &q, 1));
     let (yaw, pitch) = (0.6_f64, -0.3_f64);
     let (cy, sy, cp, sp) = (
@@ -169,12 +168,7 @@ fn the_picture_stays_level_and_only_the_neck_turns_it() {
     };
     solve.reset();
     run(&mut solve, &mut q, &targets, 600);
-    let ([forward, across, _], _) = camera(&body, &q);
-    assert!(
-        across[2].abs() < 0.02,
-        "the picture rolls {:.1} degrees",
-        across[2].asin().to_degrees()
-    );
+    let ([forward, ..], _) = camera(&body, &q);
     assert!(
         forward[1].atan2(forward[0]) > 0.3,
         "the camera turned toward the gaze: {forward:?}"
@@ -185,9 +179,8 @@ fn the_picture_stays_level_and_only_the_neck_turns_it() {
         .iter()
         .position(|a| a.name == "torso_joint")
         .expect("torso");
-    // The camera never asks the torso to turn (before: 9 mrad, and the picture rolled 12.6
-    // degrees, on this very ask). What is left is the neck's collision rows against the arms,
-    // which may use any axis.
+    // The camera never asks the torso to turn. What is left is the neck's collision rows
+    // against the arms, which may use any axis.
     assert!(
         (q[torso] - begun[torso]).abs() < 2.5e-3,
         "the torso turned {} rad for the camera",
@@ -195,16 +188,16 @@ fn the_picture_stays_level_and_only_the_neck_turns_it() {
     );
 }
 
-/// The share of random arm postures, each settled with both hands held and the camera on
-/// them, at which no part of the body stands between the camera and either hand.
-fn both_hands_seen(sight: bool) -> (f64, usize) {
-    let mut ik = ghost(sight);
+#[test]
+fn a_hand_behind_an_arm_is_reported_with_the_link_hiding_it() {
+    let mut ik = ghost();
     let body = ik.body().clone();
     let axes = body.model().axes().to_vec();
+    let links = body.model().links().to_vec();
     let mut rng = Rng(0x5eed_cafe);
-    let (mut seen, mut hidden_at_start, mut tries) = (0, 0, 0);
+    let (mut hidden, mut tries) = (Vec::new(), 0);
     while tries < 60 {
-        let q0: Vec<f64> = axes
+        let q: Vec<f64> = axes
             .iter()
             .zip(ik.rest())
             .map(|(a, r)| match a.limits {
@@ -214,53 +207,93 @@ fn both_hands_seen(sight: bool) -> (f64, usize) {
                 _ => *r,
             })
             .collect();
-        if ik.clearance(&q0).0 < 0.02 {
+        if ik.clearance(&q).0 < 0.02 {
             continue;
         }
         tries += 1;
-        let hands = [tcp(&body, &q0, 0), tcp(&body, &q0, 1)];
-        let mid =
-            [0, 1, 2].map(|k| f64::midpoint(hands[0].translation_m[k], hands[1].translation_m[k]));
-        let targets: Vec<Option<Target>> = hands
-            .iter()
-            .map(|p| {
+        let targets: Vec<Option<Target>> = [0, 1]
+            .map(|hand| {
+                let p = tcp(&body, &q, hand);
                 Some(Target::Pose {
                     translation_m: p.translation_m,
                     rotation_xyzw: p.rotation_xyzw,
                 })
             })
-            .chain([Some(Target::LookAt { point_m: mid })])
+            .into_iter()
+            .chain([None])
             .collect();
-        let available = vec![true; q0.len()];
-        let mut q = q0.clone();
         ik.reset();
-        let mut first = true;
-        for _ in 0..300 {
-            let step = ik.step(&q, &available, &targets, DT).expect("step");
-            if first {
-                hidden_at_start +=
-                    usize::from(step.limbs[..2].iter().any(|l| l.hidden_by.is_some()));
-                first = false;
-            }
-            q.copy_from_slice(&step.q);
-        }
-        let last = ik.step(&q, &available, &targets, DT).expect("step");
-        if last.limbs[..2].iter().all(|l| l.hidden_by.is_none()) {
-            seen += 1;
-        }
+        let step = ik
+            .step(&q, &vec![true; q.len()], &targets, DT)
+            .expect("step");
+        hidden.extend(step.limbs[..2].iter().filter_map(|l| l.hidden_by));
+        assert_eq!(step.limbs[2].hidden_by, None, "the camera is not a tool");
     }
-    (f64::from(seen) / f64::from(tries), hidden_at_start)
+    // Over 60 random arm postures with the neck at rest, some hand is behind an arm, and what
+    // hides it never moves with the camera (the neck's base, fixed on the chest, may).
+    assert!(!hidden.is_empty());
+    let moving_with_camera = |name: &str| {
+        (name.starts_with("so101_") && name != "so101_base_link") || name == "camera_link"
+    };
+    for link in hidden {
+        assert!(!moving_with_camera(&links[link]), "{}", links[link]);
+    }
 }
 
 #[test]
-fn the_camera_steps_around_an_arm_between_it_and_a_hand() {
-    let (without, hidden) = both_hands_seen(false);
-    let (with, _) = both_hands_seen(true);
-    eprintln!(
-        "both hands in clear sight: {:.0}% without sight rows, {:.0}% with ({hidden} of 60 hidden at the start)",
-        100.0 * without,
-        100.0 * with
+fn the_neck_holds_steady_while_both_hands_circle() {
+    // Both hands trace slow circles (12 cm, 4 s a turn) for 10 s. The looking rows that
+    // levelled the picture and stepped around the arms swung this neck through its parallel
+    // pitch joints and pinned the camera tilt at its stop; pointing alone must not.
+    let mut solve = teleop(HeadPolicy::Hands);
+    let mut q = zero(&solve);
+    let body = solve.ik().body().clone();
+    let start = [tcp(&body, &q, 0), tcp(&body, &q, 1)];
+    let neck: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.name.starts_with("so101_"))
+        .map(|(i, _)| i)
+        .collect();
+    let tilt = solve
+        .model()
+        .axes()
+        .iter()
+        .position(|a| a.name == "so101_camera_tilt_joint")
+        .expect("tilt");
+    let [low, high] = solve.model().axes()[tilt].limits.expect("tilt range");
+    let measured = vec![None; q.len()];
+    let available = vec![true; q.len()];
+    let (mut travel, mut pinned, mut ticks) = (0.0, 0, 0);
+    solve.reset();
+    for tick in 0..1000 {
+        let phase = std::f64::consts::TAU * f64::from(tick) * DT / 4.0;
+        let mut targets = Targets::default();
+        for (hand, pose) in start.iter().enumerate() {
+            let mut p = *pose;
+            let side = if hand == 0 { 1.0 } else { -1.0 };
+            p.translation_m[1] += 0.06 * side * (phase.cos() - 1.0);
+            p.translation_m[2] += 0.06 * phase.sin();
+            targets.tcp[hand] = Some(p);
+        }
+        let before = q.clone();
+        let step = solve
+            .step(&q, &measured, &available, &targets, DT)
+            .expect("a step");
+        q.copy_from_slice(&step.q);
+        if tick >= 100 {
+            travel += neck.iter().map(|&i| (q[i] - before[i]).abs()).sum::<f64>();
+            pinned += usize::from(q[tilt] - low < 0.02 || high - q[tilt] < 0.02);
+            ticks += 1;
+        }
+    }
+    // Measured: 5.2 rad and never at a stop; with the levelling and clear-sight rows, 7.6 rad
+    // and the tilt at its stop for 230 of the 900 ticks.
+    assert_eq!(
+        pinned, 0,
+        "the camera tilt sat at its stop {pinned} of {ticks} ticks"
     );
-    assert!(hidden > 0, "the sample has occlusions to clear");
-    assert!(with > without, "{with} vs {without}");
+    assert!(travel < 6.5, "the neck travelled {travel:.2} rad");
 }

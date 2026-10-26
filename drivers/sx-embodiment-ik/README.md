@@ -29,17 +29,15 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   with each pair's approach planned to stop before a 1 cm margin.
 - **The camera:** a look-at limb points at its target (teleop's `HeadPolicy::Hands` aims
   halfway between the hands *as the camera sees them*, so both sit the same angle from the
-  picture's centre). It turns on its own neck only, never on the torso that carries the
-  arms. It keeps its picture level (`Task::LookAt::level`, the ZED's stereo baseline), and
-  keeps each driven tool's line of sight 1 cm clear of the body's capsules, stepping around
-  an arm in the way. `LimbReport::hidden_by` names the link hiding a tool. Across 60 random
-  arm postures, both hands end in clear sight 67% of the time against 27% without the sight
-  rows (`tests/view.rs`). On recorded operators (`examples/film.rs`, rendered with the pack's
-  meshes and the ZED's 70 degree field of view), both hands are in the picture and unblocked
-  94 -> 98% (rings on a peg), 91 -> 97% (towel) and 99 -> 100% (bulbs). The margin is small on
-  purpose: the capsules are fatter than the meshes, and at 3 cm the camera climbed to twice
-  the distance from the hands for nothing. The view model is the Model 3 co-design study's
-  (October 2026): framing alone left the hands hidden by the robot's own arms.
+  picture's centre), and turns on its own neck only, never on the torso that carries the
+  arms. `LimbReport::hidden_by` names the link standing between the camera and a tool.
+  Two more looking rows were tried and removed (October 2026): keeping the picture level and
+  stepping the camera around an arm. On recorded operators (`examples/film.rs`) they cut the
+  roll from about 20 to 2 degrees and added a few points of clear sight, but this SO-101 neck
+  cannot level the ZED inside its tilt range: the tilt sat at its stop up to 74% of the time
+  and the parallel pitch joints swung against each other (neck travel 4x main). Today the
+  neck moves as main's does (`the_neck_holds_steady_while_both_hands_circle`). A level
+  picture is better had by rotating the image from the known camera pose.
 - **Unreachable targets:** the solver degrades smoothly and reports
   `Reach::Unreachable` with the residual.
 - **Unavailable axes:** `available[axis] = false` holds an axis at its measured position.

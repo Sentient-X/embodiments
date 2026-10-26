@@ -22,8 +22,7 @@
 //! - **head**: the limb named `head` (a camera, [`Task::LookAt`]) looks where the
 //!   [`HeadPolicy`] says: at the commanded hands, or along the operator's gaze (the head pose's
 //!   local +x, by looking at the point [`GAZE_DISTANCE_M`] ahead of the camera along it). The
-//!   neck alone turns it, its picture stays level, and it keeps each driven tool in clear
-//!   sight ([`Ik`] owns those).
+//!   neck alone turns it ([`Ik`] owns that).
 //! - **grippers**: each hand's gripper width moves its fingers, linear between the fingertips'
 //!   closed and open distance ([`Gripper`]).
 //!
@@ -102,9 +101,6 @@ pub struct LimbConfig {
     /// a target (a camera).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look_forward: Option<[f64; 3]>,
-    /// For a camera: the unit vector in the frame kept horizontal (the image's across axis).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub look_level: Option<[f64; 3]>,
 }
 
 /// Everything the solve is built from besides the description, so a station and a headset
@@ -134,7 +130,7 @@ pub struct TeleopConfig {
 
 impl TeleopConfig {
     /// The static upper body's limbs: both grippers' tool frames, and the ZED looking out of
-    /// its lenses (`ZED_camera` +x, its stereo baseline +y level) from the SO-101 neck.
+    /// its lenses (`ZED_camera` +x) from the SO-101 neck.
     #[must_use]
     pub fn static_upper_body_limbs() -> Vec<LimbConfig> {
         vec![
@@ -142,19 +138,16 @@ impl TeleopConfig {
                 name: "left".into(),
                 frame: "left_gripper_tcp".into(),
                 look_forward: None,
-                look_level: None,
             },
             LimbConfig {
                 name: "right".into(),
                 frame: "right_gripper_tcp".into(),
                 look_forward: None,
-                look_level: None,
             },
             LimbConfig {
                 name: "head".into(),
                 frame: "ZED_camera".into(),
                 look_forward: Some([1.0, 0.0, 0.0]),
-                look_level: Some([0.0, 1.0, 0.0]),
             },
         ]
     }
@@ -364,10 +357,7 @@ impl Teleop {
                 frame: limb.frame.clone(),
                 task: limb
                     .look_forward
-                    .map_or(Task::Pose, |forward| Task::LookAt {
-                        forward,
-                        level: limb.look_level,
-                    }),
+                    .map_or(Task::Pose, |forward| Task::LookAt { forward }),
             })
             .collect();
         let body = Body::new(urdf, collision, &limbs)?;
