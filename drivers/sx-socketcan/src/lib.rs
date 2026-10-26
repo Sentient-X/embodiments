@@ -37,6 +37,48 @@ pub use lock::InterfaceLock;
 #[cfg(target_os = "linux")]
 pub use socket::SocketCanPort;
 
+/// The bitrate a robot's CAN bus runs at unless its commissioning says otherwise.
+pub const BITRATE: u32 = 1_000_000;
+/// How soon a bus-off controller restarts by itself.
+pub const RESTART_MS: u32 = 100;
+/// The transmit queue a chain's burst of one frame per motor fits (the kernel's default is 10).
+pub const TXQUEUE_LEN: u32 = 64;
+
+/// What the host must provide to open `interface` as it was measured
+/// (`sx_embodiment_drivers::host_needs`): the interface up with its bitrate, an automatic
+/// bus-off restart and a queue a chain's burst fits; `can_raw`; `SCHED_FIFO` for the control
+/// loop and the CPU wake-latency hold the open port keeps; and for a USB adapter
+/// (`usb = Some((vendor, product))`), its autosuspend off.
+#[must_use]
+pub fn host_needs(
+    interface: &str,
+    usb: Option<(u16, u16)>,
+) -> Vec<sx_embodiment_drivers::HostNeed> {
+    use sx_embodiment_drivers::HostNeed;
+    let mut needs = vec![
+        HostNeed::CanInterface {
+            interface: interface.to_owned(),
+            bitrate: BITRATE,
+            restart_ms: RESTART_MS,
+            txqueue_len: TXQUEUE_LEN,
+        },
+        HostNeed::KernelModule {
+            name: "can_raw".to_owned(),
+        },
+        HostNeed::RealtimePriority {
+            priority: u8::try_from(sx_realtime::ANSWER_PATH_PRIORITY).unwrap_or(u8::MAX),
+        },
+        HostNeed::CpuWakeLatency,
+    ];
+    if let Some((vendor_id, product_id)) = usb {
+        needs.push(HostNeed::UsbAutosuspendOff {
+            vendor_id,
+            product_id,
+        });
+    }
+    needs
+}
+
 /// Why an interface could not be opened.
 #[derive(Debug, Error)]
 pub enum SocketCanError {

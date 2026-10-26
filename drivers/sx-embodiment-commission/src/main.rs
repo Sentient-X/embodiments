@@ -10,7 +10,10 @@
 //! ```
 //!
 //! `probe` and `commission` send a bus only PINGs, READs and register reads; see the library
-//! header. `commission` prints what it would record and writes only under `--write`.
+//! header. `commission` prints what it would record and writes only under `--write`: the
+//! `commissioning.json`, each Feetech port's calibration, and `host-needs.json`, what the host
+//! must provide for the drivers that open those bridges (`sx_embodiment_drivers::host_needs`),
+//! which the robot host's launcher applies.
 //! `calibrate` writes registers and moves servos only under `--move`
 //! (`sx_embodiment_commission::calibrate`).
 //!
@@ -36,7 +39,8 @@ use sx_embodiment_commission::declared::{BusKind, DeclaredBody};
 use sx_embodiment_commission::host::System;
 use sx_embodiment_commission::matching::commission;
 use sx_embodiment_commission::output::{
-    Station, calibration, commission_report, commissioning, probe_json, probe_report, warnings,
+    Station, calibration, commission_report, commissioning, host_needs, probe_json, probe_report,
+    warnings,
 };
 use sx_embodiment_commission::probe::{Ids, probe};
 use sx_embodiment_commission::tty::TtyPort;
@@ -313,6 +317,10 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
             Ok::<(), String>(())
         };
         write("commissioning.json".to_owned(), document)?;
+        write(
+            "host-needs.json".to_owned(),
+            &needs_document(&found, matched)?,
+        )?;
         for (port, value) in &calibrations {
             write(sx_embodiment_bodies::calibration_file(port), value)?;
         }
@@ -320,6 +328,15 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
         eprintln!("dry run: nothing written (pass --write <dir>)");
     }
     Ok(result.is_ok())
+}
+
+/// `host-needs.json` for what was matched (empty when nothing was).
+fn needs_document(
+    found: &sx_embodiment_commission::probe::Probe,
+    matched: Option<&Vec<sx_embodiment_commission::matching::PortMatch>>,
+) -> Result<serde_json::Value, String> {
+    serde_json::to_value(host_needs(found, matched.map_or(&[][..], Vec::as_slice)))
+        .map_err(|error| error.to_string())
 }
 
 fn main() -> ExitCode {
