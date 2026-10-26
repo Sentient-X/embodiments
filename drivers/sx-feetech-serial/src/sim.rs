@@ -956,4 +956,60 @@ mod tests {
         assert_eq!(command_bytes(6), 184);
         assert_eq!(command_bytes(2), 72);
     }
+
+    #[test]
+    fn a_reenable_with_torque_still_on_never_writes_the_declared_speed_to_a_servo_outside() {
+        let bus = calibrated_bus();
+        bus.rest_at(2, 3303);
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        chain.command(&[0.0; 6]).expect("enabled");
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+        bus.advance(Duration::from_millis(100));
+        assert!(bus.present(2) > 3200, "still outside");
+        // One missed SYNC READ answer from another servo: the chain marks itself disabled but
+        // turns no torque off.
+        bus.kill(5);
+        let _ = chain.command(&[0.0; 6]);
+        bus.state().dead.remove(&5);
+        assert_eq!(bus.state().torque(2), 1, "servo 2 still holds torque");
+        let before = bus.state().written.len();
+        chain.command(&[0.0; 6]).expect("re-enabled");
+        let state = bus.state();
+        let [low, high] = 2607_u16.to_le_bytes();
+        assert!(
+            !state.written[before..]
+                .iter()
+                .any(|packet| packet[2] == 2 && packet[4..8] == [0x03, 46, low, high]),
+            "the re-enable wrote the declared 2607 steps/s to servo 2 while it rested outside"
+        );
+        let registers = &state.servos[&2];
+        assert_eq!(
+            (
+                registers[41],
+                u16::from_le_bytes([registers[46], registers[47]])
+            ),
+            (3, 162),
+            "still pulled in slowly"
+        );
+        drop(state);
+        assert_eq!(chain.pulling_in().collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn a_high_reduction_is_still_pulled_in_no_faster_than_bring_up() {
+        // Declared 0.5 rad/s and 0.3 rad/s² at reduction 100: bring-up's acceleration (0.5
+        // rad/s²) overflows the register, yet its speed (0.25 rad/s) is half the declared one.
+        let declared = crate::chain::approach_registers(
+            &crate::ApproachLimit {
+                speed: 0.5,
+                acceleration: 0.3,
+            },
+            100.0,
+        )
+        .expect("declared fits");
+        let (speed, acceleration) =
+            crate::chain::pull_in_registers(declared, 100.0).expect("a slower pull-in");
+        assert!(speed <= declared.0 / 2 + 1, "{speed} vs {declared:?}");
+        assert_eq!(acceleration, declared.1);
+    }
 }
