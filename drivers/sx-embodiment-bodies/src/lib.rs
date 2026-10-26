@@ -58,8 +58,9 @@ use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, BodyBindings, BodyError, BoundAxis, ChainError, ChainFailure,
-    Chains, ChainsError, CommandRange, CompositeError, InstanceDrive, Receipt, StopReport,
+    ActuatorBus, ActuatorChain, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
+    ChainFailure, Chains, ChainsError, CommandRange, CompositeError, InstanceDrive, Receipt,
+    StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::body::FeetechBody;
@@ -721,8 +722,8 @@ where
         self.0.stop_budget()
     }
 
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, BusError> {
-        self.0.read_positions().map_err(Into::into)
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.0.read_positions()
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {
@@ -774,11 +775,11 @@ impl ActuatorChain for Body {
         }
     }
 
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
-        Ok(match self {
-            Self::B601(chain) => chain.read_positions()?,
-            Self::Buses(chain) => chain.read_positions()?,
-        })
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        match self {
+            Self::B601(chain) => chain.read_positions(),
+            Self::Buses(chain) => chain.read_positions(),
+        }
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {

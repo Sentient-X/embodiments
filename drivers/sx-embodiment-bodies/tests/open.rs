@@ -16,6 +16,7 @@ use sx_embodiment_bodies::{
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
     ActuatorChain, AxisLimits, BodyBindings, Evidence, Governor, GovernorError, InstanceDrive,
+    fresh_positions,
 };
 use sx_feetech_serial::FeetechChainError;
 use sx_feetech_serial::sim::SimBus;
@@ -923,6 +924,10 @@ impl ActuatorChain for Unlimited {
     fn last_observed(&self) -> Option<Vec<f64>> {
         self.0.last_observed()
     }
+
+    fn read_positions(&mut self) -> Vec<sx_embodiment_drivers::AxisReading> {
+        self.0.read_positions()
+    }
 }
 
 #[test]
@@ -1009,10 +1014,7 @@ fn the_whole_static_upper_body_reads_its_measured_joints_without_moving_anything
         .collect();
     // All 15 Damiao axes, both grippers' fingers and the neck, freshly read, where open found
     // them.
-    let read = body
-        .read_positions()
-        .expect("every bus answered")
-        .expect("a read");
+    let read = fresh_positions(&body.read_positions()).expect("every axis answered");
     assert_eq!(read.len(), 25);
     for (index, (read, rest)) in read.iter().zip(&rest).enumerate() {
         assert!((read - rest).abs() < 1e-3, "axis {index}: {read} vs {rest}");
@@ -1028,12 +1030,16 @@ fn the_whole_static_upper_body_reads_its_measured_joints_without_moving_anything
         );
     }
     assert!(torques(&serial, 0));
-    // A silent neck servo refuses the whole read as that bus's timeout, not a fault: a read
-    // applies nothing on any earlier bus.
+    // A silent neck servo is missing on its own axis; the layout keeps all 25, every other
+    // axis fresh in its place.
     neck.kill(4);
-    let error = body.read_positions().expect_err("the neck is silent");
+    let read = body.read_positions();
+    assert_eq!(read.len(), 25);
+    let silent: Vec<usize> = (0..25).filter(|index| !read[*index].is_fresh()).collect();
+    assert_eq!(silent.len(), 1, "{read:?}");
     assert_eq!(
-        sx_embodiment_drivers::ChainError::failure(&error),
-        sx_embodiment_drivers::ChainFailure::Timeout
+        read[silent[0]],
+        sx_embodiment_drivers::AxisReading::Missing(sx_embodiment_drivers::MissingReason::Timeout)
     );
+    assert_eq!(body.axes()[silent[0]].binding.bus_id, 4);
 }

@@ -25,8 +25,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, ChainError, ChainFailure, CommandRange, Evidence, Receipt, StopReport,
-    TargetError,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
+    StopReport, TargetError,
 };
 
 /// Chains in native state order, driven as one.
@@ -168,21 +168,12 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         report
     }
 
-    /// Every chain's fresh read, in native state order, or `None` when any chain has none.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
-        let mut observed = Vec::with_capacity(self.axes.len());
-        for (index, chain) in self.members.iter_mut().enumerate() {
-            let Some(positions) = chain.read_positions().map_err(|error| ChainsError::Chain {
-                index,
-                applied: false,
-                error,
-            })?
-            else {
-                return Ok(None);
-            };
-            observed.extend(positions);
-        }
-        Ok(Some(observed))
+    /// Every chain's read, in native state order: each chain's axes whatever another answered.
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.members
+            .iter_mut()
+            .flat_map(ActuatorChain::read_positions)
+            .collect()
     }
 
     /// Every chain's, in native state order, or `None` when any chain has none.
@@ -247,7 +238,7 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
         (**self).stop_budget()
     }
 
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
+    fn read_positions(&mut self) -> Vec<AxisReading> {
         (**self).read_positions()
     }
 
@@ -379,32 +370,35 @@ mod tests {
             self.answers.then(|| vec![0.25; self.axes.len()])
         }
 
-        fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Failed> {
-            if let Some(failure) = self.fails {
-                return Err(Failed(failure));
-            }
-            Ok(self.answers.then(|| vec![0.5; self.axes.len()]))
+        fn read_positions(&mut self) -> Vec<AxisReading> {
+            let reading = if self.answers {
+                AxisReading::Fresh {
+                    position: 0.5,
+                    received: std::time::Instant::now(),
+                }
+            } else {
+                AxisReading::Missing(crate::chain::MissingReason::Timeout)
+            };
+            vec![reading; self.axes.len()]
         }
     }
 
     #[test]
-    fn a_read_joins_every_chain_and_commands_nothing() {
+    fn a_read_keeps_every_chains_axes_and_commands_nothing() {
         let mut chains = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], true)]);
-        assert_eq!(chains.read_positions().expect("read"), Some(vec![0.5; 3]));
+        let read = chains.read_positions();
+        assert_eq!(crate::chain::fresh_positions(&read), Some(vec![0.5; 3]));
         assert!(chains.chains().iter().all(|chain| chain.sent.is_empty()));
-        let mut partial = Chains::new(vec![fake("can", &[1], true), fake("neck", &[1], false)]);
-        assert_eq!(partial.read_positions().expect("read"), None);
-        let mut failing = fake("neck", &[1], true);
-        failing.fails = Some(ChainFailure::Timeout);
-        let mut broken = Chains::new(vec![fake("can", &[1], true), failing]);
-        assert!(matches!(
-            broken.read_positions(),
-            Err(ChainsError::Chain {
-                index: 1,
-                applied: false,
-                ..
-            })
-        ));
+        // A silent chain is missing on its own axes; every other chain's readings stand.
+        let mut partial = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], false)]);
+        let read = partial.read_positions();
+        assert_eq!(read.len(), 3);
+        assert!(read[0].is_fresh() && read[1].is_fresh());
+        assert_eq!(
+            read[2],
+            AxisReading::Missing(crate::chain::MissingReason::Timeout)
+        );
+        assert_eq!(crate::chain::fresh_positions(&read), None);
     }
 
     #[test]

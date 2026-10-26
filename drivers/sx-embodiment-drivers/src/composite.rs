@@ -4,8 +4,7 @@
 //! chains' commandable ranges before either is written; the first is commanded, then the second.
 //! A second chain that fails after the first applied is a [`ChainFailure::Fault`] whatever it
 //! reported, since one device already holds its new target. A stop stops both, whatever the first
-//! answered, and is proven only when both are. A read moves nothing, so either chain's failed
-//! read is that chain's own failure.
+//! answered, and is proven only when both are. A read reads both, whatever either answered.
 
 use std::time::Duration;
 
@@ -13,8 +12,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, ChainError, ChainFailure, CommandRange, Evidence, Receipt, StopReport,
-    TargetError,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
+    StopReport, TargetError,
 };
 
 /// The first chain's axes, then the second's.
@@ -33,9 +32,6 @@ pub enum CompositeError<E, F> {
     First(E),
     #[error("after the first chain applied, {0}")]
     Second(F),
-    /// The second chain's read failed; a read applies nothing, so it is that chain's failure.
-    #[error("{0} (reading the second chain)")]
-    SecondRead(F),
 }
 
 impl<E: ChainError, F: ChainError> ChainError for CompositeError<E, F> {
@@ -44,7 +40,6 @@ impl<E: ChainError, F: ChainError> ChainError for CompositeError<E, F> {
             Self::Target(_) => ChainFailure::Refused,
             Self::First(error) => error.failure(),
             Self::Second(_) => ChainFailure::Fault,
-            Self::SecondRead(error) => error.failure(),
         }
     }
 }
@@ -158,20 +153,11 @@ where
         }
     }
 
-    /// Both chains' fresh reads, or `None` when either has none. Reading moves nothing.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
-        let Some(mut observed) = self.first.read_positions().map_err(CompositeError::First)? else {
-            return Ok(None);
-        };
-        let Some(second) = self
-            .second
-            .read_positions()
-            .map_err(CompositeError::SecondRead)?
-        else {
-            return Ok(None);
-        };
-        observed.extend(second);
-        Ok(Some(observed))
+    /// Both chains' reads, the first's axes then the second's. Reading moves nothing.
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        let mut readings = self.first.read_positions();
+        readings.extend(self.second.read_positions());
+        readings
     }
 
     fn last_observed(&self) -> Option<Vec<f64>> {
@@ -260,9 +246,15 @@ mod tests {
             )
         }
 
-        fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Failed> {
-            self.fails
-                .map_or(Ok(Some(vec![0.5])), |failure| Err(Failed(failure)))
+        fn read_positions(&mut self) -> Vec<AxisReading> {
+            vec![if self.fails.is_some() {
+                AxisReading::Missing(crate::chain::MissingReason::Timeout)
+            } else {
+                AxisReading::Fresh {
+                    position: 0.5,
+                    received: std::time::Instant::now(),
+                }
+            }]
         }
 
         fn stop(&mut self) -> StopReport {
@@ -275,16 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_read_is_each_chains_own_failure_but_a_late_command_is_a_fault() {
+    fn a_read_keeps_both_chains_axes_but_a_late_command_failure_is_a_fault() {
         let mut both = Composite::new(fake(None), fake(None));
-        assert_eq!(both.read_positions().expect("read"), Some(vec![0.5, 0.5]));
+        assert_eq!(
+            crate::chain::fresh_positions(&both.read_positions()),
+            Some(vec![0.5, 0.5])
+        );
         let mut second = Composite::new(fake(None), fake(Some(ChainFailure::Timeout)));
-        let read = second.read_positions().expect_err("second is silent");
-        assert_eq!(read.failure(), ChainFailure::Timeout);
+        let read = second.read_positions();
+        assert!(read[0].is_fresh());
+        assert_eq!(
+            read[1],
+            AxisReading::Missing(crate::chain::MissingReason::Timeout)
+        );
         let command = second.command(&[0.0, 0.0]).expect_err("second is silent");
         assert_eq!(command.failure(), ChainFailure::Fault);
-        let mut first = Composite::new(fake(Some(ChainFailure::Unavailable)), fake(None));
-        let read = first.read_positions().expect_err("first is down");
-        assert_eq!(read.failure(), ChainFailure::Unavailable);
     }
 }

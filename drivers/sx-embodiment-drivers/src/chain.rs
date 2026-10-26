@@ -1,6 +1,6 @@
 //! The bound actuator chain: command in joint coordinates, stop with proof.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
@@ -108,6 +108,55 @@ impl ProvenStop {
     }
 }
 
+/// Why one axis has no fresh reading in a poll.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MissingReason {
+    /// The actuator sent no answer within the poll.
+    Timeout,
+    /// An answer arrived incomplete or failing its checks.
+    Corrupt,
+    /// The actuator did not answer this poll; the newest answer the chain holds for it predates
+    /// the poll, so it is never reported as fresh.
+    Stale,
+    /// The link could not carry the request or the answer.
+    Unavailable,
+}
+
+/// One axis's part of a read: what the actuator answered to this poll, if anything.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AxisReading {
+    /// The joint coordinate from an answer newer than the start of the poll, and when the
+    /// chain received it.
+    Fresh { position: f64, received: Instant },
+    /// No usable answer to this poll.
+    Missing(MissingReason),
+    /// The actuator answered, reporting a vendor fault code (or a state contradicting what
+    /// the chain holds it in); its position is not vouched for.
+    Faulted(u8),
+}
+
+impl AxisReading {
+    /// The position, when the reading is fresh.
+    #[must_use]
+    pub const fn position(&self) -> Option<f64> {
+        match self {
+            Self::Fresh { position, .. } => Some(*position),
+            Self::Missing(_) | Self::Faulted(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_fresh(&self) -> bool {
+        matches!(self, Self::Fresh { .. })
+    }
+}
+
+/// Every position of a read, in native state order, only when every axis is fresh.
+#[must_use]
+pub fn fresh_positions(readings: &[AxisReading]) -> Option<Vec<f64>> {
+    readings.iter().map(AxisReading::position).collect()
+}
+
 /// A command vector the chain refuses before any frame is built.
 #[derive(Debug, Error, PartialEq)]
 pub enum TargetError {
@@ -182,15 +231,12 @@ pub trait ActuatorChain {
     /// link's failure or an actuator whose answer contradicts the command.
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error>;
 
-    /// Poll measured joint coordinates without enabling an actuator or changing its target.
-    /// Every returned value must come from an answer newer than the start of this poll.
-    /// `None` means this chain has no read-only observation implementation.
-    ///
-    /// # Errors
-    /// Refuses an incomplete, stale, faulted or unavailable observation.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, Self::Error> {
-        Ok(None)
-    }
+    /// Poll measured joint coordinates without enabling an actuator or changing its target:
+    /// one [`AxisReading`] per axis, always `axes().len()` of them in native state order, an
+    /// axis that did not answer this poll freshly reported as missing or faulted rather than
+    /// dropped. A read never fails as a whole; a link that is down reads every axis
+    /// [`MissingReason::Unavailable`].
+    fn read_positions(&mut self) -> Vec<AxisReading>;
 
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
     /// prove. The chain stays disabled until the next command.

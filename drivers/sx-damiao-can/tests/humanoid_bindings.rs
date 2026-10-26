@@ -72,17 +72,17 @@ fn another_bodys_drive_opens_nothing() {
 
 #[cfg(feature = "sim")]
 #[test]
-fn measured_upper_body_reads_are_fresh_complete_and_never_enable_or_move() {
+fn measured_upper_body_reads_are_fresh_per_axis_and_never_enable_or_move() {
     use sx_damiao_can::{chain::DamiaoChain, sim::Sim};
-    use sx_embodiment_drivers::ActuatorChain;
+    use sx_embodiment_drivers::{ActuatorChain, AxisReading, MissingReason, fresh_positions};
     let axes = humanoid_upper_body(&drive("sentient-humanoid-upper-body", "measured")).unwrap();
     let bus = Sim::for_axes(&axes);
     let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).unwrap();
-    let first = chain.read_positions().unwrap().unwrap();
+    let first = fresh_positions(&chain.read_positions()).expect("every motor answered");
     assert_eq!(first.len(), 11);
     let id = axes[0].axis.binding.bus_id;
     bus.0.lock().unwrap().motors.get_mut(&id).unwrap().q = 0.2;
-    let second = chain.read_positions().unwrap().unwrap();
+    let second = fresh_positions(&chain.read_positions()).expect("every motor answered");
     assert!((second[0] - axes[0].axis.joint_from_actuator(0.2)).abs() < 0.001);
     assert!((second[0] - first[0]).abs() > 0.1);
     assert!(
@@ -94,10 +94,21 @@ fn measured_upper_body_reads_are_fresh_complete_and_never_enable_or_move() {
             .all(|motor| motor.state == 0)
     );
     assert!((bus.0.lock().unwrap().motors[&id].q - 0.2).abs() < 1e-12);
-    // The successful prior cache cannot satisfy a subsequent missing motor reply.
+    // The successful prior cache cannot satisfy a subsequent missing motor reply: that axis
+    // is stale, and every other axis is still read, fresh, in its place.
     bus.0.lock().unwrap().dead.insert(id);
-    assert!(chain.read_positions().is_err());
+    let silent = chain.read_positions();
+    assert_eq!(silent.len(), 11);
+    assert_eq!(silent[0], AxisReading::Missing(MissingReason::Stale));
+    assert!(silent[1..].iter().all(AxisReading::is_fresh));
     bus.0.lock().unwrap().dead.remove(&id);
+    // A motor reporting over-voltage (8) is faulted with its code; the others stand.
     bus.0.lock().unwrap().motors.get_mut(&id).unwrap().state = 8;
-    assert!(chain.read_positions().is_err());
+    let faulted = chain.read_positions();
+    assert_eq!(faulted[0], AxisReading::Faulted(8));
+    assert!(faulted[1..].iter().all(AxisReading::is_fresh));
+    // A motor that reports itself enabled while the chain holds it disabled is not vouched for.
+    bus.0.lock().unwrap().motors.get_mut(&id).unwrap().state = 1;
+    let read = chain.read_positions();
+    assert_eq!(read[0], AxisReading::Faulted(1));
 }

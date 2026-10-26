@@ -144,14 +144,15 @@
 //!   [`FeetechChain::clear_faults`] clears them. After an unproven stop every command is refused
 //!   until a stop is proven.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use sx_embodiment_drivers::lerobot::{MotorCalibration, MotorNormMode};
 use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
-    ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
+    ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
+    TargetError, fresh_positions, validate_chain,
 };
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
@@ -576,7 +577,7 @@ impl<P: SerialPort> FeetechChain<P> {
         };
         chain.is_calibrated()?;
         chain.configure()?;
-        chain.observed = chain.present_positions().ok();
+        chain.observed = fresh_positions(&chain.present_positions());
         Ok(chain)
     }
 
@@ -758,28 +759,38 @@ impl<P: SerialPort> FeetechChain<P> {
         }
     }
 
-    /// Every servo's `Present_Position` (56..=57), one `READ` per servo, as joint coordinates in
-    /// native state order. Each answer is fresh: the packet handler clears the port before it
-    /// writes each `READ`. Reading writes no register, so nothing moves and torque stays as it
-    /// was.
-    ///
-    /// # Errors
-    ///
-    /// Refuses the whole sample when any servo does not answer, answers corrupt, or reports
-    /// error flags.
-    fn present_positions(&mut self) -> Result<Vec<f64>, FeetechChainError> {
-        let ids: Vec<(u16, u8)> = self
-            .servos
-            .iter()
-            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
-            .collect();
-        let mut observed = Vec::with_capacity(ids.len());
-        for (index, (bus_id, scs_id)) in ids.into_iter().enumerate() {
-            let raw = self.read2(bus_id, scs_id, SMS_STS_PRESENT_POSITION_L)?;
-            let raw = ProtocolPacketHandler::<()>::scs_tohost(raw, PRESENT_POSITION_SIGN_BIT);
-            observed.push(self.servos[index].joint_from_raw(raw));
+    /// Every servo's `Present_Position` (56..=57), one `READ` per servo, as an
+    /// [`AxisReading`] per axis in native state order. Each answer is fresh: the packet handler
+    /// clears the port before it writes each `READ`. A servo that is silent, answers corrupt or
+    /// cannot be reached is missing; one that answers with error flags is faulted with them. The
+    /// other servos' readings stand. Reading writes no register, so nothing moves and torque
+    /// stays as it was.
+    fn present_positions(&mut self) -> Vec<AxisReading> {
+        let ids: Vec<u8> = self.servos.iter().map(FeetechServo::scs_id).collect();
+        let mut readings = Vec::with_capacity(ids.len());
+        for (index, scs_id) in ids.into_iter().enumerate() {
+            let (raw, result, error) = self
+                .sms
+                .ph
+                .read2_byte_tx_rx(scs_id, SMS_STS_PRESENT_POSITION_L);
+            let received = Instant::now();
+            readings.push(match result {
+                CommResult::Success if error != 0 => AxisReading::Faulted(error),
+                CommResult::Success => AxisReading::Fresh {
+                    position: self.servos[index].joint_from_raw(
+                        ProtocolPacketHandler::<()>::scs_tohost(raw, PRESENT_POSITION_SIGN_BIT),
+                    ),
+                    received,
+                },
+                CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
+                CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
+                CommResult::TxFail
+                | CommResult::RxFail
+                | CommResult::TxError
+                | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
+            });
         }
-        Ok(observed)
+        readings
     }
 
     /// One SYNC READ of every servo's registers from `Torque_Enable` (40) to `Present_Position`
@@ -1037,13 +1048,13 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 self.faults.push(*fault);
             }
         }
-        self.observed = self.present_positions().ok();
+        self.observed = fresh_positions(&self.present_positions());
         report
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, FeetechChainError> {
-        self.present_positions().map(Some)
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.present_positions()
     }
 
     /// A servo's, once the approach limit it declares was confirmed.

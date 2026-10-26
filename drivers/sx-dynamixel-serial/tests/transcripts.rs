@@ -22,8 +22,8 @@ use sx_dynamixel_serial::{
     OperatingMode,
 };
 use sx_embodiment_drivers::{
-    ActuatorChain, ApproachLimit, BRING_UP_APPROACH, BodyBindings, ChainError, ChainFailure,
-    Evidence,
+    ActuatorChain, ApproachLimit, AxisReading, BRING_UP_APPROACH, BodyBindings, ChainError,
+    ChainFailure, Evidence, MissingReason, fresh_positions,
 };
 
 const GOLDEN: &str = include_str!("fixtures/dynamixel_sdk/xl330_xm430.json");
@@ -703,7 +703,7 @@ fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
         .iter()
         .map(|servo| servo.joint_from_raw(2050))
         .collect();
-    assert_eq!(chain.read_positions().expect("both answered"), Some(rest));
+    assert_eq!(fresh_positions(&chain.read_positions()), Some(rest));
     assert!(chain.port().expected.is_empty());
     let sent: Vec<String> = chain.port().written[before..]
         .iter()
@@ -717,26 +717,24 @@ fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
 }
 
 #[test]
-fn a_silent_stale_or_alerting_servo_refuses_the_whole_read() {
+fn a_silent_or_alerting_servo_is_marked_on_its_own_axis() {
     let golden = golden();
-    // The wrist is silent; a status packet it sent before the read waits in the buffer.
+    // The wrist is silent; a status packet it sent before the read waits in the buffer and is
+    // never taken for this poll's answer.
     let mut silent = positions();
     let stale = silent[1].response.clone();
     silent[1].response = String::new();
     let mut chain = open(&golden, &[&silent]);
     chain.port_mut().pending.extend(bytes(&stale));
-    let error = chain.read_positions().expect_err("silent");
-    assert!(matches!(error, DynamixelChainError::Comm { bus_id: 2, .. }));
-    assert_eq!(error.failure(), ChainFailure::Timeout);
+    let read = chain.read_positions();
+    assert_eq!(read.len(), 2);
+    assert!(read[0].is_fresh());
+    assert_eq!(read[1], AxisReading::Missing(MissingReason::Timeout));
     // The wrist answers with its hardware-error alert set.
     let mut alerting = positions();
     answer(&mut alerting[1], 0x80, &REST.to_le_bytes());
     let mut chain = open(&golden, &[&alerting]);
-    assert!(matches!(
-        chain.read_positions(),
-        Err(DynamixelChainError::ServoError {
-            bus_id: 2,
-            error: 0x80
-        })
-    ));
+    let read = chain.read_positions();
+    assert!(read[0].is_fresh());
+    assert_eq!(read[1], AxisReading::Faulted(0x80));
 }

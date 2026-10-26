@@ -58,13 +58,13 @@
 //!   range, the motor's own reading of an aliased or out-of-range joint. A joint turned by hand
 //!   past the window while unpowered, onto an alias inside it, cannot be told apart.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::can::CanPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, BindingError, BodyError, BoundAxis, ChainError,
-    ChainFailure, CommandRange, Evidence, Receipt, StopReport, TargetError, check_targets,
-    validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
+    ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt, StopReport,
+    TargetError, check_targets, validate_chain,
 };
 use thiserror::Error;
 
@@ -631,6 +631,21 @@ impl<P: CanPort> DamiaoChain<P> {
         Ok(())
     }
 
+    /// Stamp `now` on every motor first seen answering since `before`.
+    fn stamp_answers(
+        &self,
+        before: &[u64],
+        received: &mut [Option<Instant>],
+    ) -> Result<(), DmCanError> {
+        let now = Instant::now();
+        for (stamp, fresh) in received.iter_mut().zip(self.fresh(before)?) {
+            if fresh && stamp.is_none() {
+                *stamp = Some(now);
+            }
+        }
+        Ok(())
+    }
+
     fn expect_all(&self, before: &[u64], expected: MotorState) -> Result<(), DamiaoChainError> {
         for (index, fresh) in self.fresh(before)?.into_iter().enumerate() {
             let bus_id = self.bus_id(index);
@@ -704,30 +719,89 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         &self.commandable
     }
 
-    fn read_positions(&mut self) -> Result<Option<Vec<f64>>, DamiaoChainError> {
-        // Drain older answers before taking the high-water mark. A cached open/command
-        // answer cannot masquerade as a fresh read. 0xCC requests feedback only.
-        self.control.recv()?;
-        let before = self.feedback_counts()?;
-        for index in 0..self.motors.len() {
-            self.control.refresh_motor_status(self.bus_id(index))?;
+    /// Drain older answers, take each motor's feedback count, request status with the
+    /// vendor's `0xCC` operation, and read each motor's answer to that request. A motor that
+    /// answered since the counts were taken is fresh, faulted when it reports a fault code or a
+    /// state contradicting the chain's; one that did not is stale (or, never having answered,
+    /// timed out); a link that failed is unavailable for every motor it could not reach.
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        let count = self.motors.len();
+        let unavailable = vec![AxisReading::Missing(MissingReason::Unavailable); count];
+        // Drain older answers before taking the high-water mark: a cached open/command answer
+        // cannot masquerade as a fresh read. 0xCC requests feedback only.
+        if self.control.recv().is_err() {
+            return unavailable;
         }
-        self.await_answers(&before)?;
-        self.expect_all(
-            &before,
-            if self.enabled {
-                MotorState::Enabled
-            } else {
-                MotorState::Disabled
-            },
-        )?;
-        Ok(Some(
-            self.motors
+        let Ok(before) = self.feedback_counts() else {
+            return unavailable;
+        };
+        let sent: Vec<bool> = (0..count)
+            .map(|index| {
+                self.control
+                    .refresh_motor_status(self.bus_id(index))
+                    .is_ok()
+            })
+            .collect();
+        let mut received: Vec<Option<Instant>> = vec![None; count];
+        let mut link_failed = false;
+        for attempt in 0..ANSWER_POLLS {
+            if self.stamp_answers(&before, &mut received).is_err() {
+                link_failed = true;
+                break;
+            }
+            if received
                 .iter()
-                .zip(self.feedback()?)
-                .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
-                .collect(),
-        ))
+                .zip(&sent)
+                .all(|(answered, sent)| answered.is_some() || !sent)
+            {
+                break;
+            }
+            if attempt > 0 {
+                self.control.port_mut().sleep(ANSWER_POLL_INTERVAL);
+            }
+            if self.control.recv().is_err() {
+                link_failed = true;
+                break;
+            }
+        }
+        if !link_failed && self.stamp_answers(&before, &mut received).is_err() {
+            link_failed = true;
+        }
+        let expected = if self.enabled {
+            MotorState::Enabled
+        } else {
+            MotorState::Disabled
+        };
+        (0..count)
+            .map(|index| {
+                let bus_id = self.bus_id(index);
+                let Ok(cached) = self.control.motor(bus_id) else {
+                    return AxisReading::Missing(MissingReason::Unavailable);
+                };
+                let Some(at) = received[index] else {
+                    return AxisReading::Missing(if !sent[index] || link_failed {
+                        MissingReason::Unavailable
+                    } else if before[index] > 0 {
+                        MissingReason::Stale
+                    } else {
+                        MissingReason::Timeout
+                    });
+                };
+                let code = cached.get_error();
+                let state = MotorState::from_err(code);
+                let unreported = !self.motors[index].reports_enable_state
+                    && matches!(state, MotorState::Enabled | MotorState::Disabled);
+                if state != expected && !unreported {
+                    return AxisReading::Faulted(code);
+                }
+                AxisReading::Fresh {
+                    position: self.motors[index]
+                        .axis
+                        .joint_from_actuator(f64::from(cached.get_position())),
+                    received: at,
+                }
+            })
+            .collect()
     }
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {

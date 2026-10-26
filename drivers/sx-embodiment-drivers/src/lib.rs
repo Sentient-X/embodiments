@@ -53,8 +53,8 @@ pub use binding::{
 };
 pub use body::{BodyBindings, BodyError, Bus};
 pub use chain::{
-    ActuatorChain, ChainError, ChainFailure, CommandRange, Evidence, ProvenStop, Receipt,
-    StopReport, TargetError, check_targets,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, MissingReason,
+    ProvenStop, Receipt, StopReport, TargetError, check_targets, fresh_positions,
 };
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};

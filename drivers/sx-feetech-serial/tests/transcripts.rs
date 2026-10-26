@@ -13,7 +13,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sx_embodiment_drivers::serial::SerialPort;
-use sx_embodiment_drivers::{ActuatorChain, BindingError, Evidence, StopReport, TargetError};
+use sx_embodiment_drivers::{
+    ActuatorChain, AxisReading, BindingError, Evidence, MissingReason, StopReport, TargetError,
+    fresh_positions,
+};
 use sx_feetech_serial::scservo_sdk::CommResult;
 use sx_feetech_serial::so101::so101;
 use sx_feetech_serial::{FeetechChain, FeetechChainError, FeetechServo, MotorCalibration};
@@ -910,7 +913,7 @@ fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
     );
     let before = chain.port().written.len();
     assert_eq!(
-        chain.read_positions().expect("every servo answered"),
+        fresh_positions(&chain.read_positions()),
         Some(golden.present_joints.clone())
     );
     assert!(chain.port().expected.is_empty());
@@ -927,28 +930,32 @@ fn a_read_is_one_present_position_read_per_servo_and_writes_nothing() {
 }
 
 #[test]
-fn a_silent_stale_or_flagged_servo_refuses_the_whole_read() {
+fn a_silent_corrupt_or_flagged_servo_is_marked_on_its_own_axis() {
     let golden = golden();
-    // Servo 3 is silent; a status packet it sent before the read waits in the buffer.
-    let mut silent = golden.present_position.clone();
-    let stale = silent[2].response.clone();
-    silent[2].response = String::new();
-    let mut chain = open(&with(&[&opening(&golden), &silent]), "so101");
+    // Servo 3 is silent; a status packet it sent before the read waits in the buffer and is
+    // never taken for this poll's answer. Servo 5's answer fails its checksum.
+    let mut partial = golden.present_position.clone();
+    let stale = partial[2].response.clone();
+    partial[2].response = String::new();
+    let mut corrupt = bytes(&partial[4].response);
+    *corrupt.last_mut().expect("checksum") ^= 0xFF;
+    partial[4].response = hex(&corrupt);
+    let mut chain = open(&with(&[&opening(&golden), &partial]), "so101");
     chain.port_mut().pending.extend(bytes(&stale));
-    assert!(matches!(
-        chain.read_positions(),
-        Err(FeetechChainError::Comm { bus_id: 3, .. })
-    ));
+    let read = chain.read_positions();
+    assert_eq!(read.len(), 6);
+    assert_eq!(read[2], AxisReading::Missing(MissingReason::Timeout));
+    assert_eq!(read[4], AxisReading::Missing(MissingReason::Corrupt));
+    for index in [0, 1, 3, 5] {
+        assert_eq!(read[index].position(), Some(golden.present_joints[index]));
+    }
+    assert_eq!(fresh_positions(&read), None);
     // Servo 4 answers with its overload flag set.
     let mut flagged = golden.present_position.clone();
     let params = bytes(&flagged[3].response)[5..7].to_vec();
     answer(&mut flagged[3], 0x20, &params);
     let mut chain = open(&with(&[&opening(&golden), &flagged]), "so101");
-    assert!(matches!(
-        chain.read_positions(),
-        Err(FeetechChainError::ServoError {
-            bus_id: 4,
-            error: 0x20
-        })
-    ));
+    let read = chain.read_positions();
+    assert_eq!(read[3], AxisReading::Faulted(0x20));
+    assert!(read.iter().enumerate().all(|(i, r)| i == 3 || r.is_fresh()));
 }

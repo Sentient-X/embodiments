@@ -34,9 +34,11 @@ it on an SO-101's serial adapter once a serial device binding exists there.
   one `Goal_Position` SYNC WRITE per command, `disable_torque` (`Torque_Enable` 0, `Lock` 0)
   on every servo at stop, then the read-back.
 - **Read-only positions.** `read_positions` reads every servo's `Present_Position` (56), one `READ` per
-  servo; the packet handler clears the port before each, so every value is a fresh answer. A
-  servo that is silent, answers corrupt or reports error flags refuses the whole read. It
-  writes no register: it never enables torque or sends a goal.
+  servo; the packet handler clears the port before each, so every value is a fresh answer. It
+  returns one `AxisReading` per axis in native state order, always all of them: a silent,
+  corrupt or unreachable servo is `Missing` with its reason, one reporting error flags is
+  `Faulted` with the code, and every other servo's reading stands. It writes no register: it
+  never enables torque or sends a goal.
 - **Open the arm at rest.** Open disables torque on every servo before configuring it, so an
   arm holding a pose slumps under gravity. `LeRobot` assumes the same: `SOFollower.connect`
   expects the arm "in a rest position" when torque is disabled (`so_follower.py:91-96`).
