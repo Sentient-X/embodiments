@@ -90,8 +90,9 @@ sx-commission calibrate --restore <journal>
   `--goal-speed`. `--hold-seconds <s>` holds it at the target first, printing `HOLDING id N at
   <ticks>` when the hold starts and `RETURNED` once it is back and limp; `--json` gives the hold's
   wall-clock start and end and the positions read during it. `--widen` works as for `gripper`.
-  That measurement settles the `Goal_Speed` unit, which
-  `sx-feetech-serial`'s README records as unverified.
+  That measurement settled the `Goal_Speed` unit on 2026-10-26: steps per second, with the
+  firmware never slower than 50 (the default `--goal-speed 20` runs at 50 steps/s, about
+  0.077 rad/s); see `sx-feetech-serial`'s README.
 - A sweep's end is one of `Load`, `NoProgress` (a stop), `Stuck` (it never moved a lead's
   worth, so it proves no stop), `Limit` (its position limit, or a stall within a lead of it,
   where the goal is clamped) and `MaxTravel`. A move that stops short without load holds where
