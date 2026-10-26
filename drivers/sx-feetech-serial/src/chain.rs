@@ -88,6 +88,12 @@
 //!   reads one step as 0.732 rpm, which is 50 steps/s: taken per register step, as this chain
 //!   did before, it made every declared approach about 50 times slower than declared (4 rad/s
 //!   wrote 52, about 0.08 rad/s, and the governor's tracking stop fired on every gripper move).
+//!   The measurements sit at or below the floor (3, 20 and 52 all ran at about 50 steps/s,
+//!   by position slope, not only `Present_Speed`); under any linear reading they bound one
+//!   step to at most 1 step/s, so the true unit cannot be faster than this one, only slower,
+//!   which trips tracking rather than overspeeding. Proportionality above 50 (162 at
+//!   bring-up, 2607 at 4 rad/s) and the `Acceleration` unit (the vendor's 8.7 °/s², not
+//!   measured) are confirmed by timing the first bring-up move.
 //!
 //!   Those registers are RAM: a servo whose power cycles while its USB link stays up comes back with
 //!   `Goal_Speed` 0 (full speed) and torque off. So the limit is never trusted for the
@@ -277,7 +283,27 @@ pub fn approach_registers(approach: &ApproachLimit, reduction: f64) -> Option<(u
 /// `declared` is already no faster, so there is nothing to raise once the servo is inside.
 #[must_use]
 pub fn pull_in_registers(declared: (u16, u8), reduction: f64) -> Option<(u16, u8)> {
-    let bring_up = approach_registers(&BRING_UP_APPROACH, reduction)?;
+    // Bring-up in register steps, held inside the registers rather than refused: at a high
+    // reduction its acceleration overflows `Acceleration`'s 254, and the slower of the two must
+    // still be taken register by register, never the declared approach whole.
+    let steps = |rate: f64, step: f64, low: f64, high: f64| {
+        (rate * reduction / step).floor().clamp(low, high)
+    };
+    let speed = steps(
+        BRING_UP_APPROACH.speed,
+        SPEED_STEP_RAD_PER_S,
+        f64::from(SLOWEST_GOAL_SPEED),
+        f64::from(GOAL_SPEED_MAX),
+    );
+    let acceleration = steps(
+        BRING_UP_APPROACH.acceleration,
+        ACCELERATION_STEP_RAD_PER_S2,
+        1.0,
+        254.0,
+    );
+    // Both are integers clamped inside their registers just above.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let bring_up = (speed as u16, acceleration as u8);
     let slower = (declared.0.min(bring_up.0), declared.1.min(bring_up.1));
     (slower != declared).then_some(slower)
 }
@@ -1046,12 +1072,6 @@ impl<P: SerialPort> FeetechChain<P> {
 
     /// `FeetechMotorsBus.enable_torque`: `Torque_Enable` 1, then `Lock` 1, on every servo.
     fn enable_torque(&mut self) -> Result<(), FeetechChainError> {
-        // Prove every declared approach limit still holds: a servo that power-cycled has lost it,
-        // and one an earlier enable was pulling in may still hold its slower pull-in registers.
-        self.pulling_in.fill(false);
-        for index in 0..self.servos.len() {
-            self.hold_approach(index, false)?;
-        }
         // Hold every servo where it is first, so enabling never drives toward a stale goal; a
         // servo resting outside its limits is given the nearest one, which the firmware would
         // drive it to anyway, and only at an approach limit this enable just confirmed.
@@ -1066,19 +1086,26 @@ impl<P: SerialPort> FeetechChain<P> {
             let present =
                 ProtocolPacketHandler::<()>::scs_tohost(register, PRESENT_POSITION_SIGN_BIT);
             let (range_min, range_max) = (calibration.range_min, calibration.range_max);
-            let goal = if (i32::from(range_min)..=i32::from(range_max)).contains(&present) {
+            let inside = (i32::from(range_min)..=i32::from(range_max)).contains(&present);
+            // Where the servo rests decides which approach it must hold before anything else is
+            // written to it: resting outside its limits, its slower pull-in registers, so its
+            // declared (faster) approach is never written while it is outside, even on a
+            // re-enable with its torque still on (a SYNC READ another servo missed marks the
+            // chain disabled without turning any torque off). Then prove that approach: a servo
+            // that power-cycled has lost it, and one an earlier enable was pulling in may still
+            // hold the slower registers.
+            let reduction = self.servos[index].axis.binding.reduction;
+            self.pulling_in[index] = !inside
+                && self
+                    .approach_registers(index)?
+                    .is_some_and(|declared| pull_in_registers(declared, reduction).is_some());
+            self.hold_approach(index, false)?;
+            let goal = if inside {
                 register
             } else if self.approach_limited[index] {
-                // The pull-in is the one move no governor bounds: at the slower pull-in
-                // registers, confirmed before torque comes on, until a command finds it inside.
-                let declared = self.approach_registers(index)?;
-                let reduction = self.servos[index].axis.binding.reduction;
-                if declared.is_some_and(|declared| pull_in_registers(declared, reduction).is_some())
-                {
-                    self.pulling_in[index] = true;
-                    self.hold_approach(index, true)?;
-                }
-                // Inside `range_min..=range_max`, both below 4096: positive, so its
+                // The pull-in is the one move no governor bounds: it runs at the pull-in
+                // registers proven above, before torque comes on, until a command finds it
+                // inside. Inside `range_min..=range_max`, both below 4096: positive, so its
                 // sign-magnitude encoding is itself.
                 let goal = if present < i32::from(range_min) {
                     range_min
