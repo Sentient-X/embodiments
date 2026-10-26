@@ -998,3 +998,42 @@ fn by_default_the_provisional_neck_and_grippers_stay_off_and_the_damiao_bus_driv
     assert_eq!(bridges.opened, ["CAN", "5A7C118709@1000000"]);
     assert_eq!(body.axes().len(), 21);
 }
+
+#[test]
+fn the_whole_static_upper_body_reads_its_measured_joints_without_moving_anything() {
+    let (mut body, neck, serial) = probed_body();
+    let rest = body.last_observed().expect("observed at open");
+    let written: Vec<usize> = serial
+        .values()
+        .map(|bus| bus.state().written.len())
+        .collect();
+    // All 15 Damiao axes, both grippers' fingers and the neck, freshly read, where open found
+    // them.
+    let read = body
+        .read_positions()
+        .expect("every bus answered")
+        .expect("a read");
+    assert_eq!(read.len(), 25);
+    for (index, (read, rest)) in read.iter().zip(&rest).enumerate() {
+        assert!((read - rest).abs() < 1e-3, "axis {index}: {read} vs {rest}");
+    }
+    // Only READ instructions (0x02) reached the Feetech buses; no torque came on.
+    for (bus, before) in serial.values().zip(&written) {
+        let state = bus.state();
+        assert!(state.written.len() > *before);
+        assert!(
+            state.written[*before..]
+                .iter()
+                .all(|packet| packet[4] == 0x02)
+        );
+    }
+    assert!(torques(&serial, 0));
+    // A silent neck servo refuses the whole read as that bus's timeout, not a fault: a read
+    // applies nothing on any earlier bus.
+    neck.kill(4);
+    let error = body.read_positions().expect_err("the neck is silent");
+    assert_eq!(
+        sx_embodiment_drivers::ChainError::failure(&error),
+        sx_embodiment_drivers::ChainFailure::Timeout
+    );
+}
