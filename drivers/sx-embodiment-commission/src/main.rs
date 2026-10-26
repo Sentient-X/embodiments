@@ -21,9 +21,10 @@
 //! supply its axes open derated (`sx_embodiment_drivers::rail`); record the rail again once it
 //! is in range and the derate lifts. `--derate` records a derate decided for this robot in
 //! place of the automatic one, with who decided it and why (`"derate": {"max_speed",
-//! "decided"}`; its acceleration keeps the automatic one's ratio to speed, and no axis is
-//! derated faster than its model's rated speed): the owner's `--derate '0.6,owner 2026-10-26:
-//! J8009P on the 54 V battery at double the automatic derate'`.
+//! "decided"}`; its acceleration keeps the automatic one's ratio to speed, no axis is derated
+//! faster than its model's rated speed, and one faster than the automatic derate must say
+//! "lifts the derate" in its decision): the owner's `--derate '0.6,owner 2026-10-26: lifts the
+//! derate for the J8009P on the 54 V battery to double the automatic one'`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

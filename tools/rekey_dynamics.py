@@ -121,7 +121,7 @@ def main() -> int:
         for document in arguments.documents:
             moved = rekey(document, old_sha, new_sha)
             sys.stdout.write(f"{'re-keyed' if moved else 'already current'}: {document}\n")
-    except (RekeyError, json.JSONDecodeError, OSError) as error:
+    except (RekeyError, json.JSONDecodeError, OSError, UnicodeDecodeError, ET.ParseError) as error:
         sys.stderr.write(f"rekey_dynamics: {error}\n")
         return 1
     return 0

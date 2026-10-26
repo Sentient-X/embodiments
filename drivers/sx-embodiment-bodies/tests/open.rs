@@ -1179,7 +1179,7 @@ fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
         "pod_revision": 3,
         "ports": {"can": "CAN"},
         "rails": {"damiao_dm8009p": 54.0, "*": 24.0},
-        "derate": {"max_speed": 0.6, "decided": "owner, 2026-10-26"},
+        "derate": {"max_speed": 0.6, "decided": "owner, 2026-10-26: lifts the derate to 0.6"},
     });
     let commissioning =
         Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
