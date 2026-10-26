@@ -212,6 +212,7 @@ fn a_governed_joint_outside_its_range_comes_in_at_the_speed_bound() {
         AxisLimits {
             max_speed: 0.25,
             max_tracking_error: 0.2,
+            max_acceleration: None,
         };
         15
     ];
@@ -256,6 +257,7 @@ fn the_governor_starts_from_where_the_body_rests_and_slews() {
         AxisLimits {
             max_speed: 0.25,
             max_tracking_error: 0.2,
+            max_acceleration: None,
         };
         15
     ];
@@ -522,6 +524,7 @@ fn a_late_answer_to_a_command_is_a_stale_reading_and_two_in_a_row_stop_the_gover
         AxisLimits {
             max_speed: 0.25,
             max_tracking_error: 0.2,
+            max_acceleration: None,
         };
         15
     ];

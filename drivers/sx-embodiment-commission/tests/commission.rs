@@ -288,11 +288,16 @@ fn body() -> DeclaredBody {
     DeclaredBody::parse(&[BINDINGS]).unwrap()
 }
 
+/// The bench: the J8009P torso and shoulders on the 54 V battery, the rest on 24 V.
 fn station() -> Station {
     Station {
         instance: "instance-content-id".to_owned(),
         pod_id: "pod-1".to_owned(),
         pod_revision: 3,
+        rails: sx_embodiment_drivers::rail::Rails::new(
+            [("damiao_dm8009p".to_owned(), 54.0), ("*".to_owned(), 24.0)].into(),
+        )
+        .unwrap(),
     }
 }
 
@@ -327,6 +332,11 @@ fn every_port_finds_its_one_bridge() {
     assert_eq!(parsed.ports["neck"], NECK_SERIAL);
     assert_eq!(parsed.ports["can"], ZLG_SERIAL);
     assert_eq!(parsed.pod_revision, 3);
+    assert_eq!(
+        parsed.rails,
+        station().rails,
+        "the rails are recorded as measured"
+    );
 
     // The ZLG's two channels share its serial: the station cannot yet open by it.
     let notes = warnings(&found, &matched);

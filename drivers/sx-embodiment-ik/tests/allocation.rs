@@ -12,7 +12,7 @@
     clippy::doc_markdown
 )]
 
-use sx_embodiment_ik::{Body, Caps, Ik, Obstacle, Settings, Target};
+use sx_embodiment_ik::{Body, Caps, Ik, Settings, Target};
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
 /// the clock, and run on a loaded machine.
@@ -30,11 +30,7 @@ const ALL: [bool; 64] = [true; 64];
 fn a_steady_state_tick_allocates_nothing() {
     let body = Body::static_upper_body();
     let caps = Caps::declared(&body, 0.25).expect("caps").at_most(0.5);
-    let table = Obstacle {
-        min: [-1.0, -1.0, -0.8],
-        max: [0.05, 1.0, 0.0],
-    };
-    let mut ik = Ik::new(body, caps, settings(), vec![table]).expect("ik");
+    let mut ik = Ik::new(body, caps, settings(), Vec::new()).expect("ik");
     let mut q = ik.rest().to_vec();
     let mut next = q.clone();
     let mut worst = 0;

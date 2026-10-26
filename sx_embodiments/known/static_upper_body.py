@@ -27,7 +27,9 @@ robot, exactly, except that both wrists' motors read with sign -1, because allis
 those axes against them. Their confirmed limits are motor coordinates, so the rendering
 negates them onto allisa_bot's axes (the package copies them by name unnegated, and says
 hardware signs still need evidence). The profile has no torso entry, so the torso's binding
-(DM8009 at 0x1F) is the superseded table's.
+(at 0x1F) is the superseded table's. The torso and the four shoulder motors are DM-J8009P-2EC
+(``ActuatorModel.DAMIAO_DM8009P``, as the meshes are), which the tables wrote as "DM8009": the
+same wire limits, but a distinct product rated 24-48 V.
 
 * **Elbows** bend both ways about the forearm hanging straight (-pi/2 left, +pi/2 right): about
   90 deg forward to the stop at zero and about 80 deg back, the robot's confirmed stops.
@@ -161,8 +163,8 @@ _ARM_JOINTS: Final = (
     "wrist_roll",
 )
 _ARM_MODELS: Final = (
-    ActuatorModel.DAMIAO_DM8009,
-    ActuatorModel.DAMIAO_DM8009,
+    ActuatorModel.DAMIAO_DM8009P,
+    ActuatorModel.DAMIAO_DM8009P,
     ActuatorModel.DAMIAO_DM4340,
     ActuatorModel.DAMIAO_DM4340,
     ActuatorModel.DAMIAO_DM4340,
@@ -197,7 +199,7 @@ STATIC_UPPER_BODY_TORSO: Final = ChainSpec(
         units=(CoordinateUnit.RADIAN,),
         lower=(-1.221293965056839,),
         upper=(1.1499580376897836,),
-        actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x1F),),
+        actuations=(_damiao(ActuatorModel.DAMIAO_DM8009P, 0x1F),),
         observations=(ActuatorFeedback(),),
     ),
     home=(0.0,),

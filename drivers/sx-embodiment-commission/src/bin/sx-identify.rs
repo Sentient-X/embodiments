@@ -218,7 +218,7 @@ struct Args {
     without: Vec<String>,
     feedforward: Option<String>,
     /// The supply the motors run on, recorded with every run: one voltage, or per motor model
-    /// (`damiao_dm8009=48,*=24`), as given.
+    /// (`damiao_dm8009p=48,*=24`), as given.
     supply: Option<String>,
     /// Seconds over which feed-forward torque ramps in from zero.
     ramp: f64,
@@ -323,15 +323,6 @@ fn supply_for(text: &str, model: &str) -> Result<Option<f64>, ()> {
         }
     }
     Ok(fallback)
-}
-
-/// Peak torque by model, N·m: what the guard is a share of.
-fn peak(model: &str) -> f64 {
-    match model {
-        "damiao_dm8009" => 40.0,
-        "damiao_dm4340" => 27.0,
-        _ => 7.0,
-    }
 }
 
 /// One tick's target and the segment it belongs to.
@@ -768,6 +759,17 @@ fn check(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
                         axis.axis.joint
                     ));
                 }
+                let rating = axis.axis.binding.model.rating();
+                if let (Some(supply), Some(false)) =
+                    (supply, supply.and_then(|volts| rating.admits_supply(volts)))
+                {
+                    let [low, high] = rating.supply_volts.unwrap_or_default();
+                    problems.push(format!(
+                        "{}'s {} is rated {low}-{high} V, not the {supply} V supply",
+                        axis.axis.joint,
+                        axis.axis.binding.model.wire()
+                    ));
+                }
             }
         }
         eprintln!(
@@ -1044,7 +1046,7 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let peaks: Vec<f64> = axes
         .iter()
-        .map(|a| peak(a.axis.binding.model.wire()))
+        .map(|a| a.axis.binding.model.rating().peak_torque_nm)
         .collect();
     let gains: Vec<f64> = axes
         .iter()
@@ -1062,6 +1064,7 @@ fn run() -> Result<(), String> {
             AxisLimits {
                 max_speed: args.speed,
                 max_tracking_error: MAX_TRACKING_ERROR,
+                max_acceleration: None,
             };
             width
         ],

@@ -16,7 +16,8 @@ crate driving one of its buses embeds the same document. A body is looked up in 
 then in ``development_embodiments``, so a body still under construction (the static upper body)
 is driven from the same registry facts its promotion will keep. ``vocabulary.json`` is the
 registry's ``ActuatorModel`` and ``ActuatorBus``, which the driver crate's own lists are held
-equal to.
+equal to, and each model's ``ACTUATOR_RATINGS`` entry (peak torque, supply range), which drivers
+and commissioning read instead of spelling.
 ``tests/fixtures/drives.json`` in ``sx-damiao-can`` holds, for each Damiao body, the
 ``sx.instance-drive/v1`` documents :func:`sx_embodiments.instance.drive_document` renders for
 its nominal instance and for one with a measured, reversed first joint, which the crate's
@@ -63,7 +64,7 @@ from sx_embodiments.known.humanoid import (
 )
 from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
 from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
-from sx_embodiments.layout import ActuatorBus, ActuatorModel
+from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorBus, ActuatorModel
 from sx_embodiments.media import (
     NO_RIG,
     MediaRig,
@@ -123,6 +124,15 @@ def vocabulary() -> str:
     document = {
         "models": [model.value for model in ActuatorModel],
         "buses": [bus.value for bus in ActuatorBus],
+        "ratings": {
+            model.value: {
+                "peak_torque_nm": rating.peak_torque_nm,
+                "supply_volts": None
+                if rating.supply is None
+                else [rating.supply.min_volts, rating.supply.max_volts],
+            }
+            for model, rating in ((m, ACTUATOR_RATINGS[m]) for m in ActuatorModel)
+        },
     }
     return json.dumps(document, indent=2) + "\n"
 
