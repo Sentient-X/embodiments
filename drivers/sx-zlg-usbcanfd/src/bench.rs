@@ -116,6 +116,10 @@ impl<P: CanPort> CanPort for ReadOnly<P> {
     fn counters(&self) -> Vec<(&'static str, u64)> {
         self.0.counters()
     }
+
+    fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
+        self.0.health()
+    }
 }
 
 /// The static upper body's motors that answer: send ids 0x09, 0x10–0x15, 0x18–0x1E. The torso,
@@ -243,7 +247,9 @@ impl LinkEvents {
                 note(self, error.to_string());
                 Ok(())
             }
-            Some(LinkError::PowerCycle { .. }) => Err(BenchError::PowerCycle(error.to_string())),
+            Some(LinkError::PowerCycle { .. } | LinkError::NothingAnswering { .. }) => {
+                Err(BenchError::LinkDown(error.to_string()))
+            }
             None => Err(BenchError::Port(error)),
         }
     }
@@ -332,7 +338,7 @@ pub enum BenchError {
         bitrate: u32,
     },
     #[error("{0}")]
-    PowerCycle(String),
+    LinkDown(String),
     #[error("the port failed: {0}")]
     Port(#[from] io::Error),
 }

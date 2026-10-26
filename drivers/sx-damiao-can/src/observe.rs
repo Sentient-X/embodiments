@@ -89,6 +89,10 @@ impl<P: CanPort> CanPort for AskOnlyCanPort<P> {
     fn counters(&self) -> Vec<(&'static str, u64)> {
         self.0.counters()
     }
+
+    fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
+        self.0.health()
+    }
 }
 
 /// How a motor's feedback is scaled.

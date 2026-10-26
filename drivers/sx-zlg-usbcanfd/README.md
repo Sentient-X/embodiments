@@ -66,6 +66,14 @@ restart (stop, initialise, transmit timeout, termination, start: §3.8 has no ot
 it stalls again before any batch is accepted, a device close and open (only when no other
 channel is open); after that, or if the adapter does not answer those commands, every send
 returns `LinkError::PowerCycle`, which says the adapter must be unplugged and plugged back in.
+An empty bus is not a wedged adapter: when a stall is a run of refused batches (status 1: the
+bus did not take the batch within the transmit timeout, i.e. no node acknowledged) and not one
+frame arrived on the channel meanwhile, the channel is restarted but never escalated, and the
+send returns `LinkError::NothingAnswering` (`NotConnected`): "Nothing on CAN<n> is answering:
+check the cable to the motors, its termination and motor power". The next send tries again, so
+the channel works the moment the bus answers. `CanPort::health` reports the same as the
+channel's health line (`LinkHealth`), for a station to surface as the device's health; seen on
+the Spark 2026-10-26, when every batch on both channels came back status 1.
 `sx-can-bench --exercise-recovery` checks both recoveries on the adapter.
 
 `frame_allowance()` is twice (device transmit timeout + 1 ms): a frame can wait behind one
@@ -127,7 +135,7 @@ motors) is refused before anything is sent, and a cycle that has less of its per
 its bus time when it comes due is skipped and counted missed, never queued late. Cycles are
 paced by sleeping to 1 ms before they are due and spinning the rest, because macOS oversleeps
 by about 0.75 ms; replies are awaited with `receive_until`, which sleeps (`--spin` to poll).
-A link that needs a power cycle stops the run with that message.
+A link that needs a power cycle, or a bus where nothing answers, stops the run with that message.
 
 ### Measured, 2026-10-25
 
