@@ -1263,6 +1263,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sx-embodiment-ik"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "serde",
+ "serde_json",
+ "sx-embodiment-drivers",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sx-feetech-serial"
 version = "0.1.0"
 dependencies = [

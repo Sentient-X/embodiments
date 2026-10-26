@@ -210,6 +210,14 @@ leader, so a headset needs only joint positions. `tools/render_packs.py` renders
 packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
 the crate's `tree-poses.json`, Python's poses at seeded positions that `Tree` is held equal to.
 
+A body with collision geometry also gets `collision.json` (`sx.collision-proxies/v1`,
+`sx_embodiments.collision_proxies`): one to three capsules per link, fitted to contain every
+vertex of its collision meshes, and the link pairs a self-collision check skips (at most two
+moving joints apart, or overlapping at the zero pose). `drivers/sx-embodiment-ik` reads the
+pack's URDF and proxies and solves one constrained QP differential IK per tick: tool poses and a
+camera look-at, under joint limits, speed and acceleration caps, self and table collision. The
+station runs it as the authority and the headset links the same crate for its ghost.
+
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,
 each directly driven joint, each encoder-read joint, each declared camera) and the

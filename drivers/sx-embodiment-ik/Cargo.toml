@@ -1,0 +1,20 @@
+[package]
+name = "sx-embodiment-ik"
+description = "One constrained QP differential IK per tick over an embodiment's tree: joint limits, speed and acceleration caps, self and scene collision"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sx-embodiment-drivers.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+allocation-counter = "0.8"

@@ -282,19 +282,24 @@ pub enum TreeError {
     Malformed(String),
 }
 
+/// One joint of a [`Tree`], placed: `root_from_child = root_from_parent · origin · motion`,
+/// where the motion turns about (or slides along) `axis` by `multiplier * leader + offset`.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TreeJoint {
-    pub(crate) kind: JointType,
+pub struct TreeJoint {
+    /// Fixed for a fixed, floating or planar joint (which holds its origin).
+    pub kind: JointType,
     /// Index into [`Tree::links`].
-    pub(crate) parent: usize,
-    pub(crate) child: usize,
-    pub(crate) origin: Transform,
-    pub(crate) axis: [f64; 3],
+    pub parent: usize,
+    pub child: usize,
+    /// `parent_from_child` at zero.
+    pub origin: Transform,
+    /// Unit length, in the child's frame (which is the joint's frame).
+    pub axis: [f64; 3],
     /// The independent joint this one's position comes from, as `multiplier * leader +
     /// offset` with mimic chains folded; itself with `(1, 0)` when it is independent.
-    pub(crate) leader: String,
-    pub(crate) multiplier: f64,
-    pub(crate) offset: f64,
+    pub leader: String,
+    pub multiplier: f64,
+    pub offset: f64,
 }
 
 /// A description's whole joint tree, parsed once: every link's pose in the root link's frame.
@@ -326,6 +331,8 @@ pub struct Axis {
     pub kind: JointType,
     /// The description's `<limit lower upper>` (radians or metres); `None` for continuous.
     pub limits: Option<[f64; 2]>,
+    /// The description's `<limit velocity>` (unit/s), when it declares one above zero.
+    pub velocity: Option<f64>,
 }
 
 fn attribute_floats<const N: usize>(
@@ -436,6 +443,7 @@ struct RawJoint {
     axis: [f64; 3],
     mimic: Option<(String, f64, f64)>,
     limits: Option<[f64; 2]>,
+    velocity: Option<f64>,
 }
 
 impl RawJoint {
@@ -514,6 +522,10 @@ impl RawJoint {
                     limit.map_or(Ok(0.0), |l| number(l, "upper", 0.0))?,
                 ]),
                 _ => None,
+            },
+            velocity: match child_of(element, "limit") {
+                Some(limit) => Some(number(limit, "velocity", 0.0)?).filter(|v| *v > 0.0),
+                None => None,
             },
         })
     }
@@ -626,6 +638,7 @@ impl Tree {
                 name: j.name.clone(),
                 kind: j.kind.unwrap_or(JointType::Fixed),
                 limits: j.limits,
+                velocity: j.velocity,
             })
             .collect();
         let joints = order
@@ -663,6 +676,13 @@ impl Tree {
     #[must_use]
     pub fn joints(&self) -> &[Axis] {
         &self.independent
+    }
+
+    /// Every joint, parent before child: what [`Tree::link_poses`] composes, for a consumer
+    /// that differentiates the tree (an inverse-kinematics solver) or evaluates it many times.
+    #[must_use]
+    pub fn placed_joints(&self) -> &[TreeJoint] {
+        &self.joints
     }
 
     /// Every link's `root_from_link` at the positions `position` answers for each independent
