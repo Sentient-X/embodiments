@@ -41,9 +41,9 @@ fn inverse_dynamics_is_mujocos_within_a_micro_newton_metre() {
     let design = Dynamics::new(tree.clone(), gravity(&fixture));
     let record = fixture["calibration"].to_string();
     let calibration = DynamicsCalibration::parse(&record).expect("calibration");
-    let digest = calibration.description_sha256.clone();
-    let calibrated = Dynamics::new(tree, gravity(&fixture))
-        .calibrated(&calibration, &digest)
+    let calibrated = Dynamics::of(URDF, gravity(&fixture))
+        .expect("dynamics")
+        .calibrated(&calibration)
         .expect("calibrated");
     let mut worst: f64 = 0.0;
     for sample in fixture["samples"].as_array().expect("samples") {
@@ -94,12 +94,14 @@ fn a_calibration_for_another_description_is_refused() {
     let fixture = fixture();
     let calibration =
         DynamicsCalibration::parse(&fixture["calibration"].to_string()).expect("calibration");
-    let dynamics = Dynamics::new(Tree::parse(URDF).expect("tree"), gravity(&fixture));
-    assert!(
-        dynamics
-            .calibrated(&calibration, "0".repeat(64).as_str())
-            .is_err()
-    );
+    let dynamics = Dynamics::of(URDF, gravity(&fixture)).expect("dynamics");
+    assert!(dynamics.clone().calibrated(&calibration).is_ok());
+    let mut elsewhere = calibration.clone();
+    elsewhere.description_sha256 = "0".repeat(64);
+    assert!(dynamics.calibrated(&elsewhere).is_err());
+    // A tree read without its bytes takes no calibration.
+    let bare = Dynamics::new(Tree::parse(URDF).expect("tree"), gravity(&fixture));
+    assert!(bare.calibrated(&calibration).is_err());
     let mut document = fixture["calibration"].clone();
     document["links"][0]["mass"] = Value::from(-1.0);
     assert!(DynamicsCalibration::parse(&document.to_string()).is_err());
@@ -135,4 +137,28 @@ fn a_tick_is_bounded_in_time() {
     eprintln!("inverse_into over 2000 calls: median {median:?}, worst {worst:?}");
     // The work is fixed by the tree; the bound is loose so a debug build on a busy host passes.
     assert!(median < std::time::Duration::from_millis(5));
+}
+
+/// BAM-family friction (`fixtures/friction-parity.json`, every term on) is the Python model's,
+/// which fits it and drives the simulator's motors.
+#[test]
+fn joint_friction_is_the_fitted_and_simulated_model() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/friction-parity.json")).expect("fixture");
+    let stiction = fixture["stiction_velocity"].as_f64().expect("stiction");
+    for case in fixture["cases"].as_array().expect("cases") {
+        let friction: sx_embodiment_drivers::JointFriction =
+            serde_json::from_value(case["friction"].clone()).expect("friction");
+        let (speed, acceleration, motor, external, torque) = (
+            vector(&case["speed"]),
+            vector(&case["acceleration"]),
+            vector(&case["motor"]),
+            vector(&case["external"]),
+            vector(&case["torque"]),
+        );
+        for i in 0..speed.len() {
+            let got = friction.torque(speed[i], acceleration[i], motor[i], external[i], stiction);
+            assert!((got - torque[i]).abs() < 1e-12, "{got} != {}", torque[i]);
+        }
+    }
 }

@@ -36,7 +36,7 @@
  "calibration": {
   "schema": "sx.calibration/v1",
   "kind": "dynamics",
-  "description_sha256": "cde441400103731f119d1e0178b85fbb3eb918ce5f21e91638638af4d4cd5ee7",
+  "description_sha256": "e78a6c1603b2e38876c3da6d0c332e37d71cf804a9042358293a845f246ae4fe",
   "stiction_velocity": 0.05,
   "links": [
    {
@@ -385,85 +385,183 @@
     "joint": "left_elbow_pitch_joint",
     "coulomb": 0.26642900761094446,
     "viscous": 0.23234738537219865,
-    "armature": 0.004419360318410787
+    "armature": 0.004419360318410787,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_forearm_yaw_joint",
     "coulomb": 0.7670190764929427,
     "viscous": 0.15146674654086278,
-    "armature": 0.0029767229272226357
+    "armature": 0.0029767229272226357,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_shoulder_pitch_joint",
     "coulomb": 0.38284689267051186,
     "viscous": 0.10730971822406887,
-    "armature": 0.0021919467448927193
+    "armature": 0.0021919467448927193,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_shoulder_roll_joint",
     "coulomb": 0.32746636658206846,
     "viscous": 0.19680335026253523,
-    "armature": 0.0027340796427381205
+    "armature": 0.0027340796427381205,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_upper_arm_yaw_joint",
     "coulomb": 0.21753822797636482,
     "viscous": 0.13582481362200707,
-    "armature": 0.04740139251963869
+    "armature": 0.04740139251963869,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_wrist_pitch_joint",
     "coulomb": 0.1580378993317417,
     "viscous": 0.1131024344009946,
-    "armature": 0.027991791429011804
+    "armature": 0.027991791429011804,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "left_wrist_roll_joint",
     "coulomb": 0.4718650546260425,
     "viscous": 0.45527671659839974,
-    "armature": 0.02134680326340592
+    "armature": 0.02134680326340592,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_elbow_pitch_joint",
     "coulomb": 0.32656804812406043,
     "viscous": 0.4084126540697864,
-    "armature": 0.032988396054057546
+    "armature": 0.032988396054057546,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_forearm_yaw_joint",
     "coulomb": 0.8381679833511628,
     "viscous": 0.08013833378581774,
-    "armature": 0.003959213508218385
+    "armature": 0.003959213508218385,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_shoulder_pitch_joint",
     "coulomb": 0.660439111033471,
     "viscous": 0.3859506680108879,
-    "armature": 0.032695977825935
+    "armature": 0.032695977825935,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_shoulder_roll_joint",
     "coulomb": 0.28896901767588923,
     "viscous": 0.2779398199909328,
-    "armature": 0.041173267378591866
+    "armature": 0.041173267378591866,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_upper_arm_yaw_joint",
     "coulomb": 0.8534299938282074,
     "viscous": 0.496698299452601,
-    "armature": 0.01616363512601603
+    "armature": 0.01616363512601603,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_wrist_pitch_joint",
     "coulomb": 0.2239320576515403,
     "viscous": 0.29438227188919,
-    "armature": 0.04325167018655619
+    "armature": 0.04325167018655619,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    },
    {
     "joint": "right_wrist_roll_joint",
     "coulomb": 0.11282502176830984,
     "viscous": 0.3565351879689869,
-    "armature": 0.012475519100627991
+    "armature": 0.012475519100627991,
+    "stribeck": 0.0,
+    "stribeck_velocity": 0.0,
+    "stribeck_exponent": 0.0,
+    "load_motor": 0.0,
+    "load_external": 0.0,
+    "load_motor_stribeck": 0.0,
+    "load_external_stribeck": 0.0
    }
   ],
   "units": [],
