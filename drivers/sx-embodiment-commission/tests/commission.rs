@@ -347,7 +347,10 @@ fn every_port_finds_its_one_bridge() {
     };
     let document = commissioning(&declared, &matched).to_string();
     let parsed = Commissioning::parse(&document, "instance-content-id").unwrap();
-    assert_eq!(parsed.rails, declared.rails, "the derate is recorded as declared");
+    assert_eq!(
+        parsed.rails, declared.rails,
+        "the derate is recorded as declared"
+    );
     assert_eq!(parsed.rails.derate_decided(), Some("owner, 2026-10-26"));
 
     // The ZLG's two channels share its serial: the station cannot yet open by it.
