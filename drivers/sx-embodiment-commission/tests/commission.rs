@@ -341,7 +341,7 @@ fn every_port_finds_its_one_bridge() {
     let declared = Station {
         rails: station()
             .rails
-            .with_derate(0.6, "owner, 2026-10-26")
+            .with_derate(0.6, "owner, 2026-10-26: lifts the derate")
             .unwrap(),
         ..station()
     };
@@ -351,7 +351,10 @@ fn every_port_finds_its_one_bridge() {
         parsed.rails, declared.rails,
         "the derate is recorded as declared"
     );
-    assert_eq!(parsed.rails.derate_decided(), Some("owner, 2026-10-26"));
+    assert_eq!(
+        parsed.rails.derate_decided(),
+        Some("owner, 2026-10-26: lifts the derate")
+    );
 
     // The ZLG's two channels share its serial: the station cannot yet open by it.
     let notes = warnings(&found, &matched);

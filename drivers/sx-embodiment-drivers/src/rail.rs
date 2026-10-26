@@ -40,6 +40,10 @@ pub struct DerateLimits {
     pub torque_share: f64,
 }
 
+/// What a declared derate's decision says when it is faster than [`OVER_RAIL`]: lifting the
+/// over-rail protection is recorded as such, never as a side effect of a number.
+pub const LIFTS_DERATE: &str = "lifts the derate";
+
 /// The derate of an axis whose rail is over its model's supported maximum.
 pub const OVER_RAIL: DerateLimits = DerateLimits {
     max_speed: 0.3,
@@ -124,11 +128,17 @@ pub fn derates(axes: &[BoundAxis], rails: &Rails) -> Vec<AxisDerate> {
         .filter_map(|(axis, bound)| match rails.check(bound) {
             RailCheck::Derated(over) => {
                 let mut limits = rails.derate();
-                if let Some(rated) = bound.binding.model.rating().rated_speed_rad_s
-                    && limits.max_speed > rated
-                {
-                    limits.max_acceleration *= rated / limits.max_speed;
-                    limits.max_speed = rated;
+                // No faster than the model's rated speed; a model with none recorded is held to
+                // the automatic derate at most, never lifted on a guess.
+                let ceiling = bound
+                    .binding
+                    .model
+                    .rating()
+                    .rated_speed_rad_s
+                    .unwrap_or(OVER_RAIL.max_speed);
+                if limits.max_speed > ceiling {
+                    limits.max_acceleration *= ceiling / limits.max_speed;
+                    limits.max_speed = ceiling;
                 }
                 Some(AxisDerate { axis, over, limits })
             }
@@ -146,6 +156,11 @@ pub enum RailsError {
     Volts(String),
     #[error("a declared derate needs a finite, positive speed and the decision it records")]
     Derate,
+    #[error(
+        "a declared derate faster than the automatic one must say \"lifts the derate\" in its \
+         decision to be recorded"
+    )]
+    Lifts,
 }
 
 /// Commissioning's measured rails: volts by selector (see the module docs). A selector that is
@@ -211,6 +226,11 @@ impl Rails {
     pub fn with_derate(mut self, max_speed: f64, decided: &str) -> Result<Self, RailsError> {
         if !(max_speed.is_finite() && max_speed > 0.0) || decided.trim().is_empty() {
             return Err(RailsError::Derate);
+        }
+        // Lifting the over-rail protection is a decision that says so: a derate faster than the
+        // automatic one names it in its record, so a typo (6 for 0.6) is refused, not obeyed.
+        if max_speed > OVER_RAIL.max_speed && !decided.contains(LIFTS_DERATE) {
+            return Err(RailsError::Lifts);
         }
         self.derate = DerateLimits {
             max_speed,
@@ -356,9 +376,12 @@ mod tests {
         assert_eq!(rails.derate_decided(), None);
         let declared = rails
             .clone()
-            .with_derate(0.6, "owner, 2026-10-26")
+            .with_derate(0.6, "owner, 2026-10-26: lifts the derate")
             .expect("declared");
-        assert_eq!(declared.derate_decided(), Some("owner, 2026-10-26"));
+        assert_eq!(
+            declared.derate_decided(),
+            Some("owner, 2026-10-26: lifts the derate")
+        );
         let derate = derates(&axes, &declared)[0];
         // The automatic ratio of acceleration to speed (5 s^-1), the automatic torque share.
         assert_eq!(
@@ -372,7 +395,7 @@ mod tests {
         // Never faster than the model's rated speed (100 rpm).
         let wild = rails
             .clone()
-            .with_derate(100.0, "a typo")
+            .with_derate(100.0, "a typo that lifts the derate")
             .expect("declared");
         let rated = ActuatorModel::parse("damiao_dm8009p")
             .expect("a model")
@@ -380,6 +403,22 @@ mod tests {
             .rated_speed_rad_s
             .expect("rated");
         assert!((derates(&axes, &wild)[0].limits.max_speed - rated).abs() < 1e-12);
+        // Faster than the automatic derate without saying so: refused, typed.
+        assert!(matches!(
+            rails.clone().with_derate(6.0, "owner"),
+            Err(RailsError::Lifts)
+        ));
+        // Slower than the automatic derate needs no such words.
+        assert!(rails.clone().with_derate(0.2, "owner: gentler").is_ok());
+        // A model with no rated speed is never derated faster than the automatic derate.
+        let unrated = [axis("dynamixel_xm430_w350", "serial")];
+        let lifted = Rails::new(BTreeMap::from([("dynamixel_xm430_w350".to_owned(), 16.0)]))
+            .expect("rails")
+            .with_derate(5.0, "lifts the derate")
+            .expect("declared");
+        assert!(
+            (derates(&unrated, &lifted)[0].limits.max_speed - OVER_RAIL.max_speed).abs() < 1e-12
+        );
         for (speed, decided) in [(0.0, "x"), (f64::NAN, "x"), (-1.0, "x"), (0.6, "  ")] {
             assert_eq!(
                 rails.clone().with_derate(speed, decided),
