@@ -230,7 +230,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     /// Every chain's read, in native state order: each chain's axes whatever another answered.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         self.members
             .iter_mut()
             .flat_map(ActuatorChain::read_positions)
@@ -318,7 +318,7 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
         (**self).stop_budget()
     }
 
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         (**self).read_positions()
     }
 
@@ -454,7 +454,7 @@ mod tests {
             self.answers.then(|| Axes::filled(0.25, self.axes.len()))
         }
 
-        fn read_positions(&mut self) -> Vec<AxisReading> {
+        fn read_positions(&mut self) -> Axes<AxisReading> {
             let reading = if self.answers {
                 AxisReading::Fresh {
                     position: 0.5,
@@ -463,7 +463,7 @@ mod tests {
             } else {
                 AxisReading::Missing(crate::chain::MissingReason::Timeout)
             };
-            vec![reading; self.axes.len()]
+            Axes::filled(reading, self.axes.len())
         }
     }
 

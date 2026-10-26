@@ -433,7 +433,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     }
 
     /// A read moves nothing, so it passes through even while a fault is latched.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         self.chain.read_positions()
     }
 
@@ -585,8 +585,11 @@ mod tests {
                 .then(|| Axes::from_slice(self.at.as_ref().unwrap_or(&self.rest)))
         }
 
-        fn read_positions(&mut self) -> Vec<AxisReading> {
-            vec![AxisReading::Missing(crate::chain::MissingReason::Timeout); self.axes.len()]
+        fn read_positions(&mut self) -> Axes<AxisReading> {
+            Axes::filled(
+                AxisReading::Missing(crate::chain::MissingReason::Timeout),
+                self.axes.len(),
+            )
         }
     }
 

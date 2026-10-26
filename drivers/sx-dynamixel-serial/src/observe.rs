@@ -267,7 +267,7 @@ impl<P: SerialPort> Observe for DynamixelObserver<P> {
     /// Each identified servo's `Present Position`, read as the chain reads it; a servo not yet
     /// identified is identified first and reads missing (or faulted) while it does not answer;
     /// a refused servo reads corrupt.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> sx_embodiment_drivers::Axes<AxisReading> {
         (0..self.units.len())
             .map(|index| match self.identify(index) {
                 Err(Unidentified::Silent(reading)) => reading,

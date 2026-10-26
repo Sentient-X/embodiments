@@ -1217,13 +1217,15 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     /// was sent is fresh, faulted when it reports a fault code or a state contradicting the
     /// chain's; one that did not is stale (or, never having answered, timed out); a link that
     /// failed is unavailable for every motor it could not reach.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
-        let asked = phase(
+    fn read_positions(&mut self) -> Axes<AxisReading> {
+        phase_into(
             &mut self.control,
-            &every(&self.ids, Awaits::Feedback),
+            &self.every_feedback,
             FEEDBACK_WAIT,
             |control, _, request| control.send_refresh(request.bus_id),
+            &mut self.tick,
         );
+        let asked = &self.tick;
         let link_failed = asked.failure.is_some();
         let expected = if self.enabled {
             MotorState::Enabled

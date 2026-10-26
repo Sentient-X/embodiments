@@ -350,7 +350,7 @@ pub trait ActuatorChain {
     /// axis that did not answer this poll freshly reported as missing or faulted rather than
     /// dropped. A read never fails as a whole; a link that is down reads every axis
     /// [`MissingReason::Unavailable`].
-    fn read_positions(&mut self) -> Vec<AxisReading>;
+    fn read_positions(&mut self) -> Axes<AxisReading>;
 
     /// Each axis's reading from the last command's own observation, in native state order:
     /// what the bus answered while the body moved, so a caller can keep it beside the command.
@@ -400,7 +400,7 @@ pub trait Observe {
     /// One [`AxisReading`] per axis in native state order, in joint coordinates through each
     /// axis's drive map and unit calibration, as [`ActuatorChain::read_positions`] reports them.
     /// An axis that did not answer is missing or faulted in its place, never dropped.
-    fn read_positions(&mut self) -> Vec<AxisReading>;
+    fn read_positions(&mut self) -> Axes<AxisReading>;
 }
 
 #[cfg(test)]

@@ -804,7 +804,7 @@ impl<P: SerialPort> DynamixelChain<P> {
     /// cannot be reached is missing; one that answers with an error, the hardware-error alert
     /// included, is faulted with it. The other servos' readings stand. Reading writes no
     /// register, so nothing moves and torque stays as it was.
-    fn present_positions(&mut self) -> Vec<AxisReading> {
+    fn present_positions(&mut self) -> sx_embodiment_drivers::Axes<AxisReading> {
         self.servos
             .iter()
             .map(|servo| present_position(&mut self.ph, servo))
@@ -1024,7 +1024,7 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> sx_embodiment_drivers::Axes<AxisReading> {
         self.present_positions()
     }
 

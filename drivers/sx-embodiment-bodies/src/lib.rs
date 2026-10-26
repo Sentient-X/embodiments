@@ -824,7 +824,7 @@ impl Observe for Observer {
     }
 
     /// Every bus's readings, in native state order; a bus's missing axes stand in their place.
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> sx_embodiment_drivers::Axes<AxisReading> {
         self.buses
             .iter_mut()
             .flat_map(Observe::read_positions)
@@ -1081,7 +1081,7 @@ where
         self.0.stop_budget()
     }
 
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> sx_embodiment_drivers::Axes<AxisReading> {
         self.0.read_positions()
     }
 

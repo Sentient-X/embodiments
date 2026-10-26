@@ -145,7 +145,7 @@ impl<O: Observe + ?Sized> Observe for Box<O> {
         (**self).axes()
     }
 
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         (**self).read_positions()
     }
 }
@@ -155,10 +155,9 @@ impl<C: Observe, F> Observe for Masked<C, F> {
         &self.axes
     }
 
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
         self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
-            .to_vec()
     }
 }
 
@@ -198,10 +197,9 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
         self.inner.set_feedforward_limits(&kept)
     }
 
-    fn read_positions(&mut self) -> Vec<AxisReading> {
+    fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
         self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
-            .to_vec()
     }
     fn stop(&mut self) -> StopReport {
         self.inner.stop()
