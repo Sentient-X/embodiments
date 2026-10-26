@@ -9,6 +9,7 @@ dependencies = ["sx-contracts>=0.1.0"]
 
 [project.optional-dependencies]
 capture = ["pyserial>=3.5,<4"]
+render = ["numpy>=2.1"]
 calibrate = [
     "numpy>=2.1",
     "opencv-python-headless>=4.13,<4.14",

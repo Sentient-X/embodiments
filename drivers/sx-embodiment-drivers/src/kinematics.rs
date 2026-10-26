@@ -272,6 +272,370 @@ pub fn pose_of(m: &Transform) -> Pose {
     }
 }
 
+/// A description cannot be read as a joint tree.
+#[derive(Debug, Error, PartialEq)]
+pub enum TreeError {
+    #[error("the description is not XML: {0}")]
+    Xml(String),
+    #[error("{0}")]
+    Malformed(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TreeJoint {
+    kind: JointType,
+    /// Index into [`Tree::links`].
+    parent: usize,
+    child: usize,
+    origin: Transform,
+    axis: [f64; 3],
+    /// The independent joint this one's position comes from, as `multiplier * leader +
+    /// offset` with mimic chains folded; itself with `(1, 0)` when it is independent.
+    leader: String,
+    multiplier: f64,
+    offset: f64,
+}
+
+/// A description's whole joint tree, parsed once: every link's pose in the root link's frame.
+///
+/// The same reading as `sx_embodiments.kinematics.Kinematics`: a URDF origin is translation
+/// then fixed-axis roll, pitch, yaw; a revolute or continuous joint turns about its unit axis,
+/// a prismatic one slides along it; a `<mimic>` joint takes `multiplier * leader + offset`
+/// (chains of mimics fold to the one independent joint), so the YUBI's fingers, nails and
+/// connectors all follow the one encoder joint. A floating or planar joint has no one-number
+/// position: it holds its origin, and the subtree below it is placed by its consumer (each
+/// YUBI hand by the operator's controller). Links are in description order, the render pack's
+/// link order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tree {
+    links: Vec<String>,
+    root: usize,
+    /// Parent before child.
+    joints: Vec<TreeJoint>,
+    independent: Vec<String>,
+}
+
+fn attribute_floats<const N: usize>(
+    node: Option<roxmltree::Node>,
+    key: &str,
+    default: [f64; N],
+) -> Result<[f64; N], TreeError> {
+    let Some(text) = node.and_then(|n| n.attribute(key)) else {
+        return Ok(default);
+    };
+    let values: Vec<f64> = text
+        .split_whitespace()
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|_| TreeError::Malformed(format!("{key}={text:?} is not {N} numbers")))?;
+    let values: [f64; N] = values
+        .try_into()
+        .map_err(|_| TreeError::Malformed(format!("{key}={text:?} is not {N} numbers")))?;
+    if values.iter().all(|v| v.is_finite()) {
+        Ok(values)
+    } else {
+        Err(TreeError::Malformed(format!(
+            "{key}={text:?} is not finite"
+        )))
+    }
+}
+
+fn child_of<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
+    tag: &str,
+) -> Option<roxmltree::Node<'a, 'input>> {
+    node.children()
+        .find(|n| n.is_element() && n.tag_name().name() == tag)
+}
+
+fn number(node: roxmltree::Node, key: &str, default: f64) -> Result<f64, TreeError> {
+    node.attribute(key).map_or(Ok(default), |text| {
+        text.trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| TreeError::Malformed(format!("{key}={text:?} is not a finite number")))
+    })
+}
+
+/// A URDF origin: translation, then fixed-axis roll, pitch, yaw.
+#[must_use]
+pub fn from_xyz_rpy([x, y, z]: [f64; 3], [roll, pitch, yaw]: [f64; 3]) -> Transform {
+    let (sr, cr) = roll.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    let (sy, cy) = yaw.sin_cos();
+    [
+        cy * cp,
+        cy * sp * sr - sy * cr,
+        cy * sp * cr + sy * sr,
+        x, //
+        sy * cp,
+        sy * sp * sr + cy * cr,
+        sy * sp * cr - cy * sr,
+        y, //
+        -sp,
+        cp * sr,
+        cp * cr,
+        z, //
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+}
+
+struct RawJoint {
+    name: String,
+    kind: Option<JointType>,
+    parent: usize,
+    child: usize,
+    origin: Transform,
+    axis: [f64; 3],
+    mimic: Option<(String, f64, f64)>,
+}
+
+impl RawJoint {
+    fn read(element: roxmltree::Node, links: &[String]) -> Result<Self, TreeError> {
+        let index = |name: Option<&str>, joint: &str| {
+            name.and_then(|n| links.iter().position(|l| l == n))
+                .ok_or_else(|| {
+                    TreeError::Malformed(format!(
+                        "joint {joint:?} joins links the description lacks"
+                    ))
+                })
+        };
+        let name = element
+            .attribute("name")
+            .ok_or_else(|| TreeError::Malformed("a joint has no name".into()))?;
+        let parent = index(
+            child_of(element, "parent").and_then(|n| n.attribute("link")),
+            name,
+        )?;
+        let child = index(
+            child_of(element, "child").and_then(|n| n.attribute("link")),
+            name,
+        )?;
+        let kind = match element.attribute("type").unwrap_or_default() {
+            "fixed" => Some(JointType::Fixed),
+            "revolute" => Some(JointType::Revolute),
+            "continuous" => Some(JointType::Continuous),
+            "prismatic" => Some(JointType::Prismatic),
+            "floating" | "planar" => None,
+            other => {
+                return Err(TreeError::Malformed(format!(
+                    "joint {name:?} has type {other:?}, which URDF does not define"
+                )));
+            }
+        };
+        let origin = child_of(element, "origin");
+        let axis = attribute_floats(child_of(element, "axis"), "xyz", [1.0, 0.0, 0.0])?;
+        let norm = axis.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let moves = matches!(
+            kind,
+            Some(JointType::Revolute | JointType::Continuous | JointType::Prismatic)
+        );
+        if moves && norm < 1e-12 {
+            return Err(TreeError::Malformed(format!(
+                "joint {name:?} moves about a zero axis"
+            )));
+        }
+        let mimic = match child_of(element, "mimic") {
+            None => None,
+            Some(m) => Some((
+                m.attribute("joint")
+                    .ok_or_else(|| TreeError::Malformed(format!("joint {name:?} mimics no joint")))?
+                    .to_owned(),
+                number(m, "multiplier", 1.0)?,
+                number(m, "offset", 0.0)?,
+            )),
+        };
+        Ok(Self {
+            name: name.to_owned(),
+            kind,
+            parent,
+            child,
+            origin: from_xyz_rpy(
+                attribute_floats(origin, "xyz", [0.0; 3])?,
+                attribute_floats(origin, "rpy", [0.0; 3])?,
+            ),
+            axis: if norm >= 1e-12 {
+                [axis[0] / norm, axis[1] / norm, axis[2] / norm]
+            } else {
+                [1.0, 0.0, 0.0]
+            },
+            mimic,
+        })
+    }
+
+    /// This joint with its mimic chain folded onto the one independent joint it follows.
+    fn fold(raw: &[Self], j: usize) -> Result<TreeJoint, TreeError> {
+        let joint = &raw[j];
+        let (mut leader, mut multiplier, mut offset) = (j, 1.0_f64, 0.0_f64);
+        let mut seen = vec![j];
+        while let Some((name, m, o)) = &raw[leader].mimic {
+            let next = raw.iter().position(|r| &r.name == name).ok_or_else(|| {
+                TreeError::Malformed(format!(
+                    "joint {:?} mimics an absent joint",
+                    raw[leader].name
+                ))
+            })?;
+            if seen.contains(&next) {
+                return Err(TreeError::Malformed(format!(
+                    "joint {:?} mimics itself through a cycle",
+                    joint.name
+                )));
+            }
+            seen.push(next);
+            // x_self = multiplier * x_leader + offset, x_leader = m * x_next + o.
+            offset = multiplier.mul_add(*o, offset);
+            multiplier *= m;
+            leader = next;
+        }
+        Ok(TreeJoint {
+            kind: joint.kind.unwrap_or(JointType::Fixed),
+            parent: joint.parent,
+            child: joint.child,
+            origin: joint.origin,
+            axis: joint.axis,
+            leader: raw[leader].name.clone(),
+            multiplier,
+            offset,
+        })
+    }
+}
+
+impl Tree {
+    /// Read a description's links and joints.
+    ///
+    /// # Errors
+    ///
+    /// [`TreeError`] when the bytes are not XML, a joint names an absent link, a link has two
+    /// parents or none reaches the one root, a type is not URDF's, a moving axis is zero, or a
+    /// mimic names an absent joint or a cycle.
+    pub fn parse(urdf: &str) -> Result<Self, TreeError> {
+        let document =
+            roxmltree::Document::parse(urdf).map_err(|e| TreeError::Xml(e.to_string()))?;
+        let description = document.root_element();
+        let elements = |tag: &'static str| {
+            description
+                .children()
+                .filter(move |n| n.is_element() && n.tag_name().name() == tag)
+        };
+        let mut links: Vec<String> = Vec::new();
+        for link in elements("link") {
+            let name = link
+                .attribute("name")
+                .ok_or_else(|| TreeError::Malformed("a link has no name".into()))?;
+            links.push(name.to_owned());
+        }
+        let mut raw: Vec<RawJoint> = Vec::new();
+        let mut parent_joint: Vec<Option<usize>> = vec![None; links.len()];
+        for element in elements("joint") {
+            let joint = RawJoint::read(element, &links)?;
+            if parent_joint[joint.child].is_some() {
+                return Err(TreeError::Malformed(format!(
+                    "link {:?} has two parent joints",
+                    links[joint.child]
+                )));
+            }
+            parent_joint[joint.child] = Some(raw.len());
+            raw.push(joint);
+        }
+        let roots: Vec<usize> = (0..links.len())
+            .filter(|&l| parent_joint[l].is_none())
+            .collect();
+        let [root] = roots[..] else {
+            return Err(TreeError::Malformed(format!(
+                "a tree has one root link; this description has {}",
+                roots.len()
+            )));
+        };
+        // Parent before child: breadth first from the root. A link it never reaches sits on a cycle.
+        let mut order: Vec<usize> = Vec::with_capacity(raw.len());
+        let mut frontier = vec![root];
+        while let Some(link) = frontier.pop() {
+            for (j, joint) in raw.iter().enumerate() {
+                if joint.parent == link {
+                    order.push(j);
+                    frontier.push(joint.child);
+                }
+            }
+        }
+        if order.len() != raw.len() {
+            return Err(TreeError::Malformed(
+                "the description's links form a cycle".into(),
+            ));
+        }
+        let independent = raw
+            .iter()
+            .filter(|j| j.kind.is_some_and(|k| k != JointType::Fixed) && j.mimic.is_none())
+            .map(|j| j.name.clone())
+            .collect();
+        let joints = order
+            .iter()
+            .map(|&j| RawJoint::fold(&raw, j))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            links,
+            root,
+            joints,
+            independent,
+        })
+    }
+
+    /// Every link, in description order: the order [`Tree::link_poses`] answers in.
+    #[must_use]
+    pub fn links(&self) -> &[String] {
+        &self.links
+    }
+
+    /// The root link, whose frame every pose is in.
+    #[must_use]
+    pub fn root(&self) -> &str {
+        &self.links[self.root]
+    }
+
+    /// The joints whose positions place the tree: every moving joint that mimics none, in
+    /// description order.
+    #[must_use]
+    pub fn independent(&self) -> &[String] {
+        &self.independent
+    }
+
+    /// Every link's `root_from_link` at the positions `position` answers for each independent
+    /// joint, in [`Tree::links`] order.
+    ///
+    /// # Errors
+    ///
+    /// [`PlacementError`] when an independent joint the tree moves has no finite position.
+    pub fn link_poses(
+        &self,
+        position: impl Fn(&str) -> Option<f64>,
+    ) -> Result<Vec<Transform>, PlacementError> {
+        let mut poses = vec![IDENTITY; self.links.len()];
+        for joint in &self.joints {
+            let local = if joint.kind == JointType::Fixed {
+                joint.origin
+            } else {
+                let x = position(&joint.leader)
+                    .ok_or_else(|| PlacementError::Missing(joint.leader.clone()))?;
+                if !x.is_finite() {
+                    return Err(PlacementError::NonFinite(joint.leader.clone()));
+                }
+                let q = joint.multiplier.mul_add(x, joint.offset);
+                let motion = if joint.kind == JointType::Prismatic {
+                    along(joint.axis, q)
+                } else {
+                    about(joint.axis, q)
+                };
+                compose(&joint.origin, &motion)
+            };
+            poses[joint.child] = compose(&poses[joint.parent], &local);
+        }
+        Ok(poses)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,5 +763,121 @@ mod tests {
             .expect("pose");
         assert!((pose.translation_m[0] - 0.0).abs() < 1e-12);
         assert_eq!(chain.joints(), ["gripper"]);
+    }
+
+    const TREE_POSES: &str = include_str!("../tests/fixtures/tree-poses.json");
+    const STATIC_UPPER_BODY: &str =
+        include_str!("../../../render_packs/sentient-static-upper-body/robot.urdf");
+    const YUBI: &str = include_str!("../../../render_packs/yubi/robot.urdf");
+
+    #[derive(Deserialize)]
+    struct TreeSample {
+        positions: HashMap<String, f64>,
+        poses: HashMap<String, Vec<f64>>,
+    }
+
+    #[test]
+    fn the_tree_places_every_link_where_the_description_does() {
+        let samples: HashMap<String, Vec<TreeSample>> =
+            serde_json::from_str(TREE_POSES).expect("tree poses");
+        for (key, urdf) in [
+            ("sentient-static-upper-body", STATIC_UPPER_BODY),
+            ("yubi", YUBI),
+        ] {
+            let tree = Tree::parse(urdf).expect("tree");
+            assert_eq!(samples[key].len(), 4);
+            for sample in &samples[key] {
+                let mut joints: Vec<&String> = sample.positions.keys().collect();
+                joints.sort();
+                let mut independent: Vec<&String> = tree.independent().iter().collect();
+                independent.sort();
+                assert_eq!(joints, independent, "{key}");
+                let poses = tree
+                    .link_poses(|j| sample.positions.get(j).copied())
+                    .expect("poses");
+                assert_eq!(poses.len(), sample.poses.len(), "{key}: every link");
+                for (link, pose) in tree.links().iter().zip(&poses) {
+                    for (got, want) in pose.iter().zip(&sample.poses[link]) {
+                        assert!((got - want).abs() <= 1e-9, "{key} {link}: {got} != {want}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn yubi_fingers_follow_the_one_encoder_joint() {
+        let tree = Tree::parse(YUBI).expect("tree");
+        assert_eq!(
+            tree.independent(),
+            ["left_left_finger", "right_left_finger"]
+        );
+        let at = |q: f64| tree.link_poses(|_| Some(q)).expect("poses");
+        let (open, shut) = (at(0.3), at(0.0));
+        let moved = |link: &str| {
+            let i = tree.links().iter().position(|l| l == link).expect("link");
+            open[i]
+                .iter()
+                .zip(shut[i])
+                .any(|(a, b)| (a - b).abs() > 1e-9)
+        };
+        for link in [
+            "left_link_right_finger",
+            "left_right_nail",
+            "left_link_connector_left",
+        ] {
+            assert!(moved(link), "{link} follows left_left_finger");
+        }
+        assert!(!moved("left_base_link"));
+    }
+
+    #[test]
+    fn a_mimic_of_a_mimic_folds_to_the_leader() {
+        let urdf = r#"<robot name="r">
+            <link name="a"/><link name="b"/><link name="c"/><link name="d"/>
+            <joint name="lead" type="prismatic"><parent link="a"/><child link="b"/><axis xyz="1 0 0"/></joint>
+            <joint name="m1" type="prismatic"><parent link="a"/><child link="c"/><axis xyz="0 2 0"/>
+              <mimic joint="lead" multiplier="2" offset="0.5"/></joint>
+            <joint name="m2" type="prismatic"><parent link="c"/><child link="d"/><axis xyz="0 0 1"/>
+              <mimic joint="m1" multiplier="-1" offset="0.25"/></joint>
+        </robot>"#;
+        let tree = Tree::parse(urdf).expect("tree");
+        assert_eq!(tree.root(), "a");
+        assert_eq!(tree.independent(), ["lead"]);
+        let poses = tree
+            .link_poses(|j| (j == "lead").then_some(1.0))
+            .expect("poses");
+        // m1 = 2.5 along y; m2 = -(2.5) + 0.25 = -2.25 along z.
+        assert!((poses[2][7] - 2.5).abs() < 1e-12);
+        assert!((poses[3][7] - 2.5).abs() < 1e-12 && (poses[3][11] + 2.25).abs() < 1e-12);
+        assert_eq!(
+            tree.link_poses(|_| None),
+            Err(PlacementError::Missing("lead".into()))
+        );
+        assert_eq!(
+            tree.link_poses(|_| Some(f64::INFINITY)),
+            Err(PlacementError::NonFinite("lead".into()))
+        );
+    }
+
+    #[test]
+    fn a_description_that_is_not_one_tree_is_refused() {
+        let two_roots = r#"<robot name="r"><link name="a"/><link name="b"/></robot>"#;
+        assert!(matches!(
+            Tree::parse(two_roots),
+            Err(TreeError::Malformed(_))
+        ));
+        let cycle = r#"<robot name="r"><link name="a"/><link name="b"/><link name="c"/>
+            <joint name="x" type="fixed"><parent link="b"/><child link="c"/></joint>
+            <joint name="y" type="fixed"><parent link="c"/><child link="b"/></joint></robot>"#;
+        assert!(matches!(Tree::parse(cycle), Err(TreeError::Malformed(_))));
+        let self_mimic = r#"<robot name="r"><link name="a"/><link name="b"/>
+            <joint name="x" type="revolute"><parent link="a"/><child link="b"/>
+              <mimic joint="x"/></joint></robot>"#;
+        assert!(matches!(
+            Tree::parse(self_mimic),
+            Err(TreeError::Malformed(_))
+        ));
+        assert!(matches!(Tree::parse("<robot"), Err(TreeError::Xml(_))));
     }
 }

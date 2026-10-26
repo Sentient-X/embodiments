@@ -1,8 +1,9 @@
 """sx-embodiments depends only on the lower sx-contracts vocabulary package.
 
 Two optional extras widen it for one tree each: ``capture`` lets ``encoder_serial.py`` read a
-serial port, and ``calibrate`` lets the solvers under ``calibrate/`` use NumPy, SciPy and
-OpenCV. Nothing else in the package may import them, so the registry stays importable bare.
+serial port, ``calibrate`` lets the solvers under ``calibrate/`` use NumPy, SciPy and OpenCV,
+and ``render`` lets ``render_pack.py`` use NumPy. Nothing else in the package may import them,
+so the registry stays importable bare.
 """
 
 import ast
@@ -15,6 +16,7 @@ _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_contracts", "sx_embodiments
 _EXTRAS = {
     "encoder_serial.py": frozenset({"serial"}),
     "calibrate": frozenset({"numpy", "scipy", "cv2"}),
+    "render_pack.py": frozenset({"numpy"}),
 }
 
 # The sanctioned environment reads live in assets.py alone: the local-tree override,
