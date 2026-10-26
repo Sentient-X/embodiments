@@ -26,7 +26,13 @@ from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.errors import UnknownEmbodimentError
 from sx_embodiments.kinematics import JointType, Kinematics, Transform, compose
+from sx_embodiments.known.static_upper_body import (
+    STATIC_UPPER_BODY_VIRTUAL_GRIPPER,
+    STATIC_UPPER_BODY_WORKCELL,
+)
+from sx_embodiments.known.yubi import YUBI_TRACKING
 from sx_embodiments.render_pack import RenderPack, build
+from sx_embodiments.viewing import Viewing
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ROOT / "render_packs"
@@ -34,6 +40,13 @@ POSES = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/tree-poses.json"
 
 #: Each body drawn, with its triangle budget.
 BODIES: dict[str, int] = {"sentient-static-upper-body": 150_000, "yubi": 60_000}
+#: Each body's viewing facts, as its registry module declares them.
+VIEWING: dict[str, Viewing] = {
+    "sentient-static-upper-body": Viewing(
+        mount=STATIC_UPPER_BODY_WORKCELL, virtual_gripper=STATIC_UPPER_BODY_VIRTUAL_GRIPPER
+    ),
+    "yubi": Viewing(tracking=YUBI_TRACKING),
+}
 SAMPLES = 4
 _HELD = (JointType.FLOATING, JointType.PLANAR)
 
@@ -79,7 +92,7 @@ def _relevant(kinematics: Kinematics, joint: str, positions: dict[str, float]) -
 
 def packs() -> dict[str, RenderPack]:
     return {
-        name: build(body(name), name=name, triangle_budget=budget)
+        name: build(body(name), name=name, triangle_budget=budget, viewing=VIEWING.get(name))
         for name, budget in BODIES.items()
     }
 

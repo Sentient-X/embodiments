@@ -110,3 +110,27 @@ def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
             t = np.clip((vertices - a) @ d / max(float(d @ d), 1e-18), 0.0, 1.0)
             gaps.append(np.linalg.norm(vertices - (a + t[:, None] * d), axis=1) - capsule["radius"])
         assert float(np.min(gaps, axis=0).max()) <= 0.0, link
+
+
+def test_viewing_facts_are_carried_from_the_registry() -> None:
+    from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_WORKCELL
+    from sx_embodiments.known.yubi import YUBI_TRACKING
+
+    def pack(name: str) -> dict[str, object]:
+        return json.loads((ROOT / "render_packs" / name / "pack.json").read_bytes())
+
+    yubi, body = pack("yubi"), pack("sentient-static-upper-body")
+    assert yubi["tracking"] == {d.side: d.to_json() for d in YUBI_TRACKING}
+    assert yubi["tracking"]["left"]["frame"] == "left_controller_link"
+    assert "mount" not in yubi and "tracking" not in body
+    support = json.loads(
+        (ROOT / "render_packs/sentient-static-upper-body/collision.json").read_bytes()
+    )["support"]
+    assert body["mount"] == {
+        **support,
+        "floor_to_frame_m": STATIC_UPPER_BODY_WORKCELL.floor_to_frame_m,
+    }
+    gripper = body["virtual_gripper"]
+    assert gripper["ahead_m"] == 0.09
+    drawn = gripper["links"]["left"] + gripper["links"]["right"]
+    assert set(body["tcp_frames"].values()) <= set(drawn)

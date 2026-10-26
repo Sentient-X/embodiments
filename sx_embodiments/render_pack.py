@@ -13,7 +13,10 @@ A pack is a directory of three files, generated from the body's composed descrip
   material is the visual's URDF colour, or one neutral grey. Box, cylinder and sphere visuals
   are tessellated. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
-  count, and the body's gripper tool frames by side.
+  count, and the body's gripper tool frames by side; and, when the body declares them
+  (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
+  side), ``mount`` (the base mount's frame and kind, as ``collision.json``'s ``support``, and
+  that surface's height above the floor) and ``virtual_gripper`` (the body's gripper drawn at an empty controller).
 * ``collision.json``, when a link has collision geometry: capsules containing it and the link
   pairs a self-collision check skips (:mod:`sx_embodiments.collision_proxies`), which the
   ``sx-embodiment-ik`` solver keeps apart.
@@ -46,6 +49,7 @@ from .embodiment import Embodiment
 from .errors import EmbodimentError
 from .kinematics import Transform, from_xyz_rpy
 from .materialize import materialize
+from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
 GENERATOR: Final = "sx_embodiments.render_pack/v1"
@@ -528,15 +532,41 @@ def tcp_frames(links: list[str]) -> dict[str, str]:
     return frames
 
 
+def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict[str, JsonValue]:
+    frames = [device.frame for device in viewing.tracking]
+    if missing := sorted(set(frames) - set(links)):
+        raise RenderPackError(f"{embodiment.name}: viewing names links it lacks: {missing}")
+    fields: dict[str, JsonValue] = {}
+    if viewing.tracking:
+        fields["tracking"] = {device.side: device.to_json() for device in viewing.tracking}
+    if viewing.mount is not None:
+        base = embodiment.base_mount
+        if base is None:
+            raise RenderPackError(f"{embodiment.name}: a workcell needs a base mount")
+        fields["mount"] = {
+            "frame": base.frame,
+            "kind": str(base.kind),
+            "floor_to_frame_m": viewing.mount.floor_to_frame_m,
+        }
+    if viewing.virtual_gripper is not None:
+        gripper = viewing.virtual_gripper.to_json(links)
+        if set(tcp_frames(links)) != {"left", "right"}:
+            raise RenderPackError(f"{embodiment.name}: a virtual gripper needs both tool frames")
+        fields["virtual_gripper"] = gripper
+    return fields
+
+
 def build(
     embodiment: Embodiment,
     *,
     name: str | None = None,
     triangle_budget: int = DEFAULT_TRIANGLE_BUDGET,
+    viewing: Viewing | None = None,
 ) -> RenderPack:
     """``embodiment``'s render pack, decimated to at most ``triangle_budget`` triangles.
 
-    ``name`` is the registry key the pack is filed under (the body's name by default).
+    ``name`` is the registry key the pack is filed under (the body's name by default);
+    ``viewing`` the body's declared viewing facts, written into ``pack.json``.
     """
     urdf = embodiment.urdf_bytes
     links, visuals = _visuals(embodiment, urdf)
@@ -571,6 +601,8 @@ def build(
         "tcp_frames": tcp_frames(links),
         "generated_by": GENERATOR,
     }
+    if viewing is not None:
+        document.update(_viewing(viewing, links, embodiment))
     from .collision_proxies import proxies
 
     return RenderPack(key, urdf, glb, canonical_bytes(document), proxies(embodiment, name=key))
