@@ -4,6 +4,7 @@
     "damiao_dm4310",
     "damiao_dm4340",
     "damiao_dm8009",
+    "damiao_dm8009p",
     "dynamixel_xl330_m288",
     "dynamixel_xm430_w350"
   ],
@@ -11,5 +12,44 @@
     "feetech_serial",
     "damiao_can",
     "dynamixel_serial"
-  ]
+  ],
+  "ratings": {
+    "feetech_sts3215": {
+      "peak_torque_nm": 2.94,
+      "supply_volts": null
+    },
+    "damiao_dm4310": {
+      "peak_torque_nm": 7.0,
+      "supply_volts": null
+    },
+    "damiao_dm4340": {
+      "peak_torque_nm": 27.0,
+      "supply_volts": null
+    },
+    "damiao_dm8009": {
+      "peak_torque_nm": 40.0,
+      "supply_volts": null
+    },
+    "damiao_dm8009p": {
+      "peak_torque_nm": 40.0,
+      "supply_volts": [
+        24.0,
+        48.0
+      ]
+    },
+    "dynamixel_xl330_m288": {
+      "peak_torque_nm": 0.52,
+      "supply_volts": [
+        3.7,
+        6.0
+      ]
+    },
+    "dynamixel_xm430_w350": {
+      "peak_torque_nm": 4.1,
+      "supply_volts": [
+        10.0,
+        14.8
+      ]
+    }
+  }
 }

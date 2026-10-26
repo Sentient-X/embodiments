@@ -18,7 +18,7 @@ use thiserror::Error;
 pub struct DeclaredUnit {
     pub joint: String,
     pub bus_id: u16,
-    /// The registry's actuator model (`feetech_sts3215`, `damiao_dm8009`).
+    /// The registry's actuator model (`feetech_sts3215`, `damiao_dm8009p`).
     pub model: String,
 }
 

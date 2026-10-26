@@ -7,7 +7,7 @@
 
 use serde_json::Value;
 use sx_damiao_can::body::DamiaoBody;
-use sx_damiao_can::chain::{DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009, motor_type};
+use sx_damiao_can::chain::{DAMIAO_CAN, DAMIAO_DM4310, DAMIAO_DM4340, DAMIAO_DM8009P, motor_type};
 use sx_damiao_can::static_upper_body::{BINDINGS, MASTER_ID_OFFSET, STATIC_UPPER_BODY};
 use sx_embodiment_drivers::{BodyBindings, BodyError, InstanceDrive};
 
@@ -41,16 +41,16 @@ fn the_chain_is_the_registrys_bindings_with_the_hardware_profile() {
     assert_eq!(body.axes.len(), 25);
     // The hardware profile's send ids and models, torso then left then right.
     let table: [(&str, u16, _); 15] = [
-        ("torso_joint", 0x1F, DAMIAO_DM8009),
-        ("left_shoulder_pitch_joint", 0x18, DAMIAO_DM8009),
-        ("left_shoulder_roll_joint", 0x19, DAMIAO_DM8009),
+        ("torso_joint", 0x1F, DAMIAO_DM8009P),
+        ("left_shoulder_pitch_joint", 0x18, DAMIAO_DM8009P),
+        ("left_shoulder_roll_joint", 0x19, DAMIAO_DM8009P),
         ("left_upper_arm_yaw_joint", 0x1A, DAMIAO_DM4340),
         ("left_elbow_pitch_joint", 0x1B, DAMIAO_DM4340),
         ("left_forearm_yaw_joint", 0x1C, DAMIAO_DM4340),
         ("left_wrist_pitch_joint", 0x1D, DAMIAO_DM4310),
         ("left_wrist_roll_joint", 0x1E, DAMIAO_DM4310),
-        ("right_shoulder_pitch_joint", 0x09, DAMIAO_DM8009),
-        ("right_shoulder_roll_joint", 0x10, DAMIAO_DM8009),
+        ("right_shoulder_pitch_joint", 0x09, DAMIAO_DM8009P),
+        ("right_shoulder_roll_joint", 0x10, DAMIAO_DM8009P),
         ("right_upper_arm_yaw_joint", 0x11, DAMIAO_DM4340),
         ("right_elbow_pitch_joint", 0x12, DAMIAO_DM4340),
         ("right_forearm_yaw_joint", 0x13, DAMIAO_DM4340),

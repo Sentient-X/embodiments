@@ -67,7 +67,10 @@ def test_the_arm_bindings_are_the_hardware_profile() -> None:
         motor = motors[axis.name]
         assert isinstance(axis.actuation, DirectDrive) and isinstance(axis.bounds, Bounds)
         binding = axis.actuation.actuator
-        assert binding.model.value == f"damiao_{motor['model_candidate'].lower()}", axis.name
+        # The profile writes the torso's and shoulders' DM-J8009P-2EC as "DM8009".
+        candidate = {"dm8009": "dm8009p"}.get(motor["model_candidate"].lower())
+        candidate = candidate or motor["model_candidate"].lower()
+        assert binding.model.value == f"damiao_{candidate}", axis.name
         assert binding.bus_id == motor["send_id"], axis.name
         assert motor["recv_id"] == binding.bus_id + STATIC_UPPER_BODY_MASTER_ID_OFFSET
         assert (binding.sign, motor["zero_rad"]) == (motor["sign"], 0.0), axis.name

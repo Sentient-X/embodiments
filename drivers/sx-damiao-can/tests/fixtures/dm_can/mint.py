@@ -212,6 +212,7 @@ DM_TYPE = {
     "damiao_dm4310": DM_CAN.DM_Motor_Type.DM4310,
     "damiao_dm4340": DM_CAN.DM_Motor_Type.DM4340,
     "damiao_dm8009": DM_CAN.DM_Motor_Type.DM8009,
+    "damiao_dm8009p": DM_CAN.DM_Motor_Type.DM8009,  # the J8009P: the DM8009's limit row
 }
 # src/b601.rs: master = id + 0x10; kp/kd from reBotArm_control_py's rebotarm_dm.yaml (the 4340P's
 # kd 8 declared as 5, the MIT maximum); motor ranges are the URDF limits intersected with

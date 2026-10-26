@@ -105,6 +105,9 @@ pub const DAMIAO_DM4310: ActuatorModel = ActuatorModel::new("damiao_dm4310");
 pub const DAMIAO_DM4340: ActuatorModel = ActuatorModel::new("damiao_dm4340");
 /// `ActuatorModel.DAMIAO_DM8009` in the registry.
 pub const DAMIAO_DM8009: ActuatorModel = ActuatorModel::new("damiao_dm8009");
+/// `ActuatorModel.DAMIAO_DM8009P` in the registry: the DM-J8009P-2EC, driven with the DM8009's
+/// limit row (`[12.5, 45, 54]`).
+pub const DAMIAO_DM8009P: ActuatorModel = ActuatorModel::new("damiao_dm8009p");
 /// `ActuatorBus.DAMIAO_CAN` in the registry.
 pub const DAMIAO_CAN: ActuatorBus = ActuatorBus::new("damiao_can");
 
@@ -141,7 +144,7 @@ pub fn motor_type(model: ActuatorModel) -> Option<DmMotorType> {
         Some(DmMotorType::DM4310)
     } else if model == DAMIAO_DM4340 {
         Some(DmMotorType::DM4340)
-    } else if model == DAMIAO_DM8009 {
+    } else if model == DAMIAO_DM8009 || model == DAMIAO_DM8009P {
         Some(DmMotorType::DM8009)
     } else {
         None
