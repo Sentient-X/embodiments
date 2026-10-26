@@ -12,7 +12,8 @@
       "provisional": false,
       "bus_id": 1,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "shoulder_lift",
@@ -24,7 +25,8 @@
       "provisional": false,
       "bus_id": 2,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "elbow_flex",
@@ -36,7 +38,8 @@
       "provisional": false,
       "bus_id": 3,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "wrist_flex",
@@ -48,7 +51,8 @@
       "provisional": false,
       "bus_id": 4,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "wrist_roll",
@@ -60,7 +64,8 @@
       "provisional": false,
       "bus_id": 5,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "gripper",

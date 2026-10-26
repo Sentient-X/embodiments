@@ -207,6 +207,7 @@ mod tests {
             },
             zero: 0.0,
             direction: 1,
+            home: None,
         }
     }
 

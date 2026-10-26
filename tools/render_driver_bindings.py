@@ -65,6 +65,7 @@ from sx_embodiments.known.humanoid import (
 from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
 from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
 from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorBus, ActuatorModel
+from sx_embodiments.parts import ChainSpec
 from sx_embodiments.media import (
     NO_RIG,
     MediaRig,
@@ -283,8 +284,24 @@ def rendered() -> dict[Path, str]:
     return files
 
 
+def declared_homes(robot: Embodiment) -> tuple[dict[tuple[str, str], float], set[str]]:
+    """Each chain joint's declared ``home``, by (component instance, joint name): where the
+    driver returns it when an operation ends; and the instances that are chains. A part that
+    declares none (a gripper) is absent, and the driver leaves that joint where it is."""
+    homes: dict[tuple[str, str], float] = {}
+    chains: set[str] = set()
+    for component in robot.components:
+        part = component.part
+        if isinstance(part, ChainSpec):
+            chains.add(str(component.instance))
+            for joint, home in zip(part.joint_names, part.home, strict=True):
+                homes[(str(component.instance), joint)] = home
+    return homes, chains
+
+
 def render(name: str) -> str:
     robot = registered(name)
+    homes, chains = declared_homes(robot)
     axes: list[dict[str, object]] = []
     for coordinate in robot.state.coordinates:
         binding = coordinate.axis.actuator
@@ -292,6 +309,9 @@ def render(name: str) -> str:
             continue
         if coordinate.lower is None or coordinate.upper is None:
             raise ValueError(f"{name}/{coordinate.joint_name} is driven without bounds")
+        home = homes.get((str(coordinate.instance), coordinate.axis.name))
+        if home is None and str(coordinate.instance) in chains:
+            raise ValueError(f"{name}/{coordinate.joint_name} is a chain joint with no home")
         axes.append(
             {
                 "joint": coordinate.joint_name,
@@ -305,6 +325,7 @@ def render(name: str) -> str:
                 "sign": binding.sign,
                 "reduction": binding.reduction,
             }
+            | ({} if home is None else {"home": home})
         )
     document = {"embodiment": name, "id": str(robot.id), "axes": axes}
     return json.dumps(document, indent=2) + "\n"

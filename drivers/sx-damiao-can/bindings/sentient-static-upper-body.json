@@ -12,7 +12,8 @@
       "provisional": false,
       "bus_id": 31,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -24,7 +25,8 @@
       "provisional": false,
       "bus_id": 24,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_shoulder_roll_joint",
@@ -36,7 +38,8 @@
       "provisional": false,
       "bus_id": 25,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_upper_arm_yaw_joint",
@@ -48,7 +51,8 @@
       "provisional": false,
       "bus_id": 26,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_elbow_pitch_joint",
@@ -60,7 +64,8 @@
       "provisional": false,
       "bus_id": 27,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_forearm_yaw_joint",
@@ -72,7 +77,8 @@
       "provisional": false,
       "bus_id": 28,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_wrist_pitch_joint",
@@ -84,7 +90,8 @@
       "provisional": false,
       "bus_id": 29,
       "sign": -1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_wrist_roll_joint",
@@ -96,7 +103,8 @@
       "provisional": false,
       "bus_id": 30,
       "sign": -1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_shoulder_pitch_joint",
@@ -108,7 +116,8 @@
       "provisional": false,
       "bus_id": 9,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_shoulder_roll_joint",
@@ -120,7 +129,8 @@
       "provisional": false,
       "bus_id": 16,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_upper_arm_yaw_joint",
@@ -132,7 +142,8 @@
       "provisional": false,
       "bus_id": 17,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_elbow_pitch_joint",
@@ -144,7 +155,8 @@
       "provisional": false,
       "bus_id": 18,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_forearm_yaw_joint",
@@ -156,7 +168,8 @@
       "provisional": false,
       "bus_id": 19,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_wrist_pitch_joint",
@@ -168,7 +181,8 @@
       "provisional": false,
       "bus_id": 20,
       "sign": -1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "right_wrist_roll_joint",
@@ -180,7 +194,8 @@
       "provisional": false,
       "bus_id": 21,
       "sign": -1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "left_gripper_left_finger_joint",
@@ -240,7 +255,8 @@
       "provisional": true,
       "bus_id": 1,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "so101_shoulder_lift_joint",
@@ -252,7 +268,8 @@
       "provisional": true,
       "bus_id": 2,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "so101_elbow_flex_joint",
@@ -264,7 +281,8 @@
       "provisional": true,
       "bus_id": 3,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "so101_wrist_flex_joint",
@@ -276,7 +294,8 @@
       "provisional": true,
       "bus_id": 4,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "so101_wrist_roll_joint",
@@ -288,7 +307,8 @@
       "provisional": true,
       "bus_id": 5,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "so101_camera_tilt_joint",
@@ -300,7 +320,8 @@
       "provisional": true,
       "bus_id": 6,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": -2.2
     }
   ]
 }

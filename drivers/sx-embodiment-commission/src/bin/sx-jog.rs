@@ -4,6 +4,7 @@
 //! sx-jog --drive <drive.json> --commissioning <commissioning.json>
 //!        [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]...
 //!        [--exclude <joint,...>] [--speed 0.2] [--log <ticks.jsonl>]
+//!        [--at-end home|start|release]
 //!        (--joint <joint> --delta-deg <deg> [--hold-seconds <s>]
 //!         | --sequence <joint:deg|pause:s,...>)
 //! ```
@@ -12,8 +13,13 @@
 //! the commissioning names), inside the `Governor`: each command slewed at `--speed` (at most
 //! 0.5 rad/s) from where the body rests, a 0.2 rad tracking-error stop. A joint in the
 //! commissioning's `out_of_service`, or in `--exclude` for this run, keeps its place in the
-//! vector and is never addressed. Relative moves need no zero calibration. The body is stopped
-//! at the end, on any refusal or fault, and on Ctrl-C. `--log` writes every tick as one JSON
+//! vector and is never addressed. Relative moves need no zero calibration. When the moves are
+//! done, `--at-end` decides (`sx_embodiment_drivers::AtEnd`): `home`, the default, returns every
+//! joint under the governor to its registry home (where the calibrated zeros put it), then stops
+//! the body; `start` returns to where the body rested when it was opened; `release` stops it
+//! where it is. A return that cannot run or finish stops the body where it is, says why and
+//! exits non-zero, as does a stop that is not proven. On any refusal or fault, and on Ctrl-C at
+//! any time (during the moves or the return), the body is stopped where it is. `--log` writes every tick as one JSON
 //! line (the target asked for, the slewed command sent, what was observed, each motor's
 //! position, velocity, torque, temperatures and state) from a writer thread; the control loop
 //! only copies a fixed-size record into a preallocated queue.
@@ -26,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use sx_embodiment_commission::bench::BodyFlags;
 use sx_embodiment_commission::jog::{self, Step, TickLog};
-use sx_embodiment_drivers::{ActuatorChain, AxisLimits, Governor};
+use sx_embodiment_drivers::{ActuatorChain, AtEnd, AxisLimits, Governor};
 
 const PERIOD: Duration = Duration::from_millis(20);
 const TRACKING: f64 = 0.2;
@@ -52,6 +58,7 @@ struct Args {
     delta_deg: Option<f64>,
     hold: f64,
     sequence: Option<String>,
+    at_end: AtEnd,
 }
 
 fn parse() -> Result<Args, String> {
@@ -71,6 +78,7 @@ fn parse() -> Result<Args, String> {
             }
             "--hold-seconds" => parsed.hold = value()?.parse().map_err(|_| "bad --hold-seconds")?,
             "--sequence" => parsed.sequence = Some(value()?),
+            "--at-end" => parsed.at_end = value()?.parse()?,
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -144,19 +152,32 @@ fn run() -> Result<(), String> {
     let ended = jog::run(
         &mut governor,
         &steps,
-        speed,
         PERIOD,
         &stop,
         log.as_ref(),
+        args.at_end,
         &mut pace,
     )?;
+    eprintln!("at end: {}", ended.ending);
+    let stop = ended.ending.stop();
     eprintln!(
         "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",
-        ended.stop.unproven, ended.stop.faults, ended.stop.unobserved
+        stop.unproven, stop.faults, stop.unobserved
     );
     if let Some(log) = log {
         let (written, dropped) = log.finish().map_err(|error| error.to_string())?;
         eprintln!("log: {written} ticks written, {dropped} dropped");
     }
-    ended.failure.map_or(Ok(()), Err)
+    if let Some(failure) = ended.failure {
+        return Err(failure);
+    }
+    if ended.ending.is_clean() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the end of the run: {}; stop proven: {}",
+            ended.ending,
+            ended.ending.stop().is_proven()
+        ))
+    }
 }

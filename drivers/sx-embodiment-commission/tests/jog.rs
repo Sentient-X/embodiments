@@ -1,6 +1,7 @@
 //! `sx-jog`'s run on the simulated static upper body, opened through the embodiment layer:
 //! the governor's slewed command is what the log records beside the target, the out-of-service
-//! torso keeps its place and is never addressed, and the log is written off the tick path.
+//! torso keeps its place and is never addressed, the log is written off the tick path, and a
+//! finished run returns the body home before it stops it.
 
 use std::cell::Cell;
 use std::io::{self, Write};
@@ -15,7 +16,10 @@ use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{Body, Commissioning, OpenError, Port, PortSource, open};
 use sx_embodiment_commission::jog::{self, Step, TickLog};
 use sx_embodiment_drivers::can::CanFrame;
-use sx_embodiment_drivers::{ActuatorChain, AxisLimits, Clock, Governor, InstanceDrive};
+use sx_embodiment_drivers::{
+    ActuatorChain, AtEnd, AxisLimits, Clock, Ending, Governor, InstanceDrive, Progress, Return,
+    ReturnFailure,
+};
 
 const DRIVES: &str = include_str!("../../sx-damiao-can/tests/fixtures/drives.json");
 const PERIOD: Duration = Duration::from_millis(20);
@@ -121,15 +125,16 @@ fn a_jog_logs_the_slewed_command_and_keeps_the_out_of_service_torso_in_its_place
     let ended = jog::run(
         &mut governor,
         &steps,
-        SPEED,
         PERIOD,
         &stop,
         Some(&log),
+        AtEnd::Release,
         &mut || clock.0.set(clock.0.get() + PERIOD),
     )
     .expect("runs");
     assert!(ended.failure.is_none(), "{:?}", ended.failure);
-    assert!(ended.stop.is_proven());
+    assert!(matches!(ended.ending, Ending::Released { .. }));
+    assert!(ended.ending.stop().is_proven());
     let (written, dropped) = log.finish().expect("log");
     assert_eq!(dropped, 0);
     // 10 degrees at 0.25 rad/s is 0.7 s, plus 0.4 s settling and the 0.1 s pause: 60 ticks.
@@ -190,4 +195,170 @@ fn an_ampersand_step_moves_with_the_next() {
     assert!(matches!(steps[1], Step::Move { axis: 1, .. }));
     assert!(matches!(steps[2], Step::Pause(_)));
     assert!(jog::parse_sequence("&pause:1", &joints).is_err());
+}
+
+#[test]
+fn a_finished_jog_returns_home_then_stops_and_never_addresses_the_torso() {
+    let drive = drive();
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let torso_id = 0x1F;
+    let bus = Sim::for_axes(&axes);
+    bus.kill(torso_id);
+    let (mut governor, clock, joints) = governed(&drive, &bus);
+    let elbow = joints
+        .iter()
+        .position(|joint| joint == "right_elbow_pitch_joint")
+        .expect("the elbow");
+    let steps = jog::parse_sequence("right_elbow_pitch_joint:10", &joints).expect("a sequence");
+    let stop = AtomicBool::new(false);
+    let sent = bus.sent();
+    let ended = jog::run(
+        &mut governor,
+        &steps,
+        PERIOD,
+        &stop,
+        None,
+        AtEnd::default(),
+        &mut || clock.0.set(clock.0.get() + PERIOD),
+    )
+    .expect("runs");
+    assert!(ended.failure.is_none(), "{:?}", ended.failure);
+    let Ending::Returned { to, stop, .. } = &ended.ending else {
+        panic!("expected a return home, got {}", ended.ending);
+    };
+    assert_eq!(*to, AtEnd::Home);
+    assert!(stop.is_proven(), "{stop:?}");
+    let home = governor.axes()[elbow]
+        .home
+        .expect("the elbow declares a home");
+    let readings = governor.read_positions();
+    let at = readings[elbow].position().expect("the elbow answers");
+    assert!((at - home).abs() < 0.05, "elbow at {at}, home {home}");
+    let addressed = |frame: &CanFrame| {
+        frame.id == u32::from(torso_id)
+            || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == torso_id)
+    };
+    assert!(!bus.state().frames[sent..].iter().any(addressed));
+}
+
+#[test]
+fn a_jog_whose_step_is_refused_stops_where_it_is_and_never_returns() {
+    let drive = drive();
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    bus.kill(0x1F);
+    let (mut governor, clock, joints) = governed(&drive, &bus);
+    // The second move asks for the elbow far outside its range: refused before the bus.
+    let steps = jog::parse_sequence(
+        "right_elbow_pitch_joint:10,right_elbow_pitch_joint:-60",
+        &joints,
+    )
+    .expect("a sequence");
+    let stop = AtomicBool::new(false);
+    let ended = jog::run(
+        &mut governor,
+        &steps,
+        PERIOD,
+        &stop,
+        None,
+        AtEnd::Start,
+        &mut || clock.0.set(clock.0.get() + PERIOD),
+    )
+    .expect("runs");
+    assert!(ended.failure.is_some(), "the step was refused");
+    assert!(
+        matches!(ended.ending, Ending::Released { .. }),
+        "a refused run must not return: {}",
+        ended.ending
+    );
+}
+
+/// The static upper body jogged away from home, as an operation leaves it.
+fn jogged(bus: &Sim, drive: &InstanceDrive) -> (Governor<Body, Manual>, Manual, usize) {
+    let (mut governor, clock, joints) = governed(drive, bus);
+    let elbow = joints
+        .iter()
+        .position(|joint| joint == "right_elbow_pitch_joint")
+        .expect("the elbow");
+    let steps = jog::parse_sequence("right_elbow_pitch_joint:10", &joints).expect("a sequence");
+    let stop = AtomicBool::new(false);
+    // Release here only to get a driven body: re-drive it where it rests below.
+    let _ = jog::run(
+        &mut governor,
+        &steps,
+        PERIOD,
+        &stop,
+        None,
+        AtEnd::Release,
+        &mut || clock.0.set(clock.0.get() + PERIOD),
+    )
+    .expect("runs");
+    let rest = governor.last_observed().expect("rest");
+    governor.command(&rest).expect("driven where it rests");
+    (governor, clock, elbow)
+}
+
+#[test]
+fn a_disengaged_body_returns_home_and_is_held_there_enabled() {
+    let drive = drive();
+    let bus = Sim::for_axes(&STATIC_UPPER_BODY.axes(&drive).expect("axes"));
+    bus.kill(0x1F);
+    let (mut governor, clock, elbow) = jogged(&bus, &drive);
+    let mut ret = Return::begin(&mut governor, AtEnd::Home, &[]).expect("begins");
+    let mut gravity = |_: &[f64], out: &mut [sx_embodiment_drivers::Feedforward]| {
+        for out in out.iter_mut() {
+            out.torque = 0.5;
+        }
+    };
+    let mut ticks = 0;
+    while ret
+        .tick(&mut governor, Some(&mut gravity))
+        .expect("returns")
+        == Progress::Moving
+    {
+        clock.0.set(clock.0.get() + PERIOD);
+        ticks += 1;
+        assert!(ticks < 10_000, "never settled");
+    }
+    for _ in 0..500 {
+        clock.0.set(clock.0.get() + PERIOD);
+        ret.hold(&mut governor, Some(&mut gravity)).expect("held");
+    }
+    // Still enabled (a stop clears what was sent), at home.
+    assert!(governor.sent().is_some(), "never stopped while held");
+    let home = governor.axes()[elbow].home.expect("a home");
+    let at = governor.last_observed().expect("observed")[elbow];
+    assert!((at - home).abs() < 0.05, "elbow at {at}, home {home}");
+}
+
+#[test]
+fn a_motor_lost_during_the_return_is_a_governor_fault_for_the_plain_stop() {
+    let drive = drive();
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    bus.kill(0x1F);
+    let (mut governor, clock, elbow) = jogged(&bus, &drive);
+    let mut ret = Return::begin(&mut governor, AtEnd::Home, &[]).expect("begins");
+    for _ in 0..5 {
+        assert_eq!(ret.tick(&mut governor, None), Ok(Progress::Moving));
+        clock.0.set(clock.0.get() + PERIOD);
+    }
+    bus.kill(governor.axes()[elbow].binding.bus_id);
+    let failure = loop {
+        match ret.tick(&mut governor, None) {
+            Ok(_) => clock.0.set(clock.0.get() + PERIOD),
+            Err(failure) => break failure,
+        }
+    };
+    assert!(
+        matches!(failure, ReturnFailure::Governor { .. }),
+        "{failure}"
+    );
+    // The governor stopped the body and latched: nothing moves it again.
+    assert!(governor.is_latched());
+    assert!(governor.sent().is_none());
+    assert!(matches!(
+        Return::begin(&mut governor, AtEnd::Home, &[]),
+        Err(ReturnFailure::Latched)
+    ));
 }

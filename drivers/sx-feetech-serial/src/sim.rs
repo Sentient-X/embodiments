@@ -632,6 +632,7 @@ mod tests {
         let mut servos = so101([narrow(); 6]).expect("composes");
         servos[1].axis.lower = 1.0;
         servos[1].axis.upper = 1.5;
+        servos[1].axis.home = Some(1.0);
         let error = crate::FeetechChain::open(bus.clone(), servos).err();
         assert!(
             matches!(
