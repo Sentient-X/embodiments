@@ -23,7 +23,10 @@ the instance placed in them spelled `<serial>/left` and `<serial>/right` of one 
 raster and integral rate the product lists. Anything else is a typed `RequestError`.
 
 `capture::open` finds the device by its product's USB vendor and product ids and, on Linux, by the
-serial `sysfs` reports (the capture node only, `index` 0); macOS's AVFoundation names no serial,
+serial `sysfs` reports (the capture node only, `index` 0). A ZED 2i's video interface reports the
+placeholder serial `OV0001` on Linux; the unit's serial is its sensor module's (`2b03:f881`), which
+sits on the USB 2 half of the same connector, so the device takes that one (seen on a DGX Spark,
+2026-10-26: `6-1` video, `5-1.2` sensor, serial 30371653); macOS's AVFoundation names no serial,
 so there the one attached device of the product is opened and two are refused as ambiguous. It
 asks for exactly the side-by-side raster, YUYV, at the planned rate, and refuses a device that
 opens anything else. The camera is read on its own thread (a `nokhwa` camera may not cross
