@@ -16,6 +16,7 @@
 use std::io;
 use std::path::PathBuf;
 
+use sx_embodiment_drivers::Holder;
 use sx_embodiment_drivers::can::CanFrame;
 use thiserror::Error;
 
@@ -33,8 +34,14 @@ pub use socket::SocketCanPort;
 pub enum SocketCanError {
     #[error("{0:?} is not a network interface name")]
     Name(String),
-    #[error("SocketCAN interface {interface} is already open in another process ({})", lock.display())]
-    Busy { interface: String, lock: PathBuf },
+    /// Another of our processes holds the interface's lock. The kernel itself lets any number
+    /// of sockets bind one interface, so only processes taking this lock are excluded.
+    #[error("SocketCAN interface {interface} is already open in another process, {holder} ({})", lock.display())]
+    Busy {
+        interface: String,
+        lock: PathBuf,
+        holder: Holder,
+    },
     #[error("SocketCAN interface {interface}: {source}")]
     Io {
         interface: String,

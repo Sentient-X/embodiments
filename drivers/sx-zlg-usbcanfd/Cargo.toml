@@ -26,7 +26,7 @@ sx-socketcan = { path = "../sx-socketcan", optional = true }
 mach2 = "0.5"
 libc = "0.2"
 objc2 = "0.6"
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFString"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
 objc2-io-kit = { version = "0.3", default-features = false, features = ["std", "libc"] }
 objc2-io-usb-host = { version = "0.3", default-features = false, features = ["std", "block2", "dispatch2", "objc2-io-kit", "objc2-core-foundation", "IOUSBHostDefinitions", "IOUSBHostDevice", "IOUSBHostObject"] }

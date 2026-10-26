@@ -10,7 +10,9 @@
 //! follows enumeration order, so it could be a different adapter on the next boot.
 //! Commissioning records the identity, and the one interface carrying it is opened as an
 //! `sx_socketcan::SocketCanPort`, which also holds that interface's lock against a second of
-//! our processes.
+//! our processes. `SocketCAN` itself is shared by design (any number of sockets bind one
+//! interface, so `candump` or another vendor's controller still can); a second of our processes
+//! is refused with [`OpenError::Busy`], naming the holder on Linux.
 //!
 //! The interface's bitrate and up state are the operating system's, set before the station
 //! starts; an interface that is down opens and then fails its first send.
@@ -19,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
-use sx_socketcan::SocketCanPort;
+use sx_socketcan::{SocketCanError, SocketCanPort};
 
 use crate::OpenError;
 #[cfg(target_os = "linux")]
@@ -114,12 +116,33 @@ fn commissioned_as(interface: &Path, name: &str) -> Option<String> {
 #[cfg(target_os = "linux")]
 impl PortSource for SocketCanPorts {
     fn open(&mut self, serial: &str) -> Result<Port, OpenError> {
-        let interface = self.interface(serial)?;
-        let port = SocketCanPort::open(&interface).map_err(|error| OpenError::Port {
+        open_interface(serial, &self.interface(serial)?)
+    }
+}
+
+/// Open `interface`, commissioned as `serial`. The kernel lets any number of sockets bind one
+/// interface, so `SocketCAN` itself is shared by design; what excludes a second of our
+/// processes is the interface's lock, and a held lock is [`OpenError::Busy`].
+///
+/// # Errors
+///
+/// [`OpenError::Busy`] when another of our processes holds the interface, and
+/// [`OpenError::Port`] for any other failure.
+#[cfg(target_os = "linux")]
+pub(crate) fn open_interface(serial: &str, interface: &str) -> Result<Port, OpenError> {
+    match SocketCanPort::open(interface) {
+        Ok(port) => Ok(Box::new(port)),
+        Err(SocketCanError::Busy {
+            interface, holder, ..
+        }) => Err(OpenError::Busy {
+            serial: serial.to_owned(),
+            device: format!("SocketCAN {interface}"),
+            holder,
+        }),
+        Err(error) => Err(OpenError::Port {
             serial: serial.to_owned(),
             reason: error.to_string(),
-        })?;
-        Ok(Box::new(port))
+        }),
     }
 }
 

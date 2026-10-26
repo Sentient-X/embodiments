@@ -74,10 +74,17 @@ device honours it per batch, as the specification presumes (42 ms at the default
 
 ## Departures and open questions
 
-- Exclusive access is the operating system's interface claim. On Linux, ZLG's kernel module
-  claims the adapter when loaded and exposes its channels as SocketCAN interfaces; then this
-  crate's open fails with `ZlgError::Busy`, and the SocketCAN path (`sx-socketcan`) is the one to
-  use, or the module must be unloaded.
+- Exclusive access is the operating system's interface claim (usbfs `CLAIMINTERFACE` on Linux,
+  the `IOUSBHostInterface` open on macOS): one process owns an adapter. A claim refused because
+  another holds it is `ZlgError::Busy`, never a generic USB failure, and it names the holder
+  where the host tells it: on Linux the processes with the adapter's `/dev/bus/usb/BBB/DDD` node
+  open (from `/proc/<pid>/fd`; another user's process is not visible without privilege), on macOS
+  the I/O Registry's `UsbExclusiveOwner` of the adapter's interface (`pid 1234, sx-station`).
+  Otherwise it says "held by another process". `sx-embodiment-bodies` turns it into
+  `OpenError::Busy`; `sx-identify` and `sx-can-bench` print it as is. On Linux, ZLG's kernel
+  module claims the adapter when loaded and exposes its channels as SocketCAN interfaces; then
+  the busy error names no process, and the SocketCAN path (`sx-socketcan`) is the one to use, or
+  the module must be unloaded.
 - The reset control request (0xFF) is never sent: a failed probe is reported and the adapter left
   as found.
 - CRCs on what the device sends are not checked, as the reference does not; their presence is

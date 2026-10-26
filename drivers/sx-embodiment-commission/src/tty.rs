@@ -1,7 +1,10 @@
 //! A serial device node as the half-duplex bus port the Feetech SDK reads through.
 
 use std::io::{self, Read as _, Write as _};
+use std::path::Path;
 use std::time::{Duration, Instant};
+
+use sx_embodiment_bodies::usb_serial::{TtyError, open_exclusive};
 
 use sx_embodiment_drivers::serial::SerialPort;
 
@@ -18,16 +21,21 @@ pub struct TtyPort {
 }
 
 impl TtyPort {
-    /// Open `path` raw at `baud`, eight data bits, no parity, one stop bit.
+    /// Open `path` raw at `baud`, eight data bits, no parity, one stop bit, exclusively, through
+    /// the layer's one serial opener.
     ///
     /// # Errors
     ///
-    /// Returns why it cannot be opened.
+    /// Returns why it cannot be opened: of kind [`io::ErrorKind::ResourceBusy`], naming the
+    /// holder where the host tells it, when another process has it open.
     pub fn open(path: &str, baud: u32) -> io::Result<Self> {
-        let port = serialport::new(path, baud)
-            .timeout(Duration::from_millis(1))
-            .open()
-            .map_err(io::Error::other)?;
+        let port =
+            open_exclusive(Path::new(path), baud, Duration::from_millis(1)).map_err(|error| {
+                match error {
+                    TtyError::Busy { .. } => io::Error::new(io::ErrorKind::ResourceBusy, error),
+                    TtyError::Open { .. } => io::Error::other(error),
+                }
+            })?;
         Ok(Self {
             port,
             deadline: Instant::now(),
