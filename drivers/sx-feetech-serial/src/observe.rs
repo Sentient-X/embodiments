@@ -12,9 +12,11 @@
 //! configuration register is written, so a servo stays as it was.
 //!
 //! A servo that does not answer its identification is not refused: it reads missing until it
-//! answers, when it is identified then. A servo that answers as another model, or whose
-//! registers disagree with the calibration supplied, is refused at open and read as corrupt if
-//! it is first found so later.
+//! answers, when it is identified then. A servo that answers as another model, or whose homing
+//! offset is not the calibration supplied's, is refused at open and read as corrupt if it is
+//! first found so later. A supplied calibration whose range differs from the EEPROM limits the
+//! servo holds (a unit measured but not yet written) is read with the measured range: the
+//! limits bound motion, which a read never makes.
 
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{AxisReading, BoundAxis, MissingReason, Observe};
@@ -64,8 +66,8 @@ impl<P: SerialPort> FeetechObserver<P> {
     /// # Errors
     ///
     /// Refuses an invalid or unqualified axis, a supplied calibration that is not one per servo
-    /// or is out of range, a servo answering as another model, and a servo whose registers
-    /// disagree with the calibration supplied for it.
+    /// or is out of range, a servo answering as another model, and a servo whose homing offset
+    /// is not the calibration supplied for it.
     pub fn open(
         port: P,
         axes: Vec<BoundAxis>,
@@ -163,14 +165,13 @@ impl<P: SerialPort> FeetechObserver<P> {
             }
             Err(error) => return Err(Unidentified::Refused(error)),
         };
+        // Present_Position comes back through the servo's own homing offset, so a supplied
+        // calibration must hold the same one to read it. Its range is the firmware's limit on
+        // motion, which a read never meets: a unit measured wider or narrower than its EEPROM
+        // limits still holds is read with the range measured (the chain, which moves, still
+        // requires both to agree).
         match supplied {
-            Some(calibration)
-                if (
-                    calibration.range_min,
-                    calibration.range_max,
-                    calibration.homing_offset,
-                ) != (held.range_min, held.range_max, held.homing_offset) =>
-            {
+            Some(calibration) if calibration.homing_offset != held.homing_offset => {
                 Err(Unidentified::Refused(FeetechChainError::Uncalibrated {
                     bus_id,
                     homing_offset: i32::from(held.homing_offset),
