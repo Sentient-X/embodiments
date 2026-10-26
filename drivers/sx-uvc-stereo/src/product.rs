@@ -21,6 +21,10 @@ pub struct Product {
     pub vendor_id: u16,
     /// The video interface's product id.
     pub product_id: u16,
+    /// The product id of the device that carries the unit's serial, where the video interface
+    /// reports a placeholder instead. A ZED 2i's video interface says `OV0001`; its sensor
+    /// module, on the USB 2 half of the same connector, says the unit's serial.
+    pub serial_product_id: Option<u16>,
     pub modes: &'static [Mode],
 }
 
@@ -48,6 +52,7 @@ pub const PRODUCTS: [Product; 1] = [Product {
     label: "Stereolabs ZED 2i",
     vendor_id: 0x2b03,
     product_id: 0xf880,
+    serial_product_id: Some(0xf881),
     modes: &[
         Mode {
             eye_width: 2208,

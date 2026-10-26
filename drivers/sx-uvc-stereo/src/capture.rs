@@ -1,8 +1,12 @@
 //! Attached devices through `nokhwa`: V4L2 on Linux, `AVFoundation` on macOS.
 //!
 //! A device is found by its product's USB vendor and product ids, and by serial where the
-//! platform says it. On Linux the serial is the USB device's own (`sysfs`), so the request's
-//! serial must match exactly and only the device's capture node (`index` 0) is opened. On macOS
+//! platform says it. On Linux the serial is read from `sysfs`, so the request's serial must match
+//! exactly and only the device's capture node (`index` 0) is opened. A product whose video
+//! interface reports a placeholder serial (`Product::serial_product_id`: the ZED 2i says
+//! `OV0001`) takes the serial of the device that carries it: the one of that product id on the
+//! same host controller whose port chain is the video device's plus one hub port (a USB 3
+//! connector's USB 2 half, behind the camera's own hub). On macOS
 //! `AVFoundation` names a UVC camera by location, vendor and product id but not by serial, so the
 //! one attached device of the product is opened and two are refused as ambiguous.
 //!
@@ -107,13 +111,86 @@ fn identify(info: &CameraInfo, index: u32) -> Attached {
     let capture = fs::read_to_string(node.join("index"))
         .map(|text| text.trim() == "0")
         .unwrap_or(false);
+    let (vendor_id, product_id) = (hex("idVendor"), hex("idProduct"));
+    let carrier = crate::PRODUCTS
+        .iter()
+        .find(|product| {
+            Some(product.vendor_id) == vendor_id && Some(product.product_id) == product_id
+        })
+        .and_then(|product| product.serial_product_id.map(|id| (product.vendor_id, id)));
+    let serial = match (carrier, usb.as_deref()) {
+        (Some((vendor, product)), Some(video)) => usb_devices()
+            .into_iter()
+            .find(|(path, ids, _)| *ids == (vendor, product) && serial_carrier(video, path))
+            .and_then(|(_, _, serial)| serial),
+        _ => read("serial"),
+    };
     Attached {
         index,
         name: info.human_name(),
-        vendor_id: hex("idVendor"),
-        product_id: hex("idProduct"),
-        serial: read("serial"),
+        vendor_id,
+        product_id,
+        serial,
         capture,
+    }
+}
+
+/// Every USB device `sysfs` lists: its canonical path, vendor and product ids, and serial.
+#[cfg(target_os = "linux")]
+fn usb_devices() -> Vec<(std::path::PathBuf, (u16, u16), Option<String>)> {
+    use std::fs;
+
+    let Ok(entries) = fs::read_dir("/sys/bus/usb/devices") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = fs::canonicalize(entry.path()).ok()?;
+            let read = |name: &str| {
+                fs::read_to_string(path.join(name))
+                    .ok()
+                    .map(|text| text.trim().to_owned())
+            };
+            let hex = |name: &str| read(name).and_then(|text| u16::from_str_radix(&text, 16).ok());
+            let ids = (hex("idVendor")?, hex("idProduct")?);
+            let serial = read("serial");
+            Some((path, ids, serial))
+        })
+        .collect()
+}
+
+/// A USB device's host controller (the directory above its `usbN` root) and its port chain
+/// (`6-1.3` is root port 1, then hub port 3).
+#[cfg(any(target_os = "linux", test))]
+fn controller_and_ports(device: &std::path::Path) -> Option<(&std::path::Path, Vec<&str>)> {
+    let name = device.file_name()?.to_str()?;
+    let (_, ports) = name.split_once('-')?;
+    if ports.contains(':') {
+        return None;
+    }
+    let root = device
+        .ancestors()
+        .find(|dir| {
+            dir.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("usb") && !name.contains('-'))
+        })?
+        .parent()?;
+    Some((root, ports.split('.').collect()))
+}
+
+/// Whether `carrier` sits on the same connector as `video`: the same host controller, and its
+/// port chain the video device's plus the camera hub's one port.
+#[cfg(any(target_os = "linux", test))]
+fn serial_carrier(video: &std::path::Path, carrier: &std::path::Path) -> bool {
+    match (controller_and_ports(video), controller_and_ports(carrier)) {
+        (Some((video_root, video_ports)), Some((carrier_root, carrier_ports))) => {
+            video_root == carrier_root
+                && carrier_ports.len() == video_ports.len() + 1
+                && carrier_ports.starts_with(&video_ports)
+        }
+        _ => false,
     }
 }
 
@@ -371,6 +448,32 @@ mod tests {
         assert!(matches!(
             find(&request(), vec![]),
             Err(OpenError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn a_zed_takes_the_serial_of_its_sensor_module_on_the_same_connector() {
+        use std::path::Path;
+        let video = Path::new("/sys/devices/platform/NVDA8000:02/usb6/6-1");
+        let sensor = Path::new("/sys/devices/platform/NVDA8000:02/usb5/5-1/5-1.2");
+        assert!(serial_carrier(video, sensor));
+        // Another connector, another controller, or not directly behind the camera's hub.
+        assert!(!serial_carrier(
+            video,
+            Path::new("/sys/devices/platform/NVDA8000:02/usb5/5-2/5-2.2")
+        ));
+        assert!(!serial_carrier(
+            video,
+            Path::new("/sys/devices/platform/NVDA8000:03/usb5/5-1/5-1.2")
+        ));
+        assert!(!serial_carrier(
+            video,
+            Path::new("/sys/devices/platform/NVDA8000:02/usb5/5-1/5-1.2/5-1.2.1")
+        ));
+        // Behind an external hub, both halves carry the hub's port.
+        assert!(serial_carrier(
+            Path::new("/sys/devices/pci0000:00/0000:00:14.0/usb2/2-3/2-3.1"),
+            Path::new("/sys/devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3.1/1-3.1.2")
         ));
     }
 }
