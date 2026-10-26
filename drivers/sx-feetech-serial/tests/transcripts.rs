@@ -474,8 +474,8 @@ fn a_stalled_servo_mid_chain_still_lets_every_later_servo_torque_off() {
     assert_eq!(
         report,
         StopReport {
-            unproven: vec![],
-            faults: vec![(2, 0x20)]
+            faults: vec![(2, 0x20)],
+            ..StopReport::default()
         }
     );
     assert_eq!(report.prove().expect("proven").faults(), &[(2, 0x20)]);

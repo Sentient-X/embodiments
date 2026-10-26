@@ -136,6 +136,11 @@ where
         StopReport {
             unproven: first.unproven.into_iter().chain(second.unproven).collect(),
             faults: first.faults.into_iter().chain(second.faults).collect(),
+            unobserved: first
+                .unobserved
+                .into_iter()
+                .chain(second.unobserved)
+                .collect(),
         }
     }
 

@@ -47,6 +47,9 @@
 //!   change. The position, velocity, force-position and CSP modes, `enable_old`,
 //!   `control_delay` and `save_motor_param` (a flash write) are left out; `Pd`, `Vd` and
 //!   `isEnable`, which `DM_CAN.py` never reads, too.
+//! - [`MotorControl::clear_error`] sends Damiao's clear-error frame, `FF..FB` ("DM-J4340-2EC
+//!   User Manual V1.1", p. 17), which `DM_CAN.py` does not carry; like `disable` it waits
+//!   0.01 s without reading.
 //! - [`MotorControl::forget_param`] drops one cached register value, so a following read or
 //!   write is judged by the motor's fresh answer; `DM_CAN.py` keeps every value it has seen.
 //! - Kept from `DM_CAN.py` as it is: `recv` decodes a register reply arriving on a `MasterID`
@@ -356,6 +359,18 @@ impl<P: CanPort> MotorControl<P> {
     /// Returns an unregistered motor or the link's failure.
     pub fn disable(&mut self, slave_id: u16) -> Result<(), DmCanError> {
         self.control_cmd(slave_id, 0xFD)?;
+        self.port.sleep(DISABLE_WAIT);
+        Ok(())
+    }
+
+    /// Clear a latched fault: `FF..FB`, wait 0.01 s (not in `DM_CAN.py`). Damiao's manual sends
+    /// it to a disabled motor; the caller's state decides when.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or the link's failure.
+    pub fn clear_error(&mut self, slave_id: u16) -> Result<(), DmCanError> {
+        self.control_cmd(slave_id, 0xFB)?;
         self.port.sleep(DISABLE_WAIT);
         Ok(())
     }

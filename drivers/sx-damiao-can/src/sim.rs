@@ -3,7 +3,8 @@
 //! Each motor answers on its master id: a register write is echoed and held, a register read
 //! answers what was written, else its model's limit table, a refresh or command answers feedback at the position last
 //! commanded, and enable and disable set the state its feedback reports. A killed motor never
-//! answers. Waits are recorded rather than slept unless `real` is set, as on the bench.
+//! answers. A fault code is latched: enable and disable leave it, and only the clear frame
+//! (`FF..FB`) clears it, to disabled, unless it is persistent. Waits are recorded rather than slept unless `real` is set, as on the bench.
 //! Shared by every suite that drives a Damiao body: this crate's, the bodies crate's and the
 //! station's.
 
@@ -31,6 +32,8 @@ pub struct SimMotor {
     /// enabled or disabled ([`DamiaoAxis::reports_enable_state`]). A fault code is reported
     /// either way.
     pub reports_enable_state: bool,
+    /// A fault the clear frame (`FF..FB`) does not clear, as a fault whose cause persists.
+    pub persistent_fault: bool,
 }
 
 /// The bus's motors and what crossed it.
@@ -68,6 +71,7 @@ impl Sim {
                         registers: BTreeMap::new(),
                         ignored: BTreeSet::new(),
                         reports_enable_state: true,
+                        persistent_fault: false,
                     },
                 )
             })
@@ -144,6 +148,11 @@ impl Sim {
     /// When a test panicked while holding it.
     pub fn state(&self) -> std::sync::MutexGuard<'_, SimState> {
         self.0.lock().expect("sim")
+    }
+
+    /// A frame arriving on the link before anything asks for it, as a late answer does.
+    pub fn deliver_late(&self, frame: CanFrame) {
+        self.state().inbox.push_back(frame);
     }
 
     pub fn kill(&self, id: u16) {
@@ -254,8 +263,12 @@ pub fn answer(id: u16, motor: &mut SimMotor, frame: &CanFrame) -> Option<CanFram
         };
     }
     match data {
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC] => motor.state = 1,
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD] => motor.state = 0,
+        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC] if motor.state <= 1 => motor.state = 1,
+        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD] if motor.state <= 1 => motor.state = 0,
+        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB] if !motor.persistent_fault => {
+            motor.state = 0;
+        }
+        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB..=0xFD] => {}
         _ => {
             let q = (u16::from(data[0]) << 8) | u16::from(data[1]);
             motor.q = f64::from(q) / 65_535.0 * 2.0 * motor.limits[0] - motor.limits[0];

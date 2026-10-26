@@ -49,6 +49,11 @@ pub struct StopReport {
     pub unproven: Vec<u16>,
     /// (bus address, vendor fault code) reported while stopping.
     pub faults: Vec<(u16, u8)>,
+    /// Actuators counted as stopped on a weaker proof: they answered the disable frame with no
+    /// fault, but their firmware does not report whether it is enabled, so the disabled state
+    /// itself was not observed. A caller that needs an observed disabled state (to release a
+    /// brake, to let a person near) must not treat these as equal to it.
+    pub unobserved: Vec<u16>,
 }
 
 impl StopReport {
@@ -66,6 +71,7 @@ impl StopReport {
         if self.is_proven() {
             Ok(ProvenStop {
                 faults: self.faults,
+                unobserved: self.unobserved,
             })
         } else {
             Err(self)
@@ -78,6 +84,7 @@ impl StopReport {
 #[must_use]
 pub struct ProvenStop {
     faults: Vec<(u16, u8)>,
+    unobserved: Vec<u16>,
 }
 
 impl ProvenStop {
@@ -85,6 +92,19 @@ impl ProvenStop {
     #[must_use]
     pub fn faults(&self) -> &[(u16, u8)] {
         &self.faults
+    }
+
+    /// Actuators proven only by answering the disable, their enable state unobservable
+    /// ([`StopReport::unobserved`]).
+    #[must_use]
+    pub fn unobserved(&self) -> &[u16] {
+        &self.unobserved
+    }
+
+    /// Whether every actuator was observed disabled, not merely answering the disable.
+    #[must_use]
+    pub fn observed_disabled(&self) -> bool {
+        self.unobserved.is_empty()
     }
 }
 
@@ -210,12 +230,21 @@ mod tests {
         let report = StopReport {
             unproven: vec![],
             faults: vec![(3, 0xA)],
+            unobserved: vec![],
         };
         let proven = report.prove().expect("every actuator answered");
         assert_eq!(proven.faults(), &[(3, 0xA)]);
+        assert!(proven.observed_disabled());
+        let report = StopReport {
+            unobserved: vec![4],
+            ..StopReport::default()
+        };
+        let proven = report.prove().expect("answered, state unobservable");
+        assert_eq!(proven.unobserved(), &[4]);
+        assert!(!proven.observed_disabled());
         let report = StopReport {
             unproven: vec![2],
-            faults: vec![],
+            ..StopReport::default()
         };
         assert_eq!(report.clone().prove(), Err(report));
     }

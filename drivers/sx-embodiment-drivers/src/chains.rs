@@ -163,6 +163,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             let stopped = chain.stop();
             report.unproven.extend(stopped.unproven);
             report.faults.extend(stopped.faults);
+            report.unobserved.extend(stopped.unobserved);
         }
         report
     }
@@ -366,7 +367,7 @@ mod tests {
             self.stops += 1;
             StopReport {
                 unproven: self.unproven.clone(),
-                faults: Vec::new(),
+                ..StopReport::default()
             }
         }
 

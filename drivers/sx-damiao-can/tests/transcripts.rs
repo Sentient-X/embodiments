@@ -385,6 +385,10 @@ fn report(step: &Value) -> StopReport {
                 (pair[0], u8::try_from(pair[1]).unwrap())
             })
             .collect(),
+        unobserved: step["report"]
+            .get("unobserved")
+            .map(&ids)
+            .unwrap_or_default(),
     }
 }
 
