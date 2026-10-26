@@ -7,7 +7,7 @@ from sx_contracts import ComponentId
 from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, GripperSpec, Limb, MimicJoint, MobileBaseSpec
@@ -183,6 +183,10 @@ RBY1_MODULE: Final = Module(
 
 RBY1_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("rby1"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("7c6fbed4dcc92f907754910a1c59ece4ed52f50462802d2276823decd6d4fe9d"),
+    ),
     label="Rainbow Robotics RBY1-M v1.3",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rby1", variant="m", revision="1.3"),

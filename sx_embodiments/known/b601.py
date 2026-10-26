@@ -162,7 +162,7 @@ from ..compose import (
     body_component,
     leader_component,
 )
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed, Socket
 from ..parts import (
@@ -324,6 +324,10 @@ B601_DM_MODULE: Final = Module(
 
 B601_DM_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("b601-dm"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa"),
+    ),
     label="Seeed Studio reBot B601-DM (single arm)",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
@@ -397,6 +401,10 @@ B601_DM_STATION_BUILD: Final = Build(
 
 BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("bimanual-b601-dm"),
+    # Its schema-15 publication: schema 16 drew facts the converter cannot state.
+    earlier_revisions=(
+        EmbodimentId("2c6d382021ddd6e4812fe4efa7b4258d59316cc27ac6f9a7ecc4958a482c1cc5"),
+    ),
     label="Bimanual Seeed Studio reBot B601-DM",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm-bimanual"),
