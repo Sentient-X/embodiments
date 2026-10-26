@@ -605,3 +605,40 @@ fn a_small_hand_move_is_a_small_joint_move() {
         "a joint went {worst_excess}x the move past its share"
     );
 }
+
+/// Bench 2026-10-26: right_upper_arm_yaw_joint rested at +2.762, just past its +2.760 limit;
+/// the first solve on engage asked further out and the governor safe-stopped. An axis resting
+/// outside its range may hold or come in, never go further out, whatever the target asks.
+#[test]
+fn an_axis_resting_past_its_limit_never_steps_further_out() {
+    for speed in [0.3, 1.0, 4.0] {
+        let mut ik = ik(Some(speed));
+        let axes = ik.body().model().axes().to_vec();
+        for (name, outward) in [
+            ("right_upper_arm_yaw_joint", 1.0),
+            ("right_upper_arm_yaw_joint", -1.0),
+            ("left_elbow_pitch_joint", -1.0),
+        ] {
+            let index = axes.iter().position(|a| a.name == name).expect(name);
+            let [lower, upper] = axes[index].limits.expect("limits");
+            let mut q = rest(&ik);
+            let edge = if outward > 0.0 { upper } else { lower };
+            q[index] = edge + outward * 0.002;
+            let start = q[index];
+            // Ask for the hands where they would be with the axis further out still.
+            let mut further = q.clone();
+            further[index] = edge + outward * 0.3;
+            let targets = pose_targets(&ik, &further);
+            ik.reset();
+            for tick in 0..100 {
+                let step = ik.step(&q, &ALL[..q.len()], &targets, DT).expect("step");
+                let next = step.q[index];
+                assert!(
+                    (next - start) * outward <= 1e-12,
+                    "{name} at speed {speed}, tick {tick}: {start} -> {next}, further out"
+                );
+                q.copy_from_slice(&step.q);
+            }
+        }
+    }
+}

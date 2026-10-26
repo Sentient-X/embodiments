@@ -143,6 +143,13 @@ impl Body {
         self.limbs.iter().map(|l| l.name.as_str()).collect()
     }
 
+    /// The axes that move limb `index`'s frame (indices into [`Model::axes`], ascending): an
+    /// axis in more than one limb's list (a torso) is shared.
+    #[must_use]
+    pub fn limb_axes(&self, index: usize) -> &[usize] {
+        &self.limbs[index].axes
+    }
+
     /// The axes the solver moves (indices into [`Model::axes`]); every other axis is held.
     #[must_use]
     pub fn solved(&self) -> &[usize] {

@@ -11,6 +11,7 @@ writes them into ``pack.json`` (``tracking``, ``mount``, ``virtual_gripper``).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -95,8 +96,9 @@ class VirtualGripper:
     When the operator holds only controllers, each hand drives a gripper whose tool frame
     sits ``ahead_m`` ahead of the controller's grip origin along its pointing ray (WebXR
     ``targetRaySpace`` -z), with x (the fingers) along that ray and the jaw opening horizontal.
-    It is drawn with the body's ``{side}_gripper_*`` links, placed so the body's tool frame
-    (``tcp_frames``) lands on that tool frame.
+    It is drawn with every link that moves rigidly with the body's tool frame (``tcp_frames``):
+    the subtree below the last actuated joint above it, so the wrist plates, motor mount and
+    camera that carry the jaw are drawn with it. That tool frame lands on the operator's.
     """
 
     ahead_m: float
@@ -105,17 +107,15 @@ class VirtualGripper:
         if not math.isfinite(self.ahead_m) or self.ahead_m < 0.0:
             raise ViewingError("ahead_m must be finite and non-negative")
 
-    def to_json(self, links: list[str]) -> JsonValue:
+    def to_json(self, links: Mapping[str, list[str]]) -> JsonValue:
+        """``links``: by side, the links drawn as that side's gripper."""
         return {
             "anchor": "grip",
             "along": "target_ray",
             "ahead_m": self.ahead_m,
             "x_axis": "target_ray",
             "jaw_opening": "horizontal",
-            "links": {
-                side: [link for link in links if link.startswith(f"{side}_gripper_")]
-                for side in ("left", "right")
-            },
+            "links": {side: list(drawn) for side, drawn in links.items()},
         }
 
 

@@ -66,7 +66,7 @@ pub fn place(
     base_height: Option<f64>,
 ) -> Option<Placement> {
     let total: f64 = points.iter().map(|p| p.weight.max(0.0)).sum();
-    if !(total > 0.0) {
+    if total.is_nan() || total <= 0.0 {
         return None;
     }
     let mut cr = [0.0; 3];
