@@ -26,6 +26,7 @@ pub mod bridges;
 pub mod calibrate;
 pub mod declared;
 pub mod host;
+pub mod jog;
 pub mod matching;
 pub mod output;
 pub mod probe;

@@ -438,7 +438,9 @@ impl Mask {
             return Ok(chain);
         }
         Ok(Box::new(
-            Masked::new(chain, self.whole, &self.out).map_err(DamiaoChainError::from)?,
+            Masked::new(chain, self.whole, &self.out)
+                .map_err(DamiaoChainError::from)?
+                .answering(|axis| MotorFeedback::unavailable(axis.binding.bus_id)),
         ))
     }
 
