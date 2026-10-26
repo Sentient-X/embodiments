@@ -14,6 +14,9 @@ A pack is a directory of three files, generated from the body's composed descrip
   are tessellated. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
   count, and the body's gripper tool frames by side.
+* ``collision.json``, when a link has collision geometry: capsules containing it and the link
+  pairs a self-collision check skips (:mod:`sx_embodiments.collision_proxies`), which the
+  ``sx-embodiment-ik`` solver keeps apart.
 
 Decimation is vertex clustering on a per-mesh grid, its cell sized by bisection to the mesh's
 share of the budget (shares are proportional to source triangles). Each cluster keeps the
@@ -50,6 +53,7 @@ DEFAULT_TRIANGLE_BUDGET: Final = 150_000
 URDF_FILE: Final = "robot.urdf"
 GLB_FILE: Final = "pack.glb"
 JSON_FILE: Final = "pack.json"
+COLLISION_FILE: Final = "collision.json"
 
 #: URDF Z-up to glTF Y-up: -90 deg about x, as glTF's (x, y, z, w).
 URDF_TO_GLTF: Final = (-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
@@ -94,10 +98,14 @@ class RenderPack:
     urdf: bytes
     glb: bytes
     document: bytes  # pack.json
+    collision: bytes | None = None  # collision.json
 
     @property
     def files(self) -> dict[str, bytes]:
-        return {URDF_FILE: self.urdf, GLB_FILE: self.glb, JSON_FILE: self.document}
+        files = {URDF_FILE: self.urdf, GLB_FILE: self.glb, JSON_FILE: self.document}
+        if self.collision is not None:
+            files[COLLISION_FILE] = self.collision
+        return files
 
     def write(self, root: Path) -> Path:
         """Write the pack under ``root/<embodiment_id>/``; returns that directory."""
@@ -563,4 +571,6 @@ def build(
         "tcp_frames": tcp_frames(links),
         "generated_by": GENERATOR,
     }
-    return RenderPack(key, urdf, glb, canonical_bytes(document))
+    from .collision_proxies import proxies
+
+    return RenderPack(key, urdf, glb, canonical_bytes(document), proxies(embodiment, name=key))

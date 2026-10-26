@@ -84,3 +84,25 @@ def test_tool_frames_are_the_grippers() -> None:
         "right": "right_gripper_tcp",
     }
     assert frames("yubi") == {"left": "left_gripper_tip", "right": "right_gripper_tip"}
+
+
+@pytest.mark.parametrize("name", ["sentient-static-upper-body", "yubi"])
+def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
+    import numpy as np
+    from sx_embodiments.collision_proxies import SCHEMA, _collision_points
+
+    directory = ROOT / "render_packs" / name
+    document = json.loads((directory / "collision.json").read_bytes())
+    urdf = (directory / "robot.urdf").read_bytes()
+    assert document["schema"] == SCHEMA
+    assert document["urdf_sha256"] == hashlib.sha256(urdf).hexdigest()
+    points = _collision_points(_tool().body(name), urdf)
+    assert {c["link"] for c in document["capsules"]} == set(points)
+    for link, vertices in points.items():
+        gaps = []
+        for capsule in (c for c in document["capsules"] if c["link"] == link):
+            a, b = np.asarray(capsule["a"]), np.asarray(capsule["b"])
+            d = b - a
+            t = np.clip((vertices - a) @ d / max(float(d @ d), 1e-18), 0.0, 1.0)
+            gaps.append(np.linalg.norm(vertices - (a + t[:, None] * d), axis=1) - capsule["radius"])
+        assert float(np.min(gaps, axis=0).max()) <= 0.0, link

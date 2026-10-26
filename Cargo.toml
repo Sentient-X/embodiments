@@ -15,6 +15,7 @@ members = [
     "drivers/sx-zlg-usbcanfd",
     "drivers/sx-embodiment-bodies",
     "drivers/sx-embodiment-commission",
+    "drivers/sx-embodiment-ik",
 ]
 
 [workspace.package]
