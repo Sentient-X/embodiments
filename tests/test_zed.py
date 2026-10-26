@@ -146,12 +146,13 @@ def test_the_placed_zed_is_one_head_track_of_its_factory_eyes() -> None:
         )
 
 
-def test_the_left_eye_is_the_sources_left_optical_frame() -> None:
-    """The ZED frame is placed so the registry's left eye is allisa_bot's own optical frame."""
+def test_the_sources_left_optical_frame_is_an_upside_down_cameras_left_eye() -> None:
+    """allisa_bot's optical frame is the left eye of an upside-down camera: it sits on the right
+    eye, turned half a turn about the optical axis, so the registry's eyes are the upright ones."""
     body = _body()
     kinematics = Kinematics.of(body.urdf_bytes)
     zero = {
         name: 0.0 for name, joint in kinematics.joints.items() if joint.type is not JointType.FIXED
     }
-    pose = kinematics.pose("zed2i_left_optical_frame", FRAMES[0], zero)
-    assert pose == pytest.approx((1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1), abs=1e-8)
+    pose = kinematics.pose("zed2i_left_optical_frame", FRAMES[1], zero)
+    assert pose == pytest.approx((-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1), abs=1e-8)
