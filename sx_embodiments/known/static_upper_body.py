@@ -126,6 +126,7 @@ from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ..sites import BodySite
+from ..viewing import VirtualGripper, Workcell
 from ._authoring import bounded_layout
 from .zed import EYES, ZED_FRAME, optical_frame, zed_2i_eye, zed_2i_imu
 
@@ -410,3 +411,13 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     # paths are the received folder's, so it is not a loadable asset of this body.
     extra_assets=(STATIC_UPPER_BODY_URDF,),
 )
+
+#: The table top (base_link, the base mount's surface) above the floor, from the received
+#: CAD's ``world_to_base`` joint.
+STATIC_UPPER_BODY_WORKCELL: Final = Workcell(
+    floor_to_frame_m=0.797200208452,
+    provenance="humanoid_pkg allisa_feedback.urdf joint world_to_base",
+)
+
+#: The operator's empty controllers drive this body's own grippers, 9 cm ahead of the grip.
+STATIC_UPPER_BODY_VIRTUAL_GRIPPER: Final = VirtualGripper(ahead_m=0.09)

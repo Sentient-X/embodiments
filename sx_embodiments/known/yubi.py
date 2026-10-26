@@ -6,6 +6,17 @@ camera links. ``left_finger`` is the one encoder-driven joint; the other finger 
 four-bar connector/nail joints mimic it. The explicit Quest tracking frame includes the
 measured +90 degree tracking-to-CAD controller basis used by the capture viewer.
 
+``quest_{side}_controller`` is the capture apps' tracked controller pose (the one OQC/Unity
+records); per-unit checkerboard mount calibrations against real hand-camera images leave
+only 1-3 degree residuals on it. The WebXR/OpenXR grip space that browsers and native OpenXR
+apps report is a different pose: the ``{side}_controller_link`` mesh is a Meta Quest Touch
+Plus, and fitting it by ICP to Meta's grip-space asset puts that grip space about 45 degrees
+and 3 cm from ``quest_{side}_controller``. A WebXR viewer that took grip space for the capture
+pose would be off by that much, which plausibly explains the prototypes' ~42 degree live
+error. :data:`YUBI_TRACKING` is the measured grip space; viewers read it from the render
+pack. The description bytes are unchanged: episode seals and per-unit mount calibrations
+are keyed to them.
+
 The aperture curve is the inner nail-mesh separation across the URDF joint box. The CAD
 meshes overlap by 0.106 mm at the mechanical stop, so the recorded closed aperture is
 clamped to zero. Per-unit camera calibration remains episode/session evidence.
@@ -31,6 +42,7 @@ from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
 from ..sites import BodySite
+from ..viewing import TrackedDevice
 from ._authoring import bounded_layout
 from .sources import capture_source
 
@@ -262,5 +274,32 @@ YUBI_SPEC: Final = EmbodimentDefinition(
             "right_hand_root",
             "quest_right_controller",
         ),
+    ),
+)
+
+_TOUCH_PLUS_PROVENANCE: Final = (
+    "ICP (RMS 0.69 mm) of the {side}_controller_link CAD mesh against Meta's "
+    "webxr-input-profiles assets@1.0 meta-quest-touch-plus/{side}.glb, defined in grip space"
+)
+
+#: The Touch Plus WebXR/OpenXR grip space in each controller link (``controller_link_from_grip``).
+YUBI_TRACKING: Final = (
+    TrackedDevice(
+        side="left",
+        device="meta-quest-touch-plus",
+        space="openxr-grip",
+        frame="left_controller_link",
+        translation_m=(-0.018771, -0.002003, -0.019933),
+        rotation_xyzw=(0.664879, -0.635962, -0.281326, 0.272661),
+        provenance=_TOUCH_PLUS_PROVENANCE.format(side="left"),
+    ),
+    TrackedDevice(
+        side="right",
+        device="meta-quest-touch-plus",
+        space="openxr-grip",
+        frame="right_controller_link",
+        translation_m=(-0.021116, 0.001244, -0.021668),
+        rotation_xyzw=(-0.645548, 0.666414, 0.250385, -0.276528),
+        provenance=_TOUCH_PLUS_PROVENANCE.format(side="right"),
     ),
 )
