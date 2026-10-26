@@ -841,8 +841,11 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
             }
             self.control.recv()?;
             let before = self.feedback_counts()?;
+            // Every motor enabled together, then the first command at once: one at a time with
+            // the vendor's 0.1 s wait, the first motors of a 13-motor chain sat enabled and silent
+            // for 0.7 to 1.3 s and their 0.75 s watchdog latched 0xD (the left arm, 2026-10-26).
             for index in 0..self.motors.len() {
-                self.control.enable(self.bus_id(index))?;
+                self.control.send_enable(self.bus_id(index))?;
             }
             self.await_answers(&before)?;
             self.expect_all(&before, MotorState::Enabled)?;

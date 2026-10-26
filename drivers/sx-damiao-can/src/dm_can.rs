@@ -352,6 +352,18 @@ impl<P: CanPort> MotorControl<P> {
         self.recv()
     }
 
+    /// The enable frame (`FF..FC`) alone: no wait and no read, so a chain can enable every motor
+    /// together and then take their answers once. `enable` waits 0.1 s per motor, as `DM_CAN.py`
+    /// does; across a chain that leaves the first motors enabled and silent for longer than their
+    /// CAN watchdog, which latches communication lost (0xD) before the first command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or the link's failure.
+    pub fn send_enable(&mut self, slave_id: u16) -> Result<(), DmCanError> {
+        self.control_cmd(slave_id, 0xFC)
+    }
+
     /// `disable`: `FF..FD`, wait 0.01 s. The vendor does not read the answer here.
     ///
     /// # Errors
