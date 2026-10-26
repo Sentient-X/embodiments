@@ -140,7 +140,7 @@ named in the commissioning's `out_of_service`, never skipped in a tool.
 |---|---|---|
 | `sx-commission probe` / `commission` / `calibrate` | find bridges and ids read-only, write `commissioning.json` and calibrations, calibrate a Feetech bus | yes (vendor scan modules behind read-only ports; `calibrate` writes only under `--move`) |
 | `sx-jog` | supervised relative jog and sequences of any body, `--exclude` joints for one run, `--log` every tick (target, the governor's slewed command, observed, each motor's q/dq/tau/temperatures/state) | yes: `open_with` + `Governor`; the log is written on its own thread from fixed-size records |
-| `sx-record` | record joints while a person moves the body by hand | **no**: hand-rolled Damiao refresh and Feetech reads, raw ticks; to be rewritten as a logger over `observe` |
+| `sx-record` | record every joint, read-only, while a person moves the body by hand; the live twin tails it | yes: `observe`, each bus on its own thread, one JSON line per poll in joint coordinates |
 | `sx-can-bench` (`sx-zlg-usbcanfd`) | ZLG USBCANFD link throughput and latency | transport bench, below the layer by design |
 | `sx-imu-still` (`sx-stereolabs-sensors`) | ZED IMU stillness check | sensor bench, no actuators |
 
@@ -170,5 +170,19 @@ probe`; `--clear-faults` is the open's own settle phase, which clears a latched 
 a pause in a sequence. `sx-timeout-probe` is gone: the watchdog is armed right before every
 enable, and `sx-damiao-can`'s simulated bus holds the phased bring-up to it.
 
-`sx-record --out <file.jsonl> --zlg-serial A30F115DD0120A949B80 --channel 1 --feetech
-neck=/dev/<tty>:1,2,3,4,5,6` (pre-rewrite).
+`sx-record` takes the same body flags and only reads:
+
+```text
+sx-record --drive <drive.json> --commissioning <commissioning.json>
+          [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]...
+          [--exclude <joint,...>] --out <file.jsonl> [--seconds 60] [--rate 50]
+```
+
+Each line is one bus's poll: `{"t", "bus", "positions": {joint: value or null}, "missing":
+{joint: why}}`, the joint values through the drive and the units' calibration (a serial servo
+with none supplied is read with the calibration its registers hold). Observing a provisional
+port writes nothing, so `--allow-provisional` needs no supervision there.
+
+`tests/bench_layering.rs` refuses a bench binary that names a vendor crate, a CAN or serial
+port or a USB stack. `sx-identify` is the one still listed, until it moves onto `open_with`
+and `observe`.
