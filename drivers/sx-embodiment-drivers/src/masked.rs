@@ -15,7 +15,7 @@ use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, CommandRange, Feedforward, FeedforwardLimit, MissingReason,
-    Observe, READ_NOISE_RAD, Receipt, StopReport, TargetError, check_targets,
+    Observe, Receipt, StopReport, TargetError, check_targets,
 };
 use crate::rail::AxisDerate;
 
@@ -296,36 +296,23 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
 }
 
 /// Refuse a vector of the wrong width or outside the declared bounds, skipping `unavailable`
-/// axes: their targets reach no actuator. With `reach` (the chain's commandable ranges and
-/// where it observes each axis), a target outside the declared bounds is still admitted when it
-/// lies no further out than its axis is now (the range widened to it, plus read noise): a joint
-/// resting outside its bounds may be held where it is or brought in.
+/// axes: their targets reach no actuator. This is for a position stated outright (where a
+/// body rests, [`crate::Governor::start_at`]); a command's target is held to
+/// [`crate::CommandRange::admissible`] instead.
 ///
 /// # Errors
 ///
-/// The width mismatch, or the first available axis' target outside both.
+/// The width mismatch, or the first available axis' target outside its bounds.
 pub fn check_available(
     axes: &[BoundAxis],
     unavailable: &[usize],
-    reach: Option<(&[CommandRange], Option<&[f64]>)>,
     joints: &[f64],
 ) -> Result<(), TargetError> {
     if axes.len() != joints.len() {
         return check_targets(axes, joints);
     }
     for (index, (axis, joint)) in axes.iter().zip(joints).enumerate() {
-        if unavailable.contains(&index) || axis.admits(*joint) {
-            continue;
-        }
-        let near = reach.is_some_and(|(ranges, at)| {
-            match (ranges.get(index), at.and_then(|at| at.get(index))) {
-                (Some(range), Some(at)) if at.is_finite() => {
-                    range.reaching(*at).slack(READ_NOISE_RAD).admits(*joint)
-                }
-                _ => false,
-            }
-        });
-        if !near {
+        if !unavailable.contains(&index) && !axis.admits(*joint) {
             return Err(TargetError::OutOfBounds {
                 joint: axis.joint.clone(),
                 value: *joint,
