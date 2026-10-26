@@ -46,12 +46,13 @@ from sx_embodiments.calibrate.dynamics import (  # noqa: E402
 )
 from sx_embodiments.calibrate.targets import CalibrationSolveError  # noqa: E402
 from sx_embodiments.calibrate.friction import Segment, SegmentLimits, fit_joint  # noqa: E402
-from sx_embodiments.calibrate.dynamics import STICTION_VELOCITY  # noqa: E402
+from sx_embodiments.calibrate.dynamics import PER_LINK, STICTION_VELOCITY  # noqa: E402
 from sx_embodiments.calibration import (  # noqa: E402
     FRICTION_TERMS,
     CalibrationMethod,
     DynamicsCalibration,
     JointFriction,
+    LinkInertia,
     Measurement,
     UnitSerial,
     calibration_id,
@@ -516,7 +517,16 @@ def report(found: DynamicsFit) -> list[str]:
 
 def fit_friction(urdf: bytes, paths: Sequence[Path], units: Sequence[str], out: Path) -> None:
     """Every joint swept in ``paths``: reject, fit, choose a model, report, and seal the joint
-    friction as a ``dynamics`` calibration (links untouched)."""
+    friction as a ``dynamics`` calibration, with the gravity each sweep measured.
+
+    A sweep measures its joint's gravity curve ``A sin q + B cos q + C`` without any mass. The
+    description's own curve for the same pose is matched to it by one scale on every massive
+    link the joint carries (mass, first moment and inertia scaled together, so each stays a
+    physical body) plus an offset (the torque sensor's): the static upper body's hull-estimated
+    masses are light, and that scale is what the station's gravity needs. Where two swept
+    joints carry the same link, the joint nearer the tip decides it."""
+    tree = RigidBodyTree.of(urdf)
+    poses: dict[str, dict[str, float]] = {}
     by_joint: dict[str, list[Segment]] = {}
     for path in paths:
         recording = Recording.read(path)
@@ -525,7 +535,15 @@ def fit_friction(urdf: bytes, paths: Sequence[Path], units: Sequence[str], out: 
             raise SystemExit(f"{path} holds no sweep or breakaway")
         joint = _swept_joint(recording)
         by_joint.setdefault(joint, []).extend(friction_segments(recording, joint))
+        if any(label.startswith("sweep:") for label in recording.segments):
+            rows = np.array([i for i, s in enumerate(recording.segments) if s.startswith("sweep:")])
+            poses[joint] = dict(
+                zip(recording.joints, recording.position[rows].mean(axis=0).tolist(), strict=True)
+            )
     frictions: list[JointFriction] = []
+    scaled: dict[int, float] = {}
+    theta = tree.parameters()
+    zero = np.zeros(len(tree.axes))
     for joint, segments in sorted(by_joint.items()):
         found = fit_joint(joint, segments, SegmentLimits(peak_torque=PEAK.get(joint, 7.0)))
         frictions.append(found.friction)
@@ -542,16 +560,71 @@ def fit_friction(urdf: bytes, paths: Sequence[Path], units: Sequence[str], out: 
         print(f"  rejected {len(found.rejected)} of {total} segments")
         for rejection in found.rejected:
             print(f"    {rejection.label}: {rejection.reason}")
+        if joint in poses:
+            swept = np.concatenate([s.position for s in segments if not s.breakaway])
+            grid = np.linspace(float(swept.min()), float(swept.max()), 25)
+            a, b, c = found.gravity
+            measured = a * np.sin(grid) + b * np.cos(grid) + c
+            index = tree.axes.index(joint)
+            design = np.array(
+                [
+                    tree.inverse(theta, tree.vector({**poses[joint], joint: float(q)}), zero, zero)[
+                        index
+                    ]
+                    for q in grid
+                ]
+            )
+            basis = np.stack([design, np.ones_like(design)], axis=1)
+            (scale, offset), *_ = np.linalg.lstsq(basis, measured, rcond=None)
+            residual = float(np.sqrt(np.mean((basis @ np.array([scale, offset]) - measured) ** 2)))
+            print(
+                f"  gravity: measured {measured.min():+.2f}..{measured.max():+.2f} N·m, "
+                f"the description {design.min():+.2f}..{design.max():+.2f}; carried links' mass "
+                f"x{scale:.2f}, offset {offset:+.2f} N·m, residual {residual:.3f} N·m"
+            )
+            if scale > 0.0:
+                for link in tree.subtree_links([joint]):
+                    scaled[link] = float(scale)
     calibration = DynamicsCalibration(
         description_sha256=Sha256Digest(hashlib.sha256(urdf).hexdigest()),
         stiction_velocity=STICTION_VELOCITY,
-        links=(),
+        links=tuple(
+            sorted(
+                (
+                    LinkInertia(
+                        link=tree.links[link],
+                        mass=float(theta[PER_LINK * link] * factor),
+                        first_moment=_triple(
+                            theta[PER_LINK * link + 1 : PER_LINK * link + 4] * factor
+                        ),
+                        inertia=_six(theta[PER_LINK * link + 4 : PER_LINK * link + 10] * factor),
+                    )
+                    for link, factor in scaled.items()
+                ),
+                key=lambda item: item.link,
+            )
+        ),
         joints=tuple(frictions),
         units=tuple(sorted({UnitSerial(unit) for unit in units})),
         measurement=Measurement(CalibrationMethod.DYNAMICS_IDENTIFICATION, datetime.now(UTC)),
     )
     out.write_text(json.dumps(calibration_to_dict(calibration), indent=1) + "\n")
     print(f"wrote {out}: calibration {calibration_id(calibration)}")
+
+
+def _triple(values: np.ndarray) -> tuple[float, float, float]:
+    return (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _six(values: np.ndarray) -> tuple[float, float, float, float, float, float]:
+    return (
+        float(values[0]),
+        float(values[1]),
+        float(values[2]),
+        float(values[3]),
+        float(values[4]),
+        float(values[5]),
+    )
 
 
 def _swept_joint(recording: Recording) -> str:
