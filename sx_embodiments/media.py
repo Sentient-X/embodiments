@@ -164,9 +164,7 @@ def mount_pose(urdf: bytes, link: str) -> MountPose:
             moves_with.append(needed)
     if moves_with:
         return MountPose(root, None, tuple(moves_with), tuple(chain))
-    return MountPose(
-        root, _translation_rotation(kinematics.pose(root, link)), (), tuple(chain)
-    )
+    return MountPose(root, _translation_rotation(kinematics.pose(root, link)), (), tuple(chain))
 
 
 def mount_pose_at(
@@ -312,7 +310,11 @@ def _step(step: ChainStep) -> dict[str, JsonValue]:
         "follows": (
             None
             if step.follows is None
-            else {"joint": step.follows[0], "multiplier": step.follows[1], "offset": step.follows[2]}
+            else {
+                "joint": step.follows[0],
+                "multiplier": step.follows[1],
+                "offset": step.follows[2],
+            }
         ),
     }
 

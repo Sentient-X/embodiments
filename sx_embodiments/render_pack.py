@@ -293,8 +293,12 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
         for visual in link.findall("visual"):
             origin = visual.find("origin")
             transform = from_xyz_rpy(
-                xyz_triple(urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
-                xyz_triple(urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
+                xyz_triple(
+                    urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")
+                ),
+                xyz_triple(
+                    urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")
+                ),
             )
             geometry = visual.find("geometry")
             shape = geometry[0] if geometry is not None and len(geometry) else None
@@ -324,7 +328,9 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
                     visuals.append(_Visual(name, transform, mesh, f"cyl{radius},{length}", rgba))
                 case "sphere":
                     radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
-                    visuals.append(_Visual(name, transform, sphere_mesh(radius), f"sph{radius}", rgba))
+                    visuals.append(
+                        _Visual(name, transform, sphere_mesh(radius), f"sph{radius}", rgba)
+                    )
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} visual")
     return links, visuals

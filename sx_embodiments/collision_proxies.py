@@ -75,7 +75,15 @@ def _matrix(transform: Transform) -> Floats:
 
 def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
     """Each link's collision mesh vertices (and primitive corners) in the link frame."""
-    from .render_pack import RenderPackError, box_mesh, cylinder_mesh, urdf_floats, load_mesh, sphere_mesh, xyz_triple
+    from .render_pack import (
+        RenderPackError,
+        box_mesh,
+        cylinder_mesh,
+        load_mesh,
+        sphere_mesh,
+        urdf_floats,
+        xyz_triple,
+    )
 
     root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
     directory = materialize(embodiment)
@@ -88,8 +96,16 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
             origin = collision.find("origin")
             transform = _matrix(
                 from_xyz_rpy(
-                    xyz_triple(urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
-                    xyz_triple(urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
+                    xyz_triple(
+                        urdf_floats(
+                            None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz"
+                        )
+                    ),
+                    xyz_triple(
+                        urdf_floats(
+                            None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy"
+                        )
+                    ),
                 )
             )
             geometry = collision.find("geometry")
@@ -112,7 +128,9 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
                     length = urdf_floats(shape.get("length"), 1, "", "length")[0]
                     vertices = cylinder_mesh(radius, length).vertices
                 case "sphere":
-                    vertices = sphere_mesh(urdf_floats(shape.get("radius"), 1, "", "radius")[0]).vertices
+                    vertices = sphere_mesh(
+                        urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    ).vertices
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} collision")
             parts.append(vertices @ transform[:3, :3].T + transform[:3, 3])
