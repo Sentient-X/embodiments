@@ -338,6 +338,12 @@ pub struct TxSide {
     pub refusals: u32,
     /// Recoveries since a batch was last accepted.
     pub recoveries_since_success: u32,
+    /// Frames received on the channel when the current run of refusals began: if none arrive
+    /// before the run stalls the channel, nothing on the bus is acknowledging.
+    pub refusal_rx_mark: u64,
+    /// The last stall was refusals with nothing received meanwhile, and no batch has been
+    /// accepted since: nothing on the bus answers.
+    pub nothing_answering: bool,
 }
 
 impl TxSide {
@@ -353,6 +359,8 @@ impl TxSide {
             failure: None,
             refusals: 0,
             recoveries_since_success: 0,
+            refusal_rx_mark: 0,
+            nothing_answering: false,
         }
     }
 
@@ -843,6 +851,7 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
                     let mut tx = lock(&channel.tx);
                     tx.refusals = 0;
                     tx.recoveries_since_success = 0;
+                    tx.nothing_answering = false;
                 }
                 Ok(Ok(reply)) => {
                     channel.fail(
@@ -883,6 +892,9 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
     /// until the bus shows life or that timeout passes; stall it after too many in a row.
     fn refused(&self, channel: &ChannelShared, status: u8, now: Instant) {
         let mut tx = lock(&channel.tx);
+        if tx.refusals == 0 {
+            tx.refusal_rx_mark = channel.counters.rx_frames.load(Ordering::Relaxed);
+        }
         tx.refusals += 1;
         if tx.refusals >= REFUSALS_BEFORE_RECOVERY {
             let batches = tx.refusals;

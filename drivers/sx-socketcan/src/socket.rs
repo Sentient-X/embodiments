@@ -95,6 +95,10 @@ pub struct SocketCanPort {
     next: usize,
     filled: usize,
     bus_off: bool,
+    /// The controller last reported error-passive (until it reports error-active).
+    passive: bool,
+    /// A transmit went unacknowledged and no frame has arrived since.
+    unanswered: bool,
     counts: Counts,
     _lock: Option<InterfaceLock>,
     /// Cores kept able to wake at once while the port is open (`sx_realtime`), where the host
@@ -294,6 +298,8 @@ impl SocketCanPort {
             next: 0,
             filled: 0,
             bus_off: false,
+            passive: false,
+            unanswered: false,
             counts: Counts::default(),
             _lock: lock,
             _wake: sx_realtime::hold_wake_latency()
@@ -381,6 +387,7 @@ impl SocketCanPort {
                 None => self.counts.malformed += 1,
                 Some(Received::Data(frame)) => {
                     self.counts.received += 1;
+                    self.unanswered = false;
                     self.counts.hardware_stamped += u64::from(found.hardware);
                     if let (Some(stamp), Some(now)) = (found.software, now) {
                         let delay = u64::try_from(now.saturating_sub(stamp).as_micros())
@@ -415,8 +422,15 @@ impl SocketCanPort {
         if event.bus_off {
             self.bus_off = true;
         }
+        if event.passive {
+            self.passive = true;
+        }
+        if event.no_ack {
+            self.unanswered = true;
+        }
         if event.restarted || event.active {
             self.bus_off = false;
+            self.passive = false;
         }
     }
 
@@ -551,6 +565,30 @@ impl CanPort for SocketCanPort {
     /// and its answer, well under a millisecond on a 1 Mbit/s bus.
     fn frame_allowance(&self) -> Duration {
         SEND_PATIENCE * 2 + Duration::from_millis(1)
+    }
+
+    /// Nothing answering after an unacknowledged transmit with nothing received since; bus
+    /// errors while the controller is bus-off or error-passive; answering once a frame arrived.
+    fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
+        use sx_embodiment_drivers::can::LinkHealth;
+        let bus = self.interface.clone();
+        if self.unanswered {
+            LinkHealth::NothingAnswering { bus }
+        } else if self.bus_off || self.passive {
+            let detail = if self.bus_off {
+                "bus-off"
+            } else {
+                "error-passive"
+            };
+            LinkHealth::BusErrors {
+                bus,
+                detail: detail.to_owned(),
+            }
+        } else if self.counts.received > 0 {
+            LinkHealth::Answering
+        } else {
+            LinkHealth::Quiet
+        }
     }
 
     fn counters(&self) -> Vec<(&'static str, u64)> {

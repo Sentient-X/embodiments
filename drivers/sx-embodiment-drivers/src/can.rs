@@ -20,6 +20,57 @@ pub struct CanFrame {
     pub data: [u8; 8],
 }
 
+/// What a link knows about its bus, in the words a person at the robot acts on: the device's
+/// health line (a station reports it as the device's health in Fleet). Closed: every transport
+/// maps what it sees onto these.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkHealth {
+    /// Frames go out and answers come back.
+    Answering,
+    /// Open, and nothing has failed, but nothing has been received yet.
+    Quiet,
+    /// The adapter works, but nothing on the bus acknowledges what it sends: the cable to the
+    /// motors, its termination or the motors' power. Clears by itself when the bus answers.
+    NothingAnswering { bus: String },
+    /// The controller reports errors on the bus (bus-off, error-passive): wiring, termination
+    /// or bitrate. `detail` names what it saw.
+    BusErrors { bus: String, detail: String },
+    /// The adapter stopped answering its own commands: unplug it and plug it back in.
+    AdapterLost { bus: String, detail: String },
+    /// This link reports no health.
+    Unknown,
+}
+
+impl LinkHealth {
+    /// Whether the bus can carry a robot's traffic now.
+    #[must_use]
+    pub const fn usable(&self) -> bool {
+        matches!(self, Self::Answering | Self::Quiet)
+    }
+}
+
+impl std::fmt::Display for LinkHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Answering => f.write_str("Answering"),
+            Self::Quiet => f.write_str("Open; nothing received yet"),
+            Self::NothingAnswering { bus } => write!(
+                f,
+                "Nothing on {bus} is answering: check the cable to the motors, its termination and motor power"
+            ),
+            Self::BusErrors { bus, detail } => write!(
+                f,
+                "{bus} has bus errors ({detail}): check the wiring, the termination at both ends and the bitrate"
+            ),
+            Self::AdapterLost { bus, detail } => write!(
+                f,
+                "The adapter for {bus} stopped answering ({detail}): unplug it and plug it back in"
+            ),
+            Self::Unknown => f.write_str("No health reported"),
+        }
+    }
+}
+
 /// A link to one CAN bus.
 ///
 /// A refused send carries its reason as an `io::Error` whose kind every transport keeps the
@@ -80,6 +131,11 @@ pub trait CanPort: Send {
     fn counters(&self) -> Vec<(&'static str, u64)> {
         Vec::new()
     }
+
+    /// The bus's health in plain words ([`LinkHealth`]); cheap, never touches the bus.
+    fn health(&self) -> LinkHealth {
+        LinkHealth::Unknown
+    }
 }
 
 /// A port chosen at run time, as a station opens whichever bridge its commissioning names.
@@ -106,6 +162,10 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn counters(&self) -> Vec<(&'static str, u64)> {
         (**self).counters()
+    }
+
+    fn health(&self) -> LinkHealth {
+        (**self).health()
     }
 }
 
@@ -167,5 +227,11 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
         self.0
             .lock()
             .map_or_else(|_| Vec::new(), |port| port.counters())
+    }
+
+    fn health(&self) -> LinkHealth {
+        self.0
+            .lock()
+            .map_or(LinkHealth::Unknown, |port| port.health())
     }
 }

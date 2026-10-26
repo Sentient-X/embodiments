@@ -201,6 +201,14 @@ pub enum LinkError {
     /// `WouldBlock`: another caller is recovering the channel.
     #[error("ZLG channel {channel}: the channel is being recovered; send again")]
     Recovering { channel: u8 },
+    /// `NotConnected`: every batch was refused (the bus did not take it within the transmit
+    /// timeout: no node acknowledged) and nothing was received meanwhile. The adapter answers
+    /// its commands and the channel was restarted; a replug cannot help an empty bus. The next
+    /// send tries again, so the channel works the moment the bus answers.
+    #[error(
+        "Nothing on CAN{channel} is answering: check the cable to the motors, its termination and motor power"
+    )]
+    NothingAnswering { channel: u8 },
     /// `NotConnected`: recovery failed or did not hold; only a power cycle helps.
     #[error(
         "ZLG channel {channel}: {cause}, and recovery failed: {detail}. The adapter must be power-cycled: unplug it and plug it back in"
@@ -219,7 +227,7 @@ impl LinkError {
             Self::QueueFull { .. } | Self::Recovering { .. } => io::ErrorKind::WouldBlock,
             Self::BatchFailed { .. } => io::ErrorKind::Other,
             Self::Recovered { .. } => io::ErrorKind::Interrupted,
-            Self::PowerCycle { .. } => io::ErrorKind::NotConnected,
+            Self::PowerCycle { .. } | Self::NothingAnswering { .. } => io::ErrorKind::NotConnected,
         }
     }
 
@@ -734,6 +742,13 @@ fn run(mut engine: Engine<BulkPipe<In>, BulkPipe<Out>, BulkPipe<In>>, shared: &S
     engine.shutdown(Duration::from_secs(1));
 }
 
+/// Whether a stall means nothing on the bus answers: the adapter refused every batch of the
+/// run (status 1: the bus did not take it within the transmit timeout, which on CAN means no
+/// node acknowledged) and not one frame arrived on the channel since the run began.
+fn nothing_answering(cause: Stall, received: u64, mark: u64) -> bool {
+    matches!(cause, Stall::Refused { .. }) && received == mark
+}
+
 /// One open CAN channel; closes it when dropped (§3.8).
 pub struct Channel {
     core: Arc<Core>,
@@ -854,14 +869,22 @@ impl Channel {
                 };
             }
             tx.state = TxState::Recovering;
-            tx.recoveries_since_success
+            let received = state.counters.rx_frames.load(Ordering::Relaxed);
+            (
+                tx.recoveries_since_success,
+                nothing_answering(cause, received, tx.refusal_rx_mark),
+            )
         };
+        let (attempt, silent) = attempt;
         let alone = lifecycle
             .open
             .iter()
             .enumerate()
             .all(|(slot, open)| !open || slot == usize::from(self.index));
+        // An empty bus is not the adapter's fault: restart the channel (cheap, and it clears the
+        // controller's error state) but never escalate to a reopen or a power cycle.
         let action = match attempt {
+            _ if silent => Some(Recovery::ChannelRestart),
             0 => Some(Recovery::ChannelRestart),
             1 if alone => Some(Recovery::DeviceReopen),
             _ => None,
@@ -892,6 +915,13 @@ impl Channel {
         tx.failure = None;
         tx.refusals = 0;
         match (result, action) {
+            (Ok(()), Some(_)) if silent => {
+                tx.state = TxState::Running;
+                tx.nothing_answering = true;
+                LinkError::NothingAnswering {
+                    channel: self.index,
+                }
+            }
             (Ok(()), Some(action)) => {
                 tx.state = TxState::Running;
                 tx.recoveries_since_success += 1;
@@ -1055,6 +1085,35 @@ impl CanPort for Channel {
         batch * 2
     }
 
+    /// Answering once a frame has arrived; nothing answering after a stall of refused batches
+    /// with nothing received; the adapter lost when it needs a power cycle or is disconnected.
+    fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
+        use sx_embodiment_drivers::can::LinkHealth;
+        let bus = format!("CAN{}", self.index);
+        if let Some(reason) = lock(&self.core.shared.fatal).as_ref() {
+            return LinkHealth::AdapterLost {
+                bus,
+                detail: reason.clone(),
+            };
+        }
+        let tx = lock(&self.state().tx);
+        if let TxState::Dead { cause, .. } = &tx.state {
+            return LinkHealth::AdapterLost {
+                bus,
+                detail: cause.to_string(),
+            };
+        }
+        if tx.nothing_answering {
+            return LinkHealth::NothingAnswering { bus };
+        }
+        drop(tx);
+        if self.stats().rx_frames > 0 {
+            LinkHealth::Answering
+        } else {
+            LinkHealth::Quiet
+        }
+    }
+
     /// The channel's and the adapter's counts (`stats`, `UsbCanFd::stats`).
     fn counters(&self) -> Vec<(&'static str, u64)> {
         let channel = self.stats();
@@ -1092,5 +1151,39 @@ impl Drop for Channel {
         if !lifecycle.open.iter().any(|open| *open) {
             let _ = lifecycle.commands.run(Command::DeviceClose, 0, &[]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An empty bus is told from a wedged adapter by what arrived during the refusals: a run of
+    /// status-1 refusals with nothing received is nothing answering, never a power cycle.
+    #[test]
+    fn refusals_with_nothing_received_are_nothing_answering() {
+        let refused = Stall::Refused {
+            batches: 3,
+            status: 1,
+        };
+        assert!(nothing_answering(refused, 0, 0));
+        assert!(
+            nothing_answering(refused, 120, 120),
+            "a cable pulled mid-run"
+        );
+        assert!(
+            !nothing_answering(refused, 121, 120),
+            "something answered meanwhile"
+        );
+        assert!(!nothing_answering(Stall::NoReply { frames: 4 }, 0, 0));
+        let message = LinkError::NothingAnswering { channel: 1 }.to_string();
+        assert_eq!(
+            message,
+            "Nothing on CAN1 is answering: check the cable to the motors, its termination and motor power"
+        );
+        assert_eq!(
+            io::Error::from(LinkError::NothingAnswering { channel: 1 }).kind(),
+            io::ErrorKind::NotConnected
+        );
     }
 }
