@@ -16,7 +16,8 @@ A pack is a directory of three files, generated from the body's composed descrip
   count, and the body's gripper tool frames by side; and, when the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
   side), ``mount`` (the base mount's frame and kind, as ``collision.json``'s ``support``, and
-  that surface's height above the floor) and ``virtual_gripper`` (the body's gripper drawn at an empty controller).
+  that surface's height above the floor) and ``virtual_gripper`` (the body's gripper drawn at an
+  empty controller).
 * ``collision.json``, when a link has collision geometry: capsules containing it and the link
   pairs a self-collision check skips (:mod:`sx_embodiments.collision_proxies`), which the
   ``sx-embodiment-ik`` solver keeps apart.
@@ -532,6 +533,30 @@ def tcp_frames(links: list[str]) -> dict[str, str]:
     return frames
 
 
+def _rigid_with(urdf: bytes, tcp: str) -> set[str]:
+    """Every link that moves with ``tcp`` but for its own joints: up from ``tcp`` through fixed
+    joints to the last actuated joint's child, and that link's whole subtree (the jaw's fingers)."""
+    root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
+    parent: dict[str, tuple[str, str]] = {}
+    children: dict[str, list[str]] = {}
+    for joint in root.findall("joint"):
+        p, c = joint.find("parent"), joint.find("child")
+        if p is None or c is None:
+            raise RenderPackError(f"joint {joint.get('name')!r} lacks a parent or child")
+        parent[c.get("link", "")] = (p.get("link", ""), joint.get("type", ""))
+        children.setdefault(p.get("link", ""), []).append(c.get("link", ""))
+    top = tcp
+    while top in parent and parent[top][1] == "fixed":
+        top = parent[top][0]
+    drawn: set[str] = set()
+    stack = [top]
+    while stack:
+        link = stack.pop()
+        drawn.add(link)
+        stack.extend(children.get(link, []))
+    return drawn
+
+
 def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict[str, JsonValue]:
     frames = [device.frame for device in viewing.tracking]
     if missing := sorted(set(frames) - set(links)):
@@ -549,10 +574,13 @@ def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict
             "floor_to_frame_m": viewing.mount.floor_to_frame_m,
         }
     if viewing.virtual_gripper is not None:
-        gripper = viewing.virtual_gripper.to_json(links)
-        if set(tcp_frames(links)) != {"left", "right"}:
+        frames = tcp_frames(links)
+        if set(frames) != {"left", "right"}:
             raise RenderPackError(f"{embodiment.name}: a virtual gripper needs both tool frames")
-        fields["virtual_gripper"] = gripper
+        drawn = {side: _rigid_with(embodiment.urdf_bytes, frame) for side, frame in frames.items()}
+        fields["virtual_gripper"] = viewing.virtual_gripper.to_json(
+            {side: [link for link in links if link in drawn[side]] for side in frames}
+        )
     return fields
 
 

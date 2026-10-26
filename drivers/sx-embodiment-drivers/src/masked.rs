@@ -296,17 +296,19 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
 }
 
 /// Refuse a vector of the wrong width or outside the declared bounds, skipping `unavailable`
-/// axes: their targets reach no actuator.
+/// axes: their targets reach no actuator. This is for a position stated outright (where a
+/// body rests, [`crate::Governor::start_at`]); a command's target is held to
+/// [`crate::CommandRange::admissible`] instead.
 ///
 /// # Errors
 ///
-/// As [`check_targets`], for the available axes.
+/// The width mismatch, or the first available axis' target outside its bounds.
 pub fn check_available(
     axes: &[BoundAxis],
     unavailable: &[usize],
     joints: &[f64],
 ) -> Result<(), TargetError> {
-    if unavailable.is_empty() || axes.len() != joints.len() {
+    if axes.len() != joints.len() {
         return check_targets(axes, joints);
     }
     for (index, (axis, joint)) in axes.iter().zip(joints).enumerate() {

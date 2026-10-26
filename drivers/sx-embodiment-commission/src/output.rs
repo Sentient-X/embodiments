@@ -50,6 +50,12 @@ pub fn commissioning(station: &Station, matched: &[PortMatch]) -> Value {
     if !station.rails.volts().is_empty() {
         document["rails"] = json!(station.rails.volts());
     }
+    if let Some(decided) = station.rails.derate_decided() {
+        document["derate"] = json!({
+            "max_speed": station.rails.derate().max_speed,
+            "decided": decided,
+        });
+    }
     document
 }
 

@@ -68,9 +68,9 @@ fn main() {
         .t;
     let zed = body.frame(&frames, head).t;
     let table = [
-        (left[0] + right[0]) / 2.0,
-        (left[1] + right[1]) / 2.0,
-        (left[2] + right[2]) / 2.0 - 0.15,
+        f64::midpoint(left[0], right[0]),
+        f64::midpoint(left[1], right[1]),
+        f64::midpoint(left[2], right[2]) - 0.15,
     ];
     let targets = [
         ("ahead", [zed[0] + 1.0, zed[1], zed[2]]),

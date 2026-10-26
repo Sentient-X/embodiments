@@ -5,8 +5,10 @@
 //! where the run has put it (where the body rested, at the start), and lasts as long as the
 //! governor's speed takes to cover it plus a settling margin; a pause holds every target. Every
 //! period the target vector goes to the governor, which steps each axis toward it and checks
-//! that the body follows. The run stops the body at the end, on a refusal or fault, and as soon
-//! as `stop` is set.
+//! that the body follows. When the steps are done the run ends as its [`AtEnd`] says
+//! ([`Governor::end`]: a return under the governor, then the stop); `stop` set during the
+//! return stops it where it is. On a refusal or fault, and as soon as `stop` is set during the
+//! steps, it stops the body where it is, with no motion.
 //!
 //! The tick path does no I/O and no formatting: each tick is one fixed-size [`TickRecord`]
 //! copied into a preallocated bounded queue ([`TickLog`]), which never blocks (a full queue
@@ -23,7 +25,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use sx_damiao_can::chain::{MotorFeedback, MotorState};
-use sx_embodiment_drivers::{ActuatorChain, Clock, Governor, StopReport};
+use sx_embodiment_drivers::{ActuatorChain, AtEnd, Clock, Ending, Governor};
 
 /// The most axes a [`TickRecord`] holds.
 pub const MAX_AXES: usize = 32;
@@ -289,11 +291,15 @@ fn state_name(state: MotorState) -> String {
 pub struct Ended {
     /// Why it stopped early, if it did.
     pub failure: Option<String>,
-    pub stop: StopReport,
+    /// What the body did at the end: the run's [`AtEnd`] when the steps finished, else
+    /// [`Ending::Released`], stopped where it was.
+    pub ending: Ending,
 }
 
 /// Run `steps` on `governor` every `period`, `pace` waiting out each period (a test advances
-/// its clock instead), until the steps end or `stop` is set; then stop the body.
+/// its clock instead), until the steps end or `stop` is set. Steps that finish end as `at_end`
+/// says ([`Governor::end`], `stop` aborting a return); a failure or `stop` during the steps
+/// stops the body where it is.
 ///
 /// # Errors
 ///
@@ -302,10 +308,10 @@ pub struct Ended {
 pub fn run<C, K>(
     governor: &mut Governor<C, K>,
     steps: &[Step],
-    speed: f64,
     period: Duration,
     stop: &AtomicBool,
     log: Option<&TickLog>,
+    at_end: AtEnd,
     pace: &mut dyn FnMut(),
 ) -> Result<Ended, String>
 where
@@ -328,10 +334,13 @@ where
     let mut record = TickRecord::new(width);
     let mut tick: u32 = 0;
     let mut failure = None;
+    let mut interrupted = false;
     'steps: for step in steps {
         let lasts = match *step {
             Step::Move { axis, delta } => {
                 target[axis] += delta;
+                // The axis's speed in force: the one given, tightened by any derate.
+                let speed = governor.limits()[axis].max_speed;
                 Duration::from_secs_f64(delta.abs() / speed.max(1e-3)) + SETTLE
             }
             Step::With { axis, delta } => {
@@ -340,9 +349,27 @@ where
             }
             Step::Pause(lasts) => lasts,
         };
+        // A move a person typed past where its joint may go is refused, not cut short: the
+        // governor would bring it in to the edge and the run would wait out a move it never
+        // makes. The rule is the governor's own (`CommandRange::admissible`).
+        if let Step::Move { axis, .. } | Step::With { axis, .. } = *step {
+            let at = governor.last_observed().map(|at| at[axis]);
+            let admissible = governor.commandable()[axis].admissible(at);
+            if !admissible.admits(target[axis]) {
+                failure = Some(format!(
+                    "{} to {:.4} is outside where it may go [{:.4}, {:.4}]",
+                    governor.axes()[axis].joint,
+                    target[axis],
+                    admissible.lower,
+                    admissible.upper
+                ));
+                break 'steps;
+            }
+        }
         let ticks = lasts.as_nanos().div_ceil(period.as_nanos().max(1));
         for _ in 0..ticks {
             if stop.load(Ordering::SeqCst) {
+                interrupted = true;
                 break 'steps;
             }
             record.t = period.as_secs_f64() * f64::from(tick);
@@ -371,8 +398,13 @@ where
             pace();
         }
     }
-    Ok(Ended {
-        failure,
-        stop: governor.stop(),
-    })
+    let ending = if failure.is_some() || interrupted {
+        Ending::Released {
+            stop: governor.stop(),
+        }
+    } else {
+        // The moves carried no feed-forward, so neither does the return.
+        governor.end(at_end, &[], None, pace, &|| stop.load(Ordering::SeqCst))
+    };
+    Ok(Ended { failure, ending })
 }

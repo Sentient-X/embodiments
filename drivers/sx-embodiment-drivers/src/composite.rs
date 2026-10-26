@@ -298,6 +298,7 @@ mod tests {
                 },
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
+                home: None,
             }],
             commandable: vec![CommandRange {
                 lower: -1.0,

@@ -12,7 +12,8 @@
       "provisional": false,
       "bus_id": 1,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "joint2",
@@ -24,7 +25,8 @@
       "provisional": false,
       "bus_id": 2,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "joint3",
@@ -36,7 +38,8 @@
       "provisional": false,
       "bus_id": 3,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "joint4",
@@ -48,7 +51,8 @@
       "provisional": false,
       "bus_id": 4,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "joint5",
@@ -60,7 +64,8 @@
       "provisional": false,
       "bus_id": 5,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "joint6",
@@ -72,7 +77,8 @@
       "provisional": false,
       "bus_id": 6,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "home": 0.0
     },
     {
       "joint": "gripper_joint1",

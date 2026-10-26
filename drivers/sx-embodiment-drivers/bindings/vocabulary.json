@@ -16,40 +16,47 @@
   "ratings": {
     "feetech_sts3215": {
       "peak_torque_nm": 2.94,
-      "supply_volts": null
+      "supply_volts": null,
+      "rated_speed_rad_s": null
     },
     "damiao_dm4310": {
       "peak_torque_nm": 7.0,
-      "supply_volts": null
+      "supply_volts": null,
+      "rated_speed_rad_s": 12.56637061435917
     },
     "damiao_dm4340": {
       "peak_torque_nm": 27.0,
-      "supply_volts": null
+      "supply_volts": null,
+      "rated_speed_rad_s": 3.7699111843077517
     },
     "damiao_dm8009": {
       "peak_torque_nm": 40.0,
-      "supply_volts": null
+      "supply_volts": null,
+      "rated_speed_rad_s": 10.471975511965978
     },
     "damiao_dm8009p": {
       "peak_torque_nm": 40.0,
       "supply_volts": [
         24.0,
         48.0
-      ]
+      ],
+      "rated_speed_rad_s": 10.471975511965978
     },
     "dynamixel_xl330_m288": {
       "peak_torque_nm": 0.52,
       "supply_volts": [
         3.7,
         6.0
-      ]
+      ],
+      "rated_speed_rad_s": null
     },
     "dynamixel_xm430_w350": {
       "peak_torque_nm": 4.1,
       "supply_volts": [
         10.0,
         14.8
-      ]
+      ],
+      "rated_speed_rad_s": null
     }
   }
 }
