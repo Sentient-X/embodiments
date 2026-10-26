@@ -55,14 +55,23 @@ impl SocketCanPorts {
     ///
     /// Returns [`OpenError::NotAttached`] when no CAN interface carries the identity,
     /// [`OpenError::Ambiguous`] when two do, and [`OpenError::Port`] when the kernel's view
-    /// cannot be read.
+    /// cannot be read. A host with no kernel network view at all has no interface: not
+    /// attached, so another transport (a ZLG adapter on macOS) can carry the identity.
     pub fn interface(&self, identity: &str) -> Result<String, OpenError> {
         let port = |reason: String| OpenError::Port {
             serial: identity.to_owned(),
             reason,
         };
+        let entries = match fs::read_dir(&self.net) {
+            Ok(entries) => entries,
+            // A host with no kernel network view (macOS has no `/sys`) carries no interface.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(OpenError::NotAttached(identity.to_owned()));
+            }
+            Err(error) => return Err(port(error.to_string())),
+        };
         let mut found: Vec<String> = Vec::new();
-        for entry in fs::read_dir(&self.net).map_err(|error| port(error.to_string()))? {
+        for entry in entries {
             let entry = entry.map_err(|error| port(error.to_string()))?;
             let path = entry.path();
             if !fs::read_to_string(path.join("type")).is_ok_and(|kind| kind.trim() == CAN_LINK_TYPE)
@@ -117,6 +126,15 @@ impl PortSource for SocketCanPorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_host_without_a_kernel_network_view_carries_no_interface() {
+        let ports = SocketCanPorts::rooted(PathBuf::from("/nonexistent/sys/class/net"));
+        assert!(matches!(
+            ports.interface("A30F115DD0120A949B80:1"),
+            Err(OpenError::NotAttached(_))
+        ));
+    }
 
     /// Where an interface's device sits.
     #[derive(Clone, Copy)]
