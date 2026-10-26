@@ -207,6 +207,22 @@ impl<C: ActuatorChain> Governor<C> {
     pub fn new(chain: C, limits: Vec<AxisLimits>) -> Result<Self, LimitsError> {
         Self::with_clock(chain, limits, MonotonicClock)
     }
+
+    /// [`Governor::new`], each derated axis held to `derate`'s speed and acceleration instead
+    /// of the rail's automatic ones ([`crate::rail::OVER_RAIL`]) when given: a person's
+    /// declared decision for this run (the owner's 0.6 rad/s for the J8009P on the 54 V
+    /// battery, 2026-10-26). The derate's feed-forward torque share is kept.
+    ///
+    /// # Errors
+    ///
+    /// As [`Governor::new`].
+    pub fn with_derate(
+        chain: C,
+        limits: Vec<AxisLimits>,
+        derate: Option<crate::rail::DerateLimits>,
+    ) -> Result<Self, LimitsError> {
+        Self::governed(chain, limits, MonotonicClock, derate)
+    }
 }
 
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
@@ -216,6 +232,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ///
     /// As [`Governor::new`].
     pub fn with_clock(chain: C, limits: Vec<AxisLimits>, clock: K) -> Result<Self, LimitsError> {
+        Self::governed(chain, limits, clock, None)
+    }
+
+    fn governed(
+        chain: C,
+        limits: Vec<AxisLimits>,
+        clock: K,
+        derate: Option<crate::rail::DerateLimits>,
+    ) -> Result<Self, LimitsError> {
         let axes = chain.axes();
         if limits.len() != axes.len() {
             return Err(LimitsError::Width {
@@ -239,7 +264,13 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .map(|observed| observed.to_vec());
         let mut limits = limits;
         let mut torque_caps = vec![None; limits.len()];
-        let derated = chain.derated();
+        let mut derated = chain.derated();
+        if let Some(chosen) = derate {
+            for axis in &mut derated {
+                axis.limits.max_speed = chosen.max_speed;
+                axis.limits.max_acceleration = chosen.max_acceleration;
+            }
+        }
         for derate in &derated {
             let (Some(limit), Some(bound)) = (limits.get_mut(derate.axis), axes.get(derate.axis))
             else {

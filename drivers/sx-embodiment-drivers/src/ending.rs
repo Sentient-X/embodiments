@@ -233,6 +233,16 @@ impl fmt::Display for Ending {
     }
 }
 
+/// How fast a return moves when the caller bounds it below [`RETURN_SPEED_SHARE`] of each
+/// axis's cap (a teleoperation disengage returns "incredibly slowly", 2026-10-26): no axis's
+/// target faster than `max_speed`, its speed ramped up from rest over `ramp` and back down to
+/// rest on arrival at the same rate, so neither the start nor the stop jerks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pace {
+    pub max_speed: f64,
+    pub ramp: Duration,
+}
+
 /// One return in progress: the target, its deadline, and since when the body has sat on it.
 /// [`Governor::end`] drives one to the end; a caller with its own wait can call
 /// [`Return::begin`] and [`Return::tick`] itself.
@@ -253,6 +263,11 @@ pub struct Return {
     began: Instant,
     deadline: Instant,
     arrived: Option<Instant>,
+    /// Each axis's target speed, and the ramp's acceleration when paced.
+    speed: Axes<f64>,
+    ramp: Option<Axes<f64>>,
+    /// Each axis's target speed now, under the ramp.
+    moving: Axes<f64>,
 }
 
 /// Where a return is after one tick.
@@ -277,6 +292,35 @@ impl Return {
         to: AtEnd,
         keep: &[usize],
     ) -> Result<Self, ReturnFailure> {
+        Self::begin_paced(governor, to, keep, None)
+    }
+
+    /// [`Return::begin`], each axis moved no faster than `pace` says when given.
+    ///
+    /// # Errors
+    ///
+    /// As [`Return::begin`].
+    #[allow(clippy::too_many_lines)] // One plan: readings, target, pace, deadline.
+    pub fn begin_paced<C: ActuatorChain, K: Clock>(
+        governor: &mut Governor<C, K>,
+        to: AtEnd,
+        keep: &[usize],
+        pace: Option<Pace>,
+    ) -> Result<Self, ReturnFailure> {
+        let speed: Axes<f64> = governor
+            .limits()
+            .iter()
+            .map(|limit| {
+                let share = limit.max_speed * RETURN_SPEED_SHARE;
+                pace.map_or(share, |pace| share.min(pace.max_speed))
+            })
+            .collect();
+        let ramp: Option<Axes<f64>> = pace.map(|pace| {
+            speed
+                .iter()
+                .map(|speed| speed / pace.ramp.as_secs_f64().max(1e-3))
+                .collect()
+        });
         if governor.is_latched() {
             return Err(ReturnFailure::Latched);
         }
@@ -332,9 +376,12 @@ impl Return {
             }
             let goal = pose.clamp(range.lower, range.upper);
             let travel = (goal - at).abs().max((goal - sent[index]).abs());
-            let mut seconds = travel / (limit.max_speed * RETURN_SPEED_SHARE);
+            let mut seconds = travel / speed[index];
             if let Some(acceleration) = limit.max_acceleration {
                 seconds += limit.max_speed / acceleration;
+            }
+            if let Some(pace) = pace {
+                seconds += 2.0 * pace.ramp.as_secs_f64();
             }
             needs = needs.max(seconds);
             returning[index] = true;
@@ -369,6 +416,9 @@ impl Return {
             began,
             deadline: began + needs.mul_f64(RETURN_SLACK) + RETURN_MARGIN,
             arrived: None,
+            moving: Axes::filled(0.0, speed.len()),
+            speed,
+            ramp,
         })
     }
 
@@ -455,13 +505,24 @@ impl Return {
             now.saturating_duration_since(last).min(MAX_STEP_INTERVAL)
         });
         self.last = Some(now);
-        for ((commanded, target), limit) in self
-            .commanded
-            .iter_mut()
-            .zip(&self.target)
-            .zip(governor.limits())
+        let _ = governor;
+        let dt = dt.as_secs_f64();
+        for (index, (commanded, target)) in self.commanded.iter_mut().zip(&self.target).enumerate()
         {
-            let step = limit.max_speed * RETURN_SPEED_SHARE * dt.as_secs_f64();
+            let speed = match &self.ramp {
+                // Up from rest at the ramp's rate, and never faster than it can brake to rest
+                // on the target.
+                Some(ramp) => {
+                    let remaining = (target - *commanded).abs();
+                    let brake = (2.0 * ramp[index] * remaining).sqrt();
+                    let up = ramp[index].mul_add(dt, self.moving[index]);
+                    let speed = up.min(self.speed[index]).min(brake);
+                    self.moving[index] = speed;
+                    speed
+                }
+                None => self.speed[index],
+            };
+            let step = speed * dt;
             *commanded += (target - *commanded).clamp(-step, step);
         }
     }
@@ -795,6 +856,45 @@ mod tests {
             "{ending}"
         );
         assert!(close(&governor.chain().at, &[0.5, 0.3]));
+    }
+
+    #[test]
+    fn a_paced_return_ramps_up_and_down_and_never_passes_its_speed() {
+        let (mut governor, clock) = governed(fake([0.5, 0.3]));
+        clock.0.set(clock.0.get() + Duration::from_secs(1));
+        for _ in 0..20 {
+            governor.command(&[0.0, 0.0]).expect("move");
+            clock.0.set(clock.0.get() + MAX_STEP);
+        }
+        let pace = Pace {
+            max_speed: 0.05,
+            ramp: Duration::from_millis(500),
+        };
+        let mut ret =
+            Return::begin_paced(&mut governor, AtEnd::Start, &[], Some(pace)).expect("begun");
+        let mut previous = governor.sent().expect("sent").to_vec();
+        let mut speeds = Vec::new();
+        loop {
+            clock.0.set(clock.0.get() + MAX_STEP);
+            let progress = ret.tick(&mut governor, None).expect("a tick");
+            let sent = governor.sent().expect("sent").to_vec();
+            let speed = sent
+                .iter()
+                .zip(&previous)
+                .map(|(a, b)| (a - b).abs() / MAX_STEP.as_secs_f64())
+                .fold(0.0, f64::max);
+            speeds.push(speed);
+            previous = sent;
+            if progress == Progress::Settled {
+                break;
+            }
+        }
+        assert!(close(&governor.chain().at, &[0.5, 0.3]));
+        assert!(speeds.iter().all(|v| *v <= 0.05 + 1e-9), "{speeds:?}");
+        // From rest: the first step is a ramp's, not the full speed; and it ends at rest.
+        assert!(speeds[0] < 0.01, "{}", speeds[0]);
+        assert!(speeds.iter().any(|v| (*v - 0.05).abs() < 1e-9));
+        assert!(*speeds.last().expect("ticks") < 0.01);
     }
 
     #[test]

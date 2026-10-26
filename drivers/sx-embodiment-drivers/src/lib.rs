@@ -72,8 +72,8 @@ pub use dynamics::{
     Scratch, UPRIGHT,
 };
 pub use ending::{
-    AtEnd, Ending, FeedforwardFn, MAX_RETURN, Progress, RETURN_MARGIN, RETURN_SETTLE, RETURN_SLACK,
-    RETURN_SPEED_SHARE, RETURN_TOLERANCE, Return, ReturnFailure,
+    AtEnd, Ending, FeedforwardFn, MAX_RETURN, Pace, Progress, RETURN_MARGIN, RETURN_SETTLE,
+    RETURN_SLACK, RETURN_SPEED_SHARE, RETURN_TOLERANCE, Return, ReturnFailure,
 };
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,
