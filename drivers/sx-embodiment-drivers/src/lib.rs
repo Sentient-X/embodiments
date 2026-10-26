@@ -31,6 +31,7 @@
 //! actuator, and nothing here owns a thread or a runtime.
 
 pub mod approach;
+pub mod axes;
 pub mod binding;
 pub mod body;
 pub mod can;
@@ -49,6 +50,7 @@ pub mod media;
 pub mod serial;
 
 pub use approach::{ApproachLimit, BRING_UP_APPROACH};
+pub use axes::{Axes, MAX_AXES};
 pub use binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
     UNCALIBRATED_ZERO, is_port_name, validate_chain,

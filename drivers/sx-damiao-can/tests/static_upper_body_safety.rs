@@ -179,7 +179,7 @@ fn a_joint_resting_outside_its_range_opens_and_is_held_or_brought_in_never_furth
     chain.command(&rest).expect("held outside its range");
     // Further out is refused before any frame.
     let sent = bus.sent();
-    let mut out = rest.clone();
+    let mut out = rest;
     out[wrist] = rest[wrist] - 0.01;
     assert!(matches!(
         chain.command(&out),
@@ -187,7 +187,7 @@ fn a_joint_resting_outside_its_range_opens_and_is_held_or_brought_in_never_furth
     ));
     assert_eq!(bus.sent(), sent, "refused before any frame");
     // Toward the range is taken, and the interval shrinks behind it.
-    let mut inward = rest.clone();
+    let mut inward = rest;
     inward[wrist] = rest[wrist] + 0.1;
     chain.command(&inward).expect("moved toward its range");
     let mut back = rest;
@@ -219,7 +219,7 @@ fn a_governed_joint_outside_its_range_comes_in_at_the_speed_bound() {
     let rest = governed.last_observed().expect("rest");
     // Asked to the wrist's range centre and the elbow (in range) up: both move, each by its
     // own interval, the wrist only ever inward.
-    let mut target = rest.clone();
+    let mut target = rest;
     target[wrist] = 0.0;
     target[elbow] = 2.5;
     let mut last = rest[wrist];
@@ -260,7 +260,7 @@ fn the_governor_starts_from_where_the_body_rests_and_slews() {
         15
     ];
     let mut governed = Governor::new(chain, limits).expect("limits");
-    let mut target = rest.clone();
+    let mut target = rest;
     target[elbow] = 2.5;
     let receipt = governed.command(&target).expect("a governed command");
     // The elbow moved at most one 20 ms step at 0.25 rad/s from where it rested.

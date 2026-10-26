@@ -37,7 +37,7 @@ fn opened() -> (Sim, DamiaoChain<Sim>, Vec<f64>) {
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
     let bus = Sim::for_axes(&axes);
     let chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
-    let rest = chain.last_observed().expect("rest");
+    let rest = chain.last_observed().expect("rest").to_vec();
     (bus, chain, rest)
 }
 

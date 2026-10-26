@@ -968,8 +968,8 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
         match writer.tx_packet(&mut self.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
-                observed: self.sync_read_positions()?,
-                feedback: Vec::new(),
+                observed: self.sync_read_positions()?.into(),
+                feedback: sx_embodiment_drivers::Axes::new(),
             }),
             result => {
                 self.enabled = false;
@@ -1028,12 +1028,16 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
         self.present_positions()
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
-        self.command_readings.clone()
+    fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
+        self.command_readings
+            .as_deref()
+            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
-    fn last_observed(&self) -> Option<Vec<f64>> {
-        self.observed.clone()
+    fn last_observed(&self) -> Option<sx_embodiment_drivers::Axes<f64>> {
+        self.observed
+            .as_deref()
+            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain: three exchanges per servo, each

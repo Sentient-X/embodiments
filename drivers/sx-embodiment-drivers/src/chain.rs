@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use crate::axes::Axes;
 use crate::binding::BoundAxis;
 
 /// The strongest evidence a command's own bus traffic established; never physical effect.
@@ -15,16 +16,16 @@ pub enum Evidence {
     BusObservedComplete,
 }
 
-/// What one command established.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Receipt<F> {
+/// What one command established, held inline ([`Axes`]) so a tick allocates nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Receipt<F: Copy + Default> {
     pub evidence: Evidence,
     /// The joint coordinates the actuators reported in their answers, in native state order;
     /// empty when the bus answers nothing.
-    pub observed: Vec<f64>,
+    pub observed: Axes<f64>,
     /// Each actuator's own answer, in its bus's terms, in native state order; empty when the
     /// bus answers nothing.
-    pub feedback: Vec<F>,
+    pub feedback: Axes<F>,
 }
 
 /// The joint range a chain commands on one axis: the declared bounds intersected with what
@@ -187,6 +188,13 @@ pub enum AxisReading {
     Faulted(u8),
 }
 
+/// No reading: what an axis holds before its first answer.
+impl Default for AxisReading {
+    fn default() -> Self {
+        Self::Missing(MissingReason::Unavailable)
+    }
+}
+
 impl AxisReading {
     /// The position, when the reading is fresh.
     #[must_use]
@@ -287,7 +295,7 @@ pub trait ChainError: std::error::Error + Send + Sync + 'static {
 pub trait ActuatorChain {
     type Error: ChainError;
     /// One actuator's answer as the bus reports it.
-    type Feedback: Clone + std::fmt::Debug + PartialEq;
+    type Feedback: Copy + Default + std::fmt::Debug + PartialEq;
 
     /// The bound axes, in native state order: index `i` of every vector is `axes()[i]`.
     fn axes(&self) -> &[BoundAxis];
@@ -349,7 +357,7 @@ pub trait ActuatorChain {
     /// `None` when the chain observes nothing with its commands, or no command has answered
     /// since open or the last stop. A value in [`Receipt::observed`] that is NaN is an axis
     /// here that is not [`AxisReading::Fresh`].
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         None
     }
 
@@ -364,7 +372,7 @@ pub trait ActuatorChain {
     /// when the bus answers nothing or an actuator has not answered. A chain that observes
     /// reports them from open and from each stop, so a caller can start from where the body
     /// rests before it commands anything.
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         None
     }
 

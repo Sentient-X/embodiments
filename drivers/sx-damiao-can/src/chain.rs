@@ -88,9 +88,9 @@ use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, ActuatorModel, AxisReading, BindingError, BodyError, BoundAxis,
-    ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit, MissingReason,
-    Receipt, StopReport, TargetError, check_reach, validate_chain,
+    ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
+    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit,
+    MissingReason, Receipt, StopReport, TargetError, check_reach, validate_chain,
 };
 use thiserror::Error;
 
@@ -232,6 +232,13 @@ pub enum MotorState {
     Unavailable,
 }
 
+/// A motor no frame has addressed: what a feedback slot holds before its answer.
+impl Default for MotorFeedback {
+    fn default() -> Self {
+        Self::unavailable(0)
+    }
+}
+
 impl MotorFeedback {
     /// The place of a motor no frame addresses, its readings `NaN`.
     #[must_use]
@@ -356,7 +363,11 @@ pub struct DamiaoChain<P> {
     stop_pending: bool,
     /// Every motor's answer to the last command, all fresh (a command that misses one fails);
     /// none since open or a stop.
-    command_readings: Option<Vec<AxisReading>>,
+    command_readings: Option<Axes<AxisReading>>,
+    /// One feedback request per motor, the shape of every command and refresh phase.
+    every_feedback: Vec<Request>,
+    /// The command phase's buffers, allocated at open and reused every tick.
+    tick: Phase,
     /// Per axis; every part off until [`DamiaoChain::set_feedforward_limits`].
     feedforward_limits: Vec<FeedforwardLimit>,
     /// What the last command sent, at the joint, after every clamp.
@@ -405,6 +416,17 @@ pub(crate) struct Phase {
 }
 
 impl Phase {
+    /// Buffers for `requests` requests.
+    pub(crate) fn with_capacity(requests: usize) -> Self {
+        Self {
+            sent: Vec::with_capacity(requests),
+            before: Vec::with_capacity(requests),
+            received: Vec::with_capacity(requests),
+            drained: false,
+            failure: None,
+        }
+    }
+
     fn answered(&self, index: usize) -> bool {
         self.received[index].is_some()
     }
@@ -456,8 +478,21 @@ pub(crate) fn phase<P: CanPort>(
     control: &mut MotorControl<P>,
     requests: &[Request],
     wait: Duration,
-    mut frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
+    frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
 ) -> Phase {
+    let mut phase = Phase::with_capacity(requests.len());
+    phase_into(control, requests, wait, frame, &mut phase);
+    phase
+}
+
+/// [`phase`] into `phase`'s buffers, which allocate nothing once they hold `requests.len()`.
+pub(crate) fn phase_into<P: CanPort>(
+    control: &mut MotorControl<P>,
+    requests: &[Request],
+    wait: Duration,
+    mut frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
+    phase: &mut Phase,
+) {
     let registers = requests
         .iter()
         .any(|request| matches!(request.awaits, Awaits::Register(_)));
@@ -466,13 +501,13 @@ pub(crate) fn phase<P: CanPort>(
     } else {
         control.recv()
     };
-    let mut phase = Phase {
-        sent: vec![false; requests.len()],
-        before: Vec::with_capacity(requests.len()),
-        received: vec![None; requests.len()],
-        drained: drained.is_ok(),
-        failure: drained.err(),
-    };
+    phase.sent.clear();
+    phase.sent.resize(requests.len(), false);
+    phase.received.clear();
+    phase.received.resize(requests.len(), None);
+    phase.before.clear();
+    phase.drained = drained.is_ok();
+    phase.failure = drained.err();
     for request in requests {
         phase.before.push(
             control
@@ -510,7 +545,7 @@ pub(crate) fn phase<P: CanPort>(
     }
     let deadline = Instant::now() + wait + allowance;
     loop {
-        stamp(control, requests, &mut phase);
+        stamp(control, requests, phase);
         let pending = (0..requests.len()).any(|index| phase.sent[index] && !phase.answered(index));
         if !pending {
             break;
@@ -524,7 +559,6 @@ pub(crate) fn phase<P: CanPort>(
             }
         }
     }
-    phase
 }
 
 /// Check the `PMAX`, `VMAX` and `TMAX` a motor last answered against the Damiao tables for its
@@ -714,6 +748,7 @@ impl<P: CanPort> DamiaoChain<P> {
         };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
         let count = motors.len();
+        let every_feedback = every(&ids, Awaits::Feedback);
         let mut chain = Self {
             control,
             motors,
@@ -724,6 +759,8 @@ impl<P: CanPort> DamiaoChain<P> {
             enabled: false,
             stop_pending: false,
             command_readings: None,
+            every_feedback,
+            tick: Phase::with_capacity(count),
             feedforward_limits: vec![FeedforwardLimit::default(); count],
             applied: vec![Feedforward::default(); count],
         };
@@ -995,52 +1032,57 @@ impl<P: CanPort> DamiaoChain<P> {
             self.last_observed().as_deref(),
             joints,
         )?;
-        let targets: Vec<f64> = self
+        let targets: Axes<f64> = self
             .motors
             .iter()
             .zip(joints)
             .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
             .collect();
         // Each axis' feed-forward in the motor's coordinates, and what that is at the joint.
-        let (sent, applied): (Vec<(f64, f64)>, Vec<Feedforward>) = (0..self.motors.len())
-            .map(|index| {
-                self.actuator_feedforward(
-                    index,
-                    targets[index],
-                    feedforward.map_or(Feedforward::default(), |all| all[index]),
-                )
-            })
-            .unzip();
+        let mut sent: Axes<(f64, f64)> = Axes::new();
+        let mut applied: Axes<Feedforward> = Axes::new();
+        for index in 0..self.motors.len() {
+            let (frame, at_joint) = self.actuator_feedforward(
+                index,
+                targets[index],
+                feedforward.map_or(Feedforward::default(), |all| all[index]),
+            );
+            sent.push(frame);
+            applied.push(at_joint);
+        }
         if !self.enabled {
             self.arm_and_enable()?;
         }
         self.command_readings = None;
         let motors = &self.motors;
-        let answered = phase(
+        phase_into(
             &mut self.control,
-            &every(&self.ids, Awaits::Feedback),
+            &self.every_feedback,
             FEEDBACK_WAIT,
             |control, index, request| {
                 let DamiaoAxis { kp, kd, .. } = motors[index];
                 let (dq, tau) = sent[index];
                 control.send_mit(request.bus_id, kp, kd, targets[index], dq, tau)
             },
-        )
-        .checked()?;
+            &mut self.tick,
+        );
+        if let Some(failure) = self.tick.failure.take() {
+            return Err(failure.into());
+        }
         // Recorded only once every frame went out.
         self.applied.copy_from_slice(&applied);
-        self.expect_all(&answered, MotorState::Enabled)?;
+        self.expect_all(&self.tick, MotorState::Enabled)?;
         let feedback = self.feedback()?;
-        let observed: Vec<f64> = self
+        let observed: Axes<f64> = self
             .motors
             .iter()
-            .zip(&feedback)
+            .zip(feedback.iter())
             .map(|(motor, answer)| motor.axis.joint_from_actuator(f64::from(answer.position)))
             .collect();
         self.command_readings = Some(
             observed
                 .iter()
-                .zip(&answered.received)
+                .zip(&self.tick.received)
                 .map(|(position, received)| AxisReading::Fresh {
                     position: *position,
                     // Every motor answered: `expect_all` refuses a silent one.
@@ -1066,7 +1108,7 @@ impl<P: CanPort> DamiaoChain<P> {
     /// # Errors
     ///
     /// Never for a chain that opened; the lookup is by the chain's own ids.
-    pub fn feedback(&self) -> Result<Vec<MotorFeedback>, DamiaoChainError> {
+    pub fn feedback(&self) -> Result<Axes<MotorFeedback>, DamiaoChainError> {
         self.motors
             .iter()
             .map(|motor| {
@@ -1235,8 +1277,8 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         self.drive(joints, None)
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
-        self.command_readings.clone()
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
+        self.command_readings
     }
 
     /// A disable phase to every motor, then a refresh phase to any that stayed silent.
@@ -1301,7 +1343,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
 
     /// Every motor's latest answered position, in joint coordinates: from open, each stop and
     /// each command.
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         let feedback = self.feedback().ok()?;
         Some(
             self.motors

@@ -60,7 +60,7 @@ use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
+    ActuatorBus, ActuatorChain, Axes, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
     ChainFailure, Chains, ChainsError, CommandRange, Feedforward, FeedforwardLimit, InstanceDrive,
     Masked, Observe, Receipt, StopReport,
 };
@@ -999,19 +999,19 @@ impl ChainError for BusError {
 
 /// A feedback type a bus's chain answers in, as the body's one feedback type: a Damiao motor's
 /// own answer, or none from a bus whose command has no answer.
-trait Answer: Sized {
-    fn into_feedback(answers: Vec<Self>) -> Vec<MotorFeedback>;
+trait Answer: Copy + Default {
+    fn into_feedback(answers: Axes<Self>) -> Axes<MotorFeedback>;
 }
 
 impl Answer for MotorFeedback {
-    fn into_feedback(answers: Vec<Self>) -> Vec<MotorFeedback> {
+    fn into_feedback(answers: Axes<Self>) -> Axes<MotorFeedback> {
         answers
     }
 }
 
 impl Answer for () {
-    fn into_feedback(_answers: Vec<Self>) -> Vec<MotorFeedback> {
-        Vec::new()
+    fn into_feedback(_answers: Axes<Self>) -> Axes<MotorFeedback> {
+        Axes::new()
     }
 }
 
@@ -1076,11 +1076,11 @@ where
         self.0.read_positions()
     }
 
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<sx_embodiment_drivers::Axes<f64>> {
         self.0.last_observed()
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
         self.0.command_readings()
     }
 

@@ -328,7 +328,7 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
     );
     assert_eq!(
         body.last_observed(),
-        Some(receipt.observed.clone()),
+        Some(receipt.observed),
         "every bus reports where its command's answers observed it"
     );
     assert!(can.state().motors.values().any(|motor| motor.state == 1));

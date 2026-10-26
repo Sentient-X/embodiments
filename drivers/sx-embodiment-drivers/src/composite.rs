@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
@@ -228,13 +229,13 @@ where
         unavailable
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         let mut readings = self.first.command_readings()?;
         readings.extend(self.second.command_readings()?);
         Some(readings)
     }
 
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         let mut observed = self.first.last_observed()?;
         observed.extend(self.second.last_observed()?);
         Some(observed)
@@ -312,8 +313,8 @@ mod tests {
                 || {
                     Ok(Receipt {
                         evidence: Evidence::BusObservedComplete,
-                        observed: joints.to_vec(),
-                        feedback: vec![()],
+                        observed: crate::axes::Axes::from_slice(joints),
+                        feedback: [()].into_iter().collect(),
                     })
                 },
                 |failure| Err(Failed(failure)),
