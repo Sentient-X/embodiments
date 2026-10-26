@@ -13,8 +13,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
-    StopReport, TargetError, check_reach,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
+    FeedforwardLimit, Receipt, StopReport, TargetError, check_reach,
 };
 
 /// The first chain's axes, then the second's.
@@ -74,23 +74,19 @@ impl<A: ActuatorChain, B: ActuatorChain<Feedback = A::Feedback>> Composite<A, B>
     }
 }
 
-impl<A, B> ActuatorChain for Composite<A, B>
+/// What driving a composite answers.
+type Driven<A, B> = Result<
+    Receipt<<A as ActuatorChain>::Feedback>,
+    CompositeError<<A as ActuatorChain>::Error, <B as ActuatorChain>::Error>,
+>;
+
+impl<A, B> Composite<A, B>
 where
     A: ActuatorChain,
     B: ActuatorChain<Feedback = A::Feedback>,
 {
-    type Error = CompositeError<A::Error, B::Error>;
-    type Feedback = A::Feedback;
-
-    fn axes(&self) -> &[BoundAxis] {
-        &self.axes
-    }
-
-    fn commandable(&self) -> &[CommandRange] {
-        &self.commandable
-    }
-
-    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+    /// Each chain its slice of `joints`, and of `feedforward` when given.
+    fn drive(&mut self, joints: &[f64], feedforward: Option<&[Feedforward]>) -> Driven<A, B> {
         if joints.len() != self.axes.len() {
             return Err(TargetError::Width {
                 expected: self.axes.len(),
@@ -112,8 +108,30 @@ where
             self.second.last_observed().as_deref(),
             tail,
         )?;
-        let first = self.first.command(head).map_err(CompositeError::First)?;
-        let second = self.second.command(tail).map_err(CompositeError::Second)?;
+        let (first, second) = match feedforward {
+            Some(wanted) => {
+                if wanted.len() != joints.len() {
+                    return Err(TargetError::Width {
+                        expected: joints.len(),
+                        actual: wanted.len(),
+                    }
+                    .into());
+                }
+                let (mine, theirs) = wanted.split_at(head.len());
+                (
+                    self.first
+                        .command_with(head, mine)
+                        .map_err(CompositeError::First)?,
+                    self.second
+                        .command_with(tail, theirs)
+                        .map_err(CompositeError::Second)?,
+                )
+            }
+            None => (
+                self.first.command(head).map_err(CompositeError::First)?,
+                self.second.command(tail).map_err(CompositeError::Second)?,
+            ),
+        };
         let evidence = if first.evidence == Evidence::BusObservedComplete {
             second.evidence
         } else {
@@ -124,6 +142,52 @@ where
             observed: first.observed.into_iter().chain(second.observed).collect(),
             feedback: first.feedback.into_iter().chain(second.feedback).collect(),
         })
+    }
+}
+
+impl<A, B> ActuatorChain for Composite<A, B>
+where
+    A: ActuatorChain,
+    B: ActuatorChain<Feedback = A::Feedback>,
+{
+    type Error = CompositeError<A::Error, B::Error>;
+    type Feedback = A::Feedback;
+
+    fn axes(&self) -> &[BoundAxis] {
+        &self.axes
+    }
+
+    fn commandable(&self) -> &[CommandRange] {
+        &self.commandable
+    }
+
+    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.drive(joints, None)
+    }
+
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.drive(joints, Some(feedforward))
+    }
+
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        if limits.len() != self.axes.len() {
+            return Err(TargetError::Width {
+                expected: self.axes.len(),
+                actual: limits.len(),
+            }
+            .into());
+        }
+        let (mine, theirs) = limits.split_at(self.first.axes().len());
+        self.first
+            .set_feedforward_limits(mine)
+            .map_err(CompositeError::First)?;
+        self.second
+            .set_feedforward_limits(theirs)
+            .map_err(CompositeError::Second)
     }
 
     fn stop(&mut self) -> StopReport {

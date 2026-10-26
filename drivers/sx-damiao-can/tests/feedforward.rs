@@ -7,12 +7,13 @@
 //! is packed with that same encoder from what the chain should have sent.
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, Feedforward, FeedforwardLimit};
+use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError};
 use sx_damiao_can::dm_can::float_to_uint;
 use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::can::CanFrame;
 use sx_embodiment_drivers::{ActuatorChain, InstanceDrive};
+use sx_embodiment_drivers::{Feedforward, FeedforwardLimit};
 
 fn drive() -> InstanceDrive {
     let drives: Value = serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");

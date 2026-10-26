@@ -26,8 +26,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Receipt,
-    StopReport, TargetError, check_reach,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
+    FeedforwardLimit, Receipt, StopReport, TargetError, check_reach,
 };
 
 /// Chains in native state order, driven as one.
@@ -85,19 +85,13 @@ impl<C: ActuatorChain> Chains<C> {
     }
 }
 
-impl<C: ActuatorChain> ActuatorChain for Chains<C> {
-    type Error = ChainsError<C::Error>;
-    type Feedback = C::Feedback;
-
-    fn axes(&self) -> &[BoundAxis] {
-        &self.axes
-    }
-
-    fn commandable(&self) -> &[CommandRange] {
-        &self.commandable
-    }
-
-    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+impl<C: ActuatorChain> Chains<C> {
+    /// Every chain its slice of `joints`, and of `feedforward` when given.
+    fn drive(
+        &mut self,
+        joints: &[f64],
+        feedforward: Option<&[Feedforward]>,
+    ) -> Result<Receipt<C::Feedback>, ChainsError<C::Error>> {
         if joints.len() != self.axes.len() {
             return Err(TargetError::Width {
                 expected: self.axes.len(),
@@ -123,11 +117,20 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         let mut feedback = Vec::with_capacity(joints.len());
         let (mut observed_any, mut feedback_whole) = (false, true);
         let mut rest = joints;
+        let mut feedforward = feedforward;
         for (index, chain) in self.members.iter_mut().enumerate() {
             let width = chain.axes().len();
             let (head, tail) = rest.split_at(width);
             rest = tail;
-            let receipt = chain.command(head).map_err(|error| ChainsError::Chain {
+            let receipt = match feedforward {
+                Some(wanted) => {
+                    let (mine, others) = wanted.split_at(width);
+                    feedforward = Some(others);
+                    chain.command_with(head, mine)
+                }
+                None => chain.command(head),
+            }
+            .map_err(|error| ChainsError::Chain {
                 index,
                 applied: index > 0,
                 error,
@@ -156,6 +159,62 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             observed,
             feedback,
         })
+    }
+}
+
+impl<C: ActuatorChain> ActuatorChain for Chains<C> {
+    type Error = ChainsError<C::Error>;
+    type Feedback = C::Feedback;
+
+    fn axes(&self) -> &[BoundAxis] {
+        &self.axes
+    }
+
+    fn commandable(&self) -> &[CommandRange] {
+        &self.commandable
+    }
+
+    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.drive(joints, None)
+    }
+
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        if feedforward.len() != self.axes.len() {
+            return Err(TargetError::Width {
+                expected: self.axes.len(),
+                actual: feedforward.len(),
+            }
+            .into());
+        }
+        self.drive(joints, Some(feedforward))
+    }
+
+    /// Each chain its own slice of `limits`.
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        if limits.len() != self.axes.len() {
+            return Err(TargetError::Width {
+                expected: self.axes.len(),
+                actual: limits.len(),
+            }
+            .into());
+        }
+        let mut rest = limits;
+        for (index, chain) in self.members.iter_mut().enumerate() {
+            let (head, tail) = rest.split_at(chain.axes().len());
+            rest = tail;
+            chain
+                .set_feedforward_limits(head)
+                .map_err(|error| ChainsError::Chain {
+                    index,
+                    applied: false,
+                    error,
+                })?;
+        }
+        Ok(())
     }
 
     fn stop(&mut self) -> StopReport {
@@ -225,6 +284,18 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
         (**self).command(joints)
+    }
+
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        (**self).command_with(joints, feedforward)
+    }
+
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        (**self).set_feedforward_limits(limits)
     }
 
     fn stop(&mut self) -> StopReport {

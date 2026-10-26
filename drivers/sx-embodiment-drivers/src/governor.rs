@@ -36,8 +36,8 @@ use thiserror::Error;
 
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Receipt, StopReport,
-    TargetError, check_targets,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Feedforward,
+    FeedforwardLimit, Receipt, StopReport, TargetError, check_targets,
 };
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
@@ -243,19 +243,13 @@ fn slew(value: f64, target: f64, step: f64, range: CommandRange, now: f64) -> f6
     (value + (target - value).clamp(-step, step)).clamp(reach.lower, reach.upper)
 }
 
-impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
-    type Error = GovernorError<C::Error>;
-    type Feedback = C::Feedback;
-
-    fn axes(&self) -> &[BoundAxis] {
-        self.chain.axes()
-    }
-
-    fn commandable(&self) -> &[CommandRange] {
-        self.chain.commandable()
-    }
-
-    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+impl<C: ActuatorChain, K: Clock> Governor<C, K> {
+    /// Slew toward `joints` and command the chain, with `feedforward` when given.
+    fn drive(
+        &mut self,
+        joints: &[f64],
+        feedforward: Option<&[Feedforward]>,
+    ) -> Result<Receipt<C::Feedback>, GovernorError<C::Error>> {
         if self.latched {
             return Err(GovernorError::Latched);
         }
@@ -289,7 +283,28 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
                 slew(*value, *target, limit.max_speed * step, *range, at)
             })
             .collect();
-        let receipt = match self.chain.command(&next) {
+        let receipt = match feedforward {
+            Some(wanted) => {
+                if wanted.len() != next.len() {
+                    return Err(TargetError::Width {
+                        expected: next.len(),
+                        actual: wanted.len(),
+                    }
+                    .into());
+                }
+                let held: Vec<Feedforward> = wanted
+                    .iter()
+                    .zip(&self.limits)
+                    .map(|(wanted, limit)| Feedforward {
+                        velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
+                        torque: wanted.torque,
+                    })
+                    .collect();
+                self.chain.command_with(&next, &held)
+            }
+            None => self.chain.command(&next),
+        };
+        let receipt = match receipt {
             Ok(receipt) => receipt,
             // Refused before any frame: nothing was applied, and the next command starts again
             // from where the chain reports the body.
@@ -338,6 +353,39 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
             at: Some(now),
         });
         Ok(receipt)
+    }
+}
+
+impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
+    type Error = GovernorError<C::Error>;
+    type Feedback = C::Feedback;
+
+    fn axes(&self) -> &[BoundAxis] {
+        self.chain.axes()
+    }
+
+    fn commandable(&self) -> &[CommandRange] {
+        self.chain.commandable()
+    }
+
+    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.drive(joints, None)
+    }
+
+    /// The slewed positions with each axis' feed-forward, its planned velocity held to the
+    /// axis's `max_speed`.
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.drive(joints, Some(feedforward))
+    }
+
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        self.chain
+            .set_feedforward_limits(limits)
+            .map_err(GovernorError::Chain)
     }
 
     fn stop(&mut self) -> StopReport {
