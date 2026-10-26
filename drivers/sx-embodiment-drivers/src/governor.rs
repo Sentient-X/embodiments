@@ -203,6 +203,16 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         Ok(())
     }
 
+    /// What the last accepted command sent the chain, each axis slewed toward its target:
+    /// `None` since open, a stop or a failure.
+    #[must_use]
+    pub fn sent(&self) -> Option<&[f64]> {
+        self.held
+            .as_ref()
+            .filter(|held| held.at.is_some())
+            .map(|held| held.position.as_slice())
+    }
+
     /// The governed chain.
     pub const fn chain(&self) -> &C {
         &self.chain

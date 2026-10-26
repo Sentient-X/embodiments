@@ -139,9 +139,8 @@ named in the commissioning's `out_of_service`, never skipped in a tool.
 | Binary | For | Through the layer? |
 |---|---|---|
 | `sx-commission probe` / `commission` / `calibrate` | find bridges and ids read-only, write `commissioning.json` and calibrations, calibrate a Feetech bus | yes (vendor scan modules behind read-only ports; `calibrate` writes only under `--move`) |
-| `sx-jog` | supervised relative jog, slew, hold/release, clear faults, disable-all on the static upper body | **no**: hand-rolls Damiao frames over ZLG and skips the torso in code; to be rewritten over `open_with` + `Governor` |
+| `sx-jog` | supervised relative jog and sequences of any body, `--exclude` joints for one run, `--log` every tick (target, the governor's slewed command, observed, each motor's q/dq/tau/temperatures/state) | yes: `open_with` + `Governor`; the log is written on its own thread from fixed-size records |
 | `sx-record` | record joints while a person moves the body by hand | **no**: hand-rolled Damiao refresh and Feetech reads, raw ticks; to be rewritten as a logger over `observe` |
-| `sx-timeout-probe` | measure a Damiao motor's CAN watchdog | **no**: drives `dm_can` directly; to fold into the layer's ops |
 | `sx-can-bench` (`sx-zlg-usbcanfd`) | ZLG USBCANFD link throughput and latency | transport bench, below the layer by design |
 | `sx-imu-still` (`sx-stereolabs-sensors`) | ZED IMU stillness check | sensor bench, no actuators |
 
@@ -156,6 +155,20 @@ gripper as `5B91028463` (ids 1, 2) and the left as `5AB0158173` (ids 3, 4):
            "right_gripper": "5B91028463", "left_gripper": "5AB0158173"}}
 ```
 
-Current command lines (pre-rewrite): `sx-jog --joint <joint> --delta-deg <deg> [--speed 0.2]
---zlg-serial A30F115DD0120A949B80 --channel 1`; `sx-record --out <file.jsonl> --zlg-serial
-A30F115DD0120A949B80 --channel 1 --feetech neck=/dev/<tty>:1,2,3,4,5,6`.
+`sx-jog` takes the robot's files as a station does:
+
+```text
+sx-jog --drive <drive.json> --commissioning <commissioning.json>
+       [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]...
+       [--exclude <joint,...>] [--speed 0.2] [--log <ticks.jsonl>]
+       (--joint <joint> --delta-deg <deg> [--hold-seconds <s>] | --sequence <joint:deg|pause:s,...>)
+```
+
+Its old vendor-frame modes are gone, each covered by the layer: `--scan` is `sx-commission
+probe`; `--clear-faults` is the open's own settle phase, which clears a latched 0xD once;
+`--disable-all` is the stop every run ends with; `--slew-to` and `--release-test` are a move and
+a pause in a sequence. `sx-timeout-probe` is gone: the watchdog is armed right before every
+enable, and `sx-damiao-can`'s simulated bus holds the phased bring-up to it.
+
+`sx-record --out <file.jsonl> --zlg-serial A30F115DD0120A949B80 --channel 1 --feetech
+neck=/dev/<tty>:1,2,3,4,5,6` (pre-rewrite).

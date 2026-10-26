@@ -227,6 +227,25 @@ pub enum MotorState {
     Disabled,
     Enabled,
     Fault(u8),
+    /// Never asked: commissioning put the motor out of service, so no frame addresses it.
+    /// No feedback nibble carries it.
+    Unavailable,
+}
+
+impl MotorFeedback {
+    /// The place of a motor no frame addresses, its readings `NaN`.
+    #[must_use]
+    pub const fn unavailable(bus_id: u16) -> Self {
+        Self {
+            bus_id,
+            state: MotorState::Unavailable,
+            position: f32::NAN,
+            velocity: f32::NAN,
+            torque: f32::NAN,
+            mos_celsius: 0,
+            rotor_celsius: 0,
+        }
+    }
 }
 
 impl MotorState {

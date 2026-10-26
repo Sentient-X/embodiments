@@ -18,7 +18,7 @@ use crate::chain::{
 };
 
 /// `inner`'s axes inside a body's full vector, the rest unavailable.
-pub struct Masked<C> {
+pub struct Masked<C, F = ()> {
     inner: C,
     axes: Vec<BoundAxis>,
     commandable: Vec<CommandRange>,
@@ -27,9 +27,12 @@ pub struct Masked<C> {
     unavailable: Vec<usize>,
     /// `inner`'s targets, refilled each command.
     targets: Vec<f64>,
+    /// The feedback an unavailable axis stands as, when set: then a receipt's feedback is one
+    /// per axis, as every chain's is; otherwise it is `inner`'s alone.
+    unanswered: Option<fn(&BoundAxis) -> F>,
 }
 
-impl<C> Masked<C> {
+impl<C, F> Masked<C, F> {
     /// `inner`, over `inner_axes` with `inner_ranges`, placed among `axes`, the ones at
     /// `unavailable` left out.
     fn place(
@@ -75,6 +78,7 @@ impl<C> Masked<C> {
             present,
             unavailable,
             targets,
+            unanswered: None,
         })
     }
 
@@ -93,7 +97,7 @@ impl<C> Masked<C> {
     }
 }
 
-impl<C: ActuatorChain> Masked<C> {
+impl<C: ActuatorChain> Masked<C, C::Feedback> {
     /// `inner`, which drives `axes` without the axes at `unavailable` (indices into `axes`), as
     /// the whole vector. An unavailable axis is commandable within its declared bounds, which
     /// only its target's check uses.
@@ -106,6 +110,14 @@ impl<C: ActuatorChain> Masked<C> {
         let inner_axes = inner.axes().to_vec();
         let inner_ranges = inner.commandable().to_vec();
         Self::place(inner, &inner_axes, &inner_ranges, axes, unavailable)
+    }
+
+    /// This chain with each unavailable axis's feedback in its place, as `unanswered` makes
+    /// it, so every receipt's feedback is one per axis.
+    #[must_use]
+    pub fn answering(mut self, unanswered: fn(&BoundAxis) -> C::Feedback) -> Self {
+        self.unanswered = Some(unanswered);
+        self
     }
 }
 
@@ -137,7 +149,7 @@ impl<O: Observe + ?Sized> Observe for Box<O> {
     }
 }
 
-impl<C: Observe> Observe for Masked<C> {
+impl<C: Observe, F> Observe for Masked<C, F> {
     fn axes(&self) -> &[BoundAxis] {
         &self.axes
     }
@@ -148,7 +160,7 @@ impl<C: Observe> Observe for Masked<C> {
     }
 }
 
-impl<C: ActuatorChain> ActuatorChain for Masked<C> {
+impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     type Error = C::Error;
     type Feedback = C::Feedback;
 
@@ -217,7 +229,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C> {
     }
 }
 
-impl<C: ActuatorChain> Masked<C> {
+impl<C: ActuatorChain> Masked<C, C::Feedback> {
     /// Command the available axes, with their feed-forward where given.
     fn drive(
         &mut self,
@@ -249,7 +261,22 @@ impl<C: ActuatorChain> Masked<C> {
             } else {
                 self.spread(&receipt.observed, f64::NAN)
             },
-            feedback: receipt.feedback,
+            feedback: match self.unanswered {
+                Some(unanswered) if receipt.feedback.len() == self.present.len() => {
+                    let mut whole: Vec<C::Feedback> = Vec::with_capacity(self.axes.len());
+                    let mut answers = receipt.feedback.into_iter();
+                    for (index, axis) in self.axes.iter().enumerate() {
+                        let answer = if self.unavailable.contains(&index) {
+                            None
+                        } else {
+                            answers.next()
+                        };
+                        whole.push(answer.unwrap_or_else(|| unanswered(axis)));
+                    }
+                    whole
+                }
+                _ => receipt.feedback,
+            },
         })
     }
 }
