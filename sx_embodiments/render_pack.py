@@ -39,7 +39,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final
+from typing import Final, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -125,7 +125,7 @@ class RenderPack:
 # --- reading the description -------------------------------------------------------------
 
 
-def _floats(text: str | None, count: int, default: str, what: str) -> tuple[float, ...]:
+def urdf_floats(text: str | None, count: int, default: str, what: str) -> tuple[float, ...]:
     raw = default if text is None else text
     try:
         values = tuple(float(value) for value in raw.split())
@@ -143,7 +143,7 @@ def _rgba(
         return NEUTRAL_RGBA
     color = element.find("color")
     if color is not None and color.get("rgba") is not None:
-        r, g, b, a = _floats(color.get("rgba"), 4, "", "rgba")
+        r, g, b, a = urdf_floats(color.get("rgba"), 4, "", "rgba")
         return (r, g, b, a)
     return named.get(element.get("name", ""), NEUTRAL_RGBA)
 
@@ -209,7 +209,7 @@ def _clean(vertices: Floats, faces: Faces) -> _Mesh:
     return _Mesh(vertices[used], remapped.reshape(-1, 3).astype(np.int64))
 
 
-def _box(size: tuple[float, ...]) -> _Mesh:
+def box_mesh(size: tuple[float, ...]) -> _Mesh:
     hx, hy, hz = (value / 2 for value in size)
     vertices = np.array(
         [[sx * hx, sy * hy, sz * hz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)],
@@ -226,7 +226,7 @@ def _box(size: tuple[float, ...]) -> _Mesh:
     return _Mesh(vertices, faces)
 
 
-def _cylinder(radius: float, length: float) -> _Mesh:
+def cylinder_mesh(radius: float, length: float) -> _Mesh:
     n = _CYLINDER_SEGMENTS
     ring = [
         (radius * math.cos(2 * math.pi * k / n), radius * math.sin(2 * math.pi * k / n))
@@ -241,7 +241,7 @@ def _cylinder(radius: float, length: float) -> _Mesh:
     return _Mesh(np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64))
 
 
-def _sphere(radius: float) -> _Mesh:
+def sphere_mesh(radius: float) -> _Mesh:
     rings, segments = _SPHERE_RINGS, _SPHERE_SEGMENTS
     vertices = [[0.0, 0.0, radius]]
     for i in range(1, rings):
@@ -293,8 +293,8 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
         for visual in link.findall("visual"):
             origin = visual.find("origin")
             transform = from_xyz_rpy(
-                _xyz(_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
-                _xyz(_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
+                xyz_triple(urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
+                xyz_triple(urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
             )
             geometry = visual.find("geometry")
             shape = geometry[0] if geometry is not None and len(geometry) else None
@@ -304,37 +304,37 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
             match shape.tag:
                 case "mesh":
                     filename = shape.get("filename", "")
-                    scale = _floats(shape.get("scale"), 3, "1 1 1", "scale")
+                    scale = urdf_floats(shape.get("scale"), 3, "1 1 1", "scale")
                     uri = description_asset_uri(description, filename)
                     if not uri.startswith(PACKAGE_URI_PREFIX):
                         raise RenderPackError(f"link {name!r}: {filename!r} is not packaged")
                     relpath = uri.removeprefix(PACKAGE_URI_PREFIX)
                     cached = meshes.get((relpath, scale))
                     if cached is None:
-                        cached = _load(directory / relpath, relpath, scale)
+                        cached = load_mesh(directory / relpath, relpath, scale)
                         meshes[(relpath, scale)] = cached
                     visuals.append(_Visual(name, transform, cached, f"{relpath}@{scale}", rgba))
                 case "box":
-                    size = _floats(shape.get("size"), 3, "", "box size")
-                    visuals.append(_Visual(name, transform, _box(size), f"box{size}", rgba))
+                    size = urdf_floats(shape.get("size"), 3, "", "box size")
+                    visuals.append(_Visual(name, transform, box_mesh(size), f"box{size}", rgba))
                 case "cylinder":
-                    radius = _floats(shape.get("radius"), 1, "", "radius")[0]
-                    length = _floats(shape.get("length"), 1, "", "length")[0]
-                    mesh = _cylinder(radius, length)
+                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
+                    mesh = cylinder_mesh(radius, length)
                     visuals.append(_Visual(name, transform, mesh, f"cyl{radius},{length}", rgba))
                 case "sphere":
-                    radius = _floats(shape.get("radius"), 1, "", "radius")[0]
-                    visuals.append(_Visual(name, transform, _sphere(radius), f"sph{radius}", rgba))
+                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    visuals.append(_Visual(name, transform, sphere_mesh(radius), f"sph{radius}", rgba))
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} visual")
     return links, visuals
 
 
-def _xyz(values: tuple[float, ...]) -> tuple[float, float, float]:
+def xyz_triple(values: tuple[float, ...]) -> tuple[float, float, float]:
     return (values[0], values[1], values[2])
 
 
-def _load(path: Path, relpath: str, scale: tuple[float, ...]) -> _Mesh:
+def load_mesh(path: Path, relpath: str, scale: tuple[float, ...]) -> _Mesh:
     data = path.read_bytes()
     match PurePosixPath(relpath).suffix.lower():
         case ".stl":
@@ -355,7 +355,8 @@ def _cluster(mesh: _Mesh, cell: float) -> _Mesh:
     grid = np.floor((v - v.min(axis=0)) / cell).astype(np.int64)
     span = grid.max(axis=0) + 1
     keys = (grid[:, 0] * span[1] + grid[:, 1]) * span[2] + grid[:, 2]
-    _, cluster = np.unique(keys, return_inverse=True)
+    # Each vertex's cluster index; this numpy's stubs leave unique's inverse unknown.
+    cluster = cast(Faces, np.unique(keys, return_inverse=True)[1])
     count = np.bincount(cluster).astype(np.float64)
     centroid = np.stack(
         [np.bincount(cluster, weights=v[:, axis]) / count for axis in range(3)], axis=1

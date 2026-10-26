@@ -75,7 +75,7 @@ def _matrix(transform: Transform) -> Floats:
 
 def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
     """Each link's collision mesh vertices (and primitive corners) in the link frame."""
-    from .render_pack import RenderPackError, _box, _cylinder, _floats, _load, _sphere, _xyz
+    from .render_pack import RenderPackError, box_mesh, cylinder_mesh, urdf_floats, load_mesh, sphere_mesh, xyz_triple
 
     root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
     directory = materialize(embodiment)
@@ -88,8 +88,8 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
             origin = collision.find("origin")
             transform = _matrix(
                 from_xyz_rpy(
-                    _xyz(_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
-                    _xyz(_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
+                    xyz_triple(urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")),
+                    xyz_triple(urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")),
                 )
             )
             geometry = collision.find("geometry")
@@ -99,20 +99,20 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
             match shape.tag:
                 case "mesh":
                     filename = shape.get("filename", "")
-                    scale = _floats(shape.get("scale"), 3, "1 1 1", "scale")
+                    scale = urdf_floats(shape.get("scale"), 3, "1 1 1", "scale")
                     uri = description_asset_uri(description, filename)
                     if not uri.startswith(PACKAGE_URI_PREFIX):
                         raise RenderPackError(f"link {name!r}: {filename!r} is not packaged")
                     relpath = uri.removeprefix(PACKAGE_URI_PREFIX)
-                    vertices = _load(directory / relpath, relpath, scale).vertices
+                    vertices = load_mesh(directory / relpath, relpath, scale).vertices
                 case "box":
-                    vertices = _box(_floats(shape.get("size"), 3, "", "box size")).vertices
+                    vertices = box_mesh(urdf_floats(shape.get("size"), 3, "", "box size")).vertices
                 case "cylinder":
-                    radius = _floats(shape.get("radius"), 1, "", "radius")[0]
-                    length = _floats(shape.get("length"), 1, "", "length")[0]
-                    vertices = _cylinder(radius, length).vertices
+                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
+                    vertices = cylinder_mesh(radius, length).vertices
                 case "sphere":
-                    vertices = _sphere(_floats(shape.get("radius"), 1, "", "radius")[0]).vertices
+                    vertices = sphere_mesh(urdf_floats(shape.get("radius"), 1, "", "radius")[0]).vertices
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} collision")
             parts.append(vertices @ transform[:3, :3].T + transform[:3, 3])
@@ -161,7 +161,7 @@ def fit(points: Floats) -> list[Capsule]:
     across = _principal(points)[1]
     s = points @ across
     for count in range(2, _MAX_CAPSULES + 1):
-        edges = np.linspace(s.min(), s.max(), count + 1)
+        edges: Floats = np.linspace(float(s.min()), float(s.max()), count + 1, dtype=np.float64)
         slabs = [
             points[(s >= low) & (s <= high)]
             for low, high in zip(edges[:-1], edges[1:], strict=True)
@@ -225,6 +225,11 @@ def _rounded(capsule: Capsule) -> Capsule:
     )
 
 
+def _pairs(pairs: list[tuple[str, str]]) -> JsonValue:
+    """Link pairs, each in name order, the list in name order."""
+    return [[first, second] for first, second in sorted(pairs)]
+
+
 def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
     """``embodiment``'s ``collision.json``, or ``None`` when no link has collision geometry."""
     urdf = embodiment.urdf_bytes
@@ -249,11 +254,11 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
         for link, shapes in capsules.items()
     }
     links = list(capsules)
-    adjacent: list[JsonValue] = []
-    touching: list[JsonValue] = []
+    adjacent: list[tuple[str, str]] = []
+    touching: list[tuple[str, str]] = []
     for i, first in enumerate(links):
         for second in links[i + 1 :]:
-            pair: JsonValue = sorted([first, second])
+            pair = (first, second) if first <= second else (second, first)
             if _moving_joints_between(kinematics, first, second) <= ADJACENT_JOINTS:
                 adjacent.append(pair)
             elif min(_distance(p, q) for p in placed[first] for q in placed[second]) < 0:
@@ -268,7 +273,7 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
             for link, shapes in capsules.items()
             for a, b, r in shapes
         ],
-        "ignored_pairs": {"adjacent": sorted(adjacent), "touching_at_zero": sorted(touching)},
+        "ignored_pairs": {"adjacent": _pairs(adjacent), "touching_at_zero": _pairs(touching)},
         "adjacent_joints": ADJACENT_JOINTS,
         "support": None if mount is None else support_document(mount),
         "generated_by": GENERATOR,

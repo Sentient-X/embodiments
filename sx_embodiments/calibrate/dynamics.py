@@ -311,7 +311,9 @@ class RigidBodyTree:
             elif joint.kind is JointType.PRISMATIC:
                 offset = offset + turn @ (joint.axis * x)
             w, dw, a = spin[joint.parent], spin_rate[joint.parent], accel[joint.parent]
-            carried = turn.T @ (a + np.cross(dw, offset) + np.cross(w, np.cross(w, offset)))
+            # np.cross of two 3-vectors is a 3-vector; this numpy's stubs leave it unknown.
+            centripetal = cast(Array, np.cross(w, cast(Array, np.cross(w, offset))))
+            carried: Array = turn.T @ (a + cast(Array, np.cross(dw, offset)) + centripetal)
             w_child, dw_child = turn.T @ w, turn.T @ dw
             z = joint.axis
             if joint.kind in (JointType.REVOLUTE, JointType.CONTINUOUS):
@@ -536,8 +538,8 @@ def excitation(
     rows, columns = _columns(tree, joints)
     scales = _scales(tree)[columns]
     theta = tree.parameters()
-    time = np.arange(0.0, period, 1.0 / rate_hz)
-    fine = np.arange(0.0, period, 0.002)
+    time = np.arange(0.0, period, 1.0 / rate_hz, dtype=np.float64)
+    fine = np.arange(0.0, period, 0.002, dtype=np.float64)
     k = np.arange(1, harmonics + 1)
     best: tuple[Excitation, float] | None = None
     for _ in range(candidates):
