@@ -114,9 +114,9 @@ const KD_MAX: f64 = 5.0;
 const MAX_MOTOR_ID: u16 = 0x7FE;
 /// How long a phase awaits feedback (to a disable, a refresh or an MIT frame) once its frames
 /// are sent.
-const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
+pub(crate) const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
 /// How long a phase awaits register answers: `DM_CAN.py`'s one 0.05 s poll per register.
-const REGISTER_WAIT: Duration = Duration::from_millis(50);
+pub(crate) const REGISTER_WAIT: Duration = Duration::from_millis(50);
 /// A range of exactly one turn, as the humanoid's shoulder pitches declare to the URDF's
 /// rounding, is not cut: it aliases only at its two ends.
 const TURN_SLACK: f64 = 1e-6;
@@ -365,7 +365,7 @@ pub struct DamiaoChain<P> {
 
 /// What a phase awaits from the motor it sends one frame to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Awaits {
+pub(crate) enum Awaits {
     /// A feedback frame that arrived after the phase's frames were sent.
     Feedback,
     /// The motor's answer about one register, its cached value forgotten first.
@@ -374,13 +374,13 @@ enum Awaits {
 
 /// One frame of a phase: the motor it goes to and what is awaited back.
 #[derive(Clone, Copy, Debug)]
-struct Request {
-    bus_id: u16,
-    awaits: Awaits,
+pub(crate) struct Request {
+    pub(crate) bus_id: u16,
+    pub(crate) awaits: Awaits,
 }
 
 /// One request per motor of `ids`, each awaiting the same.
-fn every(ids: &[u16], awaits: Awaits) -> Vec<Request> {
+pub(crate) fn every(ids: &[u16], awaits: Awaits) -> Vec<Request> {
     ids.iter()
         .map(|bus_id| Request {
             bus_id: *bus_id,
@@ -390,18 +390,18 @@ fn every(ids: &[u16], awaits: Awaits) -> Vec<Request> {
 }
 
 /// What one phase saw, request by request.
-struct Phase {
+pub(crate) struct Phase {
     /// Whether the link took the request's frame.
-    sent: Vec<bool>,
+    pub(crate) sent: Vec<bool>,
     /// Each request's motor's feedback count before the phase's frames.
-    before: Vec<u64>,
+    pub(crate) before: Vec<u64>,
     /// When each request's answer was first seen.
-    received: Vec<Option<Instant>>,
+    pub(crate) received: Vec<Option<Instant>>,
     /// Whether every answer already on the link was taken before the frames were sent, so none
     /// of them can pass for this phase's.
     drained: bool,
     /// The first link failure; every frame was still attempted.
-    failure: Option<DmCanError>,
+    pub(crate) failure: Option<DmCanError>,
 }
 
 impl Phase {
@@ -410,7 +410,7 @@ impl Phase {
     }
 
     /// The phase, unless the link failed in it.
-    fn checked(mut self) -> Result<Self, DmCanError> {
+    pub(crate) fn checked(mut self) -> Result<Self, DmCanError> {
         self.failure.take().map_or(Ok(self), Err)
     }
 }
@@ -452,7 +452,7 @@ fn stamp<P: CanPort>(control: &MotorControl<P>, requests: &[Request], phase: &mu
 /// last frame. A frame the link refuses for a full transmit queue is sent again as the queue
 /// drains, for up to the link's frame allowance. Every frame is attempted whatever an earlier
 /// one met.
-fn phase<P: CanPort>(
+pub(crate) fn phase<P: CanPort>(
     control: &mut MotorControl<P>,
     requests: &[Request],
     wait: Duration,
@@ -527,8 +527,58 @@ fn phase<P: CanPort>(
     phase
 }
 
+/// Check the `PMAX`, `VMAX` and `TMAX` a motor last answered against the Damiao tables for its
+/// model, and scale its frames by them.
+///
+/// # Errors
+///
+/// [`DamiaoChainError::LimitMismatch`] for a register unanswered (`None`) or off every table.
+// A register holds the exact float32 of a table literal; equality is the comparison meant.
+#[allow(clippy::float_cmp)]
+pub(crate) fn held_limits<P: CanPort>(
+    control: &mut MotorControl<P>,
+    bus_id: u16,
+) -> Result<MotorLimits, DamiaoChainError> {
+    let model = control.motor(bus_id)?.motor_type;
+    let row = model.limit_param();
+    let mut found = [0.0_f32; 3];
+    for (index, register) in LIMIT_REGISTERS.into_iter().enumerate() {
+        let accepted = match register {
+            DmVariable::VMAX => accepted_vmax(model),
+            DmVariable::PMAX => std::iter::once(row[index]).chain(EXTRA_PMAX).collect(),
+            _ => vec![row[index]],
+        };
+        let value = control.motor(bus_id)?.get_param(register);
+        match value {
+            Some(ParamValue::Float(reported))
+                if accepted.iter().any(|table| reported == narrow(*table)) =>
+            {
+                found[index] = reported;
+            }
+            _ => {
+                return Err(DamiaoChainError::LimitMismatch {
+                    bus_id,
+                    register,
+                    motor: value,
+                });
+            }
+        }
+    }
+    let reported = found.map(f64::from);
+    if reported != row.map(|table| f64::from(narrow(table))) {
+        control.change_limit_param(bus_id, reported[0], reported[1], reported[2])?;
+    }
+    Ok(MotorLimits {
+        bus_id,
+        p_max: found[0],
+        v_max: found[1],
+        t_max: found[2],
+    })
+}
+
 /// The registers open reads from every motor, in the vendor demo's order.
-const LIMIT_REGISTERS: [DmVariable; 3] = [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX];
+pub(crate) const LIMIT_REGISTERS: [DmVariable; 3] =
+    [DmVariable::PMAX, DmVariable::VMAX, DmVariable::TMAX];
 
 /// Bring every motor up as the vendor does, in two phases: MIT mode for all, then every limit
 /// register of every motor; see [`DamiaoChain::open`].
@@ -573,41 +623,7 @@ fn bring_up<P: CanPort>(
     .checked()?;
     let mut limits = Vec::with_capacity(ids.len());
     for bus_id in ids.iter().copied() {
-        let model = control.motor(bus_id)?.motor_type;
-        let row = model.limit_param();
-        let mut found = [0.0_f32; 3];
-        for (index, register) in LIMIT_REGISTERS.into_iter().enumerate() {
-            let accepted = match register {
-                DmVariable::VMAX => accepted_vmax(model),
-                DmVariable::PMAX => std::iter::once(row[index]).chain(EXTRA_PMAX).collect(),
-                _ => vec![row[index]],
-            };
-            let value = control.motor(bus_id)?.get_param(register);
-            match value {
-                Some(ParamValue::Float(reported))
-                    if accepted.iter().any(|table| reported == narrow(*table)) =>
-                {
-                    found[index] = reported;
-                }
-                _ => {
-                    return Err(DamiaoChainError::LimitMismatch {
-                        bus_id,
-                        register,
-                        motor: value,
-                    });
-                }
-            }
-        }
-        let reported = found.map(f64::from);
-        if reported != row.map(|table| f64::from(narrow(table))) {
-            control.change_limit_param(bus_id, reported[0], reported[1], reported[2])?;
-        }
-        limits.push(MotorLimits {
-            bus_id,
-            p_max: found[0],
-            v_max: found[1],
-            t_max: found[2],
-        });
+        limits.push(held_limits(control, bus_id)?);
     }
     Ok(limits)
 }
@@ -1077,7 +1093,7 @@ fn narrow(value: f64) -> f32 {
     value as f32
 }
 
-fn validate(motor: &DamiaoAxis, ids: &mut Vec<u16>) -> Result<(), DamiaoChainError> {
+pub(crate) fn validate(motor: &DamiaoAxis, ids: &mut Vec<u16>) -> Result<(), DamiaoChainError> {
     let binding = motor.axis.binding;
     let bus_id = binding.bus_id;
     let Some(model) = motor_type(binding.model).filter(|_| binding.bus == DAMIAO_CAN) else {

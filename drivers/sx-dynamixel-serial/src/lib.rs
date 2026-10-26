@@ -12,6 +12,7 @@
 pub mod body;
 pub mod chain;
 pub mod dynamixel_sdk;
+pub mod observe;
 
 pub use chain::{
     DYNAMIXEL_SERIAL, DYNAMIXEL_XL330_M288, DYNAMIXEL_XM430_W350, DynamixelChain,

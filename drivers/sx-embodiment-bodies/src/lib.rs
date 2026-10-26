@@ -44,27 +44,29 @@
 //! it; the vendor crate then sends every motor of that chain its disable before refusing, and
 //! names any whose disable could not be sent, which may still hold torque.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use serde::Deserialize;
-use sx_damiao_can::b601::{self, B601};
+use sx_damiao_can::b601;
 use sx_damiao_can::body::DamiaoBody;
-use sx_damiao_can::chain::{DAMIAO_CAN, DamiaoChainError, MotorFeedback};
+use sx_damiao_can::chain::{DAMIAO_CAN, DamiaoAxis, DamiaoChain, DamiaoChainError, MotorFeedback};
+use sx_damiao_can::observe::DamiaoObserver;
 use sx_dynamixel_serial::DYNAMIXEL_SERIAL;
-use sx_dynamixel_serial::body::DynamixelBody;
-use sx_dynamixel_serial::chain::DynamixelChainError;
+use sx_dynamixel_serial::body::{DynamixelBody, ServoSetup as DynamixelSetup};
+use sx_dynamixel_serial::chain::{DynamixelChain, DynamixelChainError, DynamixelServo};
+use sx_dynamixel_serial::observe::DynamixelObserver;
 use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
-    ChainFailure, Chains, ChainsError, CommandRange, CompositeError, InstanceDrive, Receipt,
-    StopReport,
+    ChainFailure, Chains, ChainsError, CommandRange, InstanceDrive, Observe, Receipt, StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
-use sx_feetech_serial::body::FeetechBody;
-use sx_feetech_serial::chain::FeetechChainError;
+use sx_feetech_serial::body::{FeetechBody, ServoSetup as FeetechSetup};
+use sx_feetech_serial::chain::{FeetechChain, FeetechChainError, FeetechServo};
+use sx_feetech_serial::observe::FeetechObserver;
 use thiserror::Error;
 
 #[cfg(feature = "socketcan")]
@@ -94,6 +96,10 @@ pub struct Commissioning {
     /// Port name, as the body's opener declares it, to the bridge's USB serial number (or a
     /// board CAN interface's name, which has none).
     pub ports: BTreeMap<String, String>,
+    /// Joints whose actuator this robot does not run (a motor known faulty, removed or not yet
+    /// fitted): left out of the body as a closed provisional port's axes are, so the rest
+    /// opens. A port whose every axis is out of service is left closed.
+    pub out_of_service: BTreeSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -104,6 +110,8 @@ struct CommissioningDocument {
     pod_id: String,
     pod_revision: u32,
     ports: BTreeMap<String, String>,
+    #[serde(default)]
+    out_of_service: BTreeSet<String>,
 }
 
 impl Commissioning {
@@ -135,9 +143,11 @@ impl Commissioning {
                 .ports
                 .iter()
                 .any(|(name, serial)| invalid(name) || invalid(serial))
+            || parsed.out_of_service.iter().any(|joint| invalid(joint))
         {
             return Err(OpenError::Document(
-                "a pod, its revision and every port and serial are non-empty identities".to_owned(),
+                "a pod, its revision and every port, serial and joint are non-empty identities"
+                    .to_owned(),
             ));
         }
         Ok(Self {
@@ -145,6 +155,7 @@ impl Commissioning {
             pod_id: parsed.pod_id,
             pod_revision: parsed.pod_revision,
             ports: parsed.ports,
+            out_of_service: parsed.out_of_service,
         })
     }
 }
@@ -242,36 +253,20 @@ impl ServoCalibrations {
         Ok(self)
     }
 
-    /// The calibration of each axis, in order, all on `port`.
-    fn of(&self, port: &str, axes: &[BoundAxis]) -> Result<Vec<MotorCalibration>, OpenError> {
-        axes.iter()
-            .map(|axis| {
-                self.0
-                    .get(port)
-                    .and_then(|bus| bus.get(&axis.binding.bus_id))
-                    .copied()
-                    .ok_or_else(|| OpenError::Uncalibrated {
-                        port: port.to_owned(),
-                        bus_id: axis.binding.bus_id,
-                    })
-            })
-            .collect()
+    /// The calibration supplied for the servo at `bus_id` on `port`.
+    #[must_use]
+    pub fn of(&self, port: &str, bus_id: u16) -> Option<MotorCalibration> {
+        self.0.get(port).and_then(|bus| bus.get(&bus_id)).copied()
     }
 }
 
 /// A body this crate composes, by the content id its bindings carry.
 #[derive(Clone, Copy, Debug)]
 enum Opener {
+    /// The reBot B601-DM: its arm and its gripper, each a Damiao chain on its own port.
     B601,
     /// Any other registered body, opened bus by bus from its rendered bindings.
     Buses(&'static str),
-}
-
-/// One bus of a body, as its vendor's crate opens it.
-enum Part {
-    Damiao(&'static DamiaoBody),
-    Feetech(&'static FeetechBody, Vec<MotorCalibration>),
-    Dynamixel(&'static DynamixelBody, Vec<MotorCalibration>),
 }
 
 /// How a port's bridge is opened.
@@ -279,6 +274,153 @@ enum Part {
 enum Wire {
     Can,
     Serial { baud: u32 },
+}
+
+/// One bus of a body, its axes resolved for one robot instance, as its vendor's crate opens
+/// or observes it.
+enum Part {
+    Damiao(Vec<DamiaoAxis>),
+    Feetech {
+        baud: u32,
+        axes: Vec<BoundAxis>,
+        setups: Vec<FeetechSetup>,
+        calibrations: Vec<Option<MotorCalibration>>,
+    },
+    Dynamixel {
+        baud: u32,
+        axes: Vec<BoundAxis>,
+        setups: Vec<DynamixelSetup>,
+        calibrations: Vec<Option<MotorCalibration>>,
+    },
+}
+
+impl Part {
+    const fn wire(&self) -> Wire {
+        match self {
+            Self::Damiao(_) => Wire::Can,
+            Self::Feetech { baud, .. } | Self::Dynamixel { baud, .. } => {
+                Wire::Serial { baud: *baud }
+            }
+        }
+    }
+
+    /// The first servo with no calibration supplied, as the refusal naming it.
+    fn uncalibrated(&self, port: &str) -> Option<OpenError> {
+        let (axes, calibrations) = match self {
+            Self::Damiao(_) => return None,
+            Self::Feetech {
+                axes, calibrations, ..
+            }
+            | Self::Dynamixel {
+                axes, calibrations, ..
+            } => (axes, calibrations),
+        };
+        axes.iter()
+            .zip(calibrations)
+            .find(|(_, calibration)| calibration.is_none())
+            .map(|(axis, _)| OpenError::Uncalibrated {
+                port: port.to_owned(),
+                bus_id: axis.binding.bus_id,
+            })
+    }
+
+    /// Open this bus's chain on `link`; every serial servo's calibration was required first.
+    fn open(self, port: &str, link: Link) -> Result<BusChain, OpenError> {
+        if let Some(refused) = self.uncalibrated(port) {
+            return Err(refused);
+        }
+        Ok(match (self, link) {
+            (Self::Damiao(axes), Link::Can(link)) => {
+                Box::new(OnBus(DamiaoChain::open(link, axes)?))
+            }
+            (
+                Self::Feetech {
+                    axes,
+                    setups,
+                    calibrations,
+                    ..
+                },
+                Link::Serial(link),
+            ) => {
+                let servos = axes
+                    .into_iter()
+                    .zip(setups)
+                    .zip(calibrations.into_iter().flatten())
+                    .map(|((axis, setup), calibration)| FeetechServo {
+                        axis,
+                        norm_mode: setup.norm_mode,
+                        calibration,
+                        configuration: setup.configuration,
+                    })
+                    .collect();
+                Box::new(OnBus(FeetechChain::open(link, servos)?))
+            }
+            (
+                Self::Dynamixel {
+                    axes,
+                    setups,
+                    calibrations,
+                    ..
+                },
+                Link::Serial(link),
+            ) => {
+                let servos = axes
+                    .into_iter()
+                    .zip(setups)
+                    .zip(calibrations.into_iter().flatten())
+                    .map(|((axis, setup), calibration)| DynamixelServo {
+                        axis,
+                        norm_mode: setup.norm_mode,
+                        calibration,
+                        operating_mode: setup.operating_mode,
+                        approach: setup.approach,
+                        goal_current: setup.goal_current,
+                        multi_turn: setup.multi_turn,
+                    })
+                    .collect();
+                Box::new(OnBus(DynamixelChain::open(link, servos)?))
+            }
+            _ => return Err(OpenError::MissingPort(port.to_owned())),
+        })
+    }
+
+    /// Observe this bus on `link`, a serial servo without a supplied calibration read with its
+    /// registers' own.
+    fn observe(self, port: &str, link: Link) -> Result<BusObserver, OpenError> {
+        Ok(match (self, link) {
+            (Self::Damiao(axes), Link::Can(link)) => Box::new(DamiaoObserver::open(link, axes)?),
+            (
+                Self::Feetech {
+                    axes,
+                    setups,
+                    calibrations,
+                    ..
+                },
+                Link::Serial(link),
+            ) => Box::new(FeetechObserver::open(link, axes, &setups, &calibrations)?),
+            (
+                Self::Dynamixel {
+                    axes,
+                    setups,
+                    calibrations,
+                    ..
+                },
+                Link::Serial(link),
+            ) => Box::new(DynamixelObserver::open(link, axes, &setups, &calibrations)?),
+            _ => return Err(OpenError::MissingPort(port.to_owned())),
+        })
+    }
+}
+
+/// Keep the axes (and what is listed beside each) whose joint is in service.
+fn in_service<T>(
+    items: impl IntoIterator<Item = (BoundAxis, T)>,
+    out_of_service: &BTreeSet<String>,
+) -> (Vec<BoundAxis>, Vec<T>) {
+    items
+        .into_iter()
+        .filter(|(axis, _)| !out_of_service.contains(&axis.joint))
+        .unzip()
 }
 
 impl Opener {
@@ -314,6 +456,20 @@ impl Opener {
         }
     }
 
+    /// Every joint of the body.
+    fn joints(self, drive: &InstanceDrive) -> Result<Vec<String>, OpenError> {
+        let bindings = match self {
+            Self::B601 => b601::BINDINGS,
+            Self::Buses(bindings) => bindings,
+        };
+        Ok(BodyBindings::parse(bindings)?
+            .calibrated(drive)?
+            .axes
+            .into_iter()
+            .map(|axis| axis.joint)
+            .collect())
+    }
+
     /// The provisional ports `options` leaves closed, refusing an opt-in for a port that is
     /// not one of this body's provisional ports.
     fn closed(self, drive: &InstanceDrive, options: OpenOptions) -> Result<Vec<String>, OpenError> {
@@ -334,55 +490,99 @@ impl Opener {
             .collect())
     }
 
-    /// Compose every bus's chain without a bridge, refusing a drive whose joints are not the
-    /// ones the vendors' data compose, a bus no vendor composes, and a serial servo whose
-    /// calibration is not supplied.
+    /// The Damiao motors on `port`, as `drive`'s robot drives them.
+    fn damiao(self, drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis>, OpenError> {
+        Ok(match self {
+            Self::B601 if port == "arm" => b601::b601_arm(drive)?,
+            Self::B601 => vec![b601::b601_gripper(drive)?],
+            Self::Buses(_) => DamiaoBody::of(&drive.embodiment)?
+                .ok_or_else(|| unopened(port, DAMIAO_CAN))?
+                .axes(drive)?,
+        })
+    }
+
+    /// Resolve every open bus's axes for `drive` without a bridge, leaving out the joints out
+    /// of service and closing a port left with none. Refuses a drive whose joints are not the
+    /// ones the vendors' data compose, a bus no vendor composes, and a joint out of service
+    /// that the body does not have.
     fn parts(
         self,
         drive: &InstanceDrive,
         calibrations: &ServoCalibrations,
-        closed: &[String],
-    ) -> Result<Vec<(String, Part, Wire)>, OpenError> {
-        let Self::Buses(_) = self else {
-            b601::b601(drive)?;
-            return Ok(Vec::new());
-        };
+        closed: &mut Vec<String>,
+        out_of_service: &BTreeSet<String>,
+    ) -> Result<Vec<(String, Part)>, OpenError> {
+        let joints = self.joints(drive)?;
+        if let Some(unknown) = out_of_service.iter().find(|joint| !joints.contains(joint)) {
+            return Err(OpenError::OutOfService(unknown.clone()));
+        }
         let embodiment = drive.embodiment.as_str();
-        let unopened = |port: &str, kind: ActuatorBus| OpenError::Bus {
-            port: port.to_owned(),
-            bus: kind.wire(),
-        };
-        let parts: Vec<(String, Part, Wire)> = self
-            .buses(drive)?
-            .into_iter()
-            .filter(|(port, _, _)| !closed.contains(port))
-            .map(|(port, kind, _)| {
-                let (part, wire) = if kind == DAMIAO_CAN {
-                    let body = DamiaoBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
-                    body.axes(drive)?;
-                    (Part::Damiao(body), Wire::Can)
-                } else if kind == FEETECH_SERIAL {
-                    let body =
-                        FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
-                    let calibration = calibrations.of(&port, &body.calibrated(drive)?)?;
-                    let baud = body.baud;
-                    (Part::Feetech(body, calibration), Wire::Serial { baud })
-                } else if kind == DYNAMIXEL_SERIAL {
-                    let body =
-                        DynamixelBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
-                    let calibration = calibrations.of(&port, &body.calibrated(drive)?)?;
-                    let baud = body.baud;
-                    (Part::Dynamixel(body, calibration), Wire::Serial { baud })
-                } else {
-                    return Err(unopened(&port, kind));
-                };
-                Ok((port, part, wire))
-            })
-            .collect::<Result<_, OpenError>>()?;
+        let mut parts = Vec::new();
+        for (port, kind, _) in self.buses(drive)? {
+            if closed.contains(&port) {
+                continue;
+            }
+            let supplied = |axes: &[BoundAxis]| -> Vec<Option<MotorCalibration>> {
+                axes.iter()
+                    .map(|axis| calibrations.of(&port, axis.binding.bus_id))
+                    .collect()
+            };
+            let part = if kind == DAMIAO_CAN {
+                let motors: Vec<DamiaoAxis> = self
+                    .damiao(drive, &port)?
+                    .into_iter()
+                    .filter(|motor| !out_of_service.contains(&motor.axis.joint))
+                    .collect();
+                (!motors.is_empty()).then_some(Part::Damiao(motors))
+            } else if kind == FEETECH_SERIAL {
+                let body =
+                    FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
+                let (axes, setups) = in_service(
+                    body.calibrated(drive)?
+                        .into_iter()
+                        .zip(body.servos.iter().copied()),
+                    out_of_service,
+                );
+                (!axes.is_empty()).then(|| Part::Feetech {
+                    baud: body.baud,
+                    calibrations: supplied(&axes),
+                    axes,
+                    setups,
+                })
+            } else if kind == DYNAMIXEL_SERIAL {
+                let body = DynamixelBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
+                let (axes, setups) = in_service(
+                    body.calibrated(drive)?
+                        .into_iter()
+                        .zip(body.servos.iter().copied()),
+                    out_of_service,
+                );
+                (!axes.is_empty()).then(|| Part::Dynamixel {
+                    baud: body.baud,
+                    calibrations: supplied(&axes),
+                    axes,
+                    setups,
+                })
+            } else {
+                return Err(unopened(&port, kind));
+            };
+            match part {
+                Some(part) => parts.push((port, part)),
+                None => closed.push(port),
+            }
+        }
         if parts.is_empty() {
-            return Err(OpenError::Provisional(closed.to_vec()));
+            return Err(OpenError::Provisional(closed.clone()));
         }
         Ok(parts)
+    }
+}
+
+/// The refusal of a bus no vendor composes for this body.
+fn unopened(port: &str, kind: ActuatorBus) -> OpenError {
+    OpenError::Bus {
+        port: port.to_owned(),
+        bus: kind.wire(),
     }
 }
 
@@ -422,13 +622,63 @@ pub fn closed_ports(drive: &InstanceDrive, options: OpenOptions) -> Result<Vec<S
 /// A chain of one bus, behind the one error and feedback type every bus shares.
 pub type BusChain = Box<dyn ActuatorChain<Error = BusError, Feedback = MotorFeedback> + Send>;
 
-/// One opened body. It is opened once per station process and lives for it, so its variants
-/// are held inline rather than boxed.
-#[allow(clippy::large_enum_variant)]
-pub enum Body {
-    B601(B601<Port, Port>),
-    /// Any other body: one chain per bus, in native state order.
-    Buses(Chains<BusChain>),
+/// One opened body: one chain per bus, in native state order. Every target is checked
+/// before any bus is written, and a stop reaches every chain.
+pub type Body = Chains<BusChain>;
+
+/// What a body's command or stop refused or failed.
+pub type BodyChainError = ChainsError<BusError>;
+
+/// What resolving a body for `drive` on `commissioning` settled before any bridge is opened.
+struct Plan {
+    closed: Vec<String>,
+    parts: Vec<(String, Part)>,
+}
+
+/// Refuse a mismatch between the drive and commissioning, then resolve every open bus.
+fn plan(
+    drive: &InstanceDrive,
+    commissioning: &Commissioning,
+    calibrations: &ServoCalibrations,
+    options: OpenOptions,
+) -> Result<Plan, OpenError> {
+    if commissioning.instance != drive.instance {
+        return Err(OpenError::Instance {
+            expected: drive.instance.clone(),
+            found: commissioning.instance.clone(),
+        });
+    }
+    let opener = Opener::of(drive)?;
+    let mut closed = opener.closed(drive, options)?;
+    let parts = opener.parts(
+        drive,
+        calibrations,
+        &mut closed,
+        &commissioning.out_of_service,
+    )?;
+    Ok(Plan { closed, parts })
+}
+
+impl Plan {
+    /// Open each part's bridge, after `before` has had its say on the plan.
+    fn links(
+        self,
+        commissioning: &Commissioning,
+        source: &mut dyn PortSource,
+    ) -> Result<Vec<(String, Part, Link)>, OpenError> {
+        let declared: Vec<(String, Wire)> = self
+            .parts
+            .iter()
+            .map(|(port, part)| (port.clone(), part.wire()))
+            .collect();
+        let links = bridges(&declared, &self.closed, commissioning, source)?;
+        Ok(self
+            .parts
+            .into_iter()
+            .zip(links)
+            .map(|((port, part), link)| (port, part, link))
+            .collect())
+    }
 }
 
 /// Open `drive`'s body on the bridges `commissioning` names, through `source`, with no serial
@@ -451,10 +701,11 @@ pub fn open(
 /// # Errors
 ///
 /// Refuses, before any bridge is opened, commissioning for another instance than the drive's,
-/// a body no opener composes, a bus no vendor composes for it, a serial servo with no
-/// calibration, a commissioned port the opener does not declare, a declared port
-/// commissioning does not name, and a serial bus on a bridge another port names; then a bridge
-/// that is not attached, and any chain its vendor crate refuses to open.
+/// a body no opener composes, a bus no vendor composes for it, a joint out of service the body
+/// does not have, a serial servo with no calibration, a commissioned port the opener does not
+/// declare, a declared port commissioning does not name, and a serial bus on a bridge another
+/// port names; then a bridge that is not attached, and any chain its vendor crate refuses to
+/// open.
 pub fn open_calibrated(
     drive: &InstanceDrive,
     commissioning: &Commissioning,
@@ -477,8 +728,7 @@ pub fn open_calibrated(
 /// # Errors
 ///
 /// What [`open_calibrated`] refuses; [`OpenError::NotProvisional`] for an opt-in naming a port
-/// that is not provisional, and [`OpenError::Provisional`] when every port is provisional and
-/// left closed.
+/// that is not provisional, and [`OpenError::Provisional`] when every port is left closed.
 pub fn open_with(
     drive: &InstanceDrive,
     commissioning: &Commissioning,
@@ -486,48 +736,78 @@ pub fn open_with(
     options: OpenOptions,
     source: &mut dyn PortSource,
 ) -> Result<Body, OpenError> {
-    if commissioning.instance != drive.instance {
-        return Err(OpenError::Instance {
-            expected: drive.instance.clone(),
-            found: commissioning.instance.clone(),
-        });
+    let plan = plan(drive, commissioning, calibrations, options)?;
+    if let Some(refused) = plan
+        .parts
+        .iter()
+        .find_map(|(port, part)| part.uncalibrated(port))
+    {
+        return Err(refused);
     }
-    let opener = Opener::of(drive)?;
-    let closed = opener.closed(drive, options)?;
-    let parts = opener.parts(drive, calibrations, &closed)?;
-    let declared: Vec<(String, Wire)> = match opener {
-        Opener::B601 => opener
-            .buses(drive)?
-            .into_iter()
-            .map(|(port, _, _)| (port, Wire::Can))
-            .collect(),
-        Opener::Buses(_) => parts
-            .iter()
-            .map(|(port, _, wire)| (port.clone(), *wire))
-            .collect(),
-    };
-    let mut links = bridges(&declared, &closed, commissioning, source)?.into_iter();
-    let mut next = || links.next().ok_or(OpenError::MissingPort(String::new()));
-    if let Opener::B601 = opener {
-        let (Link::Can(arm), Link::Can(gripper)) = (next()?, next()?) else {
-            return Err(OpenError::MissingPort("arm".to_owned()));
-        };
-        return Ok(Body::B601(b601::open_b601(arm, gripper, drive)?));
+    let mut chains: Vec<BusChain> = Vec::with_capacity(plan.parts.len());
+    for (port, part, link) in plan.links(commissioning, source)? {
+        chains.push(part.open(&port, link)?);
     }
-    let mut chains: Vec<BusChain> = Vec::with_capacity(parts.len());
-    for (port, part, _) in parts {
-        chains.push(match (part, next()?) {
-            (Part::Damiao(body), Link::Can(link)) => Box::new(OnBus(body.open(link, drive)?)),
-            (Part::Feetech(body, calibration), Link::Serial(link)) => {
-                Box::new(OnBus(body.open(link, drive, &calibration)?))
-            }
-            (Part::Dynamixel(body, calibration), Link::Serial(link)) => {
-                Box::new(OnBus(body.open(link, drive, &calibration)?))
-            }
-            _ => return Err(OpenError::MissingPort(port)),
-        });
+    Ok(Chains::new(chains))
+}
+
+/// One bus read only, behind the one observing surface every bus shares.
+pub type BusObserver = Box<dyn Observe + Send>;
+
+/// A body read and never commanded, from the same inputs as [`open_with`]: its axes are the
+/// ones [`open_with`] opens, in the same order, and each reading is in joint coordinates
+/// through the same drive map and unit calibration. It does not implement
+/// [`ActuatorChain`], and each vendor's observer speaks through a port that refuses any
+/// request but a read, so it cannot enable, configure or move an actuator.
+pub struct Observer {
+    buses: Vec<BusObserver>,
+    axes: Vec<BoundAxis>,
+}
+
+impl Observe for Observer {
+    fn axes(&self) -> &[BoundAxis] {
+        &self.axes
     }
-    Ok(Body::Buses(Chains::new(chains)))
+
+    /// Every bus's readings, in native state order; a bus's missing axes stand in their place.
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        self.buses
+            .iter_mut()
+            .flat_map(|bus| bus.read_positions())
+            .collect()
+    }
+}
+
+/// Observe `drive`'s body on the bridges `commissioning` names, through `source`, reading and
+/// never writing: Damiao motors by register reads and status refreshes only, Feetech and
+/// Dynamixel servos by `PING` and `READ` only. The ports, layout and joint coordinates are
+/// [`open_with`]'s for the same inputs. A serial servo with no calibration in `calibrations`
+/// is read with the calibration its own registers hold, where [`open_with`] would refuse it.
+/// Observing a provisional port `options` opts in to writes nothing, so it needs no
+/// supervision.
+///
+/// # Errors
+///
+/// What [`open_with`] refuses before a bridge, but a missing calibration; a bridge that is not
+/// attached; a servo answering as another model or holding another calibration than the one
+/// supplied. A motor or servo that does not answer is not refused: it reads missing.
+pub fn observe(
+    drive: &InstanceDrive,
+    commissioning: &Commissioning,
+    calibrations: &ServoCalibrations,
+    options: OpenOptions,
+    source: &mut dyn PortSource,
+) -> Result<Observer, OpenError> {
+    let plan = plan(drive, commissioning, calibrations, options)?;
+    let mut buses: Vec<BusObserver> = Vec::with_capacity(plan.parts.len());
+    for (port, part, link) in plan.links(commissioning, source)? {
+        buses.push(part.observe(&port, link)?);
+    }
+    let axes = buses
+        .iter()
+        .flat_map(|bus| bus.axes().iter().cloned())
+        .collect();
+    Ok(Observer { buses, axes })
 }
 
 /// One opened bridge.
@@ -605,8 +885,13 @@ pub enum OpenError {
     Uncalibrated { port: String, bus_id: u16 },
     #[error("port {0} is not one of this body's provisional ports, so there is nothing to opt in")]
     NotProvisional(String),
-    #[error("every port of this body is provisional and left closed: {0:?}")]
+    #[error(
+        "every port of this body is left closed, provisional or with every axis out of service: \
+         {0:?}"
+    )]
     Provisional(Vec<String>),
+    #[error("commissioning puts joint {0} out of service, which this body does not have")]
+    OutOfService(String),
     #[error("commissioning names port {0}, which this body's opener does not declare")]
     UndeclaredPort(String),
     #[error("this body's opener needs port {0}, which commissioning does not name")]
@@ -736,91 +1021,5 @@ where
 
     fn clear_faults(&mut self) {
         self.0.clear_faults();
-    }
-}
-
-/// A command or stop one opened body refused or failed.
-#[derive(Debug, Error)]
-pub enum BodyChainError {
-    #[error(transparent)]
-    B601(#[from] CompositeError<DamiaoChainError, DamiaoChainError>),
-    #[error(transparent)]
-    Buses(#[from] ChainsError<BusError>),
-}
-
-impl ChainError for BodyChainError {
-    fn failure(&self) -> ChainFailure {
-        match self {
-            Self::B601(error) => error.failure(),
-            Self::Buses(error) => error.failure(),
-        }
-    }
-}
-
-impl ActuatorChain for Body {
-    type Error = BodyChainError;
-    type Feedback = MotorFeedback;
-
-    fn axes(&self) -> &[BoundAxis] {
-        match self {
-            Self::B601(chain) => chain.axes(),
-            Self::Buses(chain) => chain.axes(),
-        }
-    }
-
-    fn commandable(&self) -> &[CommandRange] {
-        match self {
-            Self::B601(chain) => chain.commandable(),
-            Self::Buses(chain) => chain.commandable(),
-        }
-    }
-
-    fn read_positions(&mut self) -> Vec<AxisReading> {
-        match self {
-            Self::B601(chain) => chain.read_positions(),
-            Self::Buses(chain) => chain.read_positions(),
-        }
-    }
-
-    fn command(&mut self, joints: &[f64]) -> Result<Receipt<Self::Feedback>, Self::Error> {
-        Ok(match self {
-            Self::B601(chain) => chain.command(joints)?,
-            Self::Buses(chain) => chain.command(joints)?,
-        })
-    }
-
-    fn stop(&mut self) -> StopReport {
-        match self {
-            Self::B601(chain) => chain.stop(),
-            Self::Buses(chain) => chain.stop(),
-        }
-    }
-
-    fn stop_budget(&self) -> Duration {
-        match self {
-            Self::B601(chain) => chain.stop_budget(),
-            Self::Buses(chain) => chain.stop_budget(),
-        }
-    }
-
-    fn last_observed(&self) -> Option<Vec<f64>> {
-        match self {
-            Self::B601(chain) => chain.last_observed(),
-            Self::Buses(chain) => chain.last_observed(),
-        }
-    }
-
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
-        match self {
-            Self::B601(chain) => chain.command_readings(),
-            Self::Buses(chain) => chain.command_readings(),
-        }
-    }
-
-    fn clear_faults(&mut self) {
-        match self {
-            Self::B601(chain) => chain.clear_faults(),
-            Self::Buses(chain) => chain.clear_faults(),
-        }
     }
 }

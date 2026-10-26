@@ -18,6 +18,7 @@ use crate::chain::{
     FEETECH_SERIAL, FeetechChain, FeetechChainError, FeetechServo, MotorCalibration, MotorNormMode,
     ServoConfiguration,
 };
+use crate::observe::FeetechObserver;
 
 /// What one joint's servo needs beyond the registry's binding and the unit's calibration.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,6 +145,23 @@ impl FeetechBody {
         calibration: &[MotorCalibration],
     ) -> Result<FeetechChain<P>, FeetechChainError> {
         FeetechChain::open(port, self.servos(self.calibrated(drive)?, calibration)?)
+    }
+
+    /// Read every servo on `port` as `drive`'s robot drives it, never commanding one: the
+    /// servos [`FeetechBody::open`] opens, in its order, each read with the calibration
+    /// `calibration` supplies for it in native state order, or with its registers' own where it
+    /// supplies none ([`FeetechObserver`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns why the observer did not open.
+    pub fn observe<P: SerialPort>(
+        &self,
+        port: P,
+        drive: &InstanceDrive,
+        calibration: &[Option<MotorCalibration>],
+    ) -> Result<FeetechObserver<P>, FeetechChainError> {
+        FeetechObserver::open(port, self.calibrated(drive)?, self.servos, calibration)
     }
 }
 

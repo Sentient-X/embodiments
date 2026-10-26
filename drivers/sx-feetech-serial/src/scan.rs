@@ -68,6 +68,10 @@ impl<P> ReadOnlyPort<P> {
     pub fn into_inner(self) -> P {
         self.0
     }
+
+    pub const fn inner(&self) -> &P {
+        &self.0
+    }
 }
 
 impl<P: SerialPort> SerialPort for ReadOnlyPort<P> {

@@ -235,7 +235,7 @@ impl DynamixelServo {
         ))
     }
 
-    fn dxl_id(&self) -> u8 {
+    pub(crate) fn dxl_id(&self) -> u8 {
         // Open refuses an address above `MAX_ID`, so the narrowing never saturates.
         u8::try_from(self.axis.binding.bus_id).unwrap_or(u8::MAX)
     }
@@ -450,6 +450,108 @@ const fn signed(value: u32) -> i32 {
     value as i32
 }
 
+/// Refuse axes that are not one valid chain on one port of known models at addressable ids,
+/// before any byte.
+pub(crate) fn qualify(axes: &[BoundAxis]) -> Result<(), DynamixelChainError> {
+    validate_chain(axes)?;
+    let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
+    ports.dedup();
+    if ports.len() > 1 {
+        return Err(DynamixelChainError::Ports(ports));
+    }
+    for axis in axes {
+        let binding = axis.binding;
+        if binding.bus != DYNAMIXEL_SERIAL || model_number(binding.model).is_none() {
+            return Err(DynamixelChainError::Unqualified(binding.bus_id));
+        }
+        if binding.bus_id > u16::from(MAX_ID) {
+            return Err(DynamixelChainError::Ids(binding.bus_id));
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a calibration whose range is empty or beyond the encoder's resolution.
+pub(crate) fn check_calibration(
+    bus_id: u16,
+    calibration: MotorCalibration,
+) -> Result<(), DynamixelChainError> {
+    if calibration.range_min >= calibration.range_max
+        || f64::from(calibration.range_max) >= RESOLUTION
+    {
+        return Err(DynamixelChainError::Calibration(bus_id));
+    }
+    Ok(())
+}
+
+/// The calibration a servo's registers hold, as `DynamixelMotorsBus.read_calibration` reads
+/// it: `Homing Offset`, the position limits and `Drive Mode`. A value its field cannot hold is
+/// [`DynamixelChainError::Uncalibrated`].
+pub(crate) fn held_calibration<P: SerialPort>(
+    ph: &mut Protocol2PacketHandler<P>,
+    bus_id: u16,
+    dxl_id: u8,
+) -> Result<MotorCalibration, DynamixelChainError> {
+    let mut read4 = |address: u16| {
+        let (value, result, error) = ph.read4_byte_tx_rx(dxl_id, address);
+        expect(bus_id, (result, error)).map(|()| value)
+    };
+    let homing_offset = signed(read4(HOMING_OFFSET)?);
+    let range_min = read4(MIN_POSITION_LIMIT)?;
+    let range_max = read4(MAX_POSITION_LIMIT)?;
+    let (drive_mode, result, error) = ph.read1_byte_tx_rx(dxl_id, DRIVE_MODE);
+    expect(bus_id, (result, error))?;
+    let unheld = || DynamixelChainError::Uncalibrated {
+        bus_id,
+        homing_offset,
+        range_min,
+        range_max,
+        drive_mode,
+    };
+    Ok(MotorCalibration {
+        drive_mode: match drive_mode {
+            0 => false,
+            1 => true,
+            _ => return Err(unheld()),
+        },
+        homing_offset: i16::try_from(homing_offset).map_err(|_| unheld())?,
+        range_min: u16::try_from(range_min).map_err(|_| unheld())?,
+        range_max: u16::try_from(range_max).map_err(|_| unheld())?,
+    })
+}
+
+/// What a read that did not succeed says about its axis: faulted with the servo's error byte
+/// (its hardware-error alert included) when it answered, else missing for why it did not.
+pub(crate) const fn unanswered(result: CommResult, error: u8) -> AxisReading {
+    match result {
+        CommResult::Success => AxisReading::Faulted(error),
+        CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
+        CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
+        CommResult::TxFail
+        | CommResult::RxFail
+        | CommResult::TxError
+        | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
+    }
+}
+
+/// One servo's `Present Position` (132), one `READ`, as its axis's reading: fresh, missing for
+/// a servo that is silent, corrupt or unreachable, or faulted with its error. Reading writes no
+/// register, so nothing moves and torque stays as it was.
+pub(crate) fn present_position<P: SerialPort>(
+    ph: &mut Protocol2PacketHandler<P>,
+    servo: &DynamixelServo,
+) -> AxisReading {
+    let (raw, result, error) = ph.read4_byte_tx_rx(servo.dxl_id(), PRESENT_POSITION);
+    let received = Instant::now();
+    if result != CommResult::Success || error != 0 {
+        return unanswered(result, error);
+    }
+    AxisReading::Fresh {
+        position: servo.joint_from_raw(signed(raw)),
+        received,
+    }
+}
+
 impl<P: SerialPort> DynamixelChain<P> {
     /// Validate every servo, prove each answers as its binding's model holding the calibration
     /// supplied and no hardware error, disable torque and configure every servo, and leave the
@@ -463,28 +565,10 @@ impl<P: SerialPort> DynamixelChain<P> {
     /// calibration.
     pub fn open(port: P, servos: Vec<DynamixelServo>) -> Result<Self, DynamixelChainError> {
         let axes: Vec<BoundAxis> = servos.iter().map(|servo| servo.axis.clone()).collect();
-        validate_chain(&axes)?;
-        let mut ports: Vec<String> = axes.iter().map(|axis| axis.port.clone()).collect();
-        ports.dedup();
-        if ports.len() > 1 {
-            return Err(DynamixelChainError::Ports(ports));
-        }
+        qualify(&axes)?;
         for servo in &servos {
             let binding = servo.axis.binding;
-            if binding.bus != DYNAMIXEL_SERIAL || model_number(binding.model).is_none() {
-                return Err(DynamixelChainError::Unqualified(binding.bus_id));
-            }
-            if binding.bus_id > u16::from(MAX_ID) {
-                return Err(DynamixelChainError::Ids(binding.bus_id));
-            }
-            let MotorCalibration {
-                range_min,
-                range_max,
-                ..
-            } = servo.calibration;
-            if range_min >= range_max || f64::from(range_max) >= RESOLUTION {
-                return Err(DynamixelChainError::Calibration(binding.bus_id));
-            }
+            check_calibration(binding.bus_id, servo.calibration)?;
             if servo.profile().is_none() {
                 return Err(DynamixelChainError::ApproachLimit(binding.bus_id));
             }
@@ -577,22 +661,14 @@ impl<P: SerialPort> DynamixelChain<P> {
             .map(|servo| (servo.axis.binding.bus_id, servo.dxl_id(), servo.calibration))
             .collect();
         for (bus_id, dxl_id, calibration) in ids {
-            let homing_offset = signed(self.read4(bus_id, dxl_id, HOMING_OFFSET)?);
-            let range_min = self.read4(bus_id, dxl_id, MIN_POSITION_LIMIT)?;
-            let range_max = self.read4(bus_id, dxl_id, MAX_POSITION_LIMIT)?;
-            let (drive_mode, result, error) = self.ph.read1_byte_tx_rx(dxl_id, DRIVE_MODE);
-            expect(bus_id, (result, error))?;
-            if homing_offset != i32::from(calibration.homing_offset)
-                || range_min != u32::from(calibration.range_min)
-                || range_max != u32::from(calibration.range_max)
-                || drive_mode != u8::from(calibration.drive_mode)
-            {
+            let held = held_calibration(&mut self.ph, bus_id, dxl_id)?;
+            if held != calibration {
                 return Err(DynamixelChainError::Uncalibrated {
                     bus_id,
-                    homing_offset,
-                    range_min,
-                    range_max,
-                    drive_mode,
+                    homing_offset: i32::from(held.homing_offset),
+                    range_min: u32::from(held.range_min),
+                    range_max: u32::from(held.range_max),
+                    drive_mode: u8::from(held.drive_mode),
                 });
             }
         }
@@ -729,25 +805,10 @@ impl<P: SerialPort> DynamixelChain<P> {
     /// included, is faulted with it. The other servos' readings stand. Reading writes no
     /// register, so nothing moves and torque stays as it was.
     fn present_positions(&mut self) -> Vec<AxisReading> {
-        let mut readings = Vec::with_capacity(self.servos.len());
-        for (index, (_, dxl_id)) in self.ids().into_iter().enumerate() {
-            let (raw, result, error) = self.ph.read4_byte_tx_rx(dxl_id, PRESENT_POSITION);
-            let received = Instant::now();
-            readings.push(match result {
-                CommResult::Success if error != 0 => AxisReading::Faulted(error),
-                CommResult::Success => AxisReading::Fresh {
-                    position: self.servos[index].joint_from_raw(signed(raw)),
-                    received,
-                },
-                CommResult::RxTimeout => AxisReading::Missing(MissingReason::Timeout),
-                CommResult::RxCorrupt => AxisReading::Missing(MissingReason::Corrupt),
-                CommResult::TxFail
-                | CommResult::RxFail
-                | CommResult::TxError
-                | CommResult::NotAvailable => AxisReading::Missing(MissingReason::Unavailable),
-            });
-        }
-        readings
+        self.servos
+            .iter()
+            .map(|servo| present_position(&mut self.ph, servo))
+            .collect()
     }
 
     /// One SYNC READ (`GroupSyncRead`, as `sync_read("Present_Position")` reads it, widened)
