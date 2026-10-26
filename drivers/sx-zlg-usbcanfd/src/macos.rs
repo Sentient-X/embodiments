@@ -15,10 +15,11 @@ use std::ffi::CStr;
 use std::time::{Duration, Instant};
 
 use objc2::AllocAnyThread;
-use objc2_core_foundation::{CFDictionary, CFRetained};
+use objc2_core_foundation::{CFDictionary, CFRetained, CFString};
 use objc2_io_kit::{
-    IOIteratorNext, IOObjectConformsTo, IOObjectRelease, IORegistryEntryGetChildIterator,
-    IORegistryEntryIDMatching, IOServiceGetMatchingService, io_object_t, kIOMainPortDefault,
+    IOIteratorNext, IOObjectConformsTo, IOObjectRelease, IORegistryEntryCreateCFProperty,
+    IORegistryEntryGetChildIterator, IORegistryEntryIDMatching, IOServiceGetMatchingService,
+    io_object_t, kIOMainPortDefault,
 };
 use objc2_io_usb_host::{IOUSBHostDevice, IOUSBHostObjectInitOptions};
 
@@ -88,6 +89,11 @@ fn find(registry_id: u64) -> Result<Object, String> {
 
 /// Whether an `IOUSBHostInterface` is registered below the device: a configured device.
 fn has_interface(service: &Object) -> bool {
+    !interfaces(service).is_empty()
+}
+
+/// The `IOUSBHostInterface`s registered below the device.
+fn interfaces(service: &Object) -> Vec<Object> {
     const PLANE: &CStr = c"IOService";
     const INTERFACE: &CStr = c"IOUSBHostInterface";
     let mut iterator = 0;
@@ -101,19 +107,41 @@ fn has_interface(service: &Object) -> bool {
         )
     };
     if status != 0 {
-        return false;
+        return Vec::new();
     }
     let iterator = Object(iterator);
+    let mut found = Vec::new();
     loop {
         let child = Object(IOIteratorNext(iterator.0));
         if child.0 == 0 {
-            return false;
+            return found;
         }
         // SAFETY: as above, a NUL-terminated class name IOKit only reads.
         if unsafe { IOObjectConformsTo(child.0, INTERFACE.as_ptr().cast_mut().cast()) } {
-            return true;
+            found.push(child);
         }
     }
+}
+
+/// Who has the device at registry entry `registry_id` open: the I/O Registry's
+/// `UsbExclusiveOwner` (`pid 1234, sx-station`) of an interface below it, or of the device
+/// itself. Reads the registry only; no USB traffic.
+#[must_use]
+pub fn exclusive_owner(registry_id: u64) -> Option<String> {
+    let service = find(registry_id).ok()?;
+    let key = CFString::from_static_str("UsbExclusiveOwner");
+    interfaces(&service)
+        .iter()
+        .chain(std::iter::once(&service))
+        .find_map(|entry| {
+            // SAFETY: `entry` is a live registry object owned for the call; the key is a valid
+            // CFString; a null allocator is the documented default.
+            let value = unsafe { IORegistryEntryCreateCFProperty(entry.0, Some(&key), None, 0) }?;
+            value
+                .downcast_ref::<CFString>()
+                .map(ToString::to_string)
+                .filter(|owner| !owner.is_empty())
+        })
 }
 
 fn configure(service: &Object) -> Result<(), String> {

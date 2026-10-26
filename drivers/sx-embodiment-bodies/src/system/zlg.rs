@@ -9,7 +9,7 @@
 //! another process holds it); the channel opens as classic CAN at 1 Mbit/s with the adapter's
 //! termination at its default, on. Two identities on one serial share the opened adapter.
 
-use sx_zlg_usbcanfd::{ChannelOptions, Found, UsbCanFd};
+use sx_zlg_usbcanfd::{ChannelOptions, Found, UsbCanFd, ZlgError};
 
 use crate::{OpenError, Port};
 
@@ -79,13 +79,21 @@ impl ZlgPorts {
 ///
 /// # Errors
 ///
-/// Returns why the adapter or channel did not open, as [`OpenError::Port`].
+/// [`OpenError::Busy`] when another process holds the adapter's interface, naming it where the
+/// host tells; any other reason the adapter or channel did not open as [`OpenError::Port`].
 pub fn open(identity: &str, serial: &str, channel: u8) -> Result<Port, OpenError> {
     let port = |reason: String| OpenError::Port {
         serial: identity.to_owned(),
         reason,
     };
-    let adapter = UsbCanFd::open(Some(serial)).map_err(|error| port(error.to_string()))?;
+    let adapter = UsbCanFd::open(Some(serial)).map_err(|error| match error {
+        ZlgError::Busy { holder, .. } => OpenError::Busy {
+            serial: identity.to_owned(),
+            device: format!("ZLG adapter {serial}"),
+            holder,
+        },
+        error => port(error.to_string()),
+    })?;
     let channel = adapter
         .open_channel(channel, ChannelOptions::default())
         .map_err(|error| port(error.to_string()))?;

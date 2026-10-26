@@ -1083,6 +1083,16 @@ pub enum OpenError {
     },
     #[error("the bridge with USB serial {serial} cannot be opened: {reason}")]
     Port { serial: String, reason: String },
+    /// Another process already has the bridge open, and the operating system refused a second
+    /// opener. One process owns a bus: stop the holder first.
+    #[error(
+        "bus {serial} ({device}) is in use, {holder}; one process owns a bus, so stop that process first"
+    )]
+    Busy {
+        serial: String,
+        device: String,
+        holder: sx_embodiment_drivers::Holder,
+    },
     #[error(transparent)]
     Bindings(#[from] BodyError),
     #[error(transparent)]
