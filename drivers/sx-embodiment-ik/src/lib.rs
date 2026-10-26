@@ -62,6 +62,7 @@ mod model;
 pub mod placement;
 mod qp;
 mod solve;
+pub mod teleop;
 
 use sx_embodiment_drivers::kinematics::TreeError;
 use thiserror::Error;
