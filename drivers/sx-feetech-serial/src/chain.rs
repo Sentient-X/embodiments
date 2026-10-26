@@ -1090,8 +1090,8 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                     .then(|| observed.clone());
                 Ok(Receipt {
                     evidence: Evidence::DispatchAttempted,
-                    observed,
-                    feedback: Vec::new(),
+                    observed: observed.into(),
+                    feedback: sx_embodiment_drivers::Axes::new(),
                 })
             }
             result => {
@@ -1161,14 +1161,18 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         self.present_positions()
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
-        self.command_readings.clone()
+    fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
+        self.command_readings
+            .as_deref()
+            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// Where every servo was read at open, after the last stop, or by the last command's SYNC
     /// READ, when every servo answered.
-    fn last_observed(&self) -> Option<Vec<f64>> {
-        self.observed.clone()
+    fn last_observed(&self) -> Option<sx_embodiment_drivers::Axes<f64>> {
+        self.observed
+            .as_deref()
+            .map(sx_embodiment_drivers::Axes::from_slice)
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain: four exchanges per servo,

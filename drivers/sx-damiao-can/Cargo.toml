@@ -24,6 +24,8 @@ serde.workspace = true
 # Exact float parsing: the transcripts compare decoded positions bit for bit.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2.workspace = true
+# Counts a test's heap allocations (its own global allocator; this crate forbids unsafe code).
+allocation-counter = "0.8"
 
 [lints]
 workspace = true

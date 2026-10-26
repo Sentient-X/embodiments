@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
@@ -113,8 +114,8 @@ impl<C: ActuatorChain> Chains<C> {
             first += width;
         }
         let mut evidence = Evidence::BusObservedComplete;
-        let mut observed = Vec::with_capacity(joints.len());
-        let mut feedback = Vec::with_capacity(joints.len());
+        let mut observed = Axes::new();
+        let mut feedback = Axes::new();
         let (mut observed_any, mut feedback_whole) = (false, true);
         let mut rest = joints;
         let mut feedforward = feedforward;
@@ -237,8 +238,8 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     /// Every chain's, in native state order, or `None` when any chain has none.
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
-        let mut readings = Vec::with_capacity(self.axes.len());
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
+        let mut readings = Axes::new();
         for chain in &self.members {
             readings.extend(chain.command_readings()?);
         }
@@ -257,8 +258,8 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     /// Every chain's, in native state order, or `None` when any chain has none.
-    fn last_observed(&self) -> Option<Vec<f64>> {
-        let mut observed = Vec::with_capacity(self.axes.len());
+    fn last_observed(&self) -> Option<Axes<f64>> {
+        let mut observed = Axes::new();
         for chain in &self.members {
             observed.extend(chain.last_observed()?);
         }
@@ -321,11 +322,11 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
         (**self).read_positions()
     }
 
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         (**self).last_observed()
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         (**self).command_readings()
     }
 
@@ -425,14 +426,14 @@ mod tests {
             Ok(if self.answers {
                 Receipt {
                     evidence: Evidence::BusObservedComplete,
-                    observed: joints.to_vec(),
+                    observed: Axes::from_slice(joints),
                     feedback: self.axes.iter().map(|axis| axis.binding.bus_id).collect(),
                 }
             } else {
                 Receipt {
                     evidence: Evidence::DispatchAttempted,
-                    observed: Vec::new(),
-                    feedback: Vec::new(),
+                    observed: Axes::new(),
+                    feedback: Axes::new(),
                 }
             })
         }
@@ -449,8 +450,8 @@ mod tests {
             self.budget
         }
 
-        fn last_observed(&self) -> Option<Vec<f64>> {
-            self.answers.then(|| vec![0.25; self.axes.len()])
+        fn last_observed(&self) -> Option<Axes<f64>> {
+            self.answers.then(|| Axes::filled(0.25, self.axes.len()))
         }
 
         fn read_positions(&mut self) -> Vec<AxisReading> {
@@ -548,7 +549,7 @@ mod tests {
         // The neck observes nothing here, so the whole has no resting position to start from.
         assert_eq!(chains.last_observed(), None);
         let both = Chains::new(vec![fake("can", &[1, 2], true), fake("neck", &[1], true)]);
-        assert_eq!(both.last_observed(), Some(vec![0.25; 3]));
+        assert_eq!(both.last_observed(), Some(Axes::filled(0.25, 3)));
         let mut boxed: Vec<Box<dyn ActuatorChain<Error = Failed, Feedback = u16>>> = vec![
             Box::new(fake("can", &[1], true)),
             Box::new(fake("neck", &[1], true)),

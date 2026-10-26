@@ -212,6 +212,9 @@ pub fn validate_chain(axes: &[BoundAxis]) -> Result<(), BindingError> {
     if axes.is_empty() {
         return Err(BindingError::EmptyChain);
     }
+    if axes.len() > crate::axes::MAX_AXES {
+        return Err(BindingError::TooWide(axes.len()));
+    }
     let address = |axis: &BoundAxis| (axis.binding.bus, axis.port.clone(), axis.binding.bus_id);
     for (index, axis) in axes.iter().enumerate() {
         axis.validate()?;
@@ -253,6 +256,8 @@ pub enum BindingError {
     Bounds(String),
     #[error("joint {0} names a port that is not a lowercase identifier")]
     Port(String),
+    #[error("the chain binds {0} axes, more than a control tick carries")]
+    TooWide(usize),
     #[error("bus_id {0} appears twice on one bus within the chain")]
     DuplicateAddress(u16),
 }

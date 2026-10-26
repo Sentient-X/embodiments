@@ -11,6 +11,7 @@
 
 use std::time::Duration;
 
+use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, CommandRange, Feedforward, FeedforwardLimit, MissingReason,
@@ -26,7 +27,7 @@ pub struct Masked<C, F = ()> {
     present: Vec<usize>,
     unavailable: Vec<usize>,
     /// `inner`'s targets, refilled each command.
-    targets: Vec<f64>,
+    targets: Axes<f64>,
     /// The feedback an unavailable axis stands as, when set: then a receipt's feedback is one
     /// per axis, as every chain's is; otherwise it is `inner`'s alone.
     unanswered: Option<fn(&BoundAxis) -> F>,
@@ -70,7 +71,7 @@ impl<C, F> Masked<C, F> {
         let mut unavailable = unavailable.to_vec();
         unavailable.sort_unstable();
         unavailable.dedup();
-        let targets = Vec::with_capacity(present.len());
+        let targets = Axes::new();
         Ok(Self {
             inner,
             axes,
@@ -88,8 +89,8 @@ impl<C, F> Masked<C, F> {
     }
 
     /// `inner`'s values spread into the full vector, `fill` at every unavailable axis.
-    fn spread<T: Copy>(&self, values: &[T], fill: T) -> Vec<T> {
-        let mut whole = vec![fill; self.axes.len()];
+    fn spread<T: Copy + Default>(&self, values: &[T], fill: T) -> Axes<T> {
+        let mut whole = Axes::filled(fill, self.axes.len());
         for (index, value) in self.present.iter().zip(values) {
             whole[*index] = *value;
         }
@@ -157,6 +158,7 @@ impl<C: Observe, F> Observe for Masked<C, F> {
     fn read_positions(&mut self) -> Vec<AxisReading> {
         let readings = self.inner.read_positions();
         self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+            .to_vec()
     }
 }
 
@@ -199,6 +201,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     fn read_positions(&mut self) -> Vec<AxisReading> {
         let readings = self.inner.read_positions();
         self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+            .to_vec()
     }
     fn stop(&mut self) -> StopReport {
         self.inner.stop()
@@ -209,11 +212,11 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     }
 
     /// `inner`'s, with `NaN` at every unavailable axis.
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         Some(self.spread(&self.inner.last_observed()?, f64::NAN))
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         Some(self.spread(
             &self.inner.command_readings()?,
             AxisReading::Missing(MissingReason::Unavailable),
@@ -245,7 +248,7 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
         // A short vector leaves `NaN` where a target is missing, which `inner` refuses.
         let receipt = match feedforward {
             Some(all) => {
-                let kept: Vec<Feedforward> = self
+                let kept: Axes<Feedforward> = self
                     .present
                     .iter()
                     .map(|index| all.get(*index).copied().unwrap_or_default())
@@ -257,13 +260,13 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
         Ok(Receipt {
             evidence: receipt.evidence,
             observed: if receipt.observed.is_empty() {
-                Vec::new()
+                Axes::new()
             } else {
                 self.spread(&receipt.observed, f64::NAN)
             },
             feedback: match self.unanswered {
                 Some(unanswered) if receipt.feedback.len() == self.present.len() => {
-                    let mut whole: Vec<C::Feedback> = Vec::with_capacity(self.axes.len());
+                    let mut whole: Axes<C::Feedback> = Axes::new();
                     let mut answers = receipt.feedback.into_iter();
                     for (index, axis) in self.axes.iter().enumerate() {
                         let answer = if self.unavailable.contains(&index) {

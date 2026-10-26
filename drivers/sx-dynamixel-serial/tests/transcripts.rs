@@ -491,7 +491,7 @@ fn open_confirms_every_limit_and_observes_where_the_body_rests() {
         .iter()
         .map(|servo| servo.joint_from_raw(2050))
         .collect();
-    assert_eq!(chain.last_observed(), Some(rest));
+    assert_eq!(chain.last_observed().map(|rest| rest.to_vec()), Some(rest));
 }
 
 #[test]

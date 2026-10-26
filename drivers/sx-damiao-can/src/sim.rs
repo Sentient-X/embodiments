@@ -368,3 +368,68 @@ impl CanPort for Sim {
         }
     }
 }
+
+/// The answers a [`Steady`] bus holds before they are read.
+const STEADY_INBOX: usize = 256;
+
+/// A simulated bus that allocates nothing once built: the same firmware answers as [`Sim`],
+/// its motors owned and its pending answers in a fixed ring, recording no frames and waiting
+/// no time. It is what a test measures a control tick's allocations on.
+pub struct Steady {
+    motors: BTreeMap<u16, SimMotor>,
+    inbox: [Option<CanFrame>; STEADY_INBOX],
+    head: usize,
+    len: usize,
+}
+
+impl Steady {
+    /// The motors of `sim`, taken as they stand.
+    ///
+    /// # Panics
+    ///
+    /// When a test panicked while holding `sim`.
+    #[must_use]
+    pub fn from(sim: &Sim) -> Self {
+        let motors = std::mem::take(&mut sim.state().motors);
+        Self {
+            motors,
+            inbox: [None; STEADY_INBOX],
+            head: 0,
+            len: 0,
+        }
+    }
+}
+
+impl CanPort for Steady {
+    fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
+        let id = address(frame);
+        if let Some(reply) = self
+            .motors
+            .get_mut(&id)
+            .and_then(|motor| answer(id, motor, frame))
+        {
+            if self.len == STEADY_INBOX {
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            self.inbox[(self.head + self.len) % STEADY_INBOX] = Some(reply);
+            self.len += 1;
+        }
+        Ok(())
+    }
+
+    fn receive(&mut self) -> io::Result<Option<CanFrame>> {
+        if self.len == 0 {
+            return Ok(None);
+        }
+        let frame = self.inbox[self.head].take();
+        self.head = (self.head + 1) % STEADY_INBOX;
+        self.len -= 1;
+        Ok(frame)
+    }
+
+    fn receive_until(&mut self, _deadline: Instant) -> io::Result<Option<CanFrame>> {
+        self.receive()
+    }
+
+    fn sleep(&mut self, _duration: Duration) {}
+}

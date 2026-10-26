@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Feedforward,
@@ -127,8 +128,9 @@ impl<E: ChainError> ChainError for GovernorError<E> {
 }
 
 /// The position last sent, and when.
+#[derive(Clone, Copy)]
 struct Held {
-    position: Vec<f64>,
+    position: Axes<f64>,
     at: Option<Instant>,
 }
 
@@ -138,7 +140,7 @@ pub struct Governor<C, K = MonotonicClock> {
     limits: Vec<AxisLimits>,
     clock: K,
     held: Option<Held>,
-    start: Option<Vec<f64>>,
+    start: Option<Axes<f64>>,
     latched: bool,
     /// The chain's unavailable axes, neither stepped nor tracked.
     unavailable: Vec<usize>,
@@ -196,9 +198,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     /// # Errors
     ///
     /// Refuses a vector of the wrong width or outside the declared bounds.
-    pub fn start_at(&mut self, joints: Vec<f64>) -> Result<(), TargetError> {
-        check_available(self.chain.axes(), &self.unavailable, &joints)?;
-        self.start = Some(joints);
+    pub fn start_at(&mut self, joints: &[f64]) -> Result<(), TargetError> {
+        check_available(self.chain.axes(), &self.unavailable, joints)?;
+        self.start = Some(Axes::from_slice(joints));
         self.held = None;
         Ok(())
     }
@@ -210,7 +212,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.held
             .as_ref()
             .filter(|held| held.at.is_some())
-            .map(|held| held.position.as_slice())
+            .map(|held| &*held.position)
     }
 
     /// The governed chain.
@@ -264,7 +266,7 @@ fn slew(value: f64, target: f64, step: f64, range: CommandRange, now: f64) -> f6
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     /// Each axis moved from `held` toward `joints` by `max_speed` for `step` seconds, inside its
     /// range widened to where it is now; an unavailable axis at any in-range value.
-    fn step(&self, held: &[f64], joints: &[f64], step: f64) -> Vec<f64> {
+    fn step(&self, held: &[f64], joints: &[f64], step: f64) -> Axes<f64> {
         // Where each joint is now: the chain's latest observation, else the position last sent.
         let observed = self
             .chain
@@ -322,7 +324,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                     }
                     .into());
                 }
-                let held: Vec<Feedforward> = wanted
+                let held: Axes<Feedforward> = wanted
                     .iter()
                     .zip(&self.limits)
                     .map(|(wanted, limit)| Feedforward {
@@ -435,11 +437,11 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.chain.read_positions()
     }
 
-    fn last_observed(&self) -> Option<Vec<f64>> {
+    fn last_observed(&self) -> Option<Axes<f64>> {
         self.chain.last_observed()
     }
 
-    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
         self.chain.command_readings()
     }
 
@@ -562,9 +564,9 @@ mod tests {
                         .take(if self.short { 1 } else { usize::MAX })
                         .collect()
                 } else {
-                    Vec::new()
+                    Axes::new()
                 },
-                feedback: Vec::new(),
+                feedback: Axes::new(),
             })
         }
 
@@ -578,9 +580,9 @@ mod tests {
             Duration::from_millis(5)
         }
 
-        fn last_observed(&self) -> Option<Vec<f64>> {
+        fn last_observed(&self) -> Option<Axes<f64>> {
             self.observes
-                .then(|| self.at.clone().unwrap_or_else(|| self.rest.clone()))
+                .then(|| Axes::from_slice(self.at.as_ref().unwrap_or(&self.rest)))
         }
 
         fn read_positions(&mut self) -> Vec<AxisReading> {
@@ -700,8 +702,8 @@ mod tests {
             Err(GovernorError::NoStart)
         ));
         assert!(governor.chain().sent.is_empty());
-        assert!(governor.start_at(vec![0.0]).is_err());
-        governor.start_at(vec![0.2, -0.2]).expect("start");
+        assert!(governor.start_at(&[0.0]).is_err());
+        governor.start_at(&[0.2, -0.2]).expect("start");
         // One step from the given start goes out; its receipt observes nothing, so tracking
         // cannot be checked: the chain is stopped and the fault latched.
         assert!(matches!(
