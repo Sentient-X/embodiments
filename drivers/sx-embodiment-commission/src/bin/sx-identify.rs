@@ -602,6 +602,24 @@ fn schedule(
     Ok(ticks)
 }
 
+/// Whether any axis' commanded motion changes direction (or starts or stops) at `index`.
+fn turns(ticks: &[Tick], index: usize) -> bool {
+    if index < 2 {
+        return false;
+    }
+    let (a, b, c) = (
+        &ticks[index - 2].target,
+        &ticks[index - 1].target,
+        &ticks[index].target,
+    );
+    (0..c.len()).any(|axis| {
+        let before = b[axis] - a[axis];
+        let now = c[axis] - b[axis];
+        let moving = |step: f64| step.abs() > 1e-9;
+        moving(before) != moving(now) || (moving(now) && before.signum() != now.signum())
+    })
+}
+
 /// One tick as recorded: fixed size, so the run's buffer is reserved before the first command.
 #[derive(Clone, Copy)]
 struct Record {
@@ -961,7 +979,10 @@ fn run() -> Result<(), String> {
             outcome = Err("stopped by the operator".to_owned());
             break;
         }
-        if index == 0 || ticks[index - 1].segment != tick.segment {
+        // A new segment, or any axis' target reversing or starting or stopping, restarts the
+        // contact checks' settle window: friction flips sign there and steps the torque by
+        // twice its band, which is not contact (2026-10-26, right elbow, about 2 N·m).
+        if index == 0 || ticks[index - 1].segment != tick.segment || turns(&ticks, index) {
             segment_start = Instant::now();
         }
         let commanded = match model.as_mut() {
