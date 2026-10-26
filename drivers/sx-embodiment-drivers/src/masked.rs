@@ -1,0 +1,280 @@
+//! A chain whose body keeps axes its actuators cannot drive: unavailable axes stay in the
+//! vector, as data, and are never commanded.
+//!
+//! An actuator found faulty (the static upper body's torso motor, 2026-10-26) is marked
+//! unavailable by the station's commissioning. Its axis keeps its place in the native state
+//! order, so the layout an episode records, a policy reads and a leader maps never shrinks or
+//! reorders: every read reports it [`MissingReason::Unavailable`], every receipt observes it as
+//! `NaN`, its target is dropped before the bus, and [`ActuatorChain::unavailable`] names it, so a
+//! [`crate::Governor`] neither steps nor tracks it. The chain underneath drives the rest, opened
+//! without it, so the faulty actuator is never addressed and cannot fail the open.
+
+use std::time::Duration;
+
+use crate::binding::BoundAxis;
+use crate::chain::{
+    ActuatorChain, AxisReading, CommandRange, Feedforward, FeedforwardLimit, MissingReason,
+    Observe, Receipt, StopReport, TargetError, check_targets,
+};
+
+/// `inner`'s axes inside a body's full vector, the rest unavailable.
+pub struct Masked<C> {
+    inner: C,
+    axes: Vec<BoundAxis>,
+    commandable: Vec<CommandRange>,
+    /// The full vector's index of each of `inner`'s axes, in order.
+    present: Vec<usize>,
+    unavailable: Vec<usize>,
+    /// `inner`'s targets, refilled each command.
+    targets: Vec<f64>,
+}
+
+impl<C> Masked<C> {
+    /// `inner`, over `inner_axes` with `inner_ranges`, placed among `axes`, the ones at
+    /// `unavailable` left out.
+    fn place(
+        inner: C,
+        inner_axes: &[BoundAxis],
+        inner_ranges: &[CommandRange],
+        axes: Vec<BoundAxis>,
+        unavailable: &[usize],
+    ) -> Result<Self, TargetError> {
+        let present: Vec<usize> = (0..axes.len())
+            .filter(|index| !unavailable.contains(index))
+            .collect();
+        if unavailable.iter().any(|index| *index >= axes.len())
+            || present.len() != inner_axes.len()
+            || present
+                .iter()
+                .zip(inner_axes)
+                .any(|(index, axis)| axes[*index].joint != axis.joint)
+        {
+            return Err(TargetError::Width {
+                expected: axes.len(),
+                actual: inner_axes.len(),
+            });
+        }
+        let mut commandable: Vec<CommandRange> = axes
+            .iter()
+            .map(|axis| CommandRange {
+                lower: axis.lower,
+                upper: axis.upper,
+            })
+            .collect();
+        for (index, range) in present.iter().zip(inner_ranges) {
+            commandable[*index] = *range;
+        }
+        let mut unavailable = unavailable.to_vec();
+        unavailable.sort_unstable();
+        unavailable.dedup();
+        let targets = Vec::with_capacity(present.len());
+        Ok(Self {
+            inner,
+            axes,
+            commandable,
+            present,
+            unavailable,
+            targets,
+        })
+    }
+
+    /// The chain or observer behind the available axes.
+    pub const fn inner(&self) -> &C {
+        &self.inner
+    }
+
+    /// `inner`'s values spread into the full vector, `fill` at every unavailable axis.
+    fn spread<T: Copy>(&self, values: &[T], fill: T) -> Vec<T> {
+        let mut whole = vec![fill; self.axes.len()];
+        for (index, value) in self.present.iter().zip(values) {
+            whole[*index] = *value;
+        }
+        whole
+    }
+}
+
+impl<C: ActuatorChain> Masked<C> {
+    /// `inner`, which drives `axes` without the axes at `unavailable` (indices into `axes`), as
+    /// the whole vector. An unavailable axis is commandable within its declared bounds, which
+    /// only its target's check uses.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an index outside `axes`, and an `inner` whose axes are not the rest of `axes`
+    /// in order.
+    pub fn new(inner: C, axes: Vec<BoundAxis>, unavailable: &[usize]) -> Result<Self, TargetError> {
+        let inner_axes = inner.axes().to_vec();
+        let inner_ranges = inner.commandable().to_vec();
+        Self::place(inner, &inner_axes, &inner_ranges, axes, unavailable)
+    }
+}
+
+impl<C: Observe> Masked<C> {
+    /// An observer of `axes` reading every axis but those at `unavailable` through `inner`,
+    /// which reports them as [`MissingReason::Unavailable`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Masked::new`].
+    pub fn observing(
+        inner: C,
+        axes: Vec<BoundAxis>,
+        unavailable: &[usize],
+    ) -> Result<Self, TargetError> {
+        let inner_axes = inner.axes().to_vec();
+        Self::place(inner, &inner_axes, &[], axes, unavailable)
+    }
+}
+
+/// A boxed observer, as a body holds one per bus.
+impl<O: Observe + ?Sized> Observe for Box<O> {
+    fn axes(&self) -> &[BoundAxis] {
+        (**self).axes()
+    }
+
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        (**self).read_positions()
+    }
+}
+
+impl<C: Observe> Observe for Masked<C> {
+    fn axes(&self) -> &[BoundAxis] {
+        &self.axes
+    }
+
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        let readings = self.inner.read_positions();
+        self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+    }
+}
+
+impl<C: ActuatorChain> ActuatorChain for Masked<C> {
+    type Error = C::Error;
+    type Feedback = C::Feedback;
+
+    fn axes(&self) -> &[BoundAxis] {
+        &self.axes
+    }
+
+    fn commandable(&self) -> &[CommandRange] {
+        &self.commandable
+    }
+
+    /// The available axes' targets to `inner`; an unavailable axis's is dropped unchecked.
+    fn command(&mut self, joints: &[f64]) -> Result<Receipt<C::Feedback>, C::Error> {
+        self.drive(joints, None)
+    }
+
+    /// As [`ActuatorChain::command`], each available axis with its feed-forward.
+    fn command_with(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+    ) -> Result<Receipt<C::Feedback>, C::Error> {
+        self.drive(joints, Some(feedforward))
+    }
+
+    /// The available axes' bounds to `inner`.
+    fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), C::Error> {
+        let kept: Vec<FeedforwardLimit> = self
+            .present
+            .iter()
+            .filter_map(|index| limits.get(*index).copied())
+            .collect();
+        self.inner.set_feedforward_limits(&kept)
+    }
+
+    fn read_positions(&mut self) -> Vec<AxisReading> {
+        let readings = self.inner.read_positions();
+        self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+    }
+    fn stop(&mut self) -> StopReport {
+        self.inner.stop()
+    }
+
+    fn stop_budget(&self) -> Duration {
+        self.inner.stop_budget()
+    }
+
+    /// `inner`'s, with `NaN` at every unavailable axis.
+    fn last_observed(&self) -> Option<Vec<f64>> {
+        Some(self.spread(&self.inner.last_observed()?, f64::NAN))
+    }
+
+    fn command_readings(&self) -> Option<Vec<AxisReading>> {
+        Some(self.spread(
+            &self.inner.command_readings()?,
+            AxisReading::Missing(MissingReason::Unavailable),
+        ))
+    }
+
+    fn unavailable(&self) -> Vec<usize> {
+        self.unavailable.clone()
+    }
+
+    fn clear_faults(&mut self) {
+        self.inner.clear_faults();
+    }
+}
+
+impl<C: ActuatorChain> Masked<C> {
+    /// Command the available axes, with their feed-forward where given.
+    fn drive(
+        &mut self,
+        joints: &[f64],
+        feedforward: Option<&[Feedforward]>,
+    ) -> Result<Receipt<C::Feedback>, C::Error> {
+        self.targets.clear();
+        self.targets.extend(
+            self.present
+                .iter()
+                .map(|index| joints.get(*index).copied().unwrap_or(f64::NAN)),
+        );
+        // A short vector leaves `NaN` where a target is missing, which `inner` refuses.
+        let receipt = match feedforward {
+            Some(all) => {
+                let kept: Vec<Feedforward> = self
+                    .present
+                    .iter()
+                    .map(|index| all.get(*index).copied().unwrap_or_default())
+                    .collect();
+                self.inner.command_with(&self.targets, &kept)?
+            }
+            None => self.inner.command(&self.targets)?,
+        };
+        Ok(Receipt {
+            evidence: receipt.evidence,
+            observed: if receipt.observed.is_empty() {
+                Vec::new()
+            } else {
+                self.spread(&receipt.observed, f64::NAN)
+            },
+            feedback: receipt.feedback,
+        })
+    }
+}
+
+/// Refuse a vector of the wrong width or outside the declared bounds, skipping `unavailable`
+/// axes: their targets reach no actuator.
+///
+/// # Errors
+///
+/// As [`check_targets`], for the available axes.
+pub fn check_available(
+    axes: &[BoundAxis],
+    unavailable: &[usize],
+    joints: &[f64],
+) -> Result<(), TargetError> {
+    if unavailable.is_empty() || axes.len() != joints.len() {
+        return check_targets(axes, joints);
+    }
+    for (index, (axis, joint)) in axes.iter().zip(joints).enumerate() {
+        if !unavailable.contains(&index) && !axis.admits(*joint) {
+            return Err(TargetError::OutOfBounds {
+                joint: axis.joint.clone(),
+                value: *joint,
+            });
+        }
+    }
+    Ok(())
+}

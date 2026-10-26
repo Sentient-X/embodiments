@@ -245,6 +245,17 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         Some(readings)
     }
 
+    /// Every chain's, shifted to the chain's place in the vector.
+    fn unavailable(&self) -> Vec<usize> {
+        let mut first = 0;
+        let mut unavailable = Vec::new();
+        for chain in &self.members {
+            unavailable.extend(chain.unavailable().into_iter().map(|index| first + index));
+            first += chain.axes().len();
+        }
+        unavailable
+    }
+
     /// Every chain's, in native state order, or `None` when any chain has none.
     fn last_observed(&self) -> Option<Vec<f64>> {
         let mut observed = Vec::with_capacity(self.axes.len());
@@ -316,6 +327,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
         (**self).command_readings()
+    }
+
+    fn unavailable(&self) -> Vec<usize> {
+        (**self).unavailable()
     }
 
     fn clear_faults(&mut self) {

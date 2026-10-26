@@ -23,6 +23,9 @@
 //!   cannot be governed. A chain error other than a refusal (the chain may have applied part
 //!   of the command) stops the chain and latches [`GovernorError::Faulted`]; a refusal, which
 //!   changed nothing, is returned as it is.
+//! - **Unavailable axes** ([`ActuatorChain::unavailable`], marked by commissioning) keep their
+//!   place in every vector but are neither stepped nor tracked: their targets reach no
+//!   actuator, and their observations are `NaN`.
 //! - **Tracking error.** When a command's receipt carries observed positions, each must lie
 //!   within `max_tracking_error` of what was just sent. One that does not stops the chain and
 //!   latches a fault: every later command is refused until [`ActuatorChain::clear_faults`].
@@ -37,8 +40,9 @@ use thiserror::Error;
 use crate::binding::BoundAxis;
 use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Feedforward,
-    FeedforwardLimit, Receipt, StopReport, TargetError, check_targets,
+    FeedforwardLimit, Receipt, StopReport, TargetError,
 };
+use crate::masked::check_available;
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
 pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
@@ -136,6 +140,8 @@ pub struct Governor<C, K = MonotonicClock> {
     held: Option<Held>,
     start: Option<Vec<f64>>,
     latched: bool,
+    /// The chain's unavailable axes, neither stepped nor tracked.
+    unavailable: Vec<usize>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -164,6 +170,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             });
         }
         let positive = |value: f64| value.is_finite() && value > 0.0;
+        let chain_unavailable = chain.unavailable();
         if let Some((axis, _)) = axes
             .iter()
             .zip(&limits)
@@ -178,6 +185,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             held: None,
             start: None,
             latched: false,
+            unavailable: chain_unavailable,
         })
     }
 
@@ -189,7 +197,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     ///
     /// Refuses a vector of the wrong width or outside the declared bounds.
     pub fn start_at(&mut self, joints: Vec<f64>) -> Result<(), TargetError> {
-        check_targets(self.chain.axes(), &joints)?;
+        check_available(self.chain.axes(), &self.unavailable, &joints)?;
         self.start = Some(joints);
         self.held = None;
         Ok(())
@@ -244,6 +252,38 @@ fn slew(value: f64, target: f64, step: f64, range: CommandRange, now: f64) -> f6
 }
 
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
+    /// Each axis moved from `held` toward `joints` by `max_speed` for `step` seconds, inside its
+    /// range widened to where it is now; an unavailable axis at any in-range value.
+    fn step(&self, held: &[f64], joints: &[f64], step: f64) -> Vec<f64> {
+        // Where each joint is now: the chain's latest observation, else the position last sent.
+        let observed = self
+            .chain
+            .last_observed()
+            .filter(|observed| observed.len() == held.len());
+        held.iter()
+            .zip(joints)
+            .zip(self.limits.iter().zip(self.chain.commandable()))
+            .enumerate()
+            .map(|(index, ((value, target), (limit, range)))| {
+                if self.unavailable.contains(&index) {
+                    // Never reaches an actuator: any in-range value keeps the vector whole.
+                    let target = if target.is_finite() {
+                        *target
+                    } else {
+                        range.lower
+                    };
+                    return target.clamp(range.lower, range.upper);
+                }
+                let at = observed
+                    .as_ref()
+                    .map(|observed| observed[index])
+                    .filter(|at| at.is_finite())
+                    .unwrap_or(*value);
+                slew(*value, *target, limit.max_speed * step, *range, at)
+            })
+            .collect()
+    }
+
     /// Slew toward `joints` and command the chain, with `feedforward` when given.
     fn drive(
         &mut self,
@@ -253,7 +293,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         if self.latched {
             return Err(GovernorError::Latched);
         }
-        check_targets(self.chain.axes(), joints)?;
+        check_available(self.chain.axes(), &self.unavailable, joints)?;
         let now = self.clock.now();
         let held = match self.held.take() {
             Some(held) => held,
@@ -262,27 +302,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         let elapsed = held.at.map_or(MAX_STEP_INTERVAL, |at| {
             now.saturating_duration_since(at).min(MAX_STEP_INTERVAL)
         });
-        let step = elapsed.as_secs_f64();
-        // Where each joint is now: the chain's latest observation, else the position last sent.
-        let observed = self
-            .chain
-            .last_observed()
-            .filter(|observed| observed.len() == held.position.len());
-        let next: Vec<f64> = held
-            .position
-            .iter()
-            .zip(joints)
-            .zip(self.limits.iter().zip(self.chain.commandable()))
-            .enumerate()
-            .map(|(index, ((value, target), (limit, range)))| {
-                let at = observed
-                    .as_ref()
-                    .map(|observed| observed[index])
-                    .filter(|at| at.is_finite())
-                    .unwrap_or(*value);
-                slew(*value, *target, limit.max_speed * step, *range, at)
-            })
-            .collect();
+        let next = self.step(&held.position, joints, elapsed.as_secs_f64());
         let receipt = match feedforward {
             Some(wanted) => {
                 if wanted.len() != next.len() {
@@ -328,6 +348,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .iter()
             .zip(&next)
             .zip(self.limits.iter().zip(self.chain.axes()))
+            .enumerate()
+            .filter(|(index, _)| !self.unavailable.contains(index))
+            .map(|(_, pair)| pair)
             .find(|((observed, sent), (limit, _))| {
                 !within(**observed, **sent, limit.max_tracking_error)
             })
@@ -408,6 +431,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
         self.chain.command_readings()
+    }
+
+    fn unavailable(&self) -> Vec<usize> {
+        self.unavailable.clone()
     }
 
     fn clear_faults(&mut self) {

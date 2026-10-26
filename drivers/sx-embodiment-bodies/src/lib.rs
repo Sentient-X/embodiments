@@ -62,7 +62,7 @@ use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
     ChainFailure, Chains, ChainsError, CommandRange, Feedforward, FeedforwardLimit, InstanceDrive,
-    Observe, Receipt, StopReport,
+    Masked, Observe, Receipt, StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::body::{FeetechBody, ServoSetup as FeetechSetup};
@@ -98,8 +98,10 @@ pub struct Commissioning {
     /// board CAN interface's name, which has none).
     pub ports: BTreeMap<String, String>,
     /// Joints whose actuator this robot does not run (a motor known faulty, removed or not yet
-    /// fitted): left out of the body as a closed provisional port's axes are, so the rest
-    /// opens. A port whose every axis is out of service is left closed.
+    /// fitted). The actuator is never addressed, so the rest opens, and the axis keeps its
+    /// place in the body's vector as data ([`Masked`]): read as unavailable, observed as `NaN`,
+    /// never commanded, named by `ActuatorChain::unavailable`. A port whose every axis is out
+    /// of service is left closed.
     pub out_of_service: BTreeSet<String>,
 }
 
@@ -413,6 +415,44 @@ impl Part {
     }
 }
 
+/// Where a bus's out-of-service axes sit in its whole vector.
+struct Mask {
+    whole: Vec<BoundAxis>,
+    out: Vec<usize>,
+}
+
+impl Mask {
+    fn of(whole: Vec<BoundAxis>, out_of_service: &BTreeSet<String>) -> Self {
+        let out = whole
+            .iter()
+            .enumerate()
+            .filter(|(_, axis)| out_of_service.contains(&axis.joint))
+            .map(|(index, _)| index)
+            .collect();
+        Self { whole, out }
+    }
+
+    /// `chain`, which drives the bus's axes in service, as the bus's whole vector.
+    fn chain(self, chain: BusChain) -> Result<BusChain, OpenError> {
+        if self.out.is_empty() {
+            return Ok(chain);
+        }
+        Ok(Box::new(
+            Masked::new(chain, self.whole, &self.out).map_err(DamiaoChainError::from)?,
+        ))
+    }
+
+    /// `observer`, which reads the bus's axes in service, as the bus's whole vector.
+    fn observer(self, observer: BusObserver) -> Result<BusObserver, OpenError> {
+        if self.out.is_empty() {
+            return Ok(observer);
+        }
+        Ok(Box::new(
+            Masked::observing(observer, self.whole, &self.out).map_err(DamiaoChainError::from)?,
+        ))
+    }
+}
+
 /// Keep the axes (and what is listed beside each) whose joint is in service.
 fn in_service<T>(
     items: impl IntoIterator<Item = (BoundAxis, T)>,
@@ -512,7 +552,7 @@ impl Opener {
         calibrations: &ServoCalibrations,
         closed: &mut Vec<String>,
         out_of_service: &BTreeSet<String>,
-    ) -> Result<Vec<(String, Part)>, OpenError> {
+    ) -> Result<Vec<(String, Part, Mask)>, OpenError> {
         let joints = self.joints(drive)?;
         if let Some(unknown) = out_of_service.iter().find(|joint| !joints.contains(joint)) {
             return Err(OpenError::OutOfService(unknown.clone()));
@@ -528,9 +568,11 @@ impl Opener {
                     .map(|axis| calibrations.of(&port, axis.binding.bus_id))
                     .collect()
             };
+            let whole: Vec<BoundAxis>;
             let part = if kind == DAMIAO_CAN {
-                let motors: Vec<DamiaoAxis> = self
-                    .damiao(drive, &port)?
+                let all = self.damiao(drive, &port)?;
+                whole = all.iter().map(|motor| motor.axis.clone()).collect();
+                let motors: Vec<DamiaoAxis> = all
                     .into_iter()
                     .filter(|motor| !out_of_service.contains(&motor.axis.joint))
                     .collect();
@@ -538,10 +580,10 @@ impl Opener {
             } else if kind == FEETECH_SERIAL {
                 let body =
                     FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
+                let calibrated = body.calibrated(drive)?;
+                whole = calibrated.clone();
                 let (axes, setups) = in_service(
-                    body.calibrated(drive)?
-                        .into_iter()
-                        .zip(body.servos.iter().copied()),
+                    calibrated.into_iter().zip(body.servos.iter().copied()),
                     out_of_service,
                 );
                 (!axes.is_empty()).then(|| Part::Feetech {
@@ -552,10 +594,10 @@ impl Opener {
                 })
             } else if kind == DYNAMIXEL_SERIAL {
                 let body = DynamixelBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
+                let calibrated = body.calibrated(drive)?;
+                whole = calibrated.clone();
                 let (axes, setups) = in_service(
-                    body.calibrated(drive)?
-                        .into_iter()
-                        .zip(body.servos.iter().copied()),
+                    calibrated.into_iter().zip(body.servos.iter().copied()),
                     out_of_service,
                 );
                 (!axes.is_empty()).then(|| Part::Dynamixel {
@@ -568,7 +610,7 @@ impl Opener {
                 return Err(unopened(&port, kind));
             };
             match part {
-                Some(part) => parts.push((port, part)),
+                Some(part) => parts.push((port, part, Mask::of(whole, out_of_service))),
                 None => closed.push(port),
             }
         }
@@ -633,7 +675,7 @@ pub type BodyChainError = ChainsError<BusError>;
 /// What resolving a body for `drive` on `commissioning` settled before any bridge is opened.
 struct Plan {
     closed: Vec<String>,
-    parts: Vec<(String, Part)>,
+    parts: Vec<(String, Part, Mask)>,
 }
 
 /// Refuse a mismatch between the drive and commissioning, then resolve every open bus.
@@ -666,18 +708,18 @@ impl Plan {
         self,
         commissioning: &Commissioning,
         source: &mut dyn PortSource,
-    ) -> Result<Vec<(String, Part, Link)>, OpenError> {
+    ) -> Result<Vec<(String, Part, Mask, Link)>, OpenError> {
         let declared: Vec<(String, Wire)> = self
             .parts
             .iter()
-            .map(|(port, part)| (port.clone(), part.wire()))
+            .map(|(port, part, _)| (port.clone(), part.wire()))
             .collect();
         let links = bridges(&declared, &self.closed, commissioning, source)?;
         Ok(self
             .parts
             .into_iter()
             .zip(links)
-            .map(|((port, part), link)| (port, part, link))
+            .map(|((port, part, mask), link)| (port, part, mask, link))
             .collect())
     }
 }
@@ -741,13 +783,13 @@ pub fn open_with(
     if let Some(refused) = plan
         .parts
         .iter()
-        .find_map(|(port, part)| part.uncalibrated(port))
+        .find_map(|(port, part, _)| part.uncalibrated(port))
     {
         return Err(refused);
     }
     let mut chains: Vec<BusChain> = Vec::with_capacity(plan.parts.len());
-    for (port, part, link) in plan.links(commissioning, source)? {
-        chains.push(part.open(&port, link)?);
+    for (port, part, mask, link) in plan.links(commissioning, source)? {
+        chains.push(mask.chain(part.open(&port, link)?)?);
     }
     Ok(Chains::new(chains))
 }
@@ -774,7 +816,7 @@ impl Observe for Observer {
     fn read_positions(&mut self) -> Vec<AxisReading> {
         self.buses
             .iter_mut()
-            .flat_map(|bus| bus.read_positions())
+            .flat_map(Observe::read_positions)
             .collect()
     }
 }
@@ -801,8 +843,8 @@ pub fn observe(
 ) -> Result<Observer, OpenError> {
     let plan = plan(drive, commissioning, calibrations, options)?;
     let mut buses: Vec<BusObserver> = Vec::with_capacity(plan.parts.len());
-    for (port, part, link) in plan.links(commissioning, source)? {
-        buses.push(part.observe(&port, link)?);
+    for (port, part, mask, link) in plan.links(commissioning, source)? {
+        buses.push(mask.observer(part.observe(&port, link)?)?);
     }
     let axes = buses
         .iter()

@@ -216,6 +216,18 @@ where
         readings
     }
 
+    fn unavailable(&self) -> Vec<usize> {
+        let first = self.first.axes().len();
+        let mut unavailable = self.first.unavailable();
+        unavailable.extend(
+            self.second
+                .unavailable()
+                .into_iter()
+                .map(|index| first + index),
+        );
+        unavailable
+    }
+
     fn command_readings(&self) -> Option<Vec<AxisReading>> {
         let mut readings = self.first.command_readings()?;
         readings.extend(self.second.command_readings()?);
