@@ -91,8 +91,11 @@ fn damiao(
     let mut joints = Vec::new();
     for axis in &body.axes {
         // The torso motor (0x1F) is known faulty; it is asked like the rest and shows as null.
-        let model = motor_type(axis.binding.model.wire())
-            .ok_or_else(|| format!("{}: not a Damiao model", axis.joint))?;
+        // The grippers' fingers are bound too, on their own Feetech buses: this bus reads only
+        // the Damiao motors.
+        let Some(model) = motor_type(axis.binding.model.wire()) else {
+            continue;
+        };
         control.add_motor(Motor::new(
             model,
             axis.binding.bus_id,
