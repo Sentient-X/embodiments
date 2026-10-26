@@ -8,6 +8,9 @@
 //! --drive <drive.json> --commissioning <commissioning.json>
 //! [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]... [--exclude <joint,...>]
 //! ```
+//!
+//! A port with no `--calibration` takes the robot directory's own, `<port>.calibration.json`
+//! beside the commissioning file, where there is one (`sx_embodiment_bodies::calibration_file`).
 
 use sx_embodiment_bodies::system::SystemPorts;
 use sx_embodiment_bodies::{
@@ -88,6 +91,13 @@ impl BodyFlags {
                 .with_lerobot(port, &read(file)?)
                 .map_err(|error| error.to_string())?;
         }
+        // Every other port's commissioned calibration, kept beside the commissioning.
+        let directory = std::path::Path::new(&self.commissioning)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let (calibrations, _) = calibrations
+            .with_robot_directory(directory, &commissioning)
+            .map_err(|error| error.to_string())?;
         Ok((drive, commissioning, calibrations))
     }
 

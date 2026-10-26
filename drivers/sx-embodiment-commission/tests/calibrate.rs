@@ -626,3 +626,308 @@ fn goto_leaves_a_servo_at_its_target_limp_even_from_outside_its_limits() {
     untouched(&bus, 1, (1000, 3000));
     assert!(!Journal::path_for(&dir, BUS).exists());
 }
+
+/// Enter presses scripted against a simulated bus: the first press is the middle, as the bus
+/// already rests; every poll of the range loop then puts the servos where the next step of
+/// `script` says, as a person's hand would, and the press after the last step ends it.
+struct HandOnBus {
+    bus: SimBus,
+    script: Vec<Vec<(u8, u16)>>,
+    step: usize,
+}
+
+impl sx_embodiment_commission::calibrate::range::Prompt for HandOnBus {
+    fn wait(&mut self) -> Result<(), CalibrateError> {
+        Ok(())
+    }
+
+    fn pressed(&mut self) -> bool {
+        let Some(positions) = self.script.get(self.step) else {
+            return true;
+        };
+        for &(id, at) in positions {
+            self.bus.rest_at(id, at);
+        }
+        self.step += 1;
+        false
+    }
+}
+
+/// Three neck-like servos with wide limits, each holding a different homing offset.
+fn neck() -> SimBus {
+    let calibration = |homing_offset| MotorCalibration {
+        drive_mode: false,
+        homing_offset,
+        range_min: 0,
+        range_max: 4095,
+    };
+    let bus = SimBus::sts3215(&[
+        (1, calibration(0)),
+        (2, calibration(-791)),
+        (3, calibration(1605)),
+    ]);
+    bus.rest_at(1, 1000);
+    bus.rest_at(2, 2109);
+    bus.rest_at(3, 3000);
+    bus
+}
+
+fn range_words(out: &Path, extra: &[&str]) -> Vec<String> {
+    let mut words: Vec<String> = [
+        "range",
+        "--bus",
+        BUS,
+        "--ids",
+        "1-3",
+        "--joints",
+        "pan,lift,roll",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]
+    .map(String::from)
+    .to_vec();
+    words.extend(extra.iter().map(|word| (*word).to_owned()));
+    words
+}
+
+#[test]
+fn a_range_shown_by_hand_is_recorded_in_the_middle_frame_and_nothing_is_written() {
+    let bus = neck();
+    let dir = journal_dir("range");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let out = dir.join("neck.calibration.json");
+    let mut hand = HandOnBus {
+        bus: bus.clone(),
+        script: vec![
+            vec![(1, 600), (2, 1800), (3, 2800)],
+            vec![(1, 1500), (2, 2600), (3, 3500)],
+            vec![(1, 1200), (2, 2200), (3, 3100)],
+        ],
+        step: 0,
+    };
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = cli::run_with(
+        &parse(&range_words(&out, &["--full-turn", "3"])).expect("parsed"),
+        |_, _| Ok(bus.clone()),
+        &Arc::new(AtomicUsize::new(0)),
+        &mut hand,
+        &mut stdout,
+        &mut stderr,
+    );
+    let printed = String::from_utf8_lossy(&stdout);
+    assert_eq!(code, 0, "{printed}{}", String::from_utf8_lossy(&stderr));
+    let calibration: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("written")).expect("json");
+    // pan: offset 0, middle at raw 1000, so homing_offset 1000 - 2047; its travel 600..1500
+    // reads 1647..2547 in that frame.
+    assert_eq!(
+        calibration["pan"],
+        serde_json::json!({"id": 1, "drive_mode": 0, "homing_offset": -1047,
+                           "range_min": 1647, "range_max": 2547})
+    );
+    // lift: held offset -791, middle reading 2109 is raw 1318: homing_offset -729; 1800..2600
+    // reads 1738..2538.
+    assert_eq!(
+        calibration["lift"],
+        serde_json::json!({"id": 2, "drive_mode": 0, "homing_offset": -729,
+                           "range_min": 1738, "range_max": 2538})
+    );
+    // roll: held offset 1605, middle reading 3000 is raw 509 (it wrapped): homing_offset
+    // -1538; a full-turn joint gets 0..4095.
+    assert_eq!(
+        calibration["roll"],
+        serde_json::json!({"id": 3, "drive_mode": 0, "homing_offset": -1538,
+                           "range_min": 0, "range_max": 4095})
+    );
+    assert!(printed.contains("Step 1"), "{printed}");
+    assert!(printed.contains("now"), "{printed}");
+    let state = bus.state();
+    assert!(
+        state.written.iter().all(|p| is_read_only(p)),
+        "nothing but reads"
+    );
+    assert!(!Journal::path_for(&dir, BUS).exists(), "no journal");
+}
+
+#[test]
+fn a_range_refuses_while_any_listed_servo_holds_torque() {
+    let bus = neck();
+    bus.state().servos.get_mut(&2).expect("servo 2")[40] = 1;
+    let dir = journal_dir("range-torque");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let out = dir.join("neck.calibration.json");
+    let mut hand = HandOnBus {
+        bus: bus.clone(),
+        script: Vec::new(),
+        step: 0,
+    };
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = cli::run_with(
+        &parse(&range_words(&out, &[])).expect("parsed"),
+        |_, _| Ok(bus.clone()),
+        &Arc::new(AtomicUsize::new(0)),
+        &mut hand,
+        &mut stdout,
+        &mut stderr,
+    );
+    assert_eq!(code, 1);
+    assert!(String::from_utf8_lossy(&stderr).contains("[2] hold torque"));
+    assert!(!out.exists());
+    assert!(bus.state().written.iter().all(|p| is_read_only(p)));
+    // And it is never a moving mode.
+    assert!(parse(&range_words(&out, &["--move"])).is_err());
+}
+
+#[test]
+fn apply_writes_the_offsets_limits_and_neck_protection_and_keeps_them() {
+    let bus = neck();
+    for (id, protection) in [(1_u8, (1000_u16, 310_u16, 80_u8)), (3, (500, 250, 25))] {
+        let mut state = bus.state();
+        let r = state.servos.get_mut(&id).expect("servo");
+        r[16..18].copy_from_slice(&protection.0.to_le_bytes());
+        r[28..30].copy_from_slice(&protection.1.to_le_bytes());
+        r[36] = protection.2;
+        r[48..50].copy_from_slice(&protection.0.to_le_bytes());
+    }
+    let dir = journal_dir("apply-offsets");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let file = dir.join("measured.json");
+    let robot = dir.join("robot");
+    std::fs::write(
+        &file,
+        serde_json::json!({
+            "pan": {"id": 1, "drive_mode": 0, "homing_offset": -1047, "range_min": 1647,
+                    "range_max": 2547},
+            "roll": {"id": 3, "drive_mode": 0, "homing_offset": 42, "range_min": 1760,
+                     "range_max": 2909},
+        })
+        .to_string(),
+    )
+    .expect("file");
+    let words: Vec<String> = [
+        "apply",
+        "--bus",
+        BUS,
+        "--calibration",
+        file.to_str().expect("utf-8"),
+        "--move",
+        "--protection",
+        "neck-defaults",
+        "--robot",
+        robot.to_str().expect("utf-8"),
+        "--port",
+        "neck",
+        "--journal-dir",
+        dir.to_str().expect("utf-8"),
+    ]
+    .map(String::from)
+    .to_vec();
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = cli::run(
+        &parse(&words).expect("parsed"),
+        |_, _| Ok(bus.clone()),
+        &Arc::new(AtomicUsize::new(0)),
+        &mut stdout,
+        &mut stderr,
+    );
+    let printed = String::from_utf8_lossy(&stdout);
+    assert_eq!(code, 0, "{printed}{}", String::from_utf8_lossy(&stderr));
+    // Homing offsets are sign-magnitude at bit 11.
+    assert_eq!(register(&bus, 1, 31, 2), 1047 | 0x800);
+    assert_eq!(register(&bus, 3, 31, 2), 42);
+    assert_eq!(
+        (register(&bus, 1, 9, 2), register(&bus, 1, 11, 2)),
+        (1647, 2547)
+    );
+    assert_eq!(
+        (register(&bus, 3, 9, 2), register(&bus, 3, 11, 2)),
+        (1760, 2909)
+    );
+    assert!(printed.contains("homing_offset 0 -> -1047"), "{printed}");
+    assert!(
+        printed.contains("servo 1: protection already 1000/310/80"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("servo 3: protection Max_Torque 500 -> 1000"),
+        "{printed}"
+    );
+    for (address, width, value) in [(16, 2, 1000), (28, 2, 310), (36, 1, 80), (48, 2, 1000)] {
+        assert_eq!(
+            register(&bus, 3, address, width),
+            value,
+            "register {address}"
+        );
+    }
+    // Installed where the station loads the neck's calibration from, as the servos hold it.
+    let installed = robot.join(sx_embodiment_bodies::calibration_file("neck"));
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&installed).expect("installed"))
+            .expect("json");
+    let applied: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).expect("file")).expect("json");
+    assert_eq!(kept, applied);
+    assert!(printed.contains("commissioned calibration"), "{printed}");
+    // Kept: closing put only Lock back, and the journal is gone.
+    assert_eq!(register(&bus, 1, 55, 1), 0);
+    assert_eq!(register(&bus, 1, 40, 1), 0);
+    assert!(!Journal::path_for(&dir, BUS).exists());
+}
+
+#[test]
+fn apply_refuses_a_servo_holding_torque_and_changes_nothing() {
+    let bus = neck();
+    bus.state().servos.get_mut(&1).expect("servo 1")[40] = 1;
+    let dir = journal_dir("apply-torque");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let file = dir.join("c.json");
+    std::fs::write(
+        &file,
+        r#"{"pan": {"id": 1, "drive_mode": 0, "homing_offset": -5, "range_min": 100, "range_max": 200}}"#,
+    )
+    .expect("file");
+    let words: Vec<String> = [
+        "apply",
+        "--bus",
+        BUS,
+        "--calibration",
+        file.to_str().expect("utf-8"),
+        "--move",
+        "--journal-dir",
+        dir.to_str().expect("utf-8"),
+    ]
+    .map(String::from)
+    .to_vec();
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = cli::run(
+        &parse(&words).expect("parsed"),
+        |_, _| Ok(bus.clone()),
+        &Arc::new(AtomicUsize::new(0)),
+        &mut stdout,
+        &mut stderr,
+    );
+    assert_ne!(code, 0);
+    assert!(String::from_utf8_lossy(&stderr).contains("holds torque"));
+    assert!(
+        parse(
+            &[
+                "apply",
+                "--bus",
+                BUS,
+                "--calibration",
+                "x.json",
+                "--move",
+                "--robot",
+                "r"
+            ]
+            .map(String::from)
+        )
+        .is_err(),
+        "--robot needs --port"
+    );
+    assert_eq!(register(&bus, 1, 31, 2), 0);
+    assert_eq!(
+        (register(&bus, 1, 9, 2), register(&bus, 1, 11, 2)),
+        (0, 4095)
+    );
+}

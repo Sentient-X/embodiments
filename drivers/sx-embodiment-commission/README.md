@@ -90,8 +90,21 @@ sx-commission calibrate --restore <journal>
   `--goal-speed`. `--hold-seconds <s>` holds it at the target first, printing `HOLDING id N at
   <ticks>` when the hold starts and `RETURNED` once it is back and limp; `--json` gives the hold's
   wall-clock start and end and the positions read during it. `--widen` works as for `gripper`.
-  That measurement settles the `Goal_Speed` unit, which
-  `sx-feetech-serial`'s README records as unverified.
+  That measurement settled the `Goal_Speed` unit on 2026-10-26: steps per second, with the
+  firmware never slower than 50 (the default `--goal-speed 20` runs at 50 steps/s, about
+  0.077 rad/s); see `sx-feetech-serial`'s README.
+- `range --ids 1-6 --joints <names> [--full-turn <ids>] --out <file>` is a hand-guided
+  calibration that writes nothing (every packet through the read-only port, no journal). It
+  refuses unless every listed servo reads `Torque_Enable` 0. The person puts every joint at
+  its middle and presses Enter: the homing offset that makes that pose read 2047 (`LeRobot`'s
+  `int(4095 / 2)`) is computed from `raw = (present + held offset) mod 4096`, not written.
+  Then the person moves each joint through its full travel while a live line per joint shows
+  now/min/max in ticks and degrees (about 50 Hz), all in the new frame; Enter ends it and the
+  `LeRobot` calibration keyed by joint is written to `--out`. `apply --move` then writes each
+  entry's `homing_offset` and limits under `Lock` 0 → 1, refusing a servo that holds torque;
+  `--protection neck-defaults` also resets `Max_Torque_Limit`/`Protection_Current`/
+  `Overload_Torque` (and the live `Torque_Limit`) to 1000/310/80 where a servo differs,
+  printing each change first.
 - A sweep's end is one of `Load`, `NoProgress` (a stop), `Stuck` (it never moved a lead's
   worth, so it proves no stop), `Limit` (its position limit, or a stall within a lead of it,
   where the goal is clamped) and `MaxTravel`. A move that stops short without load holds where

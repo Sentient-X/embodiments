@@ -241,6 +241,15 @@ impl<P: SerialPort> Session<P> {
         read::limits(&mut self.ph, id)
     }
 
+    /// A register of `width` bytes (1 or 2), read.
+    ///
+    /// # Errors
+    ///
+    /// The bus's failure or the servo's error flags.
+    pub fn register(&mut self, id: u8, address: u8, width: u8) -> Result<u16, CalibrateError> {
+        read::register(&mut self.ph, id, address, width)
+    }
+
     /// # Errors
     ///
     /// The bus's failure or the servo's error flags.
@@ -326,9 +335,15 @@ impl<P: SerialPort> Session<P> {
 
     /// [`Session::set`] for an unlocked EEPROM word: the servo answers late while it stores
     /// it, so a write whose status packet timed out is judged by reading the word back.
-    fn set_eeprom(&mut self, id: u8, address: u8, value: u16) -> Result<(), CalibrateError> {
-        self.save(id, address, 2)?;
-        match self.write(id, address, 2, value) {
+    fn set_eeprom(
+        &mut self,
+        id: u8,
+        address: u8,
+        width: u8,
+        value: u16,
+    ) -> Result<(), CalibrateError> {
+        self.save(id, address, width)?;
+        match self.write(id, address, width, value) {
             Ok(())
             | Err(CalibrateError::Comm {
                 result: CommResult::RxTimeout,
@@ -337,7 +352,7 @@ impl<P: SerialPort> Session<P> {
             Err(error) => return Err(error),
         }
         std::thread::sleep(EEPROM_SETTLE);
-        let read = read::register(&mut self.ph, id, address, 2)?;
+        let read = read::register(&mut self.ph, id, address, width)?;
         if read != value {
             return Err(CalibrateError::ReadBack {
                 id,
@@ -363,28 +378,57 @@ impl<P: SerialPort> Session<P> {
         min: u16,
         max: u16,
     ) -> Result<(u16, u16), CalibrateError> {
-        self.check()?;
-        if self.powered().is_some() {
-            return Err(CalibrateError::Refused(format!(
-                "limits change only with every servo limp (servo {id})"
-            )));
-        }
         if min >= max || max > MAX_TICK {
             return Err(CalibrateError::Refused(format!(
                 "{min}..{max} is not a position range"
             )));
         }
-        let before = self.limits(id)?;
+        let before = self.commit(
+            id,
+            &[
+                (SMS_STS_MIN_ANGLE_LIMIT_L, 2, min),
+                (SMS_STS_MAX_ANGLE_LIMIT_L, 2, max),
+            ],
+        )?;
+        Ok((before[0], before[1]))
+    }
+
+    /// Make `writes` (address, width, value) servo `id`'s own registers, kept across power
+    /// cycles: with every servo limp and this one reading `Torque_Enable` 0, `Lock` 0, each
+    /// written and read back in order, then `Lock` 1. Like [`Session::commit_limits`] this is
+    /// the unit's calibration: a completed commit is not undone when the session closes (only
+    /// `Lock` is put back), while one interrupted part-way is, from the journal. Returns each
+    /// register's value before, in order.
+    ///
+    /// # Errors
+    ///
+    /// A powered servo, or a write that does not read back.
+    pub fn commit(&mut self, id: u8, writes: &[(u8, u8, u16)]) -> Result<Vec<u16>, CalibrateError> {
+        self.check()?;
+        if self.powered().is_some() {
+            return Err(CalibrateError::Refused(format!(
+                "a servo's own registers change only with every servo limp (servo {id})"
+            )));
+        }
+        if read::control(&mut self.ph, id)?.torque_enable != 0 {
+            return Err(CalibrateError::Refused(format!(
+                "servo {id} holds torque: its registers change only while it is limp"
+            )));
+        }
+        let mut before = Vec::with_capacity(writes.len());
+        for &(address, width, _) in writes {
+            before.push(read::register(&mut self.ph, id, address, width)?);
+        }
         self.set(id, SMS_STS_LOCK, 1, 0)?;
-        self.set_eeprom(id, SMS_STS_MIN_ANGLE_LIMIT_L, min)?;
-        self.set_eeprom(id, SMS_STS_MAX_ANGLE_LIMIT_L, max)?;
+        for &(address, width, value) in writes {
+            self.set_eeprom(id, address, width, value)?;
+        }
         self.set(id, SMS_STS_LOCK, 1, 1)?;
         self.journal.record.saved.retain(|saved| {
             saved.id != id
-                || !matches!(
-                    saved.address,
-                    SMS_STS_MIN_ANGLE_LIMIT_L | SMS_STS_MAX_ANGLE_LIMIT_L
-                )
+                || !writes
+                    .iter()
+                    .any(|(address, _, _)| *address == saved.address)
         });
         self.journal.persist()?;
         Ok(before)
