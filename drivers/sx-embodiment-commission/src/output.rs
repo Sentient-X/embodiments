@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
+use sx_embodiment_drivers::rail::Rails;
 use sx_feetech_serial::scan::ServoScan;
 
 use crate::bridges::{Access, Bridge};
@@ -20,12 +21,16 @@ use crate::probe::Probe;
 /// The schema `sx-embodiment-bodies` parses (`COMMISSIONING_SCHEMA`).
 pub const COMMISSIONING_SCHEMA: &str = "sx.station-commissioning/v1";
 
-/// Who the commissioned robot is: its instance and the Fleet pod revision recording it.
+/// Who the commissioned robot is: its instance and the Fleet pod revision recording it, and
+/// each power rail's voltage as measured on it.
 #[derive(Clone, Debug)]
 pub struct Station {
     pub instance: String,
     pub pod_id: String,
     pub pod_revision: u32,
+    /// Measured volts by selector (`*`, a port, a model, `<port>/<model>`): an axis over its
+    /// model's supported supply opens derated, or refused far over it.
+    pub rails: Rails,
 }
 
 /// The commissioning document for `matched`.
@@ -35,13 +40,17 @@ pub fn commissioning(station: &Station, matched: &[PortMatch]) -> Value {
         .iter()
         .map(|port| (port.port.as_str(), port.identity.as_str()))
         .collect();
-    json!({
+    let mut document = json!({
         "schema": COMMISSIONING_SCHEMA,
         "instance": station.instance,
         "pod_id": station.pod_id,
         "pod_revision": station.pod_revision,
         "ports": ports,
-    })
+    });
+    if !station.rails.volts().is_empty() {
+        document["rails"] = json!(station.rails.volts());
+    }
+    document
 }
 
 /// A Feetech port's units as `LeRobot`'s calibration file; `None` for a Damiao port.

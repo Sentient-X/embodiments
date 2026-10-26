@@ -113,6 +113,7 @@ fn run() -> Result<(), String> {
             AxisLimits {
                 max_speed: speed,
                 max_tracking_error: TRACKING,
+                max_acceleration: None,
             };
             width
         ],

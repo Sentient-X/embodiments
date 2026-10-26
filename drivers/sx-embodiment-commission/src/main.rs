@@ -3,7 +3,7 @@
 //! ```text
 //! sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
 //! sx-commission commission --bindings <file>... [--instance <id> --pod <id> --revision <n>]
-//!                          [--json] [--write <dir>]
+//!                          [--rail <selector>=<volts>]... [--json] [--write <dir>]
 //! sx-commission calibrate read|gripper|jog --bus <tty> ... [--move]
 //! sx-commission calibrate --restore <journal>
 //! ```
@@ -12,6 +12,13 @@
 //! header. `commission` prints what it would record and writes only under `--write`.
 //! `calibrate` writes registers and moves servos only under `--move`
 //! (`sx_embodiment_commission::calibrate`).
+//!
+//! `--rail` records a power rail's measured voltage: the selector is `*`, a port, a registry
+//! model or `<port>/<model>`, the most specific matching an axis being its rail. The static
+//! upper body on the bench, its J8009P torso and shoulders on the 54 V battery and the rest on
+//! the 24 V converter: `--rail damiao_dm8009p=54 --rail '*=24'`. Over a model's supported
+//! supply its axes open derated (`sx_embodiment_drivers::rail`); record the rail again once it
+//! is in range and the derate lifts.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,7 +38,8 @@ use sx_embodiment_commission::tty::TtyPort;
 const USAGE: &str = "usage:
   sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
   sx-commission commission --bindings <file> [--bindings <file>...]
-                           [--instance <id> --pod <id> --revision <n>] [--json] [--write <dir>]
+                           [--instance <id> --pod <id> --revision <n>]
+                           [--rail <selector>=<volts>]... [--json] [--write <dir>]
   sx-commission calibrate ... (sx-commission calibrate --help)";
 
 /// `calibrate`: every terminating signal a person or a supervisor sends sets `stop` instead of
@@ -80,6 +88,7 @@ struct Args {
     instance: Option<String>,
     pod: Option<String>,
     revision: Option<u32>,
+    rails: std::collections::BTreeMap<String, f64>,
     write: Option<PathBuf>,
     feetech_ids: Option<Vec<u16>>,
     damiao_ids: Option<Vec<u16>>,
@@ -120,6 +129,17 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Args, String> {
                 args.revision = Some(value()?.parse().map_err(|_| "--revision is a number")?);
             }
             "--write" => args.write = Some(PathBuf::from(value()?)),
+            "--rail" => {
+                let entry = value()?;
+                let (selector, volts) = entry
+                    .split_once('=')
+                    .ok_or("--rail is <selector>=<volts>")?;
+                let volts: f64 = volts
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("--rail {entry}: {volts} is not a voltage"))?;
+                args.rails.insert(selector.trim().to_owned(), volts);
+            }
             "--feetech-ids" => args.feetech_ids = Some(ids(&value()?)?),
             "--damiao-ids" => args.damiao_ids = Some(ids(&value()?)?),
             other => return Err(format!("unknown argument {other}")),
@@ -193,6 +213,8 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
             instance: instance.clone(),
             pod_id: pod_id.clone(),
             pod_revision,
+            rails: sx_embodiment_drivers::rail::Rails::new(args.rails.clone())
+                .map_err(|error| error.to_string())?,
         }),
         (None, None, None) => None,
         _ => return Err("--instance, --pod and --revision go together".to_owned()),

@@ -21,6 +21,13 @@
 //! calibration is per unit and is supplied as [`ServoCalibrations`] to [`open_calibrated`];
 //! [`open`] supplies none, so it refuses a body with serial servos it would open.
 //!
+//! Commissioning also records each power rail's measured voltage ([`Commissioning::rails`],
+//! `sx_embodiment_drivers::Rails`). An axis whose rail is over its model's supported supply is
+//! opened derated (`ActuatorChain::derated`, which a `Governor` applies: lower speed, an
+//! acceleration cap, a feed-forward torque cap); one more than `REFUSE_ABOVE` over is refused
+//! ([`OpenError::OverRail`]) unless commissioning puts it out of service. Both lift once
+//! commissioning records a rail in range.
+//!
 //! A port the registry marks provisional (bindings not yet verified on the robot: the static
 //! upper body's neck and grippers) is left closed: its bridge is not opened and its axes are
 //! not in the body, so a station drives the verified rest. A supervised bring-up opens one
@@ -58,6 +65,7 @@ use sx_dynamixel_serial::chain::{DynamixelChain, DynamixelChainError, DynamixelS
 use sx_dynamixel_serial::observe::DynamixelObserver;
 use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::lerobot::MotorCalibration;
+use sx_embodiment_drivers::rail::{AxisDerate, RailCheck, Rails, derates};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, Axes, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
@@ -77,7 +85,8 @@ pub mod system;
 #[cfg(feature = "usb-serial")]
 pub mod usb_serial;
 
-/// The commissioning document's schema.
+/// The commissioning document's schema. `rails` is optional, so a document without it is
+/// read as before: no axis derated.
 pub const COMMISSIONING_SCHEMA: &str = "sx.station-commissioning/v1";
 
 /// A boxed bridge to one CAN bus.
@@ -103,6 +112,9 @@ pub struct Commissioning {
     /// never commanded, named by `ActuatorChain::unavailable`. A port whose every axis is out
     /// of service is left closed.
     pub out_of_service: BTreeSet<String>,
+    /// Each power rail's measured voltage, by selector (`*`, a port, a model, or
+    /// `<port>/<model>`): what derates or refuses an axis over its model's supported supply.
+    pub rails: Rails,
 }
 
 #[derive(Deserialize)]
@@ -115,6 +127,8 @@ struct CommissioningDocument {
     ports: BTreeMap<String, String>,
     #[serde(default)]
     out_of_service: BTreeSet<String>,
+    #[serde(default)]
+    rails: BTreeMap<String, f64>,
 }
 
 impl Commissioning {
@@ -123,7 +137,8 @@ impl Commissioning {
     /// # Errors
     ///
     /// Refuses anything but this schema, commissioning recorded for another instance, an empty
-    /// pod, and a port or serial that is empty or carries whitespace.
+    /// pod, a port or serial that is empty or carries whitespace, and a rail whose selector or
+    /// voltage is not one.
     pub fn parse(document: &str, expected: &str) -> Result<Self, OpenError> {
         let parsed: CommissioningDocument = serde_json::from_str(document)
             .map_err(|error| OpenError::Document(error.to_string()))?;
@@ -153,12 +168,15 @@ impl Commissioning {
                     .to_owned(),
             ));
         }
+        let rails =
+            Rails::new(parsed.rails).map_err(|error| OpenError::Document(error.to_string()))?;
         Ok(Self {
             instance: parsed.instance,
             pod_id: parsed.pod_id,
             pod_revision: parsed.pod_revision,
             ports: parsed.ports,
             out_of_service: parsed.out_of_service,
+            rails,
         })
     }
 }
@@ -307,6 +325,30 @@ impl Part {
         }
     }
 
+    /// The axes this bus drives, in order.
+    fn axes(&self) -> Vec<&BoundAxis> {
+        match self {
+            Self::Damiao(motors) => motors.iter().map(|motor| &motor.axis).collect(),
+            Self::Feetech { axes, .. } | Self::Dynamixel { axes, .. } => axes.iter().collect(),
+        }
+    }
+
+    /// The first axis whose rail is too far over its model's supported supply to enable.
+    fn over_rail(&self, port: &str, rails: &Rails) -> Option<OpenError> {
+        self.axes()
+            .into_iter()
+            .find_map(|axis| match rails.check(axis) {
+                RailCheck::Refused(over) => Some(OpenError::OverRail {
+                    port: port.to_owned(),
+                    joint: axis.joint.clone(),
+                    model: axis.binding.model.wire(),
+                    rail_volts: over.rail_volts,
+                    max_volts: over.max_volts,
+                }),
+                _ => None,
+            })
+    }
+
     /// The first servo with no calibration supplied, as the refusal naming it.
     fn uncalibrated(&self, port: &str) -> Option<OpenError> {
         let (axes, calibrations) = match self {
@@ -327,14 +369,15 @@ impl Part {
             })
     }
 
-    /// Open this bus's chain on `link`; every serial servo's calibration was required first.
-    fn open(self, port: &str, link: Link) -> Result<BusChain, OpenError> {
+    /// Open this bus's chain on `link`, each axis derated as `rails` put it; every serial
+    /// servo's calibration was required first.
+    fn open(self, port: &str, link: Link, rails: &Rails) -> Result<BusChain, OpenError> {
         if let Some(refused) = self.uncalibrated(port) {
             return Err(refused);
         }
         Ok(match (self, link) {
             (Self::Damiao(axes), Link::Can(link)) => {
-                Box::new(OnBus(DamiaoChain::open(link, axes)?))
+                OnBus::boxed(DamiaoChain::open(link, axes)?, rails)
             }
             (
                 Self::Feetech {
@@ -356,7 +399,7 @@ impl Part {
                         configuration: setup.configuration,
                     })
                     .collect();
-                Box::new(OnBus(FeetechChain::open(link, servos)?))
+                OnBus::boxed(FeetechChain::open(link, servos)?, rails)
             }
             (
                 Self::Dynamixel {
@@ -381,7 +424,7 @@ impl Part {
                         multi_turn: setup.multi_turn,
                     })
                     .collect();
-                Box::new(OnBus(DynamixelChain::open(link, servos)?))
+                OnBus::boxed(DynamixelChain::open(link, servos)?, rails)
             }
             _ => return Err(OpenError::MissingPort(port.to_owned())),
         })
@@ -694,6 +737,16 @@ fn plan(
         });
     }
     let opener = Opener::of(drive)?;
+    let declared = ports(drive)?;
+    if let Some(selector) = commissioning.rails.volts().keys().find(|selector| {
+        let port = selector
+            .split_once('/')
+            .map_or(selector.as_str(), |(port, _)| port);
+        let is_model = sx_embodiment_drivers::ActuatorModel::parse(selector).is_some();
+        *selector != "*" && !is_model && !declared.iter().any(|name| name == port)
+    }) {
+        return Err(OpenError::RailPort(selector.clone()));
+    }
     let mut closed = opener.closed(drive, options)?;
     let parts = opener.parts(
         drive,
@@ -782,16 +835,15 @@ pub fn open_with(
     source: &mut dyn PortSource,
 ) -> Result<Body, OpenError> {
     let plan = plan(drive, commissioning, calibrations, options)?;
-    if let Some(refused) = plan
-        .parts
-        .iter()
-        .find_map(|(port, part, _)| part.uncalibrated(port))
-    {
+    if let Some(refused) = plan.parts.iter().find_map(|(port, part, _)| {
+        part.uncalibrated(port)
+            .or_else(|| part.over_rail(port, &commissioning.rails))
+    }) {
         return Err(refused);
     }
     let mut chains: Vec<BusChain> = Vec::with_capacity(plan.parts.len());
     for (port, part, mask, link) in plan.links(commissioning, source)? {
-        chains.push(mask.chain(part.open(&port, link)?)?);
+        chains.push(mask.chain(part.open(&port, link, &commissioning.rails)?)?);
     }
     Ok(Chains::new(chains))
 }
@@ -946,6 +998,19 @@ pub enum OpenError {
     Provisional(Vec<String>),
     #[error("commissioning puts joint {0} out of service, which this body does not have")]
     OutOfService(String),
+    #[error(
+        "joint {joint} ({model}) on port {port} is on a {rail_volts} V rail, more than {} times its {max_volts} V supported maximum; it is not enabled (put it out of service to open the rest)",
+        sx_embodiment_drivers::REFUSE_ABOVE
+    )]
+    OverRail {
+        port: String,
+        joint: String,
+        model: &'static str,
+        rail_volts: f64,
+        max_volts: f64,
+    },
+    #[error("commissioning records rail {0}, which names no port of this body")]
+    RailPort(String),
     #[error("commissioning names port {0}, which this body's opener does not declare")]
     UndeclaredPort(String),
     #[error("this body's opener needs port {0}, which commissioning does not name")]
@@ -1024,8 +1089,22 @@ impl Answer for () {
     }
 }
 
-/// One vendor's chain behind the body's shared error and feedback types.
-struct OnBus<C>(C);
+/// One vendor's chain behind the body's shared error and feedback types, with the axes its
+/// rails derate.
+struct OnBus<C>(C, Vec<AxisDerate>);
+
+impl<C> OnBus<C>
+where
+    C: ActuatorChain + Send + 'static,
+    C::Error: Into<BusError>,
+    C::Feedback: Answer,
+{
+    /// `chain` as a bus of the body, its axes derated as `rails` put them.
+    fn boxed(chain: C, rails: &Rails) -> BusChain {
+        let derated = derates(chain.axes(), rails);
+        Box::new(Self(chain, derated))
+    }
+}
 
 impl<C> ActuatorChain for OnBus<C>
 where
@@ -1091,6 +1170,10 @@ where
 
     fn command_readings(&self) -> Option<sx_embodiment_drivers::Axes<AxisReading>> {
         self.0.command_readings()
+    }
+
+    fn derated(&self) -> Vec<AxisDerate> {
+        self.1.clone()
     }
 
     fn clear_faults(&mut self) {

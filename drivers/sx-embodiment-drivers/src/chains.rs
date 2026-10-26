@@ -30,6 +30,7 @@ use crate::chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
     FeedforwardLimit, Receipt, StopReport, TargetError, check_reach,
 };
+use crate::rail::AxisDerate;
 
 /// Chains in native state order, driven as one.
 pub struct Chains<C> {
@@ -257,6 +258,20 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         unavailable
     }
 
+    /// Every chain's, shifted to the chain's place in the vector.
+    fn derated(&self) -> Vec<AxisDerate> {
+        let mut first = 0;
+        let mut derated = Vec::new();
+        for chain in &self.members {
+            derated.extend(chain.derated().into_iter().map(|derate| AxisDerate {
+                axis: first + derate.axis,
+                ..derate
+            }));
+            first += chain.axes().len();
+        }
+        derated
+    }
+
     /// Every chain's, in native state order, or `None` when any chain has none.
     fn last_observed(&self) -> Option<Axes<f64>> {
         let mut observed = Axes::new();
@@ -332,6 +347,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn unavailable(&self) -> Vec<usize> {
         (**self).unavailable()
+    }
+
+    fn derated(&self) -> Vec<AxisDerate> {
+        (**self).derated()
     }
 
     fn clear_faults(&mut self) {

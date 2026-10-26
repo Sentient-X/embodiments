@@ -17,6 +17,7 @@ use crate::chain::{
     ActuatorChain, AxisReading, CommandRange, Feedforward, FeedforwardLimit, MissingReason,
     Observe, Receipt, StopReport, TargetError, check_targets,
 };
+use crate::rail::AxisDerate;
 
 /// `inner`'s axes inside a body's full vector, the rest unavailable.
 pub struct Masked<C, F = ()> {
@@ -223,6 +224,18 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
 
     fn unavailable(&self) -> Vec<usize> {
         self.unavailable.clone()
+    }
+
+    /// `inner`'s, placed in the full vector.
+    fn derated(&self) -> Vec<AxisDerate> {
+        self.inner
+            .derated()
+            .into_iter()
+            .map(|derate| AxisDerate {
+                axis: self.present[derate.axis],
+                ..derate
+            })
+            .collect()
     }
 
     fn clear_faults(&mut self) {

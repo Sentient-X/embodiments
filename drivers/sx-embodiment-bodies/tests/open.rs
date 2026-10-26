@@ -503,6 +503,7 @@ fn the_so101_follower_opens_on_its_one_serial_bus() {
         AxisLimits {
             max_speed: 0.25,
             max_tracking_error: 0.2,
+            max_acceleration: None,
         };
         6
     ];
@@ -729,6 +730,7 @@ fn bring_up_limits() -> Vec<AxisLimits> {
         AxisLimits {
             max_speed: 0.2,
             max_tracking_error: 0.2,
+            max_acceleration: None,
         };
         25
     ]
@@ -1100,6 +1102,7 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
             AxisLimits {
                 max_speed: 0.25,
                 max_tracking_error: 0.2,
+                max_acceleration: None,
             };
             15
         ],
@@ -1141,5 +1144,139 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
     assert!(matches!(
         open(&drive, &unknown, &mut bridges),
         Err(OpenError::OutOfService(joint)) if joint == "no_such_joint"
+    ));
+}
+
+/// The static upper body's commissioning on its CAN bus with `rails` recorded.
+fn railed(drive: &InstanceDrive, rails: &serde_json::Value, out: &[&str]) -> Commissioning {
+    let document = serde_json::json!({
+        "schema": "sx.station-commissioning/v1",
+        "instance": drive.instance,
+        "pod_id": "pod-a",
+        "pod_revision": 3,
+        "ports": {"can": "CAN"},
+        "out_of_service": out,
+        "rails": rails,
+    });
+    Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning")
+}
+
+#[test]
+fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recorded() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let bridges = || Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        ..Bridges::default()
+    };
+    let limits = vec![
+        AxisLimits {
+            max_speed: 1.0,
+            max_tracking_error: 0.2,
+            max_acceleration: None,
+        };
+        15
+    ];
+    // The bench: the J8009P torso and shoulders on the 54 V battery, the rest on 24 V.
+    let bench = railed(
+        &drive,
+        &serde_json::json!({"damiao_dm8009p": 54.0, "*": 24.0}),
+        &[],
+    );
+    let body = open(&drive, &bench, &mut bridges()).expect("opens derated");
+    let derated: Vec<String> = body
+        .derated()
+        .iter()
+        .map(|derate| body.axes()[derate.axis].joint.clone())
+        .collect();
+    assert_eq!(
+        derated,
+        [
+            "torso_joint",
+            "left_shoulder_pitch_joint",
+            "left_shoulder_roll_joint",
+            "right_shoulder_pitch_joint",
+            "right_shoulder_roll_joint"
+        ]
+    );
+    assert_eq!(
+        body.derated()[0].to_string(),
+        "derated: over-rail 54 V > 48 V"
+    );
+    let governed = Governor::new(body, limits.clone()).expect("limits");
+    for (axis, limit) in governed.axes().iter().zip(governed.limits()) {
+        if derated.contains(&axis.joint) {
+            assert!((limit.max_speed - 0.3).abs() < 1e-12, "{}", axis.joint);
+            assert_eq!(limit.max_acceleration, Some(1.5), "{}", axis.joint);
+        } else {
+            assert_eq!(*limit, limits[0], "{} keeps its limits", axis.joint);
+        }
+    }
+    // The 48 V converter fitted and recorded: the derate lifts.
+    let converted = railed(
+        &drive,
+        &serde_json::json!({"damiao_dm8009p": 48.0, "*": 24.0}),
+        &[],
+    );
+    let body = open(&drive, &converted, &mut bridges()).expect("opens in range");
+    assert!(body.derated().is_empty());
+    let governed = Governor::new(body, limits.clone()).expect("limits");
+    assert_eq!(governed.limits(), &limits[..]);
+}
+
+#[test]
+fn a_rail_far_over_the_supported_supply_or_naming_nothing_is_refused() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let bridges = || Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        ..Bridges::default()
+    };
+    // More than 15 % over: refused, before any bridge, unless those axes are out of service.
+    let over = serde_json::json!({"damiao_dm8009p": 58.8, "*": 24.0});
+    let mut untouched = bridges();
+    assert!(matches!(
+        open(&drive, &railed(&drive, &over, &[]), &mut untouched),
+        Err(OpenError::OverRail { ref joint, rail_volts, max_volts, .. })
+            if joint == "torso_joint" && (rail_volts - 58.8).abs() < 1e-9
+                && (max_volts - 48.0).abs() < 1e-9
+    ));
+    assert!(untouched.opened.is_empty());
+    let shoulders_out = [
+        "torso_joint",
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+    ];
+    let body = open(
+        &drive,
+        &railed(&drive, &over, &shoulders_out),
+        &mut bridges(),
+    )
+    .expect("the rest opens");
+    assert_eq!(body.unavailable().len(), 5);
+    assert!(body.derated().is_empty());
+    // A rail naming no port of the body, or no model, is refused.
+    let mut untouched = bridges();
+    assert!(matches!(
+        open(
+            &drive,
+            &railed(&drive, &serde_json::json!({"elbow": 24.0}), &[]),
+            &mut untouched
+        ),
+        Err(OpenError::RailPort(selector)) if selector == "elbow"
+    ));
+    let document = serde_json::json!({
+        "schema": "sx.station-commissioning/v1",
+        "instance": drive.instance,
+        "pod_id": "pod-a",
+        "pod_revision": 3,
+        "ports": {"can": "CAN"},
+        "rails": {"can/damiao_dm9999": 24.0},
+    });
+    assert!(matches!(
+        Commissioning::parse(&document.to_string(), &drive.instance),
+        Err(OpenError::Document(_))
     ));
 }

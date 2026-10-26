@@ -11,6 +11,18 @@
 //!   stopped or failed starts from where the body rests: a position given with
 //!   [`Governor::start_at`], else the chain's own [`ActuatorChain::last_observed`]. With
 //!   neither, the command is refused.
+//! - **Acceleration.** With `max_acceleration`, the commanded speed changes by at most that
+//!   times the step's time, and never exceeds the speed from which the axis can still brake to
+//!   its target at that rate: it ramps up, cruises and brakes instead of jumping to `max_speed`
+//!   (an abrupt brake regenerates a spike onto the supply). The speed is held on the governor in
+//!   a fixed [`Axes`], so the bound allocates nothing per tick; it restarts from rest at the
+//!   first command after open, a stop or a failure.
+//! - **Derate.** Each axis the chain reports derated ([`ActuatorChain::derated`]: commissioning
+//!   measured its rail over its model's supported supply, [`crate::rail`]) is held to the
+//!   tighter of its limits and the derate's: a lower speed, an acceleration cap, and
+//!   feed-forward torque at most a share of its model's peak, whatever is asked or set by
+//!   [`ActuatorChain::set_feedforward_limits`]. The derate is data on the chain, so it lifts
+//!   when the body is next opened on a rail in range.
 //! - **Range is a limit on motion, not on state.** Each step is held inside the chain's
 //!   commandable range widened to where the joint is now ([`CommandRange::reaching`]):
 //!   `[min(lower, now), max(upper, now)]`, `now` being the chain's latest observation
@@ -44,6 +56,7 @@ use crate::chain::{
     FeedforwardLimit, Receipt, StopReport, TargetError,
 };
 use crate::masked::check_available;
+use crate::rail::AxisDerate;
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
 pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
@@ -55,6 +68,8 @@ pub struct AxisLimits {
     pub max_speed: f64,
     /// The farthest an observed position may lie from the position just sent, unit.
     pub max_tracking_error: f64,
+    /// The fastest the commanded speed changes, unit/s², or `None` for no bound.
+    pub max_acceleration: Option<f64>,
 }
 
 /// The time the governor measures steps by.
@@ -77,7 +92,9 @@ impl Clock for MonotonicClock {
 pub enum LimitsError {
     #[error("expected limits for {expected} axes, got {actual}")]
     Width { expected: usize, actual: usize },
-    #[error("joint {0} needs a finite, positive speed and tracking-error bound")]
+    #[error(
+        "joint {0} needs a finite, positive speed and tracking-error bound, and acceleration bound where given"
+    )]
     NotPositive(String),
 }
 
@@ -127,10 +144,11 @@ impl<E: ChainError> ChainError for GovernorError<E> {
     }
 }
 
-/// The position last sent, and when.
+/// The position last sent, the speed it was stepped at, and when.
 #[derive(Clone, Copy)]
 struct Held {
     position: Axes<f64>,
+    velocity: Axes<f64>,
     at: Option<Instant>,
 }
 
@@ -144,6 +162,10 @@ pub struct Governor<C, K = MonotonicClock> {
     latched: bool,
     /// The chain's unavailable axes, neither stepped nor tracked.
     unavailable: Vec<usize>,
+    /// The chain's derated axes, already applied to `limits` and `torque_caps`.
+    derated: Vec<AxisDerate>,
+    /// The largest feed-forward torque each axis is sent, N·m, where a derate bounds it.
+    torque_caps: Vec<Option<f64>>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -151,7 +173,8 @@ impl<C: ActuatorChain> Governor<C> {
     ///
     /// # Errors
     ///
-    /// Refuses limits of the wrong width, and a bound that is not finite and positive.
+    /// Refuses limits of the wrong width, and a bound that is not finite and positive. Each
+    /// axis the chain reports derated is held to the tighter of its limits and the derate's.
     pub fn new(chain: C, limits: Vec<AxisLimits>) -> Result<Self, LimitsError> {
         Self::with_clock(chain, limits, MonotonicClock)
     }
@@ -173,12 +196,31 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         }
         let positive = |value: f64| value.is_finite() && value > 0.0;
         let chain_unavailable = chain.unavailable();
-        if let Some((axis, _)) = axes
-            .iter()
-            .zip(&limits)
-            .find(|(_, limit)| !(positive(limit.max_speed) && positive(limit.max_tracking_error)))
-        {
+        if let Some((axis, _)) = axes.iter().zip(&limits).find(|(_, limit)| {
+            !(positive(limit.max_speed)
+                && positive(limit.max_tracking_error)
+                && limit.max_acceleration.is_none_or(positive))
+        }) {
             return Err(LimitsError::NotPositive(axis.joint.clone()));
+        }
+        let mut limits = limits;
+        let mut torque_caps = vec![None; limits.len()];
+        let derated = chain.derated();
+        for derate in &derated {
+            let (Some(limit), Some(bound)) = (limits.get_mut(derate.axis), axes.get(derate.axis))
+            else {
+                continue;
+            };
+            limit.max_speed = limit.max_speed.min(derate.limits.max_speed);
+            limit.max_acceleration = Some(
+                limit
+                    .max_acceleration
+                    .map_or(derate.limits.max_acceleration, |own| {
+                        own.min(derate.limits.max_acceleration)
+                    }),
+            );
+            torque_caps[derate.axis] =
+                Some(derate.limits.torque_share * bound.binding.model.rating().peak_torque_nm);
         }
         Ok(Self {
             chain,
@@ -188,6 +230,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             start: None,
             latched: false,
             unavailable: chain_unavailable,
+            derated,
+            torque_caps,
         })
     }
 
@@ -215,6 +259,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .map(|held| &*held.position)
     }
 
+    /// Each axis's limits in force: the ones given, tightened by any derate.
+    #[must_use]
+    pub fn limits(&self) -> &[AxisLimits] {
+        &self.limits
+    }
+
     /// The governed chain.
     pub const fn chain(&self) -> &C {
         &self.chain
@@ -236,7 +286,11 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|observed| observed.len() == width)
                 .ok_or(GovernorError::NoStart)?,
         };
-        Ok(Held { position, at: None })
+        Ok(Held {
+            velocity: Axes::filled(0.0, position.len()),
+            position,
+            at: None,
+        })
     }
 
     /// Stop the chain and latch a fault, returning the error `make` builds from the stop.
@@ -256,44 +310,76 @@ fn within(observed: f64, sent: f64, limit: f64) -> bool {
     (observed - sent).abs() <= limit
 }
 
-/// `value` moved toward `target` by at most `step`, then held inside `range` widened to `now`,
-/// where the joint is.
-fn slew(value: f64, target: f64, step: f64, range: CommandRange, now: f64) -> f64 {
+/// `value` moved toward `target` for `dt` seconds at most `limit.max_speed`, the speed changed
+/// from `speed` by at most `limit.max_acceleration * dt` and never past the speed it can brake
+/// to `target` from, then held inside `range` widened to `now`, where the joint is. Returns the
+/// position and the speed it was stepped at.
+fn slew(
+    value: f64,
+    target: f64,
+    speed: f64,
+    limit: &AxisLimits,
+    dt: f64,
+    range: CommandRange,
+    now: f64,
+) -> (f64, f64) {
     let reach = range.reaching(now);
-    (value + (target - value).clamp(-step, step)).clamp(reach.lower, reach.upper)
+    if dt <= 0.0 {
+        return (value.clamp(reach.lower, reach.upper), speed);
+    }
+    let gap = target - value;
+    let mut wanted = (gap / dt).clamp(-limit.max_speed, limit.max_speed);
+    if let Some(acceleration) = limit.max_acceleration {
+        let braking = (2.0 * acceleration * gap.abs()).sqrt();
+        let change = acceleration * dt;
+        wanted = wanted
+            .clamp(-braking, braking)
+            .clamp(speed - change, speed + change);
+    }
+    let next = (value + wanted * dt).clamp(reach.lower, reach.upper);
+    (next, (next - value) / dt)
 }
 
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
-    /// Each axis moved from `held` toward `joints` by `max_speed` for `step` seconds, inside its
-    /// range widened to where it is now; an unavailable axis at any in-range value.
-    fn step(&self, held: &[f64], joints: &[f64], step: f64) -> Axes<f64> {
+    /// Each axis moved from `held` toward `joints` for `step` seconds within its limits, inside
+    /// its range widened to where it is now; an unavailable axis at any in-range value, at rest.
+    fn step(&self, held: &Held, joints: &[f64], step: f64) -> (Axes<f64>, Axes<f64>) {
         // Where each joint is now: the chain's latest observation, else the position last sent.
         let observed = self
             .chain
             .last_observed()
-            .filter(|observed| observed.len() == held.len());
-        held.iter()
+            .filter(|observed| observed.len() == held.position.len());
+        let mut positions = Axes::new();
+        let mut speeds = Axes::new();
+        for (index, ((value, target), (limit, range))) in held
+            .position
+            .iter()
             .zip(joints)
             .zip(self.limits.iter().zip(self.chain.commandable()))
             .enumerate()
-            .map(|(index, ((value, target), (limit, range)))| {
-                if self.unavailable.contains(&index) {
-                    // Never reaches an actuator: any in-range value keeps the vector whole.
-                    let target = if target.is_finite() {
-                        *target
-                    } else {
-                        range.lower
-                    };
-                    return target.clamp(range.lower, range.upper);
-                }
-                let at = observed
-                    .as_ref()
-                    .map(|observed| observed[index])
-                    .filter(|at| at.is_finite())
-                    .unwrap_or(*value);
-                slew(*value, *target, limit.max_speed * step, *range, at)
-            })
-            .collect()
+        {
+            if self.unavailable.contains(&index) {
+                // Never reaches an actuator: any in-range value keeps the vector whole.
+                let target = if target.is_finite() {
+                    *target
+                } else {
+                    range.lower
+                };
+                positions.push(target.clamp(range.lower, range.upper));
+                speeds.push(0.0);
+                continue;
+            }
+            let at = observed
+                .as_ref()
+                .map(|observed| observed[index])
+                .filter(|at| at.is_finite())
+                .unwrap_or(*value);
+            let speed = held.velocity.get(index).copied().unwrap_or(0.0);
+            let (position, speed) = slew(*value, *target, speed, limit, step, *range, at);
+            positions.push(position);
+            speeds.push(speed);
+        }
+        (positions, speeds)
     }
 
     /// Slew toward `joints` and command the chain, with `feedforward` when given.
@@ -314,7 +400,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         let elapsed = held.at.map_or(MAX_STEP_INTERVAL, |at| {
             now.saturating_duration_since(at).min(MAX_STEP_INTERVAL)
         });
-        let next = self.step(&held.position, joints, elapsed.as_secs_f64());
+        let (next, velocity) = self.step(&held, joints, elapsed.as_secs_f64());
         let receipt = match feedforward {
             Some(wanted) => {
                 if wanted.len() != next.len() {
@@ -326,10 +412,10 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 }
                 let held: Axes<Feedforward> = wanted
                     .iter()
-                    .zip(&self.limits)
-                    .map(|(wanted, limit)| Feedforward {
+                    .zip(self.limits.iter().zip(&self.torque_caps))
+                    .map(|(wanted, (limit, cap))| Feedforward {
                         velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
-                        torque: wanted.torque,
+                        torque: cap.map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
                     })
                     .collect();
                 self.chain.command_with(&next, &held)
@@ -385,6 +471,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         }
         self.held = Some(Held {
             position: next,
+            velocity,
             at: Some(now),
         });
         Ok(receipt)
@@ -417,9 +504,24 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.drive(joints, Some(feedforward))
     }
 
+    /// The bounds given, each derated axis's torque bound no more than its derate's cap.
     fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        let bounded: Vec<FeedforwardLimit> = limits
+            .iter()
+            .enumerate()
+            .map(
+                |(index, limit)| match self.torque_caps.get(index).copied().flatten() {
+                    Some(cap) => FeedforwardLimit {
+                        // Off stays off; a bound is held to the cap.
+                        torque: limit.torque.map(|torque| torque.min(cap)),
+                        ..*limit
+                    },
+                    None => *limit,
+                },
+            )
+            .collect();
         self.chain
-            .set_feedforward_limits(limits)
+            .set_feedforward_limits(&bounded)
             .map_err(GovernorError::Chain)
     }
 
@@ -447,6 +549,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn unavailable(&self) -> Vec<usize> {
         self.unavailable.clone()
+    }
+
+    fn derated(&self) -> Vec<AxisDerate> {
+        self.derated.clone()
     }
 
     fn clear_faults(&mut self) {
@@ -491,6 +597,11 @@ mod tests {
         short: bool,
         /// Where the last command's answer observed each axis; `None` once stopped.
         at: Option<Vec<f64>>,
+        /// What the chain reports derated.
+        derated: Vec<AxisDerate>,
+        /// Each `command_with`'s feed-forward, and each feed-forward bound set.
+        feedforward: Vec<Vec<Feedforward>>,
+        feedforward_limits: Vec<Vec<FeedforwardLimit>>,
     }
 
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
@@ -529,6 +640,9 @@ mod tests {
             fail: None,
             short: false,
             at: None,
+            derated: Vec::new(),
+            feedforward: Vec::new(),
+            feedforward_limits: Vec::new(),
         }
     }
 
@@ -568,6 +682,24 @@ mod tests {
                 },
                 feedback: Axes::new(),
             })
+        }
+
+        fn command_with(
+            &mut self,
+            joints: &[f64],
+            feedforward: &[Feedforward],
+        ) -> Result<Receipt<()>, FakeError> {
+            self.feedforward.push(feedforward.to_vec());
+            self.command(joints)
+        }
+
+        fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), FakeError> {
+            self.feedforward_limits.push(limits.to_vec());
+            Ok(())
+        }
+
+        fn derated(&self) -> Vec<AxisDerate> {
+            self.derated.clone()
         }
 
         fn stop(&mut self) -> StopReport {
@@ -612,6 +744,7 @@ mod tests {
     const LIMITS: AxisLimits = AxisLimits {
         max_speed: 0.25,
         max_tracking_error: 0.2,
+        max_acceleration: None,
     };
 
     fn governed(chain: Fake) -> (Governor<Fake, Manual>, Manual) {
@@ -816,6 +949,7 @@ mod tests {
                 AxisLimits {
                     max_speed: bad,
                     max_tracking_error: 0.2,
+                    max_acceleration: None,
                 },
             ];
             assert!(matches!(
@@ -934,5 +1068,124 @@ mod tests {
             governor.command(&[0.0, 0.5]),
             Err(GovernorError::Latched)
         ));
+    }
+
+    #[test]
+    fn acceleration_ramps_the_speed_up_and_brakes_it_down() {
+        const ACCELERATION: f64 = 1.5;
+        let limits = AxisLimits {
+            max_acceleration: Some(ACCELERATION),
+            ..LIMITS
+        };
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let mut governor =
+            Governor::with_clock(fake(true), vec![limits; 2], clock.clone()).expect("limits");
+        let dt = MAX_STEP_INTERVAL.as_secs_f64();
+        let (mut position, mut speed) = (0.0_f64, 0.0_f64);
+        let mut fastest = 0.0_f64;
+        for _ in 0..200 {
+            governor.command(&[0.2, 0.5]).expect("step");
+            clock.advance(MAX_STEP_INTERVAL);
+            let sent = governor.chain().sent.last().expect("sent")[0];
+            let step_speed = (sent - position) / dt;
+            assert!(
+                (step_speed - speed).abs() <= ACCELERATION * dt + 1e-9,
+                "the speed jumped from {speed} to {step_speed}"
+            );
+            assert!(step_speed <= LIMITS.max_speed + 1e-12);
+            fastest = fastest.max(step_speed);
+            (position, speed) = (sent, step_speed);
+        }
+        // The first step starts from rest: 1.5 rad/s² for 20 ms is 0.03 rad/s.
+        assert!(close(&governor.chain().sent[0][..1], &[0.03 * dt]));
+        assert!(
+            (fastest - LIMITS.max_speed).abs() < 1e-9,
+            "it cruised at {fastest}"
+        );
+        assert!(
+            (position - 0.2).abs() < 1e-6,
+            "it braked to {position}, not 0.2"
+        );
+        assert!(speed.abs() < 1e-6, "it ends at rest, not {speed}");
+        // A stop restarts from rest, where the fake rests once stopped (0).
+        governor.stop();
+        governor.command(&[-0.2, 0.5]).expect("after a stop");
+        let sent = governor.chain().sent.last().expect("sent")[0];
+        assert!((sent + 0.03 * dt).abs() < 1e-9);
+    }
+
+    fn rated(mut chain: Fake) -> Fake {
+        chain.axes[0].binding.model = ActuatorModel::new("damiao_dm8009p");
+        chain.axes[1].binding.model = ActuatorModel::new("damiao_dm4340");
+        chain
+    }
+
+    #[test]
+    fn a_derated_axis_is_held_to_the_derate_and_reported() {
+        let mut chain = rated(fake(true));
+        let derate = AxisDerate {
+            axis: 0,
+            over: crate::rail::OverRail {
+                rail_volts: 54.0,
+                max_volts: 48.0,
+            },
+            limits: crate::rail::OVER_RAIL,
+        };
+        chain.derated = vec![derate];
+        let fast = AxisLimits {
+            max_speed: 1.0,
+            ..LIMITS
+        };
+        let mut governor = Governor::new(chain, vec![fast; 2]).expect("limits");
+        assert_eq!(governor.derated(), vec![derate]);
+        assert_eq!(derate.to_string(), "derated: over-rail 54 V > 48 V");
+        let held = governor.limits()[0];
+        assert!((held.max_speed - 0.3).abs() < 1e-12);
+        assert_eq!(held.max_acceleration, Some(1.5));
+        assert_eq!(
+            governor.limits()[1],
+            fast,
+            "the axis in range keeps its limits"
+        );
+        // Feed-forward torque: at most half the J8009P's 40 N·m peak; the DM4340 as asked.
+        governor
+            .set_feedforward_limits(&[
+                FeedforwardLimit {
+                    velocity: None,
+                    torque: Some(30.0),
+                },
+                FeedforwardLimit {
+                    velocity: None,
+                    torque: Some(30.0),
+                },
+            ])
+            .expect("bounds");
+        governor
+            .set_feedforward_limits(&[FeedforwardLimit::default(); 2])
+            .expect("off");
+        let bounds = &governor.chain().feedforward_limits;
+        assert_eq!(bounds[0][0].torque, Some(20.0));
+        assert_eq!(bounds[0][1].torque, Some(30.0));
+        assert_eq!(
+            bounds[1][0].torque, None,
+            "feed-forward switched off stays off"
+        );
+        let asked = Feedforward {
+            velocity: 0.0,
+            torque: -30.0,
+        };
+        governor
+            .command_with(&[0.0, 0.5], &[asked; 2])
+            .expect("command");
+        let sent = &governor.chain().feedforward[0];
+        assert!((sent[0].torque + 20.0).abs() < 1e-12);
+        assert!((sent[1].torque + 30.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_chain_with_no_derate_keeps_every_limit() {
+        let governor = Governor::new(rated(fake(true)), vec![LIMITS; 2]).expect("limits");
+        assert!(governor.derated().is_empty());
+        assert_eq!(governor.limits(), &[LIMITS; 2]);
     }
 }
