@@ -1172,7 +1172,7 @@ fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
         "pod_revision": 3,
         "ports": {"can": "CAN"},
         "rails": {"damiao_dm8009p": 54.0, "*": 24.0},
-        "derate": {"max_speed": 0.6, "max_acceleration": 3.0},
+        "derate": {"max_speed": 0.6, "decided": "owner, 2026-10-26"},
     });
     let commissioning =
         Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
@@ -1198,7 +1198,7 @@ fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
     }
     // A derate that is not a speed is refused with the commissioning.
     let mut bad = document.clone();
-    bad["derate"] = serde_json::json!({"max_speed": 0.0, "max_acceleration": 3.0});
+    bad["derate"] = serde_json::json!({"max_speed": 0.6, "decided": ""});
     assert!(Commissioning::parse(&bad.to_string(), &drive.instance).is_err());
 }
 

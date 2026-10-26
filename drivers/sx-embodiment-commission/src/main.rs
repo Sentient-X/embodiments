@@ -3,7 +3,7 @@
 //! ```text
 //! sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
 //! sx-commission commission --bindings <file>... [--instance <id> --pod <id> --revision <n>]
-//!                          [--rail <selector>=<volts>]... [--derate <rad/s>,<rad/s²>]
+//!                          [--rail <selector>=<volts>]... [--derate <rad/s>,<decided>]
 //!                          [--json] [--write <dir>]
 //! sx-commission calibrate read|gripper|jog --bus <tty> ... [--move]
 //! sx-commission calibrate --restore <journal>
@@ -20,8 +20,10 @@
 //! the 24 V converter: `--rail damiao_dm8009p=54 --rail '*=24'`. Over a model's supported
 //! supply its axes open derated (`sx_embodiment_drivers::rail`); record the rail again once it
 //! is in range and the derate lifts. `--derate` records a derate decided for this robot in
-//! place of the automatic one (`"derate": {"max_speed", "max_acceleration"}`): the owner's
-//! `--derate 0.6,3` for the J8009P on the 54 V battery.
+//! place of the automatic one, with who decided it and why (`"derate": {"max_speed",
+//! "decided"}`; its acceleration keeps the automatic one's ratio to speed, and no axis is
+//! derated faster than its model's rated speed): the owner's `--derate '0.6,owner 2026-10-26:
+//! J8009P on the 54 V battery at double the automatic derate'`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -92,8 +94,8 @@ struct Args {
     pod: Option<String>,
     revision: Option<u32>,
     rails: std::collections::BTreeMap<String, f64>,
-    /// The derate declared for this robot's over-rail axes: speed, acceleration.
-    derate: Option<(f64, f64)>,
+    /// The derate declared for this robot's over-rail axes: speed, who decided it and why.
+    derate: Option<(f64, String)>,
     write: Option<PathBuf>,
     feetech_ids: Option<Vec<u16>>,
     damiao_ids: Option<Vec<u16>>,
@@ -147,12 +149,20 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--derate" => {
                 let entry = value()?;
-                let parse = |text: &str| text.trim().parse::<f64>().ok();
-                let (speed, acceleration) = entry
+                let (speed, decided) = entry
                     .split_once(',')
-                    .and_then(|(speed, acceleration)| Some((parse(speed)?, parse(acceleration)?)))
-                    .ok_or("--derate is <rad/s>,<rad/s²>")?;
-                args.derate = Some((speed, acceleration));
+                    .ok_or("--derate is <rad/s>,<who decided it and why>")?;
+                let speed: f64 = speed
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("--derate {entry}: {speed} is not a speed"))?;
+                if args
+                    .derate
+                    .replace((speed, decided.trim().to_owned()))
+                    .is_some()
+                {
+                    return Err("--derate is given once".to_owned());
+                }
             }
             "--feetech-ids" => args.feetech_ids = Some(ids(&value()?)?),
             "--damiao-ids" => args.damiao_ids = Some(ids(&value()?)?),
@@ -228,8 +238,8 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
             pod_id: pod_id.clone(),
             pod_revision,
             rails: sx_embodiment_drivers::rail::Rails::new(args.rails.clone())
-                .and_then(|rails| match args.derate {
-                    Some((speed, acceleration)) => rails.with_derate(speed, acceleration),
+                .and_then(|rails| match &args.derate {
+                    Some((speed, decided)) => rails.with_derate(*speed, decided),
                     None => Ok(rails),
                 })
                 .map_err(|error| error.to_string())?,
@@ -237,6 +247,11 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
         (None, None, None) => None,
         _ => return Err("--instance, --pod and --revision go together".to_owned()),
     };
+    if station.is_none() && (!args.rails.is_empty() || args.derate.is_some()) {
+        return Err(
+            "--rail and --derate are recorded with --instance, --pod and --revision".to_owned(),
+        );
+    }
     if args.write.is_some() && station.is_none() {
         return Err("--write needs --instance, --pod and --revision".to_owned());
     }

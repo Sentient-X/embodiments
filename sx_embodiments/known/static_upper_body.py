@@ -140,8 +140,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="fd19313e0cbff9d648e2e56fac5ef3eb1e23980a69cbb9ebe6adcf24d395f697",
-    size_bytes=221406,
+    sha256="a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7",
+    size_bytes=221402,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(

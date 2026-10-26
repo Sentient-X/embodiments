@@ -239,7 +239,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .map(|observed| observed.to_vec());
         let mut limits = limits;
         let mut torque_caps = vec![None; limits.len()];
-        let derated = chain.derated();
+        let mut derated = chain.derated();
         for derate in &derated {
             let (Some(limit), Some(bound)) = (limits.get_mut(derate.axis), axes.get(derate.axis))
             else {
@@ -255,6 +255,16 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             );
             torque_caps[derate.axis] =
                 Some(derate.limits.torque_share * bound.binding.model.rating().peak_torque_nm);
+        }
+        // Each derate says what its axis is held to in force: the tighter of the derate and
+        // the governor's own limit, so a derate never reports a speed the axis cannot reach.
+        for derate in &mut derated {
+            if let Some(limit) = limits.get(derate.axis) {
+                derate.limits.max_speed = limit.max_speed;
+                derate.limits.max_acceleration = limit
+                    .max_acceleration
+                    .unwrap_or(derate.limits.max_acceleration);
+            }
         }
         Ok(Self {
             chain,

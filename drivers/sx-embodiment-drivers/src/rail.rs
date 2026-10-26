@@ -8,10 +8,12 @@
 //! refused outright: the body does not open with that axis in service. Both follow from data,
 //! so a derate lifts on its own once commissioning records a rail in range.
 //!
-//! The derate is [`OVER_RAIL`] unless commissioning declares another speed and acceleration
-//! for this robot ([`Rails::with_derate`], its `derate` entry): a person's recorded decision
-//! (the owner's 0.6 rad/s for the J8009P on the 54 V battery, 2026-10-26), data like the rails,
-//! never a code constant or a run flag. The feed-forward torque share is [`OVER_RAIL`]'s.
+//! The derate is [`OVER_RAIL`] unless commissioning declares another speed for this robot
+//! ([`Rails::with_derate`], its `derate` entry): a person's recorded decision, who and why in
+//! its `decided` text (the owner's 0.6 rad/s for the J8009P on the 54 V battery, 2026-10-26),
+//! data like the rails, never a code constant or a run flag. Its acceleration keeps
+//! [`OVER_RAIL`]'s ratio to its speed (a gentle brake regenerates less), its feed-forward
+//! torque share is [`OVER_RAIL`]'s, and no axis is derated faster than its model's rated speed.
 //!
 //! [`Rails`] is commissioning's `rails` entry: measured volts by selector, where a selector is
 //! `<port>/<model>`, a model's wire value (`damiao_dm8009p`), a port name (`can`), or `*`; the
@@ -120,11 +122,16 @@ pub fn derates(axes: &[BoundAxis], rails: &Rails) -> Vec<AxisDerate> {
     axes.iter()
         .enumerate()
         .filter_map(|(axis, bound)| match rails.check(bound) {
-            RailCheck::Derated(over) => Some(AxisDerate {
-                axis,
-                over,
-                limits: rails.derate(),
-            }),
+            RailCheck::Derated(over) => {
+                let mut limits = rails.derate();
+                if let Some(rated) = bound.binding.model.rating().rated_speed_rad_s
+                    && limits.max_speed > rated
+                {
+                    limits.max_acceleration *= rated / limits.max_speed;
+                    limits.max_speed = rated;
+                }
+                Some(AxisDerate { axis, over, limits })
+            }
             _ => None,
         })
         .collect()
@@ -137,7 +144,7 @@ pub enum RailsError {
     Selector(String),
     #[error("rail {0} needs a finite, positive voltage")]
     Volts(String),
-    #[error("a declared derate needs a finite, positive speed and acceleration")]
+    #[error("a declared derate needs a finite, positive speed and the decision it records")]
     Derate,
 }
 
@@ -147,7 +154,8 @@ pub enum RailsError {
 pub struct Rails {
     volts: BTreeMap<String, f64>,
     derate: DerateLimits,
-    declared: bool,
+    /// Who decided a declared derate, and why; `None` for [`OVER_RAIL`].
+    decided: Option<String>,
 }
 
 impl Default for Rails {
@@ -155,7 +163,7 @@ impl Default for Rails {
         Self {
             volts: BTreeMap::new(),
             derate: OVER_RAIL,
-            declared: false,
+            decided: None,
         }
     }
 }
@@ -191,27 +199,25 @@ impl Rails {
         })
     }
 
-    /// These rails with the derate commissioning declares for this robot: an over-rail axis
-    /// is held to `max_speed` and `max_acceleration` instead of [`OVER_RAIL`]'s.
+    /// These rails with the derate commissioning declares for this robot, `decided` naming
+    /// who decided it and why: an over-rail axis is held to `max_speed` (no faster than its
+    /// model's rated speed) and that speed's [`OVER_RAIL`] acceleration instead of
+    /// [`OVER_RAIL`]'s own.
     ///
     /// # Errors
     ///
-    /// [`RailsError::Derate`] for a speed or acceleration that is not finite and positive.
-    pub fn with_derate(
-        mut self,
-        max_speed: f64,
-        max_acceleration: f64,
-    ) -> Result<Self, RailsError> {
-        let positive = |value: f64| value.is_finite() && value > 0.0;
-        if !(positive(max_speed) && positive(max_acceleration)) {
+    /// [`RailsError::Derate`] for a speed that is not finite and positive, and an empty
+    /// decision.
+    pub fn with_derate(mut self, max_speed: f64, decided: &str) -> Result<Self, RailsError> {
+        if !(max_speed.is_finite() && max_speed > 0.0) || decided.trim().is_empty() {
             return Err(RailsError::Derate);
         }
         self.derate = DerateLimits {
             max_speed,
-            max_acceleration,
+            max_acceleration: max_speed * OVER_RAIL.max_acceleration / OVER_RAIL.max_speed,
             ..OVER_RAIL
         };
-        self.declared = true;
+        self.decided = Some(decided.trim().to_owned());
         Ok(self)
     }
 
@@ -227,10 +233,10 @@ impl Rails {
         self.derate
     }
 
-    /// Whether commissioning declared the derate (else it is [`OVER_RAIL`]).
+    /// Who decided a declared derate and why (else it is [`OVER_RAIL`]).
     #[must_use]
-    pub const fn derate_declared(&self) -> bool {
-        self.declared
+    pub fn derate_decided(&self) -> Option<&str> {
+        self.decided.as_deref()
     }
 
     /// The rail of `axis`: its `<port>/<model>`, else its model's, else its port's, else `*`.
@@ -347,10 +353,14 @@ mod tests {
         let rails = rails(&[("damiao_dm8009p", 54.0)]);
         let axes = [axis("damiao_dm8009p", "can")];
         assert_eq!(derates(&axes, &rails)[0].limits, OVER_RAIL);
-        assert!(!rails.derate_declared());
-        let declared = rails.clone().with_derate(0.6, 3.0).expect("declared");
-        assert!(declared.derate_declared());
+        assert_eq!(rails.derate_decided(), None);
+        let declared = rails
+            .clone()
+            .with_derate(0.6, "owner, 2026-10-26")
+            .expect("declared");
+        assert_eq!(declared.derate_decided(), Some("owner, 2026-10-26"));
         let derate = derates(&axes, &declared)[0];
+        // The automatic ratio of acceleration to speed (5 s^-1), the automatic torque share.
         assert_eq!(
             (
                 derate.limits.max_speed,
@@ -359,9 +369,20 @@ mod tests {
             ),
             (0.6, 3.0, OVER_RAIL.torque_share)
         );
-        for (speed, acceleration) in [(0.0, 3.0), (0.6, f64::NAN), (-1.0, 1.0)] {
+        // Never faster than the model's rated speed (100 rpm).
+        let wild = rails
+            .clone()
+            .with_derate(100.0, "a typo")
+            .expect("declared");
+        let rated = ActuatorModel::parse("damiao_dm8009p")
+            .expect("a model")
+            .rating()
+            .rated_speed_rad_s
+            .expect("rated");
+        assert!((derates(&axes, &wild)[0].limits.max_speed - rated).abs() < 1e-12);
+        for (speed, decided) in [(0.0, "x"), (f64::NAN, "x"), (-1.0, "x"), (0.6, "  ")] {
             assert_eq!(
-                rails.clone().with_derate(speed, acceleration),
+                rails.clone().with_derate(speed, decided),
                 Err(RailsError::Derate)
             );
         }

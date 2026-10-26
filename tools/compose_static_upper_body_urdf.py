@@ -17,9 +17,9 @@ the evidence that would replace each, are in ``known/static_upper_body.py``:
 * every link with geometry gets its visual meshes' convex hull as its collision (the source
   has none) and that hull's mass properties at one density (it has no inertials);
 * visual names are made unique and meshes are referenced as ``meshes/<name>.stl``;
-* each Damiao-driven joint's ``<limit velocity>`` is its bound actuator model's rated output
-  speed (``ACTUATOR_RATINGS``): the CAD export declares 0.5 rad/s, with effort 54, on every
-  joint alike, a placeholder no motor is rated at;
+* each Damiao-driven joint's ``<limit velocity>`` and ``effort`` are its bound actuator model's
+  rated output speed and peak torque (``ACTUATOR_RATINGS``): the CAD export declares 0.5 rad/s
+  and 54 N·m on every joint alike, placeholders no motor is rated at;
 * the four wrist pitch and roll joints' limits are negated: allisa_bot reverses those axes
   against the motors, whose confirmed limits the donor carries in motor coordinates, and the
   hardware profile reads each of those motors with sign -1;
@@ -398,20 +398,21 @@ def _fmt(values: Vec) -> str:
     return " ".join(f"{v:.9g}" for v in values)
 
 
-def _rated_speeds() -> dict[str, float]:
-    """Each Damiao-driven joint's rated speed, rad/s, from the model its binding names."""
-    speeds: dict[str, float] = {}
+def _rated_limits() -> dict[str, tuple[float, float]]:
+    """Each Damiao-driven joint's rated speed (rad/s) and peak torque (N·m), from the model its
+    binding names."""
+    limits: dict[str, tuple[float, float]] = {}
     for part in (STATIC_UPPER_BODY_TORSO, STATIC_UPPER_BODY_LEFT_ARM, STATIC_UPPER_BODY_RIGHT_ARM):
         for axis in part.layout.axes:
             if not isinstance(axis.actuation, DirectDrive):
                 raise ValueError(f"{axis.name} is not directly driven")
-            speed = ACTUATOR_RATINGS[axis.actuation.actuator.model].rated_speed_rad_s
-            if speed is None:
+            rating = ACTUATOR_RATINGS[axis.actuation.actuator.model]
+            if rating.rated_speed_rad_s is None:
                 raise ValueError(
                     f"{axis.name}'s {axis.actuation.actuator.model} has no rated speed"
                 )
-            speeds[axis.name] = speed
-    return speeds
+            limits[axis.name] = (rating.rated_speed_rad_s, rating.peak_torque_nm)
+    return limits
 
 
 def render() -> dict[Path, bytes]:
@@ -422,11 +423,12 @@ def render() -> dict[Path, bytes]:
     for sensor in robot.findall("sensor"):
         robot.remove(sensor)
     _graft_neck(robot)
-    rated = _rated_speeds()
+    rated = _rated_limits()
     for joint in robot.findall("joint"):
         limit = joint.find("limit")
-        if limit is not None and (speed := rated.get(joint.get("name", ""))) is not None:
-            limit.set("velocity", f"{speed:.6g}")
+        if limit is not None and (rating := rated.get(joint.get("name", ""))) is not None:
+            limit.set("effort", f"{rating[1]:.6g}")
+            limit.set("velocity", f"{rating[0]:.6g}")
         if joint.get("name") in REVERSED_JOINTS and limit is not None:
             lower, upper = limit.get("lower", ""), limit.get("upper", "")
             limit.set("lower", _negated(upper))

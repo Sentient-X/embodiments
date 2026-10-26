@@ -114,8 +114,8 @@ pub struct Commissioning {
     pub out_of_service: BTreeSet<String>,
     /// Each power rail's measured voltage, by selector (`*`, a port, a model, or
     /// `<port>/<model>`): what derates or refuses an axis over its model's supported supply;
-    /// with the derate declared for this robot (`derate`: `max_speed`, `max_acceleration`),
-    /// else the rail module's automatic one.
+    /// with the derate declared for this robot (`derate`: `max_speed` and `decided`, who
+    /// decided it and why), else the rail module's automatic one.
     pub rails: Rails,
 }
 
@@ -140,7 +140,8 @@ struct CommissioningDocument {
 #[serde(deny_unknown_fields)]
 struct DeclaredDerate {
     max_speed: f64,
-    max_acceleration: f64,
+    /// Who decided it, and why.
+    decided: String,
 }
 
 impl Commissioning {
@@ -182,7 +183,7 @@ impl Commissioning {
         }
         let rails = Rails::new(parsed.rails)
             .and_then(|rails| match parsed.derate {
-                Some(derate) => rails.with_derate(derate.max_speed, derate.max_acceleration),
+                Some(derate) => rails.with_derate(derate.max_speed, &derate.decided),
                 None => Ok(rails),
             })
             .map_err(|error| OpenError::Document(error.to_string()))?;
