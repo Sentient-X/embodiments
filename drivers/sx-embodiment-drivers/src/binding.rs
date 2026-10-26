@@ -76,6 +76,9 @@ pub struct ActuatorRating {
     /// The supply the vendor specifies, `[min, max]` V inclusive, or `None` where none is
     /// recorded; the bring-up compares the measured rail against it.
     pub supply_volts: Option<[f64; 2]>,
+    /// The vendor's rated output speed at its rated supply, rad/s, or `None` where none is
+    /// recorded: what a description declares as the joint's `<limit velocity>`.
+    pub rated_speed_rad_s: Option<f64>,
 }
 
 impl ActuatorRating {

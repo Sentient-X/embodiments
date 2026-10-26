@@ -1166,6 +1166,47 @@ fn railed(drive: &InstanceDrive, rails: &serde_json::Value, out: &[&str]) -> Com
 }
 
 #[test]
+fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let document = serde_json::json!({
+        "schema": "sx.station-commissioning/v1",
+        "instance": drive.instance,
+        "pod_id": "pod-a",
+        "pod_revision": 3,
+        "ports": {"can": "CAN"},
+        "rails": {"damiao_dm8009p": 54.0, "*": 24.0},
+        "derate": {"max_speed": 0.6, "decided": "owner, 2026-10-26"},
+    });
+    let commissioning =
+        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        ..Bridges::default()
+    };
+    let body = open(&drive, &commissioning, &mut bridges).expect("opens derated");
+    let limits = vec![
+        AxisLimits {
+            max_speed: 3.0,
+            max_tracking_error: 0.2,
+            max_acceleration: None,
+        };
+        15
+    ];
+    let derated: Vec<usize> = body.derated().iter().map(|derate| derate.axis).collect();
+    assert_eq!(derated.len(), 5);
+    let governed = Governor::new(body, limits).expect("limits");
+    for index in derated {
+        assert!((governed.limits()[index].max_speed - 0.6).abs() < 1e-12);
+        assert_eq!(governed.limits()[index].max_acceleration, Some(3.0));
+    }
+    // A derate that is not a speed is refused with the commissioning.
+    let mut bad = document.clone();
+    bad["derate"] = serde_json::json!({"max_speed": 0.6, "decided": ""});
+    assert!(Commissioning::parse(&bad.to_string(), &drive.instance).is_err());
+}
+
+#[test]
 fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recorded() {
     let drive = drive("sentient-static-upper-body");
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
@@ -1205,7 +1246,7 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
     );
     assert_eq!(
         body.derated()[0].to_string(),
-        "derated: over-rail 54 V > 48 V"
+        "derated: over-rail 54 V > 48 V, held to 0.30 rad/s and 1.5 rad/s², feed-forward at most 50 % of peak"
     );
     let governed = Governor::new(body, limits.clone()).expect("limits");
     for (axis, limit) in governed.axes().iter().zip(governed.limits()) {

@@ -258,7 +258,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .map(|observed| observed.to_vec());
         let mut limits = limits;
         let mut torque_caps = vec![None; limits.len()];
-        let derated = chain.derated();
+        let mut derated = chain.derated();
         for derate in &derated {
             let (Some(limit), Some(bound)) = (limits.get_mut(derate.axis), axes.get(derate.axis))
             else {
@@ -274,6 +274,16 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             );
             torque_caps[derate.axis] =
                 Some(derate.limits.torque_share * bound.binding.model.rating().peak_torque_nm);
+        }
+        // Each derate says what its axis is held to in force: the tighter of the derate and
+        // the governor's own limit, so a derate never reports a speed the axis cannot reach.
+        for derate in &mut derated {
+            if let Some(limit) = limits.get(derate.axis) {
+                derate.limits.max_speed = limit.max_speed;
+                derate.limits.max_acceleration = limit
+                    .max_acceleration
+                    .unwrap_or(derate.limits.max_acceleration);
+            }
         }
         Ok(Self {
             chain,
@@ -1472,7 +1482,10 @@ mod tests {
         };
         let mut governor = Governor::new(chain, vec![fast; 2]).expect("limits");
         assert_eq!(governor.derated(), vec![derate]);
-        assert_eq!(derate.to_string(), "derated: over-rail 54 V > 48 V");
+        assert_eq!(
+            derate.to_string(),
+            "derated: over-rail 54 V > 48 V, held to 0.30 rad/s and 1.5 rad/s², feed-forward at most 50 % of peak"
+        );
         let held = governor.limits()[0];
         assert!((held.max_speed - 0.3).abs() < 1e-12);
         assert_eq!(held.max_acceleration, Some(1.5));

@@ -337,6 +337,18 @@ fn every_port_finds_its_one_bridge() {
         station().rails,
         "the rails are recorded as measured"
     );
+    // A declared derate, with who decided it, is recorded and read back as declared.
+    let declared = Station {
+        rails: station()
+            .rails
+            .with_derate(0.6, "owner, 2026-10-26")
+            .unwrap(),
+        ..station()
+    };
+    let document = commissioning(&declared, &matched).to_string();
+    let parsed = Commissioning::parse(&document, "instance-content-id").unwrap();
+    assert_eq!(parsed.rails, declared.rails, "the derate is recorded as declared");
+    assert_eq!(parsed.rails.derate_decided(), Some("owner, 2026-10-26"));
 
     // The ZLG's two channels share its serial: the station cannot yet open by it.
     let notes = warnings(&found, &matched);
