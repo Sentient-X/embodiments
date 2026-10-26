@@ -62,9 +62,18 @@ from sx_embodiments.known.humanoid import (
     HEAD_INFRARED_RIG,
     SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
 )
-from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
+from sx_embodiments.known.static_upper_body import (
+    STATIC_UPPER_BODY_RIG,
+    STATIC_UPPER_BODY_SERVO_APPROACH,
+)
 from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
-from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorBus, ActuatorModel
+from sx_embodiments.layout import (
+    ACTUATOR_RATINGS,
+    ActuatorBus,
+    ActuatorModel,
+    BusPort,
+    ServoApproach,
+)
 from sx_embodiments.parts import ChainSpec
 from sx_embodiments.media import (
     NO_RIG,
@@ -299,6 +308,12 @@ def declared_homes(robot: Embodiment) -> tuple[dict[tuple[str, str], float], set
     return homes, chains
 
 
+#: Each body's serial-servo approach limits, by port: driver settings outside its identity.
+SERVO_APPROACH: dict[str, dict[BusPort, ServoApproach]] = {
+    "sentient-static-upper-body": STATIC_UPPER_BODY_SERVO_APPROACH,
+}
+
+
 def render(name: str) -> str:
     robot = registered(name)
     homes, chains = declared_homes(robot)
@@ -327,7 +342,16 @@ def render(name: str) -> str:
             }
             | ({} if home is None else {"home": home})
         )
-    document = {"embodiment": name, "id": str(robot.id), "axes": axes}
+    approach = SERVO_APPROACH.get(name, {})
+    ports = {axis["port"] for axis in axes}
+    if unknown := set(approach) - ports:
+        raise ValueError(f"{name}: servo approach for ports {sorted(unknown)} it has no axes on")
+    document: dict[str, object] = {"embodiment": name, "id": str(robot.id), "axes": axes}
+    if approach:
+        document["approach"] = {
+            port: {"speed": limit.speed, "acceleration": limit.acceleration}
+            for port, limit in sorted(approach.items())
+        }
     return json.dumps(document, indent=2) + "\n"
 
 

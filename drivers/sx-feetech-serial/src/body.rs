@@ -102,12 +102,37 @@ impl FeetechBody {
         self.axes(BodyBindings::parse(self.bindings)?.calibrated(drive)?)
     }
 
-    /// Each axis with its setup and its unit's calibration, `calibration` in native state
-    /// order.
+    /// Every joint's setup, in native state order, its servo's approach limit the registry's
+    /// for this port (the bindings' `approach`), else the setup's own.
     ///
     /// # Errors
     ///
-    /// Refuses a calibration list that is not one per servo.
+    /// Bindings that do not parse.
+    pub fn setups(&self) -> Result<Vec<ServoSetup>, BodyError> {
+        let approach = BodyBindings::parse(self.bindings)?
+            .approach
+            .get(self.port)
+            .copied();
+        Ok(self
+            .servos
+            .iter()
+            .map(|setup| ServoSetup {
+                configuration: ServoConfiguration {
+                    approach: approach.or(setup.configuration.approach),
+                    ..setup.configuration
+                },
+                ..*setup
+            })
+            .collect())
+    }
+
+    /// Each axis with its setup and its unit's calibration, `calibration` in native state
+    /// order. The servos' own approach limit is the registry's for this port (the bindings'
+    /// `approach`), else the setup's.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a calibration list that is not one per servo, and bindings that do not parse.
     pub fn servos(
         &self,
         axes: Vec<BoundAxis>,
@@ -121,7 +146,7 @@ impl FeetechBody {
         }
         Ok(axes
             .into_iter()
-            .zip(self.servos)
+            .zip(self.setups()?)
             .zip(calibration)
             .map(|((axis, setup), calibration)| FeetechServo {
                 axis,
