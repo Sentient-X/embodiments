@@ -297,3 +297,62 @@ fn the_neck_holds_steady_while_both_hands_circle() {
     );
     assert!(travel < 6.5, "the neck travelled {travel:.2} rad");
 }
+
+#[test]
+fn the_first_look_down_at_the_hands_settles_without_bouncing() {
+    // Engaging from the neck's rest, the camera swings well down onto both hands. Pointing
+    // once asked for its whole error each tick and overshot the acceleration caps: the pitch
+    // joints rang three times before settling (the replay films' first half second).
+    let mut solve = teleop(HeadPolicy::Hands);
+    let mut q = zero(&solve);
+    let body = solve.ik().body().clone();
+    let targets = Targets {
+        tcp: [Some(tcp(&body, &q, 0)), Some(tcp(&body, &q, 1))],
+        ..Targets::default()
+    };
+    let neck: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.name.starts_with("so101_"))
+        .map(|(i, _)| i)
+        .collect();
+    let measured = vec![None; q.len()];
+    let available = vec![true; q.len()];
+    let mut last = vec![0.0; neck.len()];
+    let mut reversals = vec![0; neck.len()];
+    solve.reset();
+    for _ in 0..200 {
+        let before = q.clone();
+        let step = solve
+            .step(&q, &measured, &available, &targets, DT)
+            .expect("a step");
+        q.copy_from_slice(&step.q);
+        for (slot, &axis) in neck.iter().enumerate() {
+            let v = (q[axis] - before[axis]) / DT;
+            if v.abs() > 0.05 {
+                if last[slot] * v < 0.0 {
+                    reversals[slot] += 1;
+                }
+                last[slot] = v;
+            }
+        }
+    }
+    let ([forward, ..], eye) = camera(&body, &q);
+    let mid = [0, 1, 2].map(|k| {
+        f64::midpoint(
+            targets.tcp[0].expect("left").translation_m[k],
+            targets.tcp[1].expect("right").translation_m[k],
+        )
+    });
+    assert!(
+        reversals.iter().all(|r| *r == 0),
+        "neck joints turned back {reversals:?} times"
+    );
+    assert!(
+        angle(forward, eye, mid) < 0.05,
+        "the camera is {:.1} degrees off the hands",
+        angle(forward, eye, mid).to_degrees()
+    );
+}

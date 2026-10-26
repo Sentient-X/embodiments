@@ -31,6 +31,8 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   halfway between the hands *as the camera sees them*, so both sit the same angle from the
   picture's centre), and turns on its own neck only, never on the torso that carries the
   arms. `LimbReport::hidden_by` names the link standing between the camera and a tool.
+  Its pointing error is closed no faster than the neck can still stop on it, as a pose
+  error is: without that, every big swing rang (the first look down bounced three times).
   Two more looking rows were tried and removed (October 2026): keeping the picture level and
   stepping the camera around an arm. On recorded operators (`examples/film.rs`) they cut the
   roll from about 20 to 2 degrees and added a few points of clear sight, but this SO-101 neck

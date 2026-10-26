@@ -727,15 +727,25 @@ impl Ik {
                     } else {
                         [0.0; 3]
                     };
-                    let e = clamp_norm(e, s.max_error_rad);
                     // Turn f toward u relative to u's own turn as the camera moves: the
                     // direction to the point turns at -(u x v) / distance, so the relative
                     // angular rate is w + (u x v) / distance; ask it for the error's rotation
                     // (its component along f, a roll, for none).
+                    for (column, &axis) in body.solved.iter().enumerate() {
+                        w.jp[axis] = if mask[column] {
+                            let turn = cross(u, w.jv[axis]);
+                            [0, 1, 2].map(|k| w.jw[axis][k] + turn[k] / distance)
+                        } else {
+                            [0.0; 3]
+                        };
+                    }
+                    // Closed no faster than the neck can still stop on it, as a pose error
+                    // is: asking for the whole turn at once overshot the acceleration caps
+                    // and the camera rang on every big swing (three bounces engaging).
+                    let share = pointing_approach(e, &w.jp, &body.solved, &self.caps, s, rho2, dt);
+                    let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
-                        fill_masked(&mut w.task, &body.solved, mask, |axis| {
-                            w.jw[axis][k] + cross(u, w.jv[axis])[k] / distance
-                        });
+                        fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e[k], rho2);
                     }
                 }
@@ -1167,13 +1177,6 @@ fn hidden(body: &Body, frames: &Frames, skip: &[bool], tool: V3, s: &Settings) -
     best.map(|(_, link)| link)
 }
 
-/// [`fill`] over the columns `mask` admits; zero elsewhere.
-fn fill_masked(out: &mut [f64], solved: &[usize], mask: &[bool], value: impl Fn(usize) -> f64) {
-    for ((slot, &axis), &on) in out.iter_mut().zip(solved).zip(mask) {
-        *slot = if on { value(axis) } else { 0.0 };
-    }
-}
-
 fn fill(out: &mut [f64], solved: &[usize], value: impl Fn(usize) -> f64) {
     for (slot, &axis) in out.iter_mut().zip(solved) {
         *slot = value(axis);
@@ -1246,6 +1249,47 @@ fn approach(
     let mut accel = f64::INFINITY;
     for &axis in solved {
         let d: f64 = (0..6).map(|a| row(a, axis) * y[a]).sum::<f64>().abs();
+        if d > 1e-12 {
+            accel = accel.min(caps.accel[axis] / d);
+        }
+    }
+    if !accel.is_finite() {
+        return 1.0;
+    }
+    length.min(braking(length, s.braking_share * accel, dt)) / length
+}
+
+/// [`approach`] for a camera's pointing error `e` (radians) over its rows `jl` (per axis, the
+/// pointing rate per unit of joint motion; zero on axes it may not turn): the share of `e`
+/// one tick closes, no more than the neck can still stop on along its damped least-squares
+/// direction.
+fn pointing_approach(
+    e: V3,
+    jl: &[V3],
+    solved: &[usize],
+    caps: &Caps,
+    s: &Settings,
+    rho2: f64,
+    dt: f64,
+) -> f64 {
+    let length = norm(e);
+    if length < 1e-12 {
+        return 1.0;
+    }
+    // The 6x6 solve with the pointing rows in its first block and identity in the second.
+    let mut m = [[0.0; 6]; 6];
+    for a in 0..3 {
+        for b in 0..3 {
+            m[a][b] = solved.iter().map(|&axis| jl[axis][a] * jl[axis][b]).sum();
+        }
+        m[a][a] += s.damping / rho2;
+        m[a + 3][a + 3] = 1.0;
+    }
+    let mut y = [e[0] / length, e[1] / length, e[2] / length, 0.0, 0.0, 0.0];
+    cholesky_solve(&mut m, &mut y);
+    let mut accel = f64::INFINITY;
+    for &axis in solved {
+        let d: f64 = (0..3).map(|a| jl[axis][a] * y[a]).sum::<f64>().abs();
         if d > 1e-12 {
             accel = accel.min(caps.accel[axis] / d);
         }
