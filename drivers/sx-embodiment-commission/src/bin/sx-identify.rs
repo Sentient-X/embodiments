@@ -5,8 +5,18 @@
 //! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>
 //!             --record <out.csv> --drive <instance-drive.json> --instance <id>
 //!             [--speed 0.25] [--zlg-serial <serial>] [--channel 1]
-//!             [--with-torso] [--without <joint>]... [--move]
+//!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>] [--move]
 //! ```
+//!
+//! `jog:<joint>` (sweep plan) moves the joint from its staging pose 0.5 rad at 0.3 rad/s,
+//! holds 2 s, and back, twice (`jog:<n>:+|-`, `hold:<n>:+|-`): the bench test of tracking.
+//! With `--feedforward`, every MIT frame carries the planned velocity and the model torque
+//! from `sx_embodiment_drivers::Dynamics` over the static upper body's description, gravity at
+//! the measured position plus friction and inertia for the plan (`urdf` uses the description
+//! alone; a file is a `dynamics` calibration, applied only to the description it names), each
+//! axis' torque bounded at a quarter of its motor's peak. Those frames go to the chain
+//! directly: the governor passes no feed-forward, so the run keeps its own speed check (every
+//! planned step within the cap, refused at planning) and tracking-error stop.
 //!
 //! `sweep:` and `breakaway:` read the friction sweep plan
 //! (`tools/identify_dynamics.py sweep-plan`, `docs/dynamics/static-upper-body-friction-sweeps.json`):
@@ -52,10 +62,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoAxis, DamiaoChain};
+use sx_damiao_can::chain::{DamiaoAxis, DamiaoChain, Feedforward, FeedforwardLimit};
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::governor::{AxisLimits, Governor};
-use sx_embodiment_drivers::{ActuatorChain, InstanceDrive};
+use sx_embodiment_drivers::{
+    ActuatorChain, Dynamics, DynamicsCalibration, InstanceDrive, Scratch, UPRIGHT,
+};
 use sx_zlg_usbcanfd::{ChannelOptions, UsbCanFd};
 
 const PERIOD: Duration = Duration::from_millis(20);
@@ -70,6 +82,103 @@ const CONTACT_TRACKING_STEP: f64 = 0.03;
 const CONTACT_SETTLE: Duration = Duration::from_millis(300);
 /// The most axes one record holds: the static upper body's fifteen Damiao motors.
 const MAX_AXES: usize = 16;
+/// The bench jog: 0.5 rad at 0.3 rad/s, as the jogs of 2026-10-26.
+const JOG_TRAVEL: f64 = 0.5;
+const JOG_SPEED: f64 = 0.3;
+/// The share of a motor's peak torque the feed-forward may send.
+const FEEDFORWARD_SHARE: f64 = 0.25;
+const URDF: &str =
+    include_str!("../../../../assets/sentient_static_upper_body/sentient_static_upper_body.urdf");
+
+/// The feed-forward: the description's dynamics, buffers sized once, and each chain axis'
+/// index among the tree's joints.
+struct Model {
+    dynamics: Dynamics,
+    scratch: Scratch,
+    index: Vec<usize>,
+    position: Vec<f64>,
+    velocity: Vec<f64>,
+    acceleration: Vec<f64>,
+    measured: Vec<f64>,
+    planned: Vec<f64>,
+    held_plan: Vec<f64>,
+    held_now: Vec<f64>,
+    out: Vec<Feedforward>,
+}
+
+impl Model {
+    fn new(source: &str, names: &[String]) -> Result<Self, String> {
+        let mut dynamics = Dynamics::of(URDF, UPRIGHT).map_err(|e| e.to_string())?;
+        if source != "urdf" {
+            let document = std::fs::read_to_string(source).map_err(|e| format!("{source}: {e}"))?;
+            let calibration = DynamicsCalibration::parse(&document).map_err(|e| e.to_string())?;
+            dynamics = dynamics
+                .calibrated(&calibration)
+                .map_err(|e| e.to_string())?;
+        }
+        let joints = dynamics.tree().joints();
+        let index = names
+            .iter()
+            .map(|n| {
+                joints
+                    .iter()
+                    .position(|a| &a.name == n)
+                    .ok_or(format!("{n} is not in the description"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let width = joints.len();
+        Ok(Self {
+            scratch: dynamics.scratch(),
+            dynamics,
+            index,
+            position: vec![0.0; width],
+            velocity: vec![0.0; width],
+            acceleration: vec![0.0; width],
+            measured: vec![0.0; width],
+            planned: vec![0.0; width],
+            held_plan: vec![0.0; width],
+            held_now: vec![0.0; width],
+            out: vec![Feedforward::default(); names.len()],
+        })
+    }
+
+    /// Gravity at `measured`, inertia and friction for the plan: `ID(plan) - g(plan) + g(now)`.
+    fn feedforward(
+        &mut self,
+        target: &[f64],
+        speed: &[f64],
+        measured: &[f64],
+    ) -> Result<&[Feedforward], String> {
+        for (axis, &joint) in self.index.iter().enumerate() {
+            self.position[joint] = target[axis];
+            self.velocity[joint] = speed[axis];
+            self.measured[joint] = measured[axis];
+        }
+        let error = |e: sx_embodiment_drivers::DynamicsError| e.to_string();
+        self.dynamics
+            .inverse_into(
+                &self.position,
+                &self.velocity,
+                &self.acceleration,
+                &mut self.scratch,
+                &mut self.planned,
+            )
+            .map_err(error)?;
+        self.dynamics
+            .gravity_torque_into(&self.position, &mut self.scratch, &mut self.held_plan)
+            .map_err(error)?;
+        self.dynamics
+            .gravity_torque_into(&self.measured, &mut self.scratch, &mut self.held_now)
+            .map_err(error)?;
+        for (axis, &joint) in self.index.iter().enumerate() {
+            self.out[axis] = Feedforward {
+                velocity: speed[axis],
+                torque: self.planned[joint] - self.held_plan[joint] + self.held_now[joint],
+            };
+        }
+        Ok(&self.out)
+    }
+}
 /// Left out of the chain unless asked: the torso motor is not on the bench chain and the left
 /// wrist roll rests out of its range until its range fix lands.
 const LEFT_OUT: [&str; 2] = ["torso_joint", "left_wrist_roll_joint"];
@@ -95,6 +204,7 @@ struct Args {
     channel: u8,
     torso: bool,
     without: Vec<String>,
+    feedforward: Option<String>,
     motion: bool,
 }
 
@@ -111,6 +221,7 @@ fn parse() -> Result<Args, String> {
         channel: 1,
         torso: false,
         without: Vec::new(),
+        feedforward: None,
         motion: false,
     };
     while let Some(arg) = args.next() {
@@ -126,6 +237,7 @@ fn parse() -> Result<Args, String> {
             "--channel" => parsed.channel = value()?.parse().map_err(|_| "bad --channel")?,
             "--with-torso" => parsed.torso = true,
             "--without" => parsed.without.push(value()?),
+            "--feedforward" => parsed.feedforward = Some(value()?),
             "--move" => parsed.motion = true,
             other => return Err(format!("unknown argument {other}")),
         }
@@ -135,7 +247,8 @@ fn parse() -> Result<Args, String> {
     }
     let known = matches!(parsed.part.as_str(), "holds" | "left" | "right")
         || parsed.part.starts_with("sweep:")
-        || parsed.part.starts_with("breakaway:");
+        || parsed.part.starts_with("breakaway:")
+        || parsed.part.starts_with("jog:");
     if !known {
         return Err("--part is holds, left, right, sweep:<joint> or breakaway:<joint>".into());
     }
@@ -200,7 +313,8 @@ fn hold(ticks: &mut Vec<Tick>, segment: &str, at: &[f64], seconds: f64) {
     }
 }
 
-/// Every tick of a sweep or breakaway part (see the header), from `rest` back to `rest`.
+/// Every tick of a sweep, breakaway or jog part (see the header), from `rest` back to `rest`.
+#[allow(clippy::too_many_lines)]
 fn schedule_sweep(
     plan: &Value,
     part: &str,
@@ -287,6 +401,29 @@ fn schedule_sweep(
             }
         }
         travel(&mut ticks, "move", &at(middle), &ready, speed);
+    } else if kind == "jog" {
+        let from = (lower + 0.1).min(upper);
+        let to = (from + JOG_TRAVEL).min(upper);
+        travel(&mut ticks, "move", &at(lower), &at(from), speed);
+        for rep in 0..2 {
+            travel(
+                &mut ticks,
+                &format!("jog:{rep}:+"),
+                &at(from),
+                &at(to),
+                JOG_SPEED.min(speed),
+            );
+            hold(&mut ticks, &format!("hold:{rep}:+"), &at(to), 2.0);
+            travel(
+                &mut ticks,
+                &format!("jog:{rep}:-"),
+                &at(to),
+                &at(from),
+                JOG_SPEED.min(speed),
+            );
+            hold(&mut ticks, &format!("hold:{rep}:-"), &at(from), 2.0);
+        }
+        travel(&mut ticks, "move", &at(from), &ready, speed);
     } else {
         return Err(format!("unknown part {part}"));
     }
@@ -303,7 +440,7 @@ fn schedule(
     rest: &[f64],
     speed: f64,
 ) -> Result<Vec<Tick>, String> {
-    if part.starts_with("sweep:") || part.starts_with("breakaway:") {
+    if part.starts_with("sweep:") || part.starts_with("breakaway:") || part.starts_with("jog:") {
         return schedule_sweep(plan, part, names, rest, speed);
     }
     let mut ticks = Vec::new();
@@ -452,6 +589,29 @@ fn write_records(
     Ok(())
 }
 
+/// The chain inside the governor, or, for feed-forward, alone: the governor carries no
+/// feed-forward, so that mode checks speed at planning and tracking per tick itself.
+enum Driver<P: sx_embodiment_drivers::can::CanPort> {
+    Governed(Governor<DamiaoChain<P>>),
+    Direct(DamiaoChain<P>),
+}
+
+impl<P: sx_embodiment_drivers::can::CanPort> Driver<P> {
+    fn chain(&self) -> &DamiaoChain<P> {
+        match self {
+            Self::Governed(governor) => governor.chain(),
+            Self::Direct(chain) => chain,
+        }
+    }
+
+    fn stop(&mut self) -> sx_embodiment_drivers::StopReport {
+        match self {
+            Self::Governed(governor) => governor.stop(),
+            Self::Direct(chain) => chain.stop(),
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn run() -> Result<(), String> {
     let args = parse()?;
@@ -509,6 +669,20 @@ fn run() -> Result<(), String> {
             .len(),
         names.join(", ")
     );
+    if let Some(source) = &args.feedforward {
+        let mut model = Model::new(source, &names)?;
+        let still = vec![0.0; names.len()];
+        let torque: Vec<String> = model
+            .feedforward(&middle, &still, &middle)?
+            .iter()
+            .zip(&names)
+            .map(|(ff, name)| format!("{name} {:+.2}", ff.torque))
+            .collect();
+        eprintln!(
+            "feed-forward at mid-range, holding (N·m): {}",
+            torque.join(", ")
+        );
+    }
     if !args.motion {
         eprintln!("without --move nothing is sent");
         return Ok(());
@@ -525,24 +699,75 @@ fn run() -> Result<(), String> {
         .iter()
         .map(|a| a.axis.actuator_from_joint(a.axis.zero + 1.0))
         .collect();
-    let chain = DamiaoChain::open(port, axes).map_err(|e| e.to_string())?;
+    let mut model = match &args.feedforward {
+        Some(source) => Some(Model::new(source, &names)?),
+        None => None,
+    };
+    let mut chain = DamiaoChain::open(port, axes).map_err(|e| e.to_string())?;
     let width = chain.axes().len();
-    let mut governor = Governor::new(
-        chain,
-        vec![
-            AxisLimits {
-                max_speed: args.speed,
-                max_tracking_error: MAX_TRACKING_ERROR,
-            };
-            width
-        ],
-    )
-    .map_err(|e| format!("{e:?}"))?;
+    if model.is_some() {
+        let limits: Vec<FeedforwardLimit> = peaks
+            .iter()
+            .map(|peak| FeedforwardLimit {
+                velocity: Some(args.speed),
+                torque: Some(FEEDFORWARD_SHARE * peak),
+            })
+            .collect();
+        chain
+            .set_feedforward_limits(&limits)
+            .map_err(|e| e.to_string())?;
+    }
+    let mut governor = if model.is_some() {
+        Driver::Direct(chain)
+    } else {
+        Driver::Governed(
+            Governor::new(
+                chain,
+                vec![
+                    AxisLimits {
+                        max_speed: args.speed,
+                        max_tracking_error: MAX_TRACKING_ERROR,
+                    };
+                    width
+                ],
+            )
+            .map_err(|e| format!("{e:?}"))?,
+        )
+    };
     let rest = governor
         .chain()
         .last_observed()
         .ok_or("the chain reports no rest position")?;
     let ticks = schedule(&plan, &args.part, &names, &rest, args.speed)?;
+    // Feed-forward frames bypass the governor's slew: every planned step must already be
+    // within the cap.
+    let step_cap = args.speed * PERIOD.as_secs_f64() * 1.01;
+    if model.is_some() {
+        let first_step = ticks.first().map_or(0.0, |t| {
+            t.target
+                .iter()
+                .zip(&rest)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max)
+        });
+        let fastest = ticks
+            .windows(2)
+            .map(|w| {
+                w[0].target
+                    .iter()
+                    .zip(&w[1].target)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max)
+            })
+            .fold(first_step, f64::max);
+        if fastest > step_cap {
+            let _ = governor.stop();
+            return Err(format!(
+                "a planned step of {fastest:.4} rad exceeds the cap; nothing moved"
+            ));
+        }
+    }
+    let mut speeds = vec![0.0; width];
     for tick in &ticks {
         for ((value, range), name) in tick.target.iter().zip(&ranges).zip(&names) {
             if !range.admits(*value) {
@@ -574,7 +799,40 @@ fn run() -> Result<(), String> {
         if index == 0 || ticks[index - 1].segment != tick.segment {
             segment_start = Instant::now();
         }
-        let receipt = match governor.command(&tick.target) {
+        let commanded = match model.as_mut() {
+            Some(model) => {
+                let following = ticks.get(index + 1).map_or(&tick.target, |t| &t.target);
+                for (axis, speed) in speeds.iter_mut().enumerate() {
+                    *speed = (following[axis] - tick.target[axis]) / PERIOD.as_secs_f64();
+                }
+                let measured = if let Some(previous) = last {
+                    previous.position
+                } else {
+                    let mut at = [0.0; MAX_AXES];
+                    at[..width].copy_from_slice(&rest);
+                    at
+                };
+                match (
+                    model.feedforward(&tick.target, &speeds, &measured[..width]),
+                    &mut governor,
+                ) {
+                    (Ok(feedforward), Driver::Direct(chain)) => chain
+                        .command_with(&tick.target, feedforward)
+                        .map_err(|e| format!("{e:?}")),
+                    (Ok(_), Driver::Governed(_)) => {
+                        Err("feed-forward needs the direct chain".into())
+                    }
+                    (Err(error), _) => Err(error),
+                }
+            }
+            None => match &mut governor {
+                Driver::Governed(governor) => {
+                    governor.command(&tick.target).map_err(|e| format!("{e:?}"))
+                }
+                Driver::Direct(chain) => chain.command(&tick.target).map_err(|e| format!("{e:?}")),
+            },
+        };
+        let receipt = match commanded {
             Ok(receipt) => receipt,
             Err(error) => {
                 outcome = Err(format!(
@@ -597,6 +855,17 @@ fn run() -> Result<(), String> {
             record.torque[axis] = f64::from(answer.torque) * gains[axis];
         }
         records.push(record);
+        if let Some(axis) = (0..width)
+            .find(|&axis| (tick.target[axis] - record.position[axis]).abs() > MAX_TRACKING_ERROR)
+        {
+            outcome = Err(format!(
+                "{}: {} is {:.3} rad from its target",
+                tick.segment,
+                names[axis],
+                tick.target[axis] - record.position[axis]
+            ));
+            break;
+        }
         let guard = (0..width).find(|&axis| record.torque[axis].abs() > TORQUE_GUARD * peaks[axis]);
         if let Some(axis) = guard {
             outcome = Err(format!(
