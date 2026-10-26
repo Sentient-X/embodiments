@@ -818,6 +818,21 @@ fn realtime_loop() {
     }
 }
 
+/// The load average as the host reports it: `/proc/loadavg` on Linux, `sysctl vm.loadavg` on
+/// macOS.
+fn load_average() -> Option<String> {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .or_else(|| {
+            std::process::Command::new("sysctl")
+                .args(["-n", "vm.loadavg"])
+                .output()
+                .ok()
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        })
+        .map(|text| text.trim().to_owned())
+}
+
 /// The bus `--bus` names, opened on whichever transport carries that identity (a ZLG channel
 /// in userspace, a `SocketCAN` interface, a USB2CAN bridge), as a station opens a commissioned
 /// port.
@@ -951,8 +966,7 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
     let document = serde_json::json!({
         "polls": polls,
         "seconds": elapsed,
-        "load_average": std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output()
-            .ok().map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned()),
+        "load_average": load_average(),
         "poll_us": poll_us,
         "frames_received": received,
         "frames_taken_by_a_poll": answered,

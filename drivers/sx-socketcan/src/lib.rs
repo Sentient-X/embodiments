@@ -60,9 +60,10 @@ pub enum LinkError {
         "SocketCAN {interface}: the transmit queue stayed full for {waited_us} µs; the frame was not sent, send it once the bus has drained"
     )]
     QueueFull { interface: String, waited_us: u64 },
-    /// `NotConnected`: the controller reported bus-off and has not restarted since.
+    /// `WouldBlock`: the transmit queue stayed full and the controller last reported bus-off;
+    /// it restarts on its own only if the interface has `restart-ms` set.
     #[error(
-        "SocketCAN {interface}: the controller is bus-off (too many transmit errors: wiring, termination, bitrate or no node acknowledging); it restarts only if the interface has restart-ms set"
+        "SocketCAN {interface}: the controller is bus-off (too many transmit errors: wiring, termination, bitrate or no node acknowledging); the frame was not sent; it restarts only if the interface has restart-ms set"
     )]
     BusOff { interface: String },
     /// `NotConnected`: the interface is down (`ENETDOWN`).
@@ -74,8 +75,8 @@ impl LinkError {
     #[must_use]
     pub const fn kind(&self) -> io::ErrorKind {
         match self {
-            Self::QueueFull { .. } => io::ErrorKind::WouldBlock,
-            Self::BusOff { .. } | Self::Down { .. } => io::ErrorKind::NotConnected,
+            Self::QueueFull { .. } | Self::BusOff { .. } => io::ErrorKind::WouldBlock,
+            Self::Down { .. } => io::ErrorKind::NotConnected,
         }
     }
 

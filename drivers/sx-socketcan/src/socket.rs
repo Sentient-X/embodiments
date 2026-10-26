@@ -17,9 +17,10 @@ use crate::{
 
 /// The longest a send waits for room in the interface's transmit queue. A full queue answers
 /// `ENOBUFS` (or `EAGAIN`) at once; a chain's burst of one frame per motor can outrun the
-/// default queue of ten, so the send waits for the bus to drain it rather than dropping the
-/// frame, and reports [`LinkError::QueueFull`] only when the bus has not moved in this long.
-const SEND_PATIENCE: Duration = Duration::from_millis(10);
+/// default queue of ten, so the send waits for the bus to drain it (ten classic frames take
+/// 1.35 ms at 1 Mbit/s) and then refuses with a `WouldBlock` [`LinkError`], which a chain
+/// retries, reading answers meanwhile, within [`CanPort::frame_allowance`].
+const SEND_PATIENCE: Duration = Duration::from_millis(2);
 const SEND_RETRY: Duration = Duration::from_micros(100);
 
 /// Frames one `recvmmsg` can take: more than a 15-motor chain's answers to one phase.
@@ -78,6 +79,7 @@ struct Counts {
     queue_waits: u64,
     queue_full: u64,
     receive_calls: u64,
+    malformed: u64,
     hardware_stamped: u64,
     host_delay_max_us: u64,
     host_delay_over_1ms: u64,
@@ -242,7 +244,7 @@ impl SocketCanPort {
         Self::bound(interface, Some(lock))
     }
 
-    /// Open a virtual interface (`vcan`, `vxcan`: no device behind it in sysfs) without its
+    /// Open a virtual interface (named `vcan*` or `vxcan*`, no device behind it in sysfs) without its
     /// lock, so a second process can play the other nodes of a test bus. Refuses any interface
     /// with a device behind it, so it can never share a real bus.
     ///
@@ -253,7 +255,8 @@ impl SocketCanPort {
     pub fn open_virtual(interface: &str) -> Result<Self, SocketCanError> {
         valid(interface)?;
         let net = std::path::Path::new("/sys/class/net").join(interface);
-        if !net.exists() || net.join("device").exists() {
+        let named_virtual = interface.starts_with("vcan") || interface.starts_with("vxcan");
+        if !named_virtual || !net.exists() || net.join("device").exists() {
             return Err(SocketCanError::Io {
                 interface: interface.to_owned(),
                 source: io::Error::new(
@@ -373,6 +376,9 @@ impl SocketCanPort {
             }
             let length = (header.msg_len as usize).min(FD_FRAME_BYTES);
             match decode(&self.slots[index].frame[..length]) {
+                // The kernel returns only `can_frame` and `canfd_frame` sizes while CAN XL is
+                // off; anything else is counted and read past, never fails the batch around it.
+                None => self.counts.malformed += 1,
                 Some(Received::Data(frame)) => {
                     self.counts.received += 1;
                     self.counts.hardware_stamped += u64::from(found.hardware);
@@ -391,12 +397,6 @@ impl SocketCanPort {
                 Some(Received::Long) => self.counts.read_past_long += 1,
                 Some(Received::Remote) => self.counts.read_past_remote += 1,
                 Some(Received::Error(event)) => self.note(event),
-                None => {
-                    return Err(io::Error::other(format!(
-                        "{} gave {length} bytes, not a CAN or CAN FD frame",
-                        self.interface
-                    )));
-                }
             }
         }
         Ok(count)
@@ -466,17 +466,13 @@ fn queue_full(error: &io::Error) -> bool {
 }
 
 impl CanPort for SocketCanPort {
-    /// One classic frame onto the interface's transmit queue. Refused with
-    /// [`LinkError::BusOff`] while the controller is bus-off, [`LinkError::Down`] when the
-    /// interface is down, and [`LinkError::QueueFull`] when the queue stayed full for
-    /// [`SEND_PATIENCE`].
+    /// One classic frame onto the interface's transmit queue. When the queue stays full for
+    /// [`SEND_PATIENCE`] it is refused as `WouldBlock`: [`LinkError::BusOff`] if the controller
+    /// last reported bus-off (it may restart: `restart-ms`), else [`LinkError::QueueFull`].
+    /// Nothing is latched: every send is tried, so a stop's disable frames go out the moment
+    /// the controller is back. An interface that is down is [`LinkError::Down`]
+    /// (`NotConnected`).
     fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
-        if self.bus_off {
-            return Err(LinkError::BusOff {
-                interface: self.interface.clone(),
-            }
-            .into());
-        }
         let bytes = encode(frame)?;
         let started = Instant::now();
         let mut waited = false;
@@ -496,10 +492,15 @@ impl CanPort for SocketCanPort {
                     }
                     if started.elapsed() >= SEND_PATIENCE {
                         self.counts.queue_full += 1;
-                        return Err(LinkError::QueueFull {
-                            interface: self.interface.clone(),
-                            waited_us: u64::try_from(started.elapsed().as_micros())
-                                .unwrap_or(u64::MAX),
+                        let interface = self.interface.clone();
+                        return Err(if self.bus_off {
+                            LinkError::BusOff { interface }
+                        } else {
+                            LinkError::QueueFull {
+                                interface,
+                                waited_us: u64::try_from(started.elapsed().as_micros())
+                                    .unwrap_or(u64::MAX),
+                            }
                         }
                         .into());
                     }
@@ -545,10 +546,11 @@ impl CanPort for SocketCanPort {
         }
     }
 
-    /// A send may wait [`SEND_PATIENCE`] for queue room, then the frame and its answer take
-    /// well under a millisecond on a 1 Mbit/s bus.
+    /// A chain retries a refused send until this has passed since its first try, and a retry
+    /// begun just before then may itself wait [`SEND_PATIENCE`]: two patiences, then the frame
+    /// and its answer, well under a millisecond on a 1 Mbit/s bus.
     fn frame_allowance(&self) -> Duration {
-        SEND_PATIENCE + Duration::from_millis(1)
+        SEND_PATIENCE * 2 + Duration::from_millis(1)
     }
 
     fn counters(&self) -> Vec<(&'static str, u64)> {
@@ -559,6 +561,7 @@ impl CanPort for SocketCanPort {
             ("rx_read_past_remote", counts.read_past_remote),
             ("rx_socket_dropped", counts.socket_dropped),
             ("rx_calls", counts.receive_calls),
+            ("rx_malformed", counts.malformed),
             ("rx_hardware_stamped", counts.hardware_stamped),
             ("host_delay_max_us", counts.host_delay_max_us),
             ("host_delay_over_1ms", counts.host_delay_over_1ms),
