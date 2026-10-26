@@ -32,6 +32,7 @@ from .compose import (
     BodyAttachment,
     Component,
     ComponentRole,
+    Direction,
     EmbodimentDefinition,
     LeaderAttachment,
     MountedOn,
@@ -40,6 +41,7 @@ from .compose import (
     OperatorSite,
     RootMount,
     SensorAttachment,
+    SupportEdge,
     camera_bindings,
     state_space,
     validate_components,
@@ -462,9 +464,7 @@ def migrate(document: Mapping[str, object]) -> EmbodimentMigration:
         raise EmbodimentSchemaError(
             f"no converter from embodiment schema_version {version!r} to {SCHEMA_VERSION}"
         )
-    source = decode.exactly(
-        entry, set(_TOP_LEVEL), where="embodiment", error=EmbodimentSchemaError
-    )
+    source = decode.exactly(entry, set(_TOP_LEVEL), where="embodiment", error=EmbodimentSchemaError)
     source_id = EmbodimentId(decode.text(source, "id"))
     content = {key: value for key, value in document.items() if key != "id"}
     try:
@@ -1175,16 +1175,32 @@ def _base_mount_to_dict(value: BaseMount | None) -> dict[str, object] | None:
         "half_extents": list(value.half_extents),
         "centre": list(value.centre),
         "clearance_m": value.clearance_m,
+        # Absent, not null, when unstated: every body without an edge keeps its bytes and id.
+        **(
+            {}
+            if value.edge is None
+            else {"edge": {"out": value.edge.out.value, "at_m": value.edge.at_m}}
+        ),
     }
+
+
+def _parse_support_edge(entry: decode.Document) -> SupportEdge | None:
+    if "edge" not in entry:
+        return None
+    edge = decode.exactly(decode.mapping(entry, "edge"), {"out", "at_m"})
+    try:
+        out = Direction(decode.text(edge, "out"))
+    except ValueError as exc:
+        raise EmbodimentSchemaError(f"{edge.where}.out is unknown") from exc
+    return SupportEdge(out=out, at_m=decode.number(edge, "at_m"))
 
 
 def _parse_base_mount(document: decode.Document) -> BaseMount | None:
     if document["base_mount"] is None:
         return None
-    entry = decode.exactly(
-        decode.mapping(document, "base_mount"),
-        {"kind", "frame", "half_extents", "centre", "clearance_m"},
-    )
+    mount = decode.mapping(document, "base_mount")
+    keys = {"kind", "frame", "half_extents", "centre", "clearance_m"}
+    entry = decode.exactly(mount, keys | {"edge"} if "edge" in mount else keys)
     try:
         kind = MountKind(decode.text(entry, "kind"))
     except ValueError as exc:
@@ -1195,6 +1211,7 @@ def _parse_base_mount(document: decode.Document) -> BaseMount | None:
         half_extents=_pair(entry, "half_extents"),
         centre=_pair(entry, "centre"),
         clearance_m=decode.number(entry, "clearance_m"),
+        edge=_parse_support_edge(entry),
     )
 
 

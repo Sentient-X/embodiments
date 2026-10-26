@@ -112,7 +112,8 @@ grippers are modules whose servo and jaw no source describes, so the body with t
 
 `sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
 arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge
-(`MountKind.CLAMP_EDGE`). Its description is `tools/compose_static_upper_body_urdf.py`'s
+(`MountKind.CLAMP_EDGE`): it faces out from the table, so the table ends at its clamp plate's
+front (`SupportEdge(POS_X, 0.0549)`) and lies behind it. Its description is `tools/compose_static_upper_body_urdf.py`'s
 rendering of `allisa_bot.urdf`, the description its operator selected, kept under `source/`
 with `humanoid_pkg`'s hardware profile. That profile (models, CAN ids and signs for the arms)
 is the body's actuator bindings, and `tests/test_static_upper_body.py` holds the two equal; the
@@ -225,11 +226,12 @@ leader, so a headset needs only joint positions. `tools/render_packs.py` renders
 packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
 the crate's `tree-poses.json`, Python's poses at seeded positions that `Tree` is held equal to.
 
-A body with collision geometry also gets `collision.json` (`sx.collision-proxies/v2`,
+A body with collision geometry also gets `collision.json` (`sx.collision-proxies/v3`,
 `sx_embodiments.collision_proxies`): one to three capsules per link, fitted to contain every
 vertex of its collision meshes, and the link pairs a self-collision check skips (at most two
 moving joints apart, or overlapping at the zero pose), and the surface it stands on from its
-declared base mount (the mount frame's z = 0 plane, solid below everywhere within reach). `drivers/sx-embodiment-ik` reads the
+declared base mount (the mount frame's z = 0 plane, solid below up to the support's declared
+edge, or everywhere within reach when it declares none). `drivers/sx-embodiment-ik` reads the
 pack's URDF and proxies and solves one constrained QP differential IK per tick: tool poses and a
 camera look-at, under joint limits, speed and acceleration caps, self and table collision. The
 station runs it as the authority and the headset links the same crate for its ghost.

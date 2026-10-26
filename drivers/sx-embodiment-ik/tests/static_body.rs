@@ -149,37 +149,50 @@ fn forward_kinematics_is_the_trees() {
 }
 
 /// The table is the embodiment's: its base mount declares the support, and every solver of the
-/// body has it without being told. The top is the base's z = 0 plane, solid below everywhere
-/// within reach (under and in front of the arms, where they touched it on 2026-10-26).
+/// body has it without being told. The top is the base's z = 0 plane; the body clamps at the
+/// table's edge facing out from it (+x), so the table ends at the clamp plate's front and lies
+/// behind it (2026-10-26 bench: the arms must reach below the top in front of the edge).
 #[test]
-fn the_declared_table_is_in_every_scene_and_the_arms_stay_above_it() {
+fn the_declared_table_ends_at_the_edge_and_the_arms_reach_below_it_in_front() {
     let mut ik = ik(Some(0.5));
     let table = ik.scene()[0];
     assert_eq!(Some(table), ik.body().proxies().support);
     assert_eq!(table.max[2], 0.0);
-    assert!(table.min[0] < -1.0 && table.max[0] > 1.0, "{table:?}");
-    // Both tools asked well below the top, in front of the body: the arms stop above it.
-    let mut q = rest(&ik);
-    let below = |y: f64| {
-        Some(Target::Pose {
-            translation_m: [0.35, y, -0.2],
-            rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
-        })
+    assert!((table.max[0] - 0.0549).abs() < 1e-9, "{table:?}");
+    assert!(
+        table.min[0] < -1.0 && table.min[1] < -1.0 && table.max[1] > 1.0,
+        "{table:?}"
+    );
+    let solve = |ik: &mut Ik, x: f64, z: f64| {
+        let mut q = rest(ik);
+        let at = |y: f64| {
+            Some(Target::Pose {
+                translation_m: [x, y, z],
+                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+            })
+        };
+        let targets = [at(0.2), at(-0.2), None];
+        for _ in 0..400 {
+            q = ik
+                .step(&q, &ALL[..q.len()], &targets, DT)
+                .expect("step")
+                .q
+                .clone();
+        }
+        let (clearance, a, b) = ik.clearance(&q);
+        assert!(clearance >= 0.0, "{a} into {b} by {clearance}");
+        let frames = ik.body().model().poses(&q);
+        [0, 1].map(|limb| ik.body().frame(&frames, limb).t)
     };
-    let targets = [below(0.2), below(-0.2), None];
-    for _ in 0..400 {
-        q = ik
-            .step(&q, &ALL[..q.len()], &targets, DT)
-            .expect("step")
-            .q
-            .clone();
+    // Both tools asked 15 cm below the top, in front of the edge: they go well below it (the
+    // arms' own reach and the chest, not the table, stop them short; on the full slab they
+    // stayed above the top).
+    for tool in solve(&mut ik, 0.35, -0.15) {
+        assert!(tool[2] < -0.05, "tool at {tool:?}");
     }
-    let (clearance, a, b) = ik.clearance(&q);
-    assert!(clearance >= 0.0, "{a} into {b} by {clearance}");
-    let frames = ik.body().model().poses(&q);
-    for limb in 0..2 {
-        let tool = ik.body().frame(&frames, limb).t;
-        assert!(tool[2] > 0.0, "tool {limb} at {tool:?}");
+    // Asked below the top behind the edge, over the table: they stop above it.
+    for tool in solve(&mut ik, -0.05, -0.15) {
+        assert!(tool[2] > 0.0 || tool[0] > table.max[0], "tool at {tool:?}");
     }
 }
 

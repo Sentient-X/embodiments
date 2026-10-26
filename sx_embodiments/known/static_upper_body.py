@@ -105,10 +105,12 @@ from sx_contracts import ComponentId
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
+    Direction,
     EmbodimentDefinition,
     MountedOn,
     MountKind,
     RootMount,
+    SupportEdge,
     body_component,
     sensor_component,
 )
@@ -415,12 +417,16 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-static-upper-body"),
     build=Build.of(STATIC_UPPER_BODY_MODULE),
-    # The xy box of base_link's collision hull, the clamp plate on the table top.
+    # The xy box of base_link's collision hull (meshes/collision/base_link.stl, x and y within
+    # ±0.0549 m), the clamp plate on the table top; its plate visual (meshes/base_link.stl)
+    # has the same box. The body faces +x (its tool points sit at x = +0.44 m with every
+    # joint at zero, and the ZED looks along +x), out from the table, so the table ends at
+    # the plate's front edge and lies on -x.
     base_mount=BaseMount(
         kind=MountKind.CLAMP_EDGE,
         frame="base_link",
-        half_extents=(0.0952, 0.055),
-        centre=(0.0402, 0.0),
+        half_extents=(0.0549, 0.0549),
+        edge=SupportEdge(out=Direction.POS_X, at_m=0.0549),
     ),
     # The received file stays in the asset tree as provenance only: its package:// mesh
     # paths are the received folder's, so it is not a loadable asset of this body.

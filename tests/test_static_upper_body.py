@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from sx_embodiments.compose import MountKind
-from sx_embodiments.embodiment import embodiment_from_definition
+from sx_embodiments.compose import BaseMount, Direction, MountKind, SupportEdge
+from sx_embodiments.embodiment import Embodiment, embodiment_from_definition
+from sx_embodiments.errors import ComponentGraphError, EmbodimentSchemaError
+from sx_embodiments.kinematics import Kinematics
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
 from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_LEFT_ARM,
@@ -40,6 +42,77 @@ def test_the_body_is_a_table_clamped_development_body() -> None:
     assert STATIC_UPPER_BODY_SPEC.base_mount.kind is MountKind.CLAMP_EDGE
     robot = embodiment_from_definition(entry.spec)
     assert len(robot.joint_names) == 25
+
+
+def _hull_xy(path: Path) -> tuple[float, float, float, float]:
+    import numpy as np
+
+    data = path.read_bytes()
+    count = int.from_bytes(data[80:84], "little")
+    rows = np.frombuffer(
+        data[84 : 84 + 50 * count],
+        dtype=np.dtype([("n", "<3f4"), ("v", "<9f4"), ("a", "<u2")]),
+    )
+    vertices = rows["v"].reshape(-1, 3)
+    low, high = vertices.min(axis=0), vertices.max(axis=0)
+    return float(low[0]), float(high[0]), float(low[1]), float(high[1])
+
+
+def test_the_table_ends_at_the_clamp_plates_front_and_lies_behind_the_body() -> None:
+    """The footprint is base_link's collision hull; the body faces +x, out from the table, so
+    the table's edge is the plate's front and the table lies on -x (2026-10-26 bench)."""
+    pytest.importorskip("numpy")
+    mount = STATIC_UPPER_BODY_SPEC.base_mount
+    assert mount is not None
+    edge = mount.edge
+    assert edge is not None
+    assert edge == SupportEdge(out=Direction.POS_X, at_m=0.0549)
+    x0, x1, y0, y1 = _hull_xy(
+        ROOT / "assets/sentient_static_upper_body/meshes/collision/base_link.stl"
+    )
+    for got, want in zip(
+        (x0, x1, y0, y1),
+        (
+            mount.centre[0] - mount.half_extents[0],
+            mount.centre[0] + mount.half_extents[0],
+            mount.centre[1] - mount.half_extents[1],
+            mount.centre[1] + mount.half_extents[1],
+        ),
+        strict=True,
+    ):
+        assert abs(got - want) < 1e-4
+    assert abs(x1 - edge.at_m) < 1e-4
+    # Facing +x: both tool points sit well in front of the edge with every joint at zero.
+    urdf = (ROOT / "assets/sentient_static_upper_body/sentient_static_upper_body.urdf").read_bytes()
+    kinematics = Kinematics.of(urdf)
+    zero = dict.fromkeys(kinematics.independent, 0.0)
+    for tcp in ("left_gripper_tcp", "right_gripper_tcp"):
+        assert kinematics.pose("base_link", tcp, zero)[3] > edge.at_m + 0.3
+
+
+def test_a_support_edge_round_trips_and_a_footprint_past_it_is_refused() -> None:
+    robot = embodiment_from_definition(STATIC_UPPER_BODY_SPEC)
+    document = json.loads(robot.to_json())
+    assert document["base_mount"]["edge"] == {"out": "pos_x", "at_m": 0.0549}
+    assert Embodiment.from_json(robot.to_json()) == robot
+    document["base_mount"]["edge"] = None
+    with pytest.raises(EmbodimentSchemaError):
+        Embodiment.from_json(json.dumps(document))
+    with pytest.raises(ComponentGraphError, match="past its support's edge"):
+        BaseMount(
+            kind=MountKind.CLAMP_EDGE,
+            frame="base_link",
+            half_extents=(0.06, 0.05),
+            edge=SupportEdge(out=Direction.POS_X, at_m=0.0549),
+        )
+    with pytest.raises(ComponentGraphError, match="past its support's edge"):
+        BaseMount(
+            kind=MountKind.CLAMP_EDGE,
+            frame="base_link",
+            half_extents=(0.05, 0.05),
+            centre=(-0.02, 0.0),
+            edge=SupportEdge(out=Direction.NEG_X, at_m=0.06),
+        )
 
 
 def test_the_arm_bindings_are_the_hardware_profile() -> None:

@@ -13,7 +13,7 @@ from .assemble import (
     part_to_dict,
 )
 from .assets import resolve_asset
-from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
+from .compose import BaseMount, Direction, MountKind, OperatorMount, OperatorSite, SupportEdge
 from .composition import PlacedEmbodiment, compose_embodiments
 from .embodiment import Embodiment, EmbodimentMigration, migrate
 from .errors import (
@@ -83,6 +83,7 @@ __all__ = [
     "CoordinateBounds",
     "CoordinateUnit",
     "DirectDrive",
+    "Direction",
     "Embodiment",
     "EmbodimentError",
     "EmbodimentId",
@@ -106,6 +107,7 @@ __all__ = [
     "Passive",
     "PlacedEmbodiment",
     "RecordedEmbodiment",
+    "SupportEdge",
     "Unbounded",
     "UndocumentedDrive",
     "UnknownEmbodimentError",
