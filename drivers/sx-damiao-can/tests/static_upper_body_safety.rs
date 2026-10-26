@@ -1,12 +1,13 @@
 //! What keeps the static upper body from moving where or how it should not, on the simulated
 //! Damiao bus: each motor's communication timeout, the one-turn window, the resting check at
-//! open, and the governor's slew from where the body rests.
+//! open, the governor's slew from where the body rests, and what a stop and a cleared fault
+//! prove.
 
 use std::time::Duration;
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError};
-use sx_damiao_can::sim::Sim;
+use sx_damiao_can::chain::{COMMUNICATION_LOST, DamiaoChain, DamiaoChainError};
+use sx_damiao_can::sim::{Sim, feedback};
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::can::{CanFrame, FRAME_ALLOWANCE};
 use sx_embodiment_drivers::{ActuatorChain, AxisLimits, Governor, InstanceDrive};
@@ -182,6 +183,11 @@ fn firmware_that_always_answers_state_1_still_proves_a_stop_and_a_silent_motor_d
     chain.command(&rest).expect("a command at rest");
     let report = chain.stop();
     assert!(report.is_proven(), "{report:?}");
+    // Proven only by the answers to the disable: every motor is named as unobserved.
+    let ids: Vec<u16> = axes.iter().map(|motor| motor.axis.binding.bus_id).collect();
+    assert_eq!(report.unobserved, ids);
+    let proven = report.prove().expect("proven");
+    assert!(!proven.observed_disabled());
     assert!(bus.state().motors.values().all(|motor| motor.state == 0));
     // A motor that stops answering leaves the stop unproven and motion refused.
     chain.command(&rest).expect("a command at rest");
@@ -204,4 +210,190 @@ fn firmware_that_always_answers_state_1_still_proves_a_stop_and_a_silent_motor_d
         Err(DamiaoChainError::UnexpectedState { .. })
     ));
     assert!(bus.state().motors.values().all(|motor| motor.state == 0));
+}
+
+/// Every TIMEOUT write frame (0x55 to register 0x09) sent to `id`, by index into the frames.
+fn timeout_writes(bus: &Sim, id: u16) -> Vec<usize> {
+    let id = id.to_le_bytes();
+    bus.state()
+        .frames
+        .iter()
+        .enumerate()
+        .filter(|(_, frame)| frame.id == 0x7FF && frame.data[..4] == [id[0], id[1], 0x55, 0x09])
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Every frame index carrying `command` (`FF..command`) to `id`.
+fn commands_to(bus: &Sim, id: u16, command: u8) -> Vec<usize> {
+    let mut data = [0xFF; 8];
+    data[7] = command;
+    bus.state()
+        .frames
+        .iter()
+        .enumerate()
+        .filter(|(_, frame)| frame.id == u32::from(id) && frame.data == data)
+        .map(|(index, _)| index)
+        .collect()
+}
+
+#[test]
+fn a_motor_power_cycled_while_stopped_has_its_timeout_restored_before_any_enable() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    assert!(chain.stop().is_proven());
+    // The first motor loses power: its RAM TIMEOUT is gone and it reads its flash value, 0.
+    let first = axes[0].axis.binding.bus_id;
+    bus.state()
+        .motors
+        .get_mut(&first)
+        .expect("first")
+        .registers
+        .remove(&0x09);
+    let stopped_at = bus.state().frames.len();
+    chain.command(&rest).expect("a command at rest");
+    assert_eq!(
+        bus.state().motors[&first].registers[&0x09],
+        15_000_u32.to_le_bytes()
+    );
+    // Every motor's TIMEOUT was rewritten after the stop, and before the first enable frame.
+    let first_enable = axes
+        .iter()
+        .filter_map(|motor| {
+            commands_to(&bus, motor.axis.binding.bus_id, 0xFC)
+                .into_iter()
+                .find(|index| *index >= stopped_at)
+        })
+        .min()
+        .expect("an enable");
+    for motor in &axes {
+        assert!(
+            timeout_writes(&bus, motor.axis.binding.bus_id)
+                .iter()
+                .any(|index| (stopped_at..first_enable).contains(index)),
+            "bus_id {} rewritten before the enable",
+            motor.axis.binding.bus_id
+        );
+    }
+}
+
+#[test]
+fn a_motor_that_does_not_confirm_its_timeout_after_a_power_cycle_is_never_enabled() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    assert!(chain.stop().is_proven());
+    let last = axes[axes.len() - 1].axis.binding.bus_id;
+    {
+        let mut state = bus.state();
+        let motor = state.motors.get_mut(&last).expect("last");
+        motor.registers.remove(&0x09);
+        motor.ignored.insert(0x09);
+    }
+    let stopped_at = bus.state().frames.len();
+    assert!(matches!(
+        chain.command(&rest),
+        Err(DamiaoChainError::TimeoutNotConfirmed { bus_id, counts: 15_000 }) if bus_id == last
+    ));
+    // Not one motor was enabled: no enable frame since the stop, every motor still disabled.
+    for motor in &axes {
+        assert!(
+            commands_to(&bus, motor.axis.binding.bus_id, 0xFC)
+                .iter()
+                .all(|index| *index < stopped_at)
+        );
+    }
+    assert!(bus.state().motors.values().all(|motor| motor.state == 0));
+}
+
+#[test]
+fn a_late_answer_to_a_command_is_not_taken_as_the_disable_acknowledgement() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    // The motor's answer to the last command arrives late, then the motor goes silent.
+    let id = axes[3].axis.binding.bus_id;
+    let late = feedback(id, &bus.state().motors[&id]);
+    bus.deliver_late(late);
+    bus.kill(id);
+    let report = chain.stop();
+    assert_eq!(report.unproven, vec![id], "{report:?}");
+    assert!(!report.unobserved.contains(&id));
+    assert!(matches!(
+        chain.command(&rest),
+        Err(DamiaoChainError::StopPending)
+    ));
+}
+
+#[test]
+fn firmware_that_reports_its_state_proves_a_stop_by_observation() {
+    let mut axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    for motor in &mut axes {
+        motor.reports_enable_state = true;
+    }
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus, axes).expect("opens");
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    let proven = chain.stop().prove().expect("proven");
+    assert!(proven.observed_disabled());
+}
+
+#[test]
+fn a_motor_latched_in_communication_lost_is_cleared_once_at_open() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let id = axes[2].axis.binding.bus_id;
+    let bus = Sim::for_axes(&axes);
+    bus.state().motors.get_mut(&id).expect("motor").state = COMMUNICATION_LOST;
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens once cleared");
+    assert_eq!(commands_to(&bus, id, 0xFB).len(), 1, "cleared exactly once");
+    assert!(bus.state().motors.values().all(|motor| motor.state == 0));
+    // No other motor was sent the clear frame.
+    for motor in axes.iter().filter(|motor| motor.axis.binding.bus_id != id) {
+        assert!(commands_to(&bus, motor.axis.binding.bus_id, 0xFB).is_empty());
+    }
+    // The clear is refused while the chain is enabled.
+    let rest = chain.last_observed().expect("observed at open");
+    chain.command(&rest).expect("a command at rest");
+    let sent = bus.sent();
+    assert!(matches!(
+        chain.clear_fault(id),
+        Err(DamiaoChainError::ClearWhileEnabled)
+    ));
+    assert_eq!(bus.sent(), sent, "refused before any frame");
+    assert!(chain.stop().is_proven());
+    chain.clear_fault(id).expect("cleared while disabled");
+}
+
+#[test]
+fn a_fault_that_persists_after_its_clear_still_refuses_the_open() {
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let id = axes[2].axis.binding.bus_id;
+    let bus = Sim::for_axes(&axes);
+    {
+        let mut state = bus.state();
+        let motor = state.motors.get_mut(&id).expect("motor");
+        motor.state = COMMUNICATION_LOST;
+        motor.persistent_fault = true;
+    }
+    assert!(matches!(
+        DamiaoChain::open(bus.clone(), axes.clone()),
+        Err(DamiaoChainError::FaultPersists { bus_id, code }) if bus_id == id && code == COMMUNICATION_LOST
+    ));
+    assert_eq!(commands_to(&bus, id, 0xFB).len(), 1, "cleared at most once");
+    // Any other fault is not cleared at open: an over-current motor refuses it untouched.
+    let bus = Sim::for_axes(&axes);
+    bus.state().motors.get_mut(&id).expect("motor").state = 0xA;
+    assert!(matches!(
+        DamiaoChain::open(bus.clone(), axes),
+        Err(DamiaoChainError::UnexpectedState { bus_id, .. }) if bus_id == id
+    ));
+    assert!(commands_to(&bus, id, 0xFB).is_empty());
 }

@@ -473,8 +473,8 @@ fn run() -> Result<(), String> {
         }
         let report = governor.stop();
         eprintln!(
-            "stopped: unproven {:?} faults {:?}",
-            report.unproven, report.faults
+            "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",
+            report.unproven, report.faults, report.unobserved
         );
         return outcome;
     }
@@ -519,8 +519,8 @@ fn run() -> Result<(), String> {
     }
     let report = governor.stop();
     eprintln!(
-        "stopped: unproven {:?} faults {:?}",
-        report.unproven, report.faults
+        "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",
+        report.unproven, report.faults, report.unobserved
     );
     outcome
 }

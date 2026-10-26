@@ -54,9 +54,12 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   caught.
 - **Communication timeout.** A `DamiaoAxis` with `can_timeout` has the motor's `TIMEOUT`
   register (0x09, 50 µs per count, Damiao's DM-J4340-2EC manual V1.1 pp. 20 and 30) written in
-  RAM at open and confirmed by echo and read-back; never saved to flash. An enabled motor that
+  RAM at open and again before every enable, each time confirmed by echo and read-back, and no
+  motor is enabled until every motor confirmed; never saved to flash. An enabled motor that
   hears no command for that long disables itself and reports fault 0xD until power-cycled or
-  cleared (this crate sends no clear). The static upper body sets 0.75 s, the heartbeat
+  cleared with `FF..FB`. Open sends that clear (`DamiaoChain::clear_fault`, refused while
+  enabled) once to a motor answering 0xD while disabled and still refuses one whose fault
+  persists; it clears no other fault. The static upper body sets 0.75 s, the heartbeat
   of the motor table it was first described with; the B601-DM and humanoid set none, as their sources do.
 - **Gains** are Seeed's (`reBotArm_control_py` `config/rebotarm_dm.yaml`); the 4340Ps' kd of
   8 is declared as 5, which `DM_CAN.py`'s `controlMIT` clamps it to on the wire.
@@ -68,6 +71,10 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   the torso's from the superseded description's motor table), not a qualification either. That driver's 0.25 rad/s speed cap and 0.2 rad tracking bound are not
   this chain's: `sx_embodiment_drivers::Governor` enforces them only when a caller wraps the
   chain in it with those limits.
+- **Stop proof.** A stop drains what is already on the link, then counts only answers to its
+  disable frames. Where firmware does not report its enable state (the static upper body's
+  answers state 1 enabled or not), a fault-free answer proves the stop weakly and the motor is
+  named in `StopReport::unobserved` (`ProvenStop::observed_disabled` is then false).
 - **DM4340 velocity range.** Damiao publishes 10 rad/s (`DM_CAN.py`) and 8 rad/s (its C++ SDK).
   Open reads each motor's registers, accepts either, scales that motor by what it reported,
   and records it in `limits()`.
