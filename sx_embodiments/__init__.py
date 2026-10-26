@@ -4,7 +4,14 @@ Registry lookup, checked assembly and composition return the same complete Embod
 Parts stay owned by their authoring source; composition namespaces instances and frames.
 """
 
-from .assemble import admit_module, admit_part, assemble, composable_parts, part_from_dict, part_to_dict
+from .assemble import (
+    admit_module,
+    admit_part,
+    assemble,
+    composable_parts,
+    part_from_dict,
+    part_to_dict,
+)
 from .assets import resolve_asset
 from .compose import BaseMount, MountKind, OperatorMount, OperatorSite
 from .composition import PlacedEmbodiment, compose_embodiments
@@ -54,6 +61,7 @@ from .recorded import (
     historical_identities,
     read_recorded,
 )
+from .sites import BodySite
 
 __all__ = [
     "ActuationBinding",
@@ -65,6 +73,7 @@ __all__ = [
     "AssetDigestMismatchError",
     "AssetsUnavailableError",
     "BaseMount",
+    "BodySite",
     "Bounds",
     "CameraOptics",
     "CameraOpticsAuthority",

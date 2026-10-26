@@ -143,7 +143,7 @@ A declared space does not establish a simulator, and a qualified direct drive na
 driver only through its bus (see [Drivers](#drivers)); whether a body runs on a given station
 is checked by the execution owner against the exact body and requested interface.
 
-Schema v15 stores one topologically ordered component graph plus nominal rates,
+Schema v16 stores one topologically ordered component graph plus nominal rates,
 content-addressed assets, and independent per-axis observation and actuation facts. Every
 articulated chain (arm, torso, head, leg, lift) is one `ChainSpec`; the `Limb` it serves is
 a fact of its mount, from which its channel kind and capabilities derive, so one design can be
@@ -157,6 +157,21 @@ controller, passively, or remain explicitly undocumented. A qualified direct dri
 fact. Cameras name their product by id in the open registry `sx_embodiments.cameras`, so a new
 camera is a record, not a schema change. State order, camera bindings, capabilities, arm and
 gripper convenience views, and the ID are derived from those facts.
+
+Physical sites are declared on their carrying module as `BodySite(name, component_id, link,
+pose=Pose())`. Their names are open and a body may have any number. `robot.sites` retains the
+sites; `robot.site("left_wrist")` refuses a missing declaration. The pose is the rigid
+`link_from_site` transform in metres and radians. `site.transform(Kinematics.of(robot.urdf_bytes),
+frame, positions)` uses the authoritative joint tree to compute `frame_from_site`. Module builds
+and complete-body composition preserve site names, component ownership and link namespaces.
+
+A site is a physical frame, not evidence of an observed trajectory. Quest ego declares a head;
+UMI declares its actual hand attachment sites; neither fabricates elbows or a chest from camera
+presence. Robot wrist/elbow sites are the explicitly named vendor link origins, not calibrated
+tool centres. G1 has pelvis and ankle sites; a ground footprint is a runtime projection, not a
+rigid offset from its moving pelvis. `sx-actions` owns URR semantic bindings, reference frames,
+missing observations and controller correspondence. Historical documents migrate with no sites;
+reading them does not authorize execution against the newer body's sites.
 
 Controller semantics stay in `sx-actions`; one embodiment can expose several action interfaces
 without changing hardware identity. Runtime status belongs to episodes or sessions, not the
@@ -247,7 +262,7 @@ including the humanoid's head camera through its instance, and holds every decla
 calibratable.
 
 A stored document of any earlier schema is read with `migrate(document)`, which runs the chain
-of pure converters (13 → 14 → 15) and returns one verified identity edge: the id the bytes
+of pure converters (13 → 14 → 15 → 16) and returns one verified identity edge: the id the bytes
 carry and the body they read as today. A converter changes only what its schema changed and
 refuses what it cannot carry (a schema-14 design zero other than 0) rather than dropping it.
 A schema bump snapshots every published body into `sx_embodiments/historical/` in the same

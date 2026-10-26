@@ -1,8 +1,8 @@
 {
   "quest-ego-stereo": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "12f4b3f04e3a5328fc03fa6888a6b040408beb09f720907f19c4b26a7f7ebe5a",
-    "instance": "dd164bf38b51f75a1e2ec1cd5d8de850ed8a48b254976621a838877dd6bc08a4",
+    "embodiment": "112a1f97f1e10a5a649d1ac2c1eb17a3b3085140abef3054d4802a5cb7804439",
+    "instance": "2deba3da7d8854ba112ec000e90a6f955ba94802af33993764b76ee8ee5d3090",
     "tracks": [
       {
         "track": "head",
@@ -162,8 +162,8 @@
   },
   "quest-ego-mono": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "12f4b3f04e3a5328fc03fa6888a6b040408beb09f720907f19c4b26a7f7ebe5a",
-    "instance": "dd164bf38b51f75a1e2ec1cd5d8de850ed8a48b254976621a838877dd6bc08a4",
+    "embodiment": "112a1f97f1e10a5a649d1ac2c1eb17a3b3085140abef3054d4802a5cb7804439",
+    "instance": "2deba3da7d8854ba112ec000e90a6f955ba94802af33993764b76ee8ee5d3090",
     "tracks": [
       {
         "track": "head_left",
@@ -321,8 +321,8 @@
   },
   "sentient-humanoid-upper-body": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc",
-    "instance": "1987eb467c22122515443ab86b43411395c5fe1eba015aef030c930b494c3143",
+    "embodiment": "36a0ef645a3b6881d2126714ec6a556e3942bba8242c59614d2c626de1c0a1b7",
+    "instance": "7af972855ba613bef1eafd1abbb6566a6b2b4497e329abca289f1191e6f5fba7",
     "tracks": [
       {
         "track": "head",
@@ -707,8 +707,8 @@
   },
   "sentient-static-upper-body": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "35e41a6209ee550da7ef857e8fef4f5011a388c68f9bc47834f8ca925a248c6f",
-    "instance": "7d7dd4f7b52e013bc878b0ff6c3849be6e48ae3b84cf8553e7fde06d531d86ee",
+    "embodiment": "a326045ec23cfa928382e157d8c34a6f75a90a80822c8f062ff52820af312c86",
+    "instance": "feb2a2a7bc686a04ec71542ea59ce80514ee971c4ee5442e0c79cc088de02400",
     "tracks": [
       {
         "track": "head",

@@ -31,10 +31,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final, NewType
 
+from sx_contracts import ComponentId
+
 from .assembly import Assembly, Frame, Member, MountJoint, Pose, Subtree, namespaced
 from .assets import PackagedAsset
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError, InterfaceMismatchError, SocketError
+from .sites import BodySite
 
 if TYPE_CHECKING:
     from .mobile_base import MobileBase
@@ -246,6 +249,7 @@ class Module:
     components: tuple[Component | Slot, ...] = ()
     frames: tuple[Frame, ...] = ()
     base: MobileBase | None = None
+    sites: tuple[BodySite, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.module_id.strip() or not self.label.strip():
@@ -258,6 +262,11 @@ class Module:
         if len(set(slotted)) != len(slotted) or not set(slotted) <= fitted:
             raise SocketError(str(self.module_id), "a slot names each fitted socket at most once")
         instances = {entry.instance for entry in self.components if not isinstance(entry, Slot)}
+        if len({site.name for site in self.sites}) != len(self.sites):
+            raise CompositionError(str(self.module_id), "body site names must be unique")
+        for site in self.sites:
+            if site.component_id not in instances:
+                raise CompositionError(str(self.module_id), f"site {site.name!r} has no component")
         for socket in self.sockets:
             if socket.carrier is not None and socket.carrier not in instances:
                 raise SocketError(
@@ -495,6 +504,27 @@ class Build:
                 )
         return self.assembly().urdf()
 
+    def sites(self) -> tuple[BodySite, ...]:
+        """All retained physical sites, with the same namespaces and cuts as components."""
+        out: list[BodySite] = []
+        modules = {entry.name: entry.module for entry in (*self.placed, *self.mates)}
+        prefixes = {
+            entry.name: entry.name + self.separator if entry.namespaced and self.root else ""
+            for entry in (*self.placed, *self.mates)
+        }
+        for entry in self.placed:
+            out.extend(_sites(entry.module, self._opened(entry.name), prefixes[entry.name], None))
+        for mate in self.mates:
+            socket = modules[mate.host].socket(mate.socket)
+            cut = mate.module.description
+            seat = (
+                (cut.mount_link, prefixes[mate.host] + socket.link, socket.pose)
+                if not mate.namespaced and isinstance(cut, Subtree) and cut.mount_link is not None
+                else None
+            )
+            out.extend(_sites(mate.module, self._opened(mate.name), prefixes[mate.name], seat))
+        return tuple(out)
+
     def components(self) -> tuple[Component, ...]:
         """Every module's components in build order, namespaced, each riding on its carrier.
 
@@ -582,6 +612,38 @@ def _fitted(
     assert isinstance(cut, Subtree) and cut.mount_link is not None
     rides = host if socket.carrier is None else prefix + socket.carrier
     return _carried(fitted, frozenset(), prefix, rides, (cut.mount_link, prefix + socket.link))
+
+
+def _sites(
+    module: Module, opened: frozenset[str], prefix: str, seat: tuple[str, str, Pose] | None
+) -> tuple[BodySite, ...]:
+    own = tuple(
+        replace(
+            site,
+            name=prefix + site.name,
+            component_id=ComponentId(prefix + site.component_id),
+            link=seat[1] if seat is not None and site.link == seat[0] else prefix + site.link,
+            pose=seat[2].compose(site.pose)
+            if seat is not None and site.link == seat[0]
+            else site.pose,
+        )
+        for site in module.sites
+    )
+    fitted: list[BodySite] = []
+    for socket in module.sockets:
+        if socket.fitted is None or socket.name in opened:
+            continue
+        cut = socket.fitted.description
+        assert isinstance(cut, Subtree) and cut.mount_link is not None
+        fitted.extend(
+            _sites(
+                socket.fitted,
+                frozenset(),
+                prefix,
+                (cut.mount_link, prefix + socket.link, socket.pose),
+            )
+        )
+    return (*own, *fitted)
 
 
 def _frames(module: Module, opened: frozenset[str], prefix: str) -> tuple[Frame, ...]:

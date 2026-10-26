@@ -1,8 +1,8 @@
 {
   "humanoid-head-color": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc",
-    "instance": "d2177cb712284bea668a69509e706136d805d1318bb75343aaf1a19b9d8289f6",
+    "embodiment": "36a0ef645a3b6881d2126714ec6a556e3942bba8242c59614d2c626de1c0a1b7",
+    "instance": "f8cffff1377c24941255a6387d9dee90def539aa70d11dcad37067404840bc36",
     "tracks": [
       {
         "track": "head",
@@ -387,8 +387,8 @@
   },
   "humanoid-head-infrared": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "9ea3203b68bb76f452b217e665a3348cb4b1593a10263c108ed212b8ae8a256b",
-    "instance": "4577fbd92927187e22d5d0d8c878f2470fbb786df056f15a3d0481224f2caa61",
+    "embodiment": "4d6eb0ce9c15dbb44421159adaf4b47f0b161d611b31cfdf7bc2bd31e264c331",
+    "instance": "540a61a1699255b6b5c22482016cd9eaa9a4c66515d1e25404cdeb8d3a9cd998",
     "tracks": [
       {
         "track": "head",

@@ -39,6 +39,7 @@ from .layout import Bounds, UndocumentedDrive
 from .mechanical import MECHANICAL_INTERFACES, InterfaceId, Module, ModuleId, Socket, carrier
 from .mobile_base import DeckSocket, Drive, DriveKind, MobileBase
 from .parts import CameraSpec, ChainSpec, ForceTorqueSpec, GripperSpec, Limb, MobileBaseSpec
+from .sites import BodySite
 
 ComposablePart = ChainSpec | GripperSpec | MobileBaseSpec | CameraSpec | ForceTorqueSpec
 
@@ -206,6 +207,7 @@ def admit_module(
     sockets: tuple[Socket, ...],
     part: Mapping[str, object] | None = None,
     mesh_paths: frozenset[str] = frozenset(),
+    sites: tuple[BodySite, ...] = (),
 ) -> Module:
     """Admit one authored or imported module (a plate, a bracket, a gripper, an arm), or refuse.
 
@@ -234,6 +236,9 @@ def admit_module(
             raise SocketError(
                 module_id, f"{socket.name!r} sits on {socket.link!r}, which the description lacks"
             )
+    for site in sites:
+        if site.link not in links:
+            raise EmbodimentSchemaError(f"{module_id}: site {site.name!r} names an absent link")
     # The composition checks read every collision shape; one they cannot is refused here.
     validate_collision_geometry(module_id, root)
     movable = _movable_joints(root)
@@ -288,6 +293,7 @@ def admit_module(
             replace(socket, carrier=carrier(socket.link, parents, owners)) for socket in sockets
         ),
         components=components,
+        sites=sites,
     )
 
 
@@ -313,7 +319,7 @@ def admit_base(base: MobileBase, *, urdf: bytes) -> Module:
     return module
 
 
-MODULE_SCHEMA = "sx.authored-module/v1"
+MODULE_SCHEMA = "sx.authored-module/v2"
 
 
 def module_to_dict(module: Module) -> dict[str, object]:
@@ -331,6 +337,7 @@ def module_to_dict(module: Module) -> dict[str, object]:
             "sockets": [],
             "part": None,
             "base": _base_to_dict(module.base),
+            "sites": [site.to_dict() for site in module.sites],
         }
     components = [entry for entry in module.components if isinstance(entry, Component)]
     part = components[0].part if components else None
@@ -353,6 +360,7 @@ def module_to_dict(module: Module) -> dict[str, object]:
         ],
         "part": None if part is None else part_to_dict(part),
         "base": None,
+        "sites": [site.to_dict() for site in module.sites],
     }
 
 
@@ -448,22 +456,35 @@ def module_from_dict(
     document: Mapping[str, object], *, urdf: bytes, mesh_paths: frozenset[str] = frozenset()
 ) -> Module:
     """Parse and admit an authored module's document against its exact description."""
+    if document.get("schema") == "sx.authored-module/v1":
+        # v1's authored documents predate physical sites and declare none.
+        old = decode.exactly(
+            document,
+            {"schema", "module_id", "label", "plug", "sockets", "part", "base"},
+            where="module",
+            error=EmbodimentSchemaError,
+        )
+        document = {**old, "schema": MODULE_SCHEMA, "sites": []}
     entry = decode.exactly(
         document,
-        {"schema", "module_id", "label", "plug", "sockets", "part", "base"},
+        {"schema", "module_id", "label", "plug", "sockets", "part", "base", "sites"},
         where="module",
         error=EmbodimentSchemaError,
     )
     if decode.text(entry, "schema") != MODULE_SCHEMA:
         raise EmbodimentSchemaError(f"module: schema must be {MODULE_SCHEMA!r}")
     module_id = decode.text(entry, "module_id")
+    sites = tuple(BodySite.from_dict(raw) for raw in decode.documents(entry, "sites"))
     if entry.get("base") is not None:
         if entry.get("plug") is not None or entry.get("part") is not None:
             raise EmbodimentSchemaError(f"{module_id}: a base stands on the floor and has no part")
         base = _base_from_dict(
             module_id, decode.text(entry, "label"), decode.mapping(entry, "base")
         )
-        return admit_base(base, urdf=urdf)
+        module = replace(admit_base(base, urdf=urdf), sites=sites)
+        if any(site.link not in module.links() for site in sites):
+            raise EmbodimentSchemaError(f"{module_id}: a body site names an absent link")
+        return module
     plug = decode.optional_text(entry, "plug")
     sockets: list[Socket] = []
     for raw in decode.documents(entry, "sockets"):
@@ -491,6 +512,7 @@ def module_from_dict(
         sockets=tuple(sockets),
         part=None if part is None else decode.mapping(entry, "part"),
         mesh_paths=mesh_paths,
+        sites=sites,
     )
 
 
@@ -609,6 +631,7 @@ def assemble(
         urdf,
         components=embodiment.components,
         operator_mounts=embodiment.operator_mounts,
+        sites=embodiment.sites,
     )
     _validate_joint_parity(embodiment, urdf)
     return embodiment

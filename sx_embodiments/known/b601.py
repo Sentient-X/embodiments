@@ -151,6 +151,8 @@ Further deliberate divergences:
 import dataclasses
 from typing import Final
 
+from sx_contracts import ComponentId
+
 from ..assembly import INSPECTION_NOTE, Frame, MountJoint, Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
@@ -170,6 +172,7 @@ from ..parts import (
     Limb,
     MimicJoint,
 )
+from ..sites import BodySite
 from ._authoring import bounded_layout
 from .sources import capture_source
 
@@ -302,6 +305,10 @@ B601_DM_MODULE: Final = Module(
     label="Seeed reBot B601-DM arm",
     description=B601_DM_URDF,
     plug=InterfaceId("seeed-b601-base"),
+    sites=(
+        BodySite("wrist", ComponentId("arm"), "link6"),
+        BodySite("elbow", ComponentId("arm"), "link3"),
+    ),
     components=(body_component("arm", B601_ARM, RootMount("base_link"), limb=Limb.ARM),),
     sockets=(
         Socket(

@@ -28,6 +28,10 @@ YUBI_SCHEMA_14 = {
     EmbodimentId("a53de59052502c6ac7c09e71d9ff61ec0c001fa3fbb954d1c3d388d609cfd932"),
 }
 
+YUBI_SCHEMA_15 = {
+    EmbodimentId("ccb5ffd83b5cd92236888361f380f8c138e3b31f91ee1cc1f79e914953a15490"),
+}
+
 
 def _historical_document(identity: EmbodimentId) -> dict[str, object]:
     path = resources.files("sx_embodiments") / "historical" / f"yubi-{identity}.json"
@@ -35,8 +39,11 @@ def _historical_document(identity: EmbodimentId) -> dict[str, object]:
 
 
 def test_historical_yubi_identities_are_the_published_earlier_packages() -> None:
-    assert historical_identities(EmbodimentName("yubi")) == YUBI_SCHEMA_13 | YUBI_SCHEMA_14
-    assert len(historical_identities(EmbodimentName("so101"))) == 1
+    assert (
+        historical_identities(EmbodimentName("yubi"))
+        == YUBI_SCHEMA_13 | YUBI_SCHEMA_14 | YUBI_SCHEMA_15
+    )
+    assert len(historical_identities(EmbodimentName("so101"))) == 2
     assert historical_identities(EmbodimentName("yubi")).isdisjoint(
         {development_embodiments["yubi"].id}
     )

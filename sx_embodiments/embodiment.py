@@ -46,6 +46,7 @@ from .compose import (
     validate_operator_mounts,
 )
 from .curves import Curve1D, Knot
+from .description import joint_names as description_joint_names
 from .errors import (
     AssetDigestMismatchError,
     EmbodimentSchemaError,
@@ -53,6 +54,7 @@ from .errors import (
     MissingUrdfError,
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
+from .kinematics import JointType, Kinematics
 from .layout import (
     UNDOCUMENTED_DRIVE_REASON,
     UNDOCUMENTED_OBSERVATION_REASON,
@@ -99,8 +101,9 @@ from .parts import (
     PhysicalSpec,
     SensorModel,
 )
+from .sites import BodySite
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +112,7 @@ class Embodiment:
 
     The component graph is the sole morphology. State order, roles, camera bindings,
     capabilities, and single-arm projections are derived from it. Friendly names are
-    catalog aliases; ``id`` is the digest of the complete schema-14 document.
+    catalog aliases; ``id`` is the digest of the complete current-schema document.
 
     Constructed through the registry, validated assembly, composition, or the checked
     document codec. Derived state, camera and capability views share these same facts.
@@ -124,6 +127,7 @@ class Embodiment:
     rates: ControlRates | None = None
     base_mount: BaseMount | None = None
     operator_mounts: tuple[OperatorMount, ...] = ()
+    sites: tuple[BodySite, ...] = ()
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -170,6 +174,21 @@ class Embodiment:
             raise MissingUrdfError(str(self.name), len(urdfs))
         validate_components(str(self.name), self.kind, self.components)
         validate_operator_mounts(str(self.name), self.kind, self.operator_mounts)
+        if len({site.name for site in self.sites}) != len(self.sites):
+            raise EmbodimentSchemaError("body site names must be unique")
+        components = {component.component_id for component in self.components}
+        for site in self.sites:
+            if site.component_id not in components:
+                raise EmbodimentSchemaError(
+                    f"site {site.name!r} names absent component {site.component_id!r}"
+                )
+
+    def site(self, name: str) -> BodySite:
+        """The explicitly declared physical site; missing sites are never inferred."""
+        for site in self.sites:
+            if site.name == name:
+                return site
+        raise EmbodimentSchemaError(f"{self.name}: no declared body site {name!r}")
 
     @property
     def id(self) -> EmbodimentId:
@@ -219,6 +238,7 @@ class Embodiment:
             path.read_bytes(),
             components=self.components,
             operator_mounts=self.operator_mounts,
+            sites=self.sites,
         )
         return path
 
@@ -304,6 +324,7 @@ class Embodiment:
             urdf,
             components=self.components,
             operator_mounts=self.operator_mounts,
+            sites=self.sites,
         )
         return dataclasses.replace(self, assets=assets)
 
@@ -334,6 +355,7 @@ class Embodiment:
             "base_mount": _base_mount_to_dict(self.base_mount),
             "operator_mounts": [_operator_mount_to_dict(mount) for mount in self.operator_mounts],
             "assets": [_provenanced_asset_to_dict(asset) for asset in self.assets],
+            "sites": [site.to_dict() for site in self.sites],
         }
 
     @classmethod
@@ -352,6 +374,7 @@ class Embodiment:
                 "base_mount",
                 "operator_mounts",
                 "assets",
+                "sites",
             },
             where="embodiment",
             error=EmbodimentSchemaError,
@@ -372,6 +395,7 @@ class Embodiment:
                 base_mount=_parse_base_mount(entry),
                 operator_mounts=_parse_operator_mounts(entry),
                 assets=_parse_assets(entry),
+                sites=tuple(BodySite.from_dict(site) for site in decode.documents(entry, "sites")),
             )
         except EmbodimentSchemaError:
             raise
@@ -431,15 +455,16 @@ def migrate(document: Mapping[str, object]) -> EmbodimentMigration:
     the edge it returns is the identity the stored bytes really carry.
     """
 
-    source = decode.exactly(
-        document, set(_TOP_LEVEL), where="embodiment", error=EmbodimentSchemaError
-    )
-    version = decode.integer(source, "schema_version")
+    entry = decode.document(document, where="embodiment", error=EmbodimentSchemaError)
+    version = decode.integer(entry, "schema_version")
     steps = _STEPS.get(version)
     if steps is None:
         raise EmbodimentSchemaError(
             f"no converter from embodiment schema_version {version!r} to {SCHEMA_VERSION}"
         )
+    source = decode.exactly(
+        entry, set(_TOP_LEVEL), where="embodiment", error=EmbodimentSchemaError
+    )
     source_id = EmbodimentId(decode.text(source, "id"))
     content = {key: value for key, value in document.items() if key != "id"}
     try:
@@ -552,9 +577,17 @@ def _v14_to_v15(document: dict[str, object]) -> dict[str, object]:
     return document
 
 
+def _v15_to_v16(document: dict[str, object]) -> dict[str, object]:
+    # Earlier recordings declare no sites; anatomical or sensor facts cannot be invented.
+    document["sites"] = []
+    document["schema_version"] = 16
+    return document
+
+
 _STEPS: Final = {
-    13: (_v13_to_v14, _v14_to_v15),
-    14: (_v14_to_v15,),
+    13: (_v13_to_v14, _v14_to_v15, _v15_to_v16),
+    14: (_v14_to_v15, _v15_to_v16),
+    15: (_v15_to_v16,),
 }
 
 
@@ -1227,6 +1260,7 @@ def embodiment_from_definition(definition: EmbodimentDefinition) -> Embodiment:
         rates=definition.rates,
         base_mount=definition.base_mount,
         operator_mounts=definition.operator_mounts,
+        sites=definition.build.sites(),
     )
 
 
@@ -1254,6 +1288,7 @@ def _validate_urdf(
     *,
     components: tuple[Component, ...],
     operator_mounts: tuple[OperatorMount, ...],
+    sites: tuple[BodySite, ...],
 ) -> None:
     urdfs = tuple(
         asset
@@ -1275,6 +1310,35 @@ def _validate_urdf(
     if root.tag != "robot" or not root.attrib.get("name", "").strip():
         raise EmbodimentSchemaError(f"{name}: authoritative URDF root must be a named <robot>")
     links = {link.get("name"): link for link in root.iter("link") if link.get("name")}
+    missing_sites = {site.link for site in sites} - links.keys()
+    if missing_sites:
+        raise EmbodimentSchemaError(
+            f"{name}: body site links are absent from the authoritative URDF: "
+            f"{', '.join(sorted(missing_sites))}"
+        )
+    if sites:
+        tree = Kinematics.of(urdf)
+        native = state_space(str(name), components)
+        owners = {
+            joint: coordinate.instance
+            for joint, coordinate in zip(
+                description_joint_names(components, native, urdf), native.coordinates, strict=True
+            )
+        }
+        mounts = {component.component_id: component.mount.frame for component in components}
+        for site in sites:
+            up, down = tree.path(mounts[site.component_id], site.link)
+            for joint in (*up, *down):
+                if joint.type is JointType.FIXED:
+                    continue
+                leader = joint
+                while leader.mimic is not None:
+                    leader = tree.joints[leader.mimic.leader]
+                if owners.get(leader.name) != site.component_id:
+                    raise EmbodimentSchemaError(
+                        f"{name}: site {site.name!r} crosses joint {joint.name!r} "
+                        f"not owned by component {site.component_id!r}"
+                    )
     camera_frames = {
         component.mount.frame for component in components if isinstance(component.part, CameraSpec)
     }

@@ -32,6 +32,7 @@ from typing import cast
 from .assets import PackagedAsset
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError
+from .kinematics import compose, from_xyz_rpy
 
 #: The note the registry's inspection layouts carry in their committed bytes.
 INSPECTION_NOTE = (
@@ -67,6 +68,17 @@ class Pose:
             for vector in (self.xyz, self.rpy)
         ):
             raise CompositionError("pose", "xyz and rpy must each contain three finite values")
+
+    def compose(self, child: Pose) -> Pose:
+        """Place a child pose through this nominal parent pose (parent_from_child)."""
+        matrix = compose(from_xyz_rpy(self.xyz, self.rpy), from_xyz_rpy(child.xyz, child.rpy))
+        horizontal = math.hypot(matrix[0], matrix[4])
+        pitch = math.atan2(-matrix[8], horizontal)
+        if horizontal > 1e-12:
+            roll, yaw = math.atan2(matrix[9], matrix[10]), math.atan2(matrix[4], matrix[0])
+        else:
+            roll, yaw = 0.0, math.atan2(-matrix[1], matrix[5])
+        return Pose((matrix[3], matrix[7], matrix[11]), (roll, pitch, yaw))
 
     def origin(self) -> dict[str, str]:
         return {
