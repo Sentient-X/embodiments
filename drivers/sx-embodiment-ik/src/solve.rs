@@ -553,7 +553,7 @@ impl Ik {
                 return Err(IkError::Target(limb.name.clone()));
             }
         }
-        let deadline = Instant::now() + self.settings.deadline;
+        let deadline = deadline_after(self.settings.deadline);
         if !self.anchored {
             self.anchor.copy_from_slice(q);
             self.anchored = true;
@@ -572,7 +572,8 @@ impl Ik {
         self.collision_rows(dt);
         let mut solve = self.keep_feasible(false);
         let mut iterations = self.solve_qp(dt, deadline);
-        if iterations.is_none() && self.work.used > 0 && Instant::now() < deadline {
+        if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
+        {
             solve = self.keep_feasible(true);
             iterations = self.solve_qp(dt, deadline);
         }
@@ -865,7 +866,7 @@ impl Ik {
     /// The QP sees `dq` in units of each axis's one-tick speed step (its box is then about
     /// [-1, 1]), unit-norm collision rows, and a cost scaled to a unit diagonal: the same
     /// problem, conditioned for an interior-point method whose data is otherwise 1e-4 m.
-    fn solve_qp(&mut self, dt: f64, deadline: Instant) -> Option<u32> {
+    fn solve_qp(&mut self, dt: f64, deadline: Option<Instant>) -> Option<u32> {
         let n = self.body.solved.len();
         let w = &mut self.work;
         let qp = &mut self.qp;
@@ -907,9 +908,7 @@ impl Ik {
             }
             qp.rhs[slot] = w.rhs[slot] * scale;
         }
-        let iterations = qp
-            .solve(self.settings.max_iterations, Some(deadline))
-            .ok()?;
+        let iterations = qp.solve(self.settings.max_iterations, deadline).ok()?;
         for j in 0..n {
             w.answer[j] = qp.x[j] * w.unit[j];
         }
@@ -1182,5 +1181,17 @@ fn clamp_norm(v: V3, most: f64) -> V3 {
         scale(v, most / length)
     } else {
         v
+    }
+}
+
+/// When this tick's QP must stop: `budget` from now. A browser's WASM has no monotonic clock
+/// (`Instant::now` panics on `wasm32-unknown-unknown`), so there the iteration bound
+/// ([`Settings::max_iterations`]) alone ends the solve; the headset's ghost is not the
+/// real-time authority, the station is.
+fn deadline_after(budget: Duration) -> Option<Instant> {
+    if cfg!(all(target_arch = "wasm32", target_os = "unknown")) {
+        None
+    } else {
+        Some(Instant::now() + budget)
     }
 }
