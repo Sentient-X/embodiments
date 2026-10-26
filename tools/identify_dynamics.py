@@ -24,7 +24,7 @@ import json
 import math
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,6 +55,7 @@ from sx_embodiments.calibration import (  # noqa: E402
     LinkInertia,
     Measurement,
     UnitSerial,
+    calibration_from_dict,
     calibration_id,
     calibration_to_dict,
 )
@@ -107,7 +108,11 @@ ACCEPT_SHARE = 0.03
 
 
 def collision_checker(
-    urdf: bytes, tree: RigidBodyTree, margin: float = TABLE_MARGIN
+    urdf: bytes,
+    tree: RigidBodyTree,
+    margin: float = TABLE_MARGIN,
+    table_edge: float | None = None,
+    resting: Mapping[str, float] | None = None,
 ) -> Callable[[Mapping[str, float]], bool]:
     """A conservative self- and table-collision check: MuJoCo's convex hulls of the collision
     meshes, grown by ``TABLE_MARGIN``, and the table top as the plane z = 0 of the base. Pairs
@@ -138,7 +143,17 @@ def collision_checker(
         angle="radian",
     )
     spec = mujoco.MjSpec.from_string(ET.tostring(root).decode())
-    spec.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[3, 3, 0.1], name="table")
+    if table_edge is None:
+        spec.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[3, 3, 0.1], name="table")
+    else:
+        # The table top behind its edge only: the body is clamped at the edge facing out, so
+        # hands hanging in front of it may go below the top.
+        spec.worldbody.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=[1.0, 1.5, 0.05],
+            pos=[table_edge - 1.0, 0.0, -0.05],
+            name="table",
+        )
     model = spec.compile()
     model.geom_margin[:] = margin
     data = mujoco.MjData(model)
@@ -157,6 +172,11 @@ def collision_checker(
 
     data.qpos[:] = 0.0
     mounted = touching()
+    if resting is not None:
+        # Where the body physically rests is not a collision, whatever the hulls say: the
+        # hulls only overstate the links.
+        data.qpos[:] = tree.vector(resting)[order]
+        mounted |= touching()
 
     def admissible(pose: Mapping[str, float]) -> bool:
         data.qpos[:] = tree.vector(pose)[order]
@@ -336,6 +356,77 @@ def make_sweep_plan(urdf: bytes, seed: int = 3, candidates: int = 120) -> dict[s
         "breakaway_rate_rad_s": BREAKAWAY_RATE,
         "breakaway_travel_rad": BREAKAWAY_TRAVEL,
         "sweeps": sweeps,
+    }
+
+
+#: Where the arms hang when unpowered, as the read-only check found them on 2026-10-26: the
+#: gravity plan starts and returns there, and checks every straight path from it.
+HANG = {
+    "left_shoulder_pitch_joint": -0.20,
+    "left_shoulder_roll_joint": -0.08,
+    "left_upper_arm_yaw_joint": -0.33,
+    "left_elbow_pitch_joint": -1.18,
+    "left_forearm_yaw_joint": -2.62,
+    "left_wrist_pitch_joint": -0.34,
+    "left_wrist_roll_joint": 0.0,
+    "right_shoulder_pitch_joint": 0.10,
+    "right_shoulder_roll_joint": 0.30,
+    "right_upper_arm_yaw_joint": 0.41,
+    "right_elbow_pitch_joint": 1.30,
+    "right_forearm_yaw_joint": -0.12,
+    "right_wrist_pitch_joint": -0.35,
+    "right_wrist_roll_joint": 0.20,
+}
+#: How far the table reaches in front of the base origin, m. The arms hang with their forearms
+#: below the table top from x = 0 forward (read-only check, 2026-10-26), so the edge is behind
+#: the base origin.
+TABLE_EDGE = -0.05
+GRAVITY_REACH = 0.7  # rad either side of hanging a gravity pose may go
+#: Clearance for gravity poses, m: smaller than the sweeps', since the poses start from where
+#: the arms physically rest, which the hulls already overlap.
+GRAVITY_CLEARANCE = 0.02
+
+
+def make_gravity_plan(urdf: bytes, side: str, poses: int = 20) -> dict[str, object]:
+    """Held poses for one arm's gravity, every joint of it: inside a box of ``GRAVITY_REACH``
+    about the hanging pose (so no pose needs the forearm lifted to horizontal), clear of the
+    body and of the table behind its edge by ``SWEEP_CLEARANCE`` along the straight path from
+    hanging, chosen greedily for the conditioning of gravity's regressor. The other arm hangs."""
+    tree = RigidBodyTree.of(urdf)
+    hang = {**dict.fromkeys(tree.axes, 0.0), **HANG}
+    admissible = collision_checker(
+        urdf, tree, GRAVITY_CLEARANCE, table_edge=TABLE_EDGE, resting=hang
+    )
+    arm = [j for j in ARMS[side] if j not in NOT_SWEPT]
+
+    def clear_from_hanging(pose: Mapping[str, float]) -> bool:
+        return all(
+            admissible({k: hang[k] + s * (pose[k] - hang[k]) for k in hang})
+            for s in np.linspace(0.0, 1.0, 12)
+        )
+
+    if not admissible(hang):
+        raise SystemExit("the hanging pose itself is not clear; check TABLE_EDGE")
+    # Inside one turn too: a Damiao joint is commanded only within its single-turn window.
+    window = math.pi - MARGIN
+    box = {
+        j: (max(hang[j] - GRAVITY_REACH, -window), min(hang[j] + GRAVITY_REACH, window))
+        for j in arm
+    }
+    chosen = hold_poses(tree, arm, hang, poses, clear_from_hanging, seed=17, margin=MARGIN, box=box)
+    return {
+        "schema": PLAN_SCHEMA,
+        "description_sha256": hashlib.sha256(urdf).hexdigest(),
+        "speed_rad_s": SPEED,
+        "acceleration_rad_s2": ACCELERATION,
+        "holds": {
+            "approach_rad": APPROACH,
+            "settle_s": SETTLE,
+            "record_s": RECORD,
+            "via": {j: hang[j] for j in [*ARMS["left"], *ARMS["right"]]},
+            "poses": [{j: round(pose[j], 4) for j in arm} for pose in chosen],
+        },
+        "excitations": [],
     }
 
 
@@ -650,6 +741,18 @@ def main() -> None:
     fitting.add_argument("--excitation", type=Path, action="append", default=[])
     fitting.add_argument("--unit", action="append", default=[], help="a fitted motor's serial")
     fitting.add_argument("--out", type=Path, required=True)
+    fitting.add_argument(
+        "--friction",
+        type=Path,
+        action="append",
+        default=[],
+        help="a fit-friction calibration whose joint friction the result keeps",
+    )
+    gravity = commands.add_parser(
+        "gravity-plan", help="write one arm's held poses for gravity, from hanging"
+    )
+    gravity.add_argument("side", choices=("left", "right"))
+    gravity.add_argument("--out", type=Path, required=True)
     sweeping = commands.add_parser("sweep-plan", help="write the in-place friction sweep plan")
     sweeping.add_argument("--out", type=Path, default=SWEEP_PLAN)
     friction = commands.add_parser("fit-friction", help="fit sweeps into joint friction")
@@ -664,6 +767,11 @@ def main() -> None:
     friction.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     urdf = URDF.read_bytes()
+    if args.command == "gravity-plan":
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(make_gravity_plan(urdf, args.side), indent=1) + "\n")
+        print(f"wrote {args.out}")
+        return
     if args.command == "sweep-plan":
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(make_sweep_plan(urdf), indent=1) + "\n")
@@ -693,6 +801,19 @@ def main() -> None:
         tuple(UnitSerial(unit) for unit in args.unit),
         datetime.now(UTC),
     )
+    # Held poses do not see friction; the sweeps' fits do, and win for their joints.
+    swept: dict[str, JointFriction] = {}
+    for path in args.friction:
+        document = calibration_from_dict(json.loads(path.read_text()))
+        if not isinstance(document, DynamicsCalibration):
+            raise SystemExit(f"{path} is not a dynamics calibration")
+        swept.update({item.joint: item for item in document.joints})
+    if swept:
+        kept = {item.joint: item for item in calibration.joints}
+        kept.update(swept)
+        calibration = replace(
+            calibration, joints=tuple(sorted(kept.values(), key=lambda item: item.joint))
+        )
     args.out.write_text(json.dumps(calibration_to_dict(calibration), indent=1) + "\n")
     print(f"wrote {args.out}: calibration {calibration_id(calibration)}")
 
