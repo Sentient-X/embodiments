@@ -312,7 +312,17 @@ pub struct Tree {
     root: usize,
     /// Parent before child.
     joints: Vec<TreeJoint>,
-    independent: Vec<String>,
+    independent: Vec<Axis>,
+}
+
+/// One joint whose position places the tree: moving, and mimicking none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Axis {
+    pub name: String,
+    /// Revolute, continuous or prismatic.
+    pub kind: JointType,
+    /// The description's `<limit lower upper>` (radians or metres); `None` for continuous.
+    pub limits: Option<[f64; 2]>,
 }
 
 fn attribute_floats<const N: usize>(
@@ -392,6 +402,7 @@ struct RawJoint {
     origin: Transform,
     axis: [f64; 3],
     mimic: Option<(String, f64, f64)>,
+    limits: Option<[f64; 2]>,
 }
 
 impl RawJoint {
@@ -464,6 +475,13 @@ impl RawJoint {
                 [1.0, 0.0, 0.0]
             },
             mimic,
+            limits: match (kind, child_of(element, "limit")) {
+                (Some(JointType::Revolute | JointType::Prismatic), limit) => Some([
+                    limit.map_or(Ok(0.0), |l| number(l, "lower", 0.0))?,
+                    limit.map_or(Ok(0.0), |l| number(l, "upper", 0.0))?,
+                ]),
+                _ => None,
+            },
         })
     }
 
@@ -569,7 +587,11 @@ impl Tree {
         let independent = raw
             .iter()
             .filter(|j| j.kind.is_some_and(|k| k != JointType::Fixed) && j.mimic.is_none())
-            .map(|j| j.name.clone())
+            .map(|j| Axis {
+                name: j.name.clone(),
+                kind: j.kind.unwrap_or(JointType::Fixed),
+                limits: j.limits,
+            })
             .collect();
         let joints = order
             .iter()
@@ -596,9 +618,10 @@ impl Tree {
     }
 
     /// The joints whose positions place the tree: every moving joint that mimics none, in
-    /// description order.
+    /// description order, with its kind and limits. [`Tree::link_poses`] asks for exactly
+    /// these, and refuses a missing one.
     #[must_use]
-    pub fn independent(&self) -> &[String] {
+    pub fn joints(&self) -> &[Axis] {
         &self.independent
     }
 
@@ -789,7 +812,7 @@ mod tests {
             for sample in &samples[key] {
                 let mut joints: Vec<&String> = sample.positions.keys().collect();
                 joints.sort();
-                let mut independent: Vec<&String> = tree.independent().iter().collect();
+                let mut independent: Vec<&String> = tree.joints().iter().map(|a| &a.name).collect();
                 independent.sort();
                 assert_eq!(joints, independent, "{key}");
                 let poses = tree
@@ -809,9 +832,17 @@ mod tests {
     fn yubi_fingers_follow_the_one_encoder_joint() {
         let tree = Tree::parse(YUBI).expect("tree");
         assert_eq!(
-            tree.independent(),
+            tree.joints()
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>(),
             ["left_left_finger", "right_left_finger"]
         );
+        let jaw = &tree.joints()[0];
+        assert_eq!(jaw.kind, JointType::Revolute);
+        let [lower, upper] = jaw.limits.expect("revolute limits");
+        assert!(lower < upper);
+
         let at = |q: f64| tree.link_poses(|_| Some(q)).expect("poses");
         let (open, shut) = (at(0.3), at(0.0));
         let moved = |link: &str| {
@@ -843,7 +874,9 @@ mod tests {
         </robot>"#;
         let tree = Tree::parse(urdf).expect("tree");
         assert_eq!(tree.root(), "a");
-        assert_eq!(tree.independent(), ["lead"]);
+        assert_eq!(tree.joints()[0].name, "lead");
+        assert_eq!(tree.joints()[0].kind, JointType::Prismatic);
+        assert_eq!(tree.joints()[0].limits, Some([0.0, 0.0]));
         let poses = tree
             .link_poses(|j| (j == "lead").then_some(1.0))
             .expect("poses");
