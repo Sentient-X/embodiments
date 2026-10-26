@@ -397,10 +397,11 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
 #: slews these joints at up to 3 rad/s (the owner's bench speed, 2026-10-26), below this, so the
 #: governor binds and the servo keeps up, a finger's RANGE_0_100 map asking its servo for up to
 #: 1.15 joint rad/s each. The bring-up's 0.25 rad/s made the neck too slow to follow a head.
-#: It is also how fast a servo resting outside its calibrated limits is pulled in by its own
-#: firmware when torque comes on, which no governor bounds (the camera tilt was probed 1.5 rad
-#: outside: about 0.5 s). Both rest on the Goal_Speed unit, 0.732 rpm per step, which is still
-#: unverified on the servo (sx-feetech-serial's README).
+#: 4 rad/s is about 85 % of the STS3215's unloaded top speed. A servo resting outside its
+#: calibrated limits is pulled in by its own firmware when torque comes on, which no governor
+#: bounds, so the driver enables it at its bring-up approach (0.25 rad/s) and raises it to this
+#: one only once it reads inside. Goal_Speed 2607 and Acceleration 104, in encoder steps/s and
+#: 100 steps/s^2, measured on the servo 2026-10-26 (sx-feetech-serial's README).
 _SERVO_APPROACH: Final = ServoApproach(speed=4.0, acceleration=16.0)
 STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
     STATIC_UPPER_BODY_NECK_PORT: _SERVO_APPROACH,

@@ -45,7 +45,8 @@ fn journal_dir(name: &str) -> PathBuf {
 fn settings() -> Sweep {
     Sweep {
         slow: Slow {
-            goal_speed: 20,
+            // Steps per second: about 0.24 turn/s, so a simulated sweep takes a few seconds.
+            goal_speed: 1000,
             acceleration: 5,
             torque_limit: 250,
         },
@@ -313,7 +314,7 @@ fn an_enable_whose_speed_limit_does_not_read_back_is_refused_before_torque() {
             Err(CalibrateError::ReadBack {
                 id: 1,
                 address: 46,
-                wrote: 20,
+                wrote: 1000,
                 read: 0
             })
         ),

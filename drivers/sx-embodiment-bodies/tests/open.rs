@@ -644,13 +644,25 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         &mut bridges,
     )
     .expect("open does not refuse a servo resting outside its range");
-    // Every Feetech servo holds its port's registry approach: Goal_Speed 52 and Acceleration
-    // 105 (4 rad/s, 16 rad/s², the bindings' approach).
-    {
-        let state = neck.state();
-        let registers = &state.servos[&6];
-        assert_eq!((registers[46], registers[47], registers[41]), (52, 0, 105));
-    }
+    // Every Feetech servo holds its port's registry approach from open (the bindings'
+    // `approach`, 4 rad/s and 16 rad/s², in steps/s and 100 steps/s²).
+    let declared = sx_feetech_serial::chain::approach_registers(
+        &sx_feetech_serial::ApproachLimit {
+            speed: 4.0,
+            acceleration: 16.0,
+        },
+        1.0,
+    )
+    .expect("a carried approach");
+    let held = |bus: &SimBus, id: u8| {
+        let state = bus.state();
+        let registers = &state.servos[&id];
+        (
+            u16::from_le_bytes([registers[46], registers[47]]),
+            registers[41],
+        )
+    };
+    assert_eq!(held(&neck, 6), declared);
     // The first command asks for the tilt's nearest commandable joint, its lower bound.
     let mut target = rest_inside(&body);
     target[24] = body.commandable()[24].lower;
@@ -684,12 +696,15 @@ fn a_neck_servo_resting_outside_its_range_is_held_then_brought_in_at_the_servos_
         goal + 1 >= TILT_MIN,
         "the goal is at the calibrated range's edge: {goal}"
     );
-    // The servo itself moves at most 52 steps of 0.732 rpm: about 2600 ticks a second.
+    // The pull-in is the one move no governor bounds: the servo itself brings it in at the
+    // bring-up approach, 0.25 rad/s (162 steps/s), not its declared one.
+    let pull_in = sx_feetech_serial::chain::pull_in_registers(declared, 1.0).expect("slower");
+    assert_eq!(held(&neck, 6), pull_in);
     neck.advance(Duration::from_millis(100));
     let moved = neck.present(6) - 753;
-    assert!((1..=260).contains(&moved), "{moved} ticks in 100 ms");
+    assert!((1..=17).contains(&moved), "{moved} ticks in 100 ms");
     neck.advance(Duration::from_millis(200));
-    assert!(neck.present(6) - 753 <= 260 + 520);
+    assert!(neck.present(6) - 753 <= 17 + 33);
     assert!(body.stop().is_proven());
 }
 
@@ -782,11 +797,17 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
         }
         tilt.push(neck.present(6));
     }
-    // The camera tilt left tick 753 at the servo's pace, about 2600 ticks a second and no
-    // faster (52 a 20 ms step), until it reached its range about 0.4 s later.
-    assert!(tilt[0] > 753 && tilt[0] <= 753 + 52);
+    // The camera tilt left tick 753 at the servo's own pull-in pace, the bring-up approach's
+    // 162 steps a second (3.24 a 20 ms step) and no faster, though its declared approach is
+    // 4 rad/s: the 1007 ticks to its range take about 6.2 s.
+    assert!(tilt[0] > 753 && tilt[0] <= 753 + 4);
     let moved = tilt[9] - 753;
-    assert!((300..=520).contains(&moved), "{moved}");
+    assert!((30..=33).contains(&moved), "{moved}");
+    let arrived = tilt
+        .iter()
+        .position(|tick| *tick >= TILT_MIN)
+        .expect("came in");
+    assert!((300..=320).contains(&arrived), "{arrived} periods");
     // It came to rest at the in-range position the governor held: its declared range reaches
     // below its unit's, so the edge its unit reaches, tick 1760 to within the radian round trip.
     let held = neck.state().goal(6);
