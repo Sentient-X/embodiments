@@ -137,6 +137,8 @@ def test_every_link_off_the_neck_draws_allisa_bots_meshes_where_it_does() -> Non
     for name, parts in source.items():
         if name.startswith("so101_") or name == "camera_link":
             continue  # the official neck, carrying allisa_bot's base, holder, bracket and ZED
+        if name == "base_link":  # the camera tilt horn moves onto the bracket it turns with
+            parts = [part for part in parts if part[0] != "_________step__Body1_1_.stl"]
         assert rendered[name] == parts, name
 
 

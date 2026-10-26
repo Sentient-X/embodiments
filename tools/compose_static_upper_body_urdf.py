@@ -130,6 +130,8 @@ NECK_KEEPS_RECEIVED_MESHES = ("so101_base_link", "camera_link")
 NECK_DROPPED_MESHES = ("wrist_roll_follower_so101_v1.stl",)
 #: The received holder that carries the camera tilt servo where the official fixed jaw was.
 RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
+#: The camera tilt servo's horn, which the source exports into base_link.
+CAMERA_TILT_HORN = "_________step__Body1_1_.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
 CAMERA_MOUNT_TILT = math.radians(141.71)
 #: The camera tilt's range. The official joint's limits are its jaw's; with the bracket on the
@@ -200,11 +202,23 @@ def _rz(angle: float) -> Vec:
     return out
 
 
+def _source_zero_pose(joints: dict[str, ET.Element], link: str) -> Vec:
+    """A source link's pose in base_link with every joint at zero."""
+    by_child = {j.find("child").get("link"): j for j in joints.values()}  # type: ignore[union-attr]
+    pose = np.eye(4)
+    while link != "base_link":
+        joint = by_child[link]
+        pose = _matrix(joint.find("origin")) @ pose
+        link = joint.find("parent").get("link")  # type: ignore[union-attr]
+    return pose
+
+
 def _graft_neck(robot: ET.Element) -> None:
     """Replace the received SO-101 below its base with the official new-calibration chain."""
     official = ET.parse(SO101).getroot()
     links = {link.get("name"): link for link in robot.findall("link")}
     joints = {joint.get("name"): joint for joint in robot.findall("joint")}
+    base_from_camera = _source_zero_pose(joints, "camera_link")  # before the mount moves
 
     # The base: the official frame, the received meshes moved into it, the mount moved onto it.
     base_in_received = np.eye(4)
@@ -224,6 +238,18 @@ def _graft_neck(robot: ET.Element) -> None:
         @ _matrix(received_tilt.find("origin"))
         @ _rz(CAMERA_MOUNT_TILT)
     )
+    # The camera tilt servo's horn: the source exports it into the fixed base_link at its CAD
+    # pose, where it hangs in the air once the neck moves. It sits on the tilt axis (within
+    # 1 mm, face square to it) and turns with the bracket, so it moves into camera_link at the
+    # place the source's zero pose puts it, before the camera visuals move onto the jaw.
+    for visual in links["base_link"].findall("visual"):
+        mesh = visual.find("geometry/mesh")
+        if mesh is not None and mesh.get("filename", "").endswith(CAMERA_TILT_HORN):
+            _set_origin(
+                visual, np.linalg.inv(base_from_camera) @ _matrix(visual.find("origin"))
+            )
+            links["base_link"].remove(visual)
+            links["camera_link"].append(visual)
     camera = links["camera_link"]
     for visual in camera.findall("visual"):
         _set_origin(visual, camera_in_jaw @ _matrix(visual.find("origin")))
