@@ -3,7 +3,8 @@
 //! ```text
 //! sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
 //! sx-commission commission --bindings <file>... [--instance <id> --pod <id> --revision <n>]
-//!                          [--rail <selector>=<volts>]... [--json] [--write <dir>]
+//!                          [--rail <selector>=<volts>]... [--derate <rad/s>,<rad/s²>]
+//!                          [--json] [--write <dir>]
 //! sx-commission calibrate read|gripper|jog --bus <tty> ... [--move]
 //! sx-commission calibrate --restore <journal>
 //! ```
@@ -18,7 +19,9 @@
 //! upper body on the bench, its J8009P torso and shoulders on the 54 V battery and the rest on
 //! the 24 V converter: `--rail damiao_dm8009p=54 --rail '*=24'`. Over a model's supported
 //! supply its axes open derated (`sx_embodiment_drivers::rail`); record the rail again once it
-//! is in range and the derate lifts.
+//! is in range and the derate lifts. `--derate` records a derate decided for this robot in
+//! place of the automatic one (`"derate": {"max_speed", "max_acceleration"}`): the owner's
+//! `--derate 0.6,3` for the J8009P on the 54 V battery.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -89,6 +92,8 @@ struct Args {
     pod: Option<String>,
     revision: Option<u32>,
     rails: std::collections::BTreeMap<String, f64>,
+    /// The derate declared for this robot's over-rail axes: speed, acceleration.
+    derate: Option<(f64, f64)>,
     write: Option<PathBuf>,
     feetech_ids: Option<Vec<u16>>,
     damiao_ids: Option<Vec<u16>>,
@@ -139,6 +144,15 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Args, String> {
                     .parse()
                     .map_err(|_| format!("--rail {entry}: {volts} is not a voltage"))?;
                 args.rails.insert(selector.trim().to_owned(), volts);
+            }
+            "--derate" => {
+                let entry = value()?;
+                let parse = |text: &str| text.trim().parse::<f64>().ok();
+                let (speed, acceleration) = entry
+                    .split_once(',')
+                    .and_then(|(speed, acceleration)| Some((parse(speed)?, parse(acceleration)?)))
+                    .ok_or("--derate is <rad/s>,<rad/s²>")?;
+                args.derate = Some((speed, acceleration));
             }
             "--feetech-ids" => args.feetech_ids = Some(ids(&value()?)?),
             "--damiao-ids" => args.damiao_ids = Some(ids(&value()?)?),
@@ -214,6 +228,10 @@ fn run_commission(args: &Args, host: &mut System) -> Result<bool, String> {
             pod_id: pod_id.clone(),
             pod_revision,
             rails: sx_embodiment_drivers::rail::Rails::new(args.rails.clone())
+                .and_then(|rails| match args.derate {
+                    Some((speed, acceleration)) => rails.with_derate(speed, acceleration),
+                    None => Ok(rails),
+                })
                 .map_err(|error| error.to_string())?,
         }),
         (None, None, None) => None,

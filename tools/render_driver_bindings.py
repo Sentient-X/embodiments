@@ -131,6 +131,7 @@ def vocabulary() -> str:
                 "supply_volts": None
                 if rating.supply is None
                 else [rating.supply.min_volts, rating.supply.max_volts],
+                "rated_speed_rad_s": rating.rated_speed_rad_s,
             }
             for model, rating in ((m, ACTUATOR_RATINGS[m]) for m in ActuatorModel)
         },

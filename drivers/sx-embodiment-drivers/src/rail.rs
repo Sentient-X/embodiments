@@ -8,6 +8,11 @@
 //! refused outright: the body does not open with that axis in service. Both follow from data,
 //! so a derate lifts on its own once commissioning records a rail in range.
 //!
+//! The derate is [`OVER_RAIL`] unless commissioning declares another speed and acceleration
+//! for this robot ([`Rails::with_derate`], its `derate` entry): a person's recorded decision
+//! (the owner's 0.6 rad/s for the J8009P on the 54 V battery, 2026-10-26), data like the rails,
+//! never a code constant or a run flag. The feed-forward torque share is [`OVER_RAIL`]'s.
+//!
 //! [`Rails`] is commissioning's `rails` entry: measured volts by selector, where a selector is
 //! `<port>/<model>`, a model's wire value (`damiao_dm8009p`), a port name (`can`), or `*`; the
 //! most specific selector that matches an axis is its rail. [`RailCheck`] compares one axis's
@@ -98,7 +103,14 @@ pub struct AxisDerate {
 
 impl fmt::Display for AxisDerate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "derated: {}", self.over)
+        write!(
+            f,
+            "derated: {}, held to {:.2} rad/s and {:.1} rad/s², feed-forward at most {:.0} % of peak",
+            self.over,
+            self.limits.max_speed,
+            self.limits.max_acceleration,
+            self.limits.torque_share * 100.0
+        )
     }
 }
 
@@ -111,7 +123,7 @@ pub fn derates(axes: &[BoundAxis], rails: &Rails) -> Vec<AxisDerate> {
             RailCheck::Derated(over) => Some(AxisDerate {
                 axis,
                 over,
-                limits: OVER_RAIL,
+                limits: rails.derate(),
             }),
             _ => None,
         })
@@ -125,12 +137,28 @@ pub enum RailsError {
     Selector(String),
     #[error("rail {0} needs a finite, positive voltage")]
     Volts(String),
+    #[error("a declared derate needs a finite, positive speed and acceleration")]
+    Derate,
 }
 
 /// Commissioning's measured rails: volts by selector (see the module docs). A selector that is
 /// no registry model reads as a port; the body's opener refuses one naming no port it has.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Rails(BTreeMap<String, f64>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rails {
+    volts: BTreeMap<String, f64>,
+    derate: DerateLimits,
+    declared: bool,
+}
+
+impl Default for Rails {
+    fn default() -> Self {
+        Self {
+            volts: BTreeMap::new(),
+            derate: OVER_RAIL,
+            declared: false,
+        }
+    }
+}
 
 /// Every voltage is finite, so equality is total.
 impl Eq for Rails {}
@@ -157,13 +185,52 @@ impl Rails {
                 return Err(RailsError::Volts(selector.clone()));
             }
         }
-        Ok(Self(volts))
+        Ok(Self {
+            volts,
+            ..Self::default()
+        })
+    }
+
+    /// These rails with the derate commissioning declares for this robot: an over-rail axis
+    /// is held to `max_speed` and `max_acceleration` instead of [`OVER_RAIL`]'s.
+    ///
+    /// # Errors
+    ///
+    /// [`RailsError::Derate`] for a speed or acceleration that is not finite and positive.
+    pub fn with_derate(
+        mut self,
+        max_speed: f64,
+        max_acceleration: f64,
+    ) -> Result<Self, RailsError> {
+        let positive = |value: f64| value.is_finite() && value > 0.0;
+        if !(positive(max_speed) && positive(max_acceleration)) {
+            return Err(RailsError::Derate);
+        }
+        self.derate = DerateLimits {
+            max_speed,
+            max_acceleration,
+            ..OVER_RAIL
+        };
+        self.declared = true;
+        Ok(self)
     }
 
     /// Volts by selector, as recorded.
     #[must_use]
     pub const fn volts(&self) -> &BTreeMap<String, f64> {
-        &self.0
+        &self.volts
+    }
+
+    /// The derate an over-rail axis is held to: the declared one, else [`OVER_RAIL`].
+    #[must_use]
+    pub const fn derate(&self) -> DerateLimits {
+        self.derate
+    }
+
+    /// Whether commissioning declared the derate (else it is [`OVER_RAIL`]).
+    #[must_use]
+    pub const fn derate_declared(&self) -> bool {
+        self.declared
     }
 
     /// The rail of `axis`: its `<port>/<model>`, else its model's, else its port's, else `*`.
@@ -177,7 +244,7 @@ impl Rails {
             "*".to_owned(),
         ]
         .iter()
-        .find_map(|selector| self.0.get(selector).copied())
+        .find_map(|selector| self.volts.get(selector).copied())
     }
 
     /// `axis`'s rail against its model's rated supply.
@@ -257,7 +324,10 @@ mod tests {
             over: over(54.0),
             limits: OVER_RAIL,
         };
-        assert_eq!(derate.to_string(), "derated: over-rail 54 V > 48 V");
+        assert_eq!(
+            derate.to_string(),
+            "derated: over-rail 54 V > 48 V, held to 0.30 rad/s and 1.5 rad/s², feed-forward at most 50 % of peak"
+        );
     }
 
     #[test]
@@ -270,5 +340,30 @@ mod tests {
         ));
         assert!(matches!(one("*", 0.0), Err(RailsError::Volts(_))));
         assert!(matches!(one("*", f64::NAN), Err(RailsError::Volts(_))));
+    }
+
+    #[test]
+    fn a_declared_derate_replaces_the_automatic_one_and_a_bad_one_is_refused() {
+        let rails = rails(&[("damiao_dm8009p", 54.0)]);
+        let axes = [axis("damiao_dm8009p", "can")];
+        assert_eq!(derates(&axes, &rails)[0].limits, OVER_RAIL);
+        assert!(!rails.derate_declared());
+        let declared = rails.clone().with_derate(0.6, 3.0).expect("declared");
+        assert!(declared.derate_declared());
+        let derate = derates(&axes, &declared)[0];
+        assert_eq!(
+            (
+                derate.limits.max_speed,
+                derate.limits.max_acceleration,
+                derate.limits.torque_share
+            ),
+            (0.6, 3.0, OVER_RAIL.torque_share)
+        );
+        for (speed, acceleration) in [(0.0, 3.0), (0.6, f64::NAN), (-1.0, 1.0)] {
+            assert_eq!(
+                rails.clone().with_derate(speed, acceleration),
+                Err(RailsError::Derate)
+            );
+        }
     }
 }

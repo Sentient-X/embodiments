@@ -113,15 +113,26 @@ class ActuatorRating:
     """A tested product's ratings, as its vendor publishes them.
 
     ``peak_torque_nm`` is what torque guards are a share of. ``supply`` is ``None`` where no
-    vendor range is recorded yet, never a guess.
+    vendor range is recorded yet, never a guess. ``rated_speed_rad_s`` is the vendor's rated
+    (continuous) output speed at its rated supply, the joint speed a description declares for
+    an axis it drives (``<limit velocity>``); ``None`` where none is recorded.
     """
 
     peak_torque_nm: float
     supply: SupplyRange | None = None
+    rated_speed_rad_s: float | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
             raise LayoutError("actuator", "peak torque must be a positive finite N·m")
+        speed = self.rated_speed_rad_s
+        if speed is not None and not (math.isfinite(speed) and speed > 0.0):
+            raise LayoutError("actuator", "rated speed must be a positive finite rad/s")
+
+
+def rpm(revolutions_per_minute: float) -> float:
+    """An output speed in rpm, as vendors publish it, in rad/s."""
+    return revolutions_per_minute * 2.0 * math.pi / 60.0
 
 
 #: Every :class:`ActuatorModel`'s rating. Drivers receive it rendered into
@@ -129,13 +140,20 @@ class ActuatorRating:
 ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
     # 30 kg·cm stall at 12 V.
     ActuatorModel.FEETECH_STS3215: ActuatorRating(2.94),
-    ActuatorModel.DAMIAO_DM4310: ActuatorRating(7.0),
-    ActuatorModel.DAMIAO_DM4340: ActuatorRating(27.0),
-    ActuatorModel.DAMIAO_DM8009: ActuatorRating(40.0),
+    # DM-J4310-2EC V1.1 manual (files.seeedstudio.com/products/Damiao/DM-J4310-en.pdf): rated
+    # 24 V, 3/7 N·m rated/peak, rated speed 120 rpm, 200 rpm unloaded.
+    ActuatorModel.DAMIAO_DM4310: ActuatorRating(7.0, rated_speed_rad_s=rpm(120.0)),
+    # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded.
+    ActuatorModel.DAMIAO_DM4340: ActuatorRating(27.0, rated_speed_rad_s=rpm(36.0)),
+    # DM-J8009-2EC manual (manuals.plus/damiao/dm-j8009-2ec-servo-motor-manual): 100 rpm at
+    # 24 V, 160 rpm unloaded.
+    ActuatorModel.DAMIAO_DM8009: ActuatorRating(40.0, rated_speed_rad_s=rpm(100.0)),
     # openelab.io/products/damiao-brushless-servo-dm-j8009p and
     # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
     # output), supports 24-48 V (200 rpm at 48 V), 20/40 N·m nominal/peak, 40-50 A peak.
-    ActuatorModel.DAMIAO_DM8009P: ActuatorRating(40.0, SupplyRange(24.0, 48.0)),
+    ActuatorModel.DAMIAO_DM8009P: ActuatorRating(
+        40.0, SupplyRange(24.0, 48.0), rated_speed_rad_s=rpm(100.0)
+    ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
     ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),
     ActuatorModel.DYNAMIXEL_XM430_W350: ActuatorRating(4.1, SupplyRange(10.0, 14.8)),

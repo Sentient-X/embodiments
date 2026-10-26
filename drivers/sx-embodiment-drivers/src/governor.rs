@@ -1274,7 +1274,10 @@ mod tests {
         };
         let mut governor = Governor::new(chain, vec![fast; 2]).expect("limits");
         assert_eq!(governor.derated(), vec![derate]);
-        assert_eq!(derate.to_string(), "derated: over-rail 54 V > 48 V");
+        assert_eq!(
+            derate.to_string(),
+            "derated: over-rail 54 V > 48 V, held to 0.30 rad/s and 1.5 rad/s², feed-forward at most 50 % of peak"
+        );
         let held = governor.limits()[0];
         assert!((held.max_speed - 0.3).abs() < 1e-12);
         assert_eq!(held.max_acceleration, Some(1.5));
