@@ -590,6 +590,10 @@ fn the_robot_host_needs_are_each_drivers_for_its_bridge() {
         serial: Some(NECK_SERIAL.to_owned()),
     }));
     assert_eq!(needs.realtime_priority(), Some(80));
+    assert!(
+        needs.ports["station"].contains(&HostNeed::CoreDumps),
+        "a crash leaves a core"
+    );
     let text = serde_json::to_string(&needs).unwrap();
     assert_eq!(
         sx_embodiment_drivers::HostNeeds::parse(&text).unwrap(),

@@ -59,6 +59,20 @@ pub enum HostNeed {
     },
     /// A userspace shared library installed (by its soname).
     SharedLibrary { name: String },
+    /// A crash of the station process leaves a core dump the robot's operators can read
+    /// (`systemd-coredump` installed, the unit's `LimitCORE=infinity`): native code (libwebrtc,
+    /// vendor drivers) aborts without a Rust backtrace, and a core is the only evidence.
+    CoreDumps,
+}
+
+/// The pseudo-port under which the station process's own needs are listed, beside the needs of
+/// the devices its ports open.
+pub const STATION: &str = "station";
+
+/// What the station process itself needs on any robot host, whatever devices it opens.
+#[must_use]
+pub fn station_needs() -> Vec<HostNeed> {
+    vec![HostNeed::CoreDumps]
 }
 
 /// A robot's needs: per port as each driver declared them, and their union.
