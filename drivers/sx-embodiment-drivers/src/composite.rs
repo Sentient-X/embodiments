@@ -203,6 +203,11 @@ where
                 .into_iter()
                 .chain(second.unobserved)
                 .collect(),
+            unreached: first
+                .unreached
+                .into_iter()
+                .chain(second.unreached)
+                .collect(),
         }
     }
 

@@ -380,6 +380,7 @@ fn report(step: &Value) -> StopReport {
             .get("unobserved")
             .map(&ids)
             .unwrap_or_default(),
+        unreached: Vec::new(),
     }
 }
 

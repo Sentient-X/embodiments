@@ -136,6 +136,10 @@ pub struct StopReport {
     /// itself was not observed. A caller that needs an observed disabled state (to release a
     /// brake, to let a person near) must not treat these as equal to it.
     pub unobserved: Vec<u16>,
+    /// Actuators on a bus the body could not open: a disable was sent where its bridge is held,
+    /// with no answer awaited, and none proves them stopped or in any state. They are outside
+    /// what this stop drives and proves; a caller must treat them as unknown, never as stopped.
+    pub unreached: Vec<u16>,
 }
 
 impl StopReport {
@@ -154,6 +158,7 @@ impl StopReport {
             Ok(ProvenStop {
                 faults: self.faults,
                 unobserved: self.unobserved,
+                unreached: self.unreached,
             })
         } else {
             Err(self)
@@ -167,6 +172,7 @@ impl StopReport {
 pub struct ProvenStop {
     faults: Vec<(u16, u8)>,
     unobserved: Vec<u16>,
+    unreached: Vec<u16>,
 }
 
 impl ProvenStop {
@@ -183,10 +189,18 @@ impl ProvenStop {
         &self.unobserved
     }
 
-    /// Whether every actuator was observed disabled, not merely answering the disable.
+    /// Actuators on a bus the body could not open, whose state nothing proves
+    /// ([`StopReport::unreached`]).
+    #[must_use]
+    pub fn unreached(&self) -> &[u16] {
+        &self.unreached
+    }
+
+    /// Whether every actuator was observed disabled, not merely answering the disable, and no
+    /// actuator of the body is out of reach.
     #[must_use]
     pub fn observed_disabled(&self) -> bool {
-        self.unobserved.is_empty()
+        self.unobserved.is_empty() && self.unreached.is_empty()
     }
 }
 
@@ -454,6 +468,7 @@ mod tests {
             unproven: vec![],
             faults: vec![(3, 0xA)],
             unobserved: vec![],
+            unreached: vec![],
         };
         let proven = report.prove().expect("every actuator answered");
         assert_eq!(proven.faults(), &[(3, 0xA)]);
@@ -464,6 +479,15 @@ mod tests {
         };
         let proven = report.prove().expect("answered, state unobservable");
         assert_eq!(proven.unobserved(), &[4]);
+        // An actuator out of the body's reach is never observed disabled.
+        let proven = StopReport {
+            unreached: vec![5],
+            ..StopReport::default()
+        }
+        .prove()
+        .expect("nothing it drives is unproven");
+        assert_eq!(proven.unreached(), &[5]);
+        assert!(!proven.observed_disabled());
         assert!(!proven.observed_disabled());
         let report = StopReport {
             unproven: vec![2],

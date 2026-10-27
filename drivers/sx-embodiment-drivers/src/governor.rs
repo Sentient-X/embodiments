@@ -156,7 +156,7 @@ pub enum GovernorError<E> {
         commanded: f64,
         observed: f64,
         limit: f64,
-        stop: StopReport,
+        stop: Box<StopReport>,
     },
     #[error(
         "the receipt observed {found} of {expected} axes, so tracking could not be checked; the chain was stopped and the fault is latched"
@@ -813,7 +813,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 commanded,
                 observed,
                 limit,
-                stop,
+                stop: Box::new(stop),
             }));
         }
         self.note_outside(&receipt.observed[..width], now);

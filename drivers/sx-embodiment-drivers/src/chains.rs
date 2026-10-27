@@ -233,6 +233,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             report.unproven.extend(stopped.unproven);
             report.faults.extend(stopped.faults);
             report.unobserved.extend(stopped.unobserved);
+            report.unreached.extend(stopped.unreached);
         }
         report
     }

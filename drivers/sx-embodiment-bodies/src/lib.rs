@@ -540,6 +540,26 @@ impl Mask {
         Self { whole, out }
     }
 
+    /// A bus that did not open, as its whole vector: every axis reads
+    /// [`MissingReason::Unavailable`](sx_embodiment_drivers::MissingReason::Unavailable), is
+    /// observed `NaN`, and is never commanded, as an out-of-service axis is. `held` is its
+    /// bridge, kept open so no other process takes the bus; it is sent a disable now and at
+    /// every stop, and its actuators are reported unreached.
+    fn unopened(self, held: Option<Held>) -> Result<BusChain, OpenError> {
+        let every: Vec<usize> = (0..self.whole.len()).collect();
+        let mut unopened = Unopened {
+            ids: self.whole.iter().map(|axis| axis.binding.bus_id).collect(),
+            held,
+        };
+        unopened.disable();
+        Ok(Box::new(
+            Masked::new(unopened, self.whole, &every)
+                .map_err(DamiaoChainError::from)?
+                .answering(|axis| MotorFeedback::unavailable(axis.binding.bus_id))
+                .missing_as(sx_embodiment_drivers::MissingReason::Unavailable),
+        ))
+    }
+
     /// `chain`, which drives the bus's axes in service, as the bus's whole vector.
     fn chain(self, chain: BusChain) -> Result<BusChain, OpenError> {
         if self.out.is_empty() {
@@ -820,19 +840,25 @@ fn plan(
     Ok(Plan { closed, parts })
 }
 
+/// One port's part and mask, with its bridge or the bridge's absence.
+type PortLink = (String, Part, Mask, Result<Link, OpenError>);
+
 impl Plan {
-    /// Open each part's bridge, after `before` has had its say on the plan.
+    /// Open each part's bridge, after `before` has had its say on the plan. A bridge that does
+    /// not open refuses them all, asking for none after it; with `each`, a bridge that is not
+    /// attached is that port's answer alone, and any other refusal still refuses them all.
     fn links(
         self,
         commissioning: &Commissioning,
         source: &mut dyn PortSource,
-    ) -> Result<Vec<(String, Part, Mask, Link)>, OpenError> {
+        each: bool,
+    ) -> Result<Vec<PortLink>, OpenError> {
         let declared: Vec<(String, Wire)> = self
             .parts
             .iter()
             .map(|(port, part, _)| (port.clone(), part.wire()))
             .collect();
-        let links = bridges(&declared, &self.closed, commissioning, source)?;
+        let links = bridges(&declared, &self.closed, commissioning, source, each)?;
         Ok(self
             .parts
             .into_iter()
@@ -905,10 +931,228 @@ pub fn open_with(
         return Err(refused);
     }
     let mut chains: Vec<BusChain> = Vec::with_capacity(plan.parts.len());
-    for (port, part, mask, link) in plan.links(commissioning, source)? {
-        chains.push(mask.chain(part.open(&port, link, &commissioning.rails)?)?);
+    for (port, part, mask, link) in plan.links(commissioning, source, false)? {
+        chains.push(mask.chain(part.open(&port, link?, &commissioning.rails)?)?);
     }
     Ok(Chains::new(chains))
+}
+
+/// A body opened with every bus that answers, and why each other bus did not open.
+pub struct Opened {
+    /// The whole body: a bus that did not open keeps its axes, each read
+    /// [`MissingReason::Unavailable`](sx_embodiment_drivers::MissingReason::Unavailable) and
+    /// never commanded ([`ActuatorChain::unavailable`] names them); its stop reports its
+    /// actuators [`StopReport::unreached`].
+    pub body: Body,
+    /// Each bus that did not open, by port, with what refused it.
+    pub unopened: Vec<(String, OpenError)>,
+}
+
+/// [`open_with`], keeping the robot when a bus is silent: a bridge that is not attached, and a
+/// serial bus whose servos do not answer the open or whose link cannot carry the exchange
+/// ([`ChainFailure::Timeout`], [`ChainFailure::Unavailable`]), leave that bus's axes in the
+/// body as unavailable data. A silent serial bus's bridge is opened again and held, so no
+/// other process takes it, and it is sent a disable at once and at every stop.
+///
+/// Refused as [`open_with`] refuses them, before any chain opens: every bridge that is
+/// attached but does not open (another process holds it, it is not the bus it is named, the
+/// host refuses it). Refused whenever met: any chain error that is not silence (an actuator
+/// that answers wrongly or faulted, a configuration that does not match the body), any CAN
+/// chain error, and a body none of whose buses opened ([`OpenError::NoBusOpened`]).
+///
+/// # Errors
+///
+/// What [`open_with`] refuses but silence, and [`OpenError::NoBusOpened`].
+pub fn open_available(
+    drive: &InstanceDrive,
+    commissioning: &Commissioning,
+    calibrations: &ServoCalibrations,
+    options: OpenOptions,
+    source: &mut dyn PortSource,
+) -> Result<Opened, OpenError> {
+    let plan = plan(drive, commissioning, calibrations, options)?;
+    if let Some(refused) = plan.parts.iter().find_map(|(port, part, _)| {
+        part.uncalibrated(port)
+            .or_else(|| part.over_rail(port, &commissioning.rails))
+    }) {
+        return Err(refused);
+    }
+    // Every bridge is opened (or found absent) before any chain is: a refusal leaves every
+    // bus untouched.
+    let links = plan.links(commissioning, source, true)?;
+    let mut chains: Vec<BusChain> = Vec::with_capacity(links.len());
+    let mut unopened = Vec::new();
+    for (port, part, mask, link) in links {
+        let link = match link {
+            Ok(link) => link,
+            Err(absent) => {
+                chains.push(mask.unopened(None)?);
+                unopened.push((port, absent));
+                continue;
+            }
+        };
+        let wire = part.wire();
+        let held = part.held_kind();
+        match part.open(&port, link, &commissioning.rails) {
+            Ok(chain) => chains.push(mask.chain(chain)?),
+            Err(error) if held.is_some() && error.is_chain_silence() => {
+                // The chain dropped its bridge with it: open it again and keep it.
+                let Wire::Serial { baud } = wire else {
+                    return Err(error);
+                };
+                let serial = commissioning
+                    .ports
+                    .get(&port)
+                    .ok_or_else(|| OpenError::MissingPort(port.clone()))?;
+                let held = match source.open_serial(serial, baud) {
+                    Ok(link) => held.map(|kind| Held::of(kind, link)),
+                    Err(OpenError::NotAttached(_)) => None,
+                    Err(refused) => return Err(refused),
+                };
+                chains.push(mask.unopened(held)?);
+                unopened.push((port, error));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if unopened.len() == chains.len() {
+        return Err(OpenError::NoBusOpened(
+            unopened
+                .into_iter()
+                .map(|(port, error)| format!("{port}: {error}"))
+                .collect(),
+        ));
+    }
+    Ok(Opened {
+        body: Chains::new(chains),
+        unopened,
+    })
+}
+
+/// Which serial protocol a silent bus's held bridge speaks, for its disable.
+#[derive(Clone, Copy)]
+enum HeldKind {
+    Feetech,
+    Dynamixel,
+}
+
+/// A silent serial bus's bridge, held open, speaking its servos' protocol.
+enum Held {
+    Feetech(sx_feetech_serial::scservo_sdk::ProtocolPacketHandler<SerialLink>),
+    Dynamixel(sx_dynamixel_serial::dynamixel_sdk::Protocol2PacketHandler<SerialLink>),
+}
+
+impl Held {
+    fn of(kind: HeldKind, link: SerialLink) -> Self {
+        match kind {
+            // Protocol end 0: STS and SMS servos.
+            HeldKind::Feetech => Self::Feetech(
+                sx_feetech_serial::scservo_sdk::ProtocolPacketHandler::new(link, 0),
+            ),
+            HeldKind::Dynamixel => Self::Dynamixel(
+                sx_dynamixel_serial::dynamixel_sdk::Protocol2PacketHandler::new(link),
+            ),
+        }
+    }
+}
+
+impl Part {
+    /// The protocol a silent bus of this part is held in; `None` for a CAN bus, which is
+    /// never held silent.
+    const fn held_kind(&self) -> Option<HeldKind> {
+        match self {
+            Self::Damiao(_) => None,
+            Self::Feetech { .. } => Some(HeldKind::Feetech),
+            Self::Dynamixel { .. } => Some(HeldKind::Dynamixel),
+        }
+    }
+}
+
+/// A bus that did not open: no actuator it drives, so nothing to command or read. Its
+/// actuators' state is unknown: each stop sends them a disable where the bridge is held (one
+/// broadcast SYNC WRITE of `Torque_Enable` 0, no answer awaited) and reports them
+/// [`StopReport::unreached`]. [`Mask::unopened`] places the bus's axes around it.
+struct Unopened {
+    ids: Vec<u16>,
+    held: Option<Held>,
+}
+
+impl Unopened {
+    /// Best effort, no answer awaited: torque off every servo the bus binds.
+    fn disable(&mut self) {
+        let param: Vec<u8> = self
+            .ids
+            .iter()
+            .filter_map(|id| u8::try_from(*id).ok())
+            .flat_map(|id| [id, 0])
+            .collect();
+        match &mut self.held {
+            Some(Held::Feetech(handler)) => {
+                let _ = handler.sync_write_tx_only(
+                    sx_feetech_serial::scservo_sdk::SMS_STS_TORQUE_ENABLE,
+                    1,
+                    &param,
+                );
+            }
+            Some(Held::Dynamixel(handler)) => {
+                let _ = handler.sync_write_tx_only(
+                    sx_dynamixel_serial::chain::TORQUE_ENABLE,
+                    1,
+                    &param,
+                );
+            }
+            None => {}
+        }
+    }
+}
+
+impl ActuatorChain for Unopened {
+    type Error = BusError;
+    type Feedback = MotorFeedback;
+
+    fn axes(&self) -> &[BoundAxis] {
+        &[]
+    }
+
+    fn commandable(&self) -> &[CommandRange] {
+        &[]
+    }
+
+    fn command(&mut self, _joints: &[f64]) -> Result<Receipt<MotorFeedback>, BusError> {
+        Ok(Receipt {
+            evidence: sx_embodiment_drivers::Evidence::BusObservedComplete,
+            observed: Axes::new(),
+            feedback: Axes::new(),
+        })
+    }
+
+    fn read_positions(&mut self) -> Axes<AxisReading> {
+        Axes::new()
+    }
+
+    /// A disable sent where the bridge is held; nothing proves these actuators stopped.
+    fn stop(&mut self) -> StopReport {
+        self.disable();
+        StopReport {
+            unreached: self.ids.clone(),
+            ..StopReport::default()
+        }
+    }
+
+    /// One broadcast write, unanswered.
+    fn stop_budget(&self) -> Duration {
+        Duration::from_millis(10)
+    }
+
+    /// Empty, never `None`, so the rest of the body still reports where it rests.
+    fn last_observed(&self) -> Option<Axes<f64>> {
+        Some(Axes::new())
+    }
+
+    /// Empty, never `None`, so the rest of the body's readings still stand.
+    fn command_readings(&self) -> Option<Axes<AxisReading>> {
+        Some(Axes::new())
+    }
 }
 
 /// One way of opening a body's drive: the commissioning that places it, its serial servos'
@@ -1091,9 +1335,9 @@ pub fn reopen_ports(
                 .ok_or_else(|| OpenError::MissingPort(port.clone()))
         })
         .collect::<Result<_, _>>()?;
-    let links = open_links(&serials, source)?;
+    let links = open_links(&serials, source, false)?;
     for ((index, port, part, mask), link) in reopened.into_iter().zip(links) {
-        chains[index] = Some(mask.chain(part.open(&port, link, &after.commissioning.rails)?)?);
+        chains[index] = Some(mask.chain(part.open(&port, link?, &after.commissioning.rails)?)?);
     }
     Ok(Chains::new(chains.into_iter().flatten().collect()))
 }
@@ -1156,8 +1400,8 @@ pub fn observe(
 ) -> Result<Observer, OpenError> {
     let plan = plan(drive, commissioning, calibrations, options)?;
     let mut buses: Vec<BusObserver> = Vec::with_capacity(plan.parts.len());
-    for (port, part, mask, link) in plan.links(commissioning, source)? {
-        buses.push(mask.observer(part.observe(&port, link)?)?);
+    for (port, part, mask, link) in plan.links(commissioning, source, false)? {
+        buses.push(mask.observer(part.observe(&port, link?)?)?);
     }
     let axes = buses
         .iter()
@@ -1180,7 +1424,8 @@ fn bridges(
     closed: &[String],
     commissioning: &Commissioning,
     source: &mut dyn PortSource,
-) -> Result<Vec<Link>, OpenError> {
+    each: bool,
+) -> Result<Vec<Result<Link, OpenError>>, OpenError> {
     if let Some(extra) = commissioning
         .ports
         .keys()
@@ -1209,33 +1454,50 @@ fn bridges(
         .into_iter()
         .map(|(serial, wire)| (serial.to_owned(), wire))
         .collect();
-    open_links(&serials, source)
+    open_links(&serials, source, each)
 }
 
 /// Open each bridge, in order; a CAN bridge named more than once is opened once and shared.
+/// The first bridge that does not open refuses them all, asking for none after it; with
+/// `each`, a bridge that is not attached is that port's answer alone (every port on a shared
+/// bridge), and any other refusal still refuses them all.
 fn open_links(
     serials: &[(String, Wire)],
     source: &mut dyn PortSource,
-) -> Result<Vec<Link>, OpenError> {
+    each: bool,
+) -> Result<Vec<Result<Link, OpenError>>, OpenError> {
     let shared = |serial: &str| serials.iter().filter(|(s, _)| s == serial).count() > 1;
-    let mut can_bridges: BTreeMap<&str, SharedCanPort<Port>> = BTreeMap::new();
+    let mut can_bridges: BTreeMap<&str, Option<SharedCanPort<Port>>> = BTreeMap::new();
     let mut links = Vec::with_capacity(serials.len());
     for (serial, wire) in serials {
         let serial = serial.as_str();
-        links.push(match wire {
-            Wire::Serial { baud } => Link::Serial(source.open_serial(serial, *baud)?),
-            Wire::Can if shared(serial) => {
-                let port = if let Some(port) = can_bridges.get(serial) {
-                    port.clone()
-                } else {
-                    let port = SharedCanPort::new(source.open(serial)?);
-                    can_bridges.insert(serial, port.clone());
-                    port
-                };
-                Link::Can(Box::new(port))
+        let link = match wire {
+            Wire::Serial { baud } => source.open_serial(serial, *baud).map(Link::Serial),
+            Wire::Can if shared(serial) => match can_bridges.get(serial) {
+                Some(Some(port)) => Ok(Link::Can(Box::new(port.clone()))),
+                Some(None) => Err(OpenError::NotAttached(serial.to_owned())),
+                None => match source.open(serial) {
+                    Ok(port) => {
+                        let port = SharedCanPort::new(port);
+                        can_bridges.insert(serial, Some(port.clone()));
+                        Ok(Link::Can(Box::new(port)))
+                    }
+                    Err(error) => {
+                        if matches!(error, OpenError::NotAttached(_)) {
+                            can_bridges.insert(serial, None);
+                        }
+                        Err(error)
+                    }
+                },
+            },
+            Wire::Can => source.open(serial).map(Link::Can),
+        };
+        match link {
+            Err(error) if !each || !matches!(error, OpenError::NotAttached(_)) => {
+                return Err(error);
             }
-            Wire::Can => Link::Can(source.open(serial)?),
-        });
+            link => links.push(link),
+        }
     }
     Ok(links)
 }
@@ -1303,10 +1565,22 @@ pub enum OpenError {
         device: String,
         holder: sx_embodiment_drivers::Holder,
     },
+    #[error("no bus of this body opened: {}", .0.join("; "))]
+    NoBusOpened(Vec<String>),
     #[error(transparent)]
     Bindings(#[from] BodyError),
     #[error(transparent)]
     Chain(#[from] BusError),
+}
+
+impl OpenError {
+    /// Whether a chain's open failed because its actuators did not answer, or its link could
+    /// not carry the exchange: silence, not a wrong answer or a wrong configuration.
+    #[must_use]
+    pub fn is_chain_silence(&self) -> bool {
+        matches!(self, Self::Chain(error)
+            if matches!(error.failure(), ChainFailure::Timeout | ChainFailure::Unavailable))
+    }
 }
 
 impl From<DamiaoChainError> for OpenError {

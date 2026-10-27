@@ -11,8 +11,8 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, Setup, changed_ports, closed_ports, observe, open, open_calibrated,
-    open_with, ports, reopen_ports,
+    ServoCalibrations, Setup, changed_ports, closed_ports, observe, open, open_available,
+    open_calibrated, open_with, ports, reopen_ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -537,6 +537,198 @@ fn a_port_on_another_bridge_or_another_set_of_open_ports_is_another_body() {
         changed_ports(&drive, before, fewer),
         Err(OpenError::NotInPlace(_))
     ));
+}
+
+/// The static upper body's bridges: the CAN bus answering and each Feetech bus as probed.
+fn static_bridges(
+    axes: &[sx_damiao_can::chain::DamiaoAxis],
+) -> (Sim, BTreeMap<String, SimBus>, Bridges) {
+    let can = Sim::for_axes(axes);
+    let serial = probed_buses();
+    let bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    (can, serial, bridges)
+}
+
+const NECK: &str = "5A7C118709";
+
+#[test]
+fn a_silent_serial_bus_stays_in_the_body_as_unavailable_data_its_bridge_held_and_disabled() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    // The Spark, 10-27: one neck servo did not answer the open ("bus_id 3: RxTimeout"); the
+    // rest were left holding torque by an earlier run.
+    let (_, serial, mut bridges) = static_bridges(&axes);
+    serial[NECK].kill(3);
+    assert!(
+        matches!(
+            open_with(
+                &drive,
+                &commissioning,
+                &probed_calibrations(),
+                BRING_UP,
+                &mut bridges
+            ),
+            Err(OpenError::Chain(BusError::Feetech(
+                FeetechChainError::Comm { bus_id: 3, .. }
+            )))
+        ),
+        "a supervised bring-up still refuses it"
+    );
+    let (can, serial, mut bridges) = static_bridges(&axes);
+    serial[NECK].kill(3);
+    let alive: Vec<u8> = serial[NECK]
+        .state()
+        .servos
+        .keys()
+        .copied()
+        .filter(|id| *id != 3)
+        .collect();
+    for id in &alive {
+        serial[NECK].state().servos.get_mut(id).expect("servo")[40] = 1;
+    }
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("the robot opens without its neck");
+    let mut body = opened.body;
+    assert_eq!(opened.unopened.len(), 1);
+    assert_eq!(opened.unopened[0].0, "neck");
+    assert!(opened.unopened[0].1.is_chain_silence());
+    // Its bridge was opened again and is held: no other process can take the bus.
+    assert_eq!(
+        bridges
+            .opened
+            .iter()
+            .filter(|opened| opened.starts_with(NECK))
+            .count(),
+        2
+    );
+    // Every servo that answers was sent its torque off at once.
+    assert!(alive.iter().all(|id| serial[NECK].state().torque(*id) == 0));
+    // The contract never shrinks: all 25 axes, the neck's six unavailable in their places.
+    assert_eq!(body.axes().len(), 25);
+    assert_eq!(body.unavailable(), vec![19, 20, 21, 22, 23, 24]);
+    let readings = body.read_positions();
+    for reading in &readings[19..] {
+        assert_eq!(
+            *reading,
+            sx_embodiment_drivers::AxisReading::Missing(
+                sx_embodiment_drivers::MissingReason::Unavailable
+            )
+        );
+    }
+    assert!(
+        readings[..19]
+            .iter()
+            .all(|reading| reading.position().is_some())
+    );
+    // The rest drives; the neck is never commanded.
+    let rest = body
+        .last_observed()
+        .expect("the opened buses report where they rest");
+    assert!(rest[..19].iter().all(|joint| joint.is_finite()));
+    let written = serial[NECK].state().written.len();
+    let receipt = body.command(&rest_inside(&body)).expect("a command");
+    assert!(receipt.observed[19..].iter().all(|joint| joint.is_nan()));
+    assert!(can.state().motors.values().any(|motor| motor.state == 1));
+    assert_eq!(
+        serial[NECK].state().written.len(),
+        written,
+        "the neck is never commanded"
+    );
+    // A stop proves what it drives and names the neck's servos unreached: nothing proves them.
+    let stop = body.stop();
+    assert!(stop.is_proven(), "{stop:?}");
+    assert_eq!(stop.unreached.len(), 6);
+    assert_eq!(
+        serial[NECK].state().written.len(),
+        written + 1,
+        "a disable at the stop"
+    );
+    assert!(can.state().motors.values().all(|motor| motor.state == 0));
+    assert!(!stop.prove().expect("proven").observed_disabled());
+}
+
+#[test]
+fn an_absent_bridge_leaves_its_bus_unavailable_and_any_other_bridge_refusal_refuses_untouched() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    let (_, _, mut bridges) = static_bridges(&axes);
+    bridges.serial.remove("5AB0158173");
+    assert!(matches!(
+        open_with(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut bridges),
+        Err(OpenError::NotAttached(serial)) if serial == "5AB0158173"
+    ));
+    let (_, _, mut bridges) = static_bridges(&axes);
+    bridges.serial.remove("5AB0158173");
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("the robot opens without its left gripper");
+    assert_eq!(opened.unopened.len(), 1);
+    assert_eq!(opened.unopened[0].0, "left_gripper");
+    assert!(matches!(opened.unopened[0].1, OpenError::NotAttached(_)));
+    assert_eq!(opened.body.unavailable(), vec![15, 16]);
+    // A bridge that is attached and refused (held by another process, refused by the host)
+    // refuses the body before any chain opens: no bus is written.
+    let (can, serial, bridges) = static_bridges(&axes);
+    let mut refusing = Refusing {
+        inner: bridges,
+        serial: "5B91028463",
+    };
+    assert!(matches!(
+        open_available(
+            &drive,
+            &commissioning,
+            &probed_calibrations(),
+            BRING_UP,
+            &mut refusing
+        ),
+        Err(OpenError::Port { .. })
+    ));
+    assert_eq!(can.sent(), 0, "no CAN frame before the refusal");
+    assert!(serial.values().all(|bus| bus.state().written.is_empty()));
+    // Nothing attached is no robot.
+    assert!(matches!(
+        open_available(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut Bridges::default()),
+        Err(OpenError::NoBusOpened(ports)) if ports.len() == 4
+    ));
+}
+
+/// Bridges where one is attached but refused by the host.
+struct Refusing {
+    inner: Bridges,
+    serial: &'static str,
+}
+
+impl PortSource for Refusing {
+    fn open(&mut self, serial: &str) -> Result<Port, OpenError> {
+        self.inner.open(serial)
+    }
+
+    fn open_serial(&mut self, serial: &str, baud: u32) -> Result<SerialLink, OpenError> {
+        if serial == self.serial {
+            return Err(OpenError::Port {
+                serial: serial.to_owned(),
+                reason: "permission denied".to_owned(),
+            });
+        }
+        self.inner.open_serial(serial, baud)
+    }
 }
 
 /// Whether every servo on every simulated bus has `Torque_Enable` at `value`.
