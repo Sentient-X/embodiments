@@ -9,10 +9,13 @@ changes only
 
 * what dynamics never read (each joint's ``<limit velocity>`` and ``effort``, each still a
   finite positive number), or
-* links outside every identified joint's reach: no document identifies the link, and no joint
-  a document identifies lies between the root and it (a changed joint counts as a change to
-  its child). The torque at an identified joint depends only on the links it carries, so a
-  fit of the arms keeps when the neck's camera mount is corrected.
+* links outside every identified joint's reach: no document identifies the link, no joint a
+  document identifies lies between the root and it (a changed joint counts as a change to its
+  child), and no joint above an identified one moves. The torque at an identified joint
+  depends only on the links it carries and the joints above it, so a fit of the arms keeps
+  when the neck's camera mount is corrected. ``Dynamics::superseding`` applies the same rule
+  at the station, so a calibration keyed to an earlier description the package keeps
+  (``_by_digest``) needs no re-key; this tool moves the repository's own documents.
 
 Anything else is refused, and the calibration must be identified again.
 
@@ -124,12 +127,22 @@ def check_rekeyable(old: Path, new: Path, identified: tuple[set[str], set[str]])
     if set(old_links) != set(new_links) or tree != new_tree:
         raise RekeyError(f"{new} has other links or joints than {old}: identify again")
     changed = {name for name in old_links if old_links[name] != new_links[name]}
-    for name in old_joints:
-        if old_joints[name] != new_joints[name]:
-            if name in joints:
-                raise RekeyError(f"{new} changes identified joint {name}: identify again")
-            changed.add(tree[name][1])
+    moved = {name for name in old_joints if old_joints[name] != new_joints[name]}
     parent_joint = {child: joint for joint, (_, child) in tree.items()}
+    for name in moved:
+        if name in joints:
+            raise RekeyError(f"{new} changes identified joint {name}: identify again")
+        changed.add(tree[name][1])
+    # Nor may a joint between the root and an identified joint move: it turns gravity.
+    for joint in sorted(joints & set(tree)):
+        at = tree[joint][0]
+        while at in parent_joint:
+            if parent_joint[at] in moved:
+                raise RekeyError(
+                    f"{new} moves {parent_joint[at]}, above identified joint {joint}: "
+                    "identify again"
+                )
+            at = tree[parent_joint[at]][0]
     for link in sorted(changed):
         if link in links:
             raise RekeyError(f"{new} changes identified link {link}: identify again")

@@ -2219,6 +2219,7 @@
 {"path": "sentient_rwh/package.xml", "sha256": "6aa77f7de5259955a21edafc1b4bd4446dbd1949c9d1cc0de41f5384146f00a2", "size": 631, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_rwh/sentient_rwh.commit", "sha256": "abd500a04453d6a18d8d1935b9813bce5cd87ec37877c569585abcb400af60d2", "size": 41, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_rwh/urdf/sentient_rwh.urdf", "sha256": "3bef45d490b7de8ba2a8c6759b82a5405cef769b47282c40349cb60bf11cbdfe", "size": 333157, "license_id": "LicenseRef-Sentient-Proprietary"},
+{"path": "sentient_static_upper_body/_by_digest/a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7/sentient_static_upper_body.urdf", "sha256": "a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7", "size": 221402, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_static_upper_body/_by_digest/e78a6c1603b2e38876c3da6d0c332e37d71cf804a9042358293a845f246ae4fe/sentient_static_upper_body.urdf", "sha256": "e78a6c1603b2e38876c3da6d0c332e37d71cf804a9042358293a845f246ae4fe", "size": 221351, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_static_upper_body/meshes/BRACKET_CAMERA.stl", "sha256": "525c04273b59aac9045e026d3c32de3678ed1c644619810944554edf22c516be", "size": 200084, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_static_upper_body/meshes/Base_08p_step__Body4_1_.stl", "sha256": "270ef32aae854229587fb04c758bdb55cf6026df5766f777e0010e5e0265785c", "size": 924184, "license_id": "LicenseRef-Sentient-Proprietary"},

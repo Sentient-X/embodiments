@@ -78,6 +78,12 @@ pub use solve::{Active, Caps, Ik, LimbReport, Reach, Settings, Solve, Step};
 /// The static upper body's render pack, as committed.
 pub const STATIC_UPPER_BODY_URDF: &str =
     include_str!("../../../render_packs/sentient-static-upper-body/robot.urdf");
+/// The static upper body's earlier descriptions a dynamics calibration may still be keyed to
+/// (`sx_embodiment_drivers::Dynamics::superseding`), as the package keeps each one: a
+/// re-render that does not reach a fit (the neck's camera mount, 2026-10-27) needs no re-key.
+pub const STATIC_UPPER_BODY_SUPERSEDED: &[&str] = &[include_str!(
+    "../../../assets/sentient_static_upper_body/_by_digest/a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7/sentient_static_upper_body.urdf"
+)];
 pub const STATIC_UPPER_BODY_COLLISION: &str =
     include_str!("../../../render_packs/sentient-static-upper-body/collision.json");
 
