@@ -655,3 +655,33 @@ fn an_axis_resting_past_its_limit_never_steps_further_out() {
         }
     }
 }
+
+/// The arms' identified dynamics, fitted against the description before the 2026-10-27 camera
+/// mount correction, still apply to the corrected one: the correction reaches no arm.
+#[test]
+fn an_arm_fit_keyed_to_the_earlier_description_still_applies() {
+    let parity: serde_json::Value = serde_json::from_str(include_str!(
+        "../../sx-embodiment-drivers/tests/fixtures/dynamics-parity.json"
+    ))
+    .expect("fixture");
+    let mut calibration = parity["calibration"].clone();
+    let earlier = sx_embodiment_drivers::dynamics::sha256_hex(
+        sx_embodiment_ik::STATIC_UPPER_BODY_SUPERSEDED[0],
+    );
+    calibration["description_sha256"] = serde_json::Value::String(earlier);
+    let calibration = sx_embodiment_drivers::DynamicsCalibration::parse(&calibration.to_string())
+        .expect("calibration");
+    let current = || {
+        sx_embodiment_drivers::Dynamics::of(
+            sx_embodiment_ik::STATIC_UPPER_BODY_URDF,
+            sx_embodiment_drivers::UPRIGHT,
+        )
+        .expect("dynamics")
+    };
+    assert!(current().calibrated(&calibration).is_err());
+    current()
+        .superseding(sx_embodiment_ik::STATIC_UPPER_BODY_SUPERSEDED)
+        .expect("earlier")
+        .calibrated(&calibration)
+        .expect("the arm fit applies");
+}

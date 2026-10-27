@@ -420,6 +420,9 @@ pub struct Dynamics {
     loaded: bool,
     /// The digest of the description bytes, when read from them.
     description_sha256: Option<String>,
+    /// Earlier revisions of the description a calibration may still name, by digest
+    /// ([`Dynamics::superseding`]).
+    superseded: Vec<(String, Tree)>,
     /// For each tree joint, the index of the independent joint it moves with.
     leader: Vec<Option<usize>>,
 }
@@ -465,10 +468,106 @@ impl Dynamics {
             stiction_velocity: DEFAULT_STICTION_VELOCITY,
             loaded: false,
             description_sha256: None,
+            superseded: Vec::new(),
             gravity,
             leader,
             tree,
         }
+    }
+
+    /// These dynamics, also accepting a calibration identified against one of `earlier`: the
+    /// description's earlier revisions (the package keeps each at
+    /// `<package>/_by_digest/<sha256>/`). A calibration keyed to one applies when the
+    /// re-render did not reach what it identified ([`Dynamics::calibrated`]), so correcting a
+    /// part no fit depends on (the neck's camera mount, under no arm) needs no re-key by hand.
+    ///
+    /// # Errors
+    ///
+    /// [`TreeError`] for an earlier revision that is not a tree.
+    pub fn superseding(mut self, earlier: &[&str]) -> Result<Self, crate::kinematics::TreeError> {
+        for urdf in earlier {
+            self.superseded.push((sha256_hex(urdf), Tree::parse(urdf)?));
+        }
+        Ok(self)
+    }
+
+    /// Whether `earlier` and this description agree on everything `calibration` identified
+    /// depends on: the same links and joints, and for each joint the calibration fits (a
+    /// listed joint, or the joint above a listed link) every link and joint it carries and
+    /// every joint between the root and it, as the dynamics read them. Anything else may
+    /// differ: torque at a fitted joint depends on nothing else.
+    fn reaches_the_same(&self, earlier: &Tree, calibration: &DynamicsCalibration) -> bool {
+        let (new, old) = (&self.tree, earlier);
+        let shaped = |tree: &Tree| {
+            tree.joints
+                .iter()
+                .map(|j| (j.kind, j.parent, j.child, j.leader.clone()))
+                .collect::<Vec<_>>()
+        };
+        if new.links() != old.links() || shaped(new) != shaped(old) {
+            return false;
+        }
+        // Both read from text: the same text is the same bits.
+        let bits = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+        let same_joint = |index: usize| {
+            let (a, b) = (&new.joints[index], &old.joints[index]);
+            bits(&a.origin, &b.origin)
+                && bits(&a.axis, &b.axis)
+                && a.multiplier.to_bits() == b.multiplier.to_bits()
+                && a.offset.to_bits() == b.offset.to_bits()
+        };
+        let above = |link: usize| new.joints.iter().position(|joint| joint.child == link);
+        let mut fitted: Vec<usize> = Vec::new();
+        for (joint, _) in &calibration.joints {
+            fitted.extend(
+                new.joints
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, j)| j.kind != JointType::Fixed && &j.leader == joint)
+                    .map(|(index, _)| index),
+            );
+        }
+        for (link, _) in &calibration.links {
+            if let Some(index) = new.links().iter().position(|name| name == link) {
+                match above(index) {
+                    Some(joint) => fitted.push(joint),
+                    // The root link: everything hangs from it.
+                    None => {
+                        return new.inertials == old.inertials
+                            && (0..new.joints.len()).all(same_joint);
+                    }
+                }
+            }
+        }
+        for joint in fitted {
+            // Every joint from the root down to this one.
+            let mut at = Some(joint);
+            while let Some(index) = at {
+                if !same_joint(index) {
+                    return false;
+                }
+                at = above(new.joints[index].parent);
+            }
+            // Everything it carries.
+            let mut below = vec![new.joints[joint].child];
+            while let Some(link) = below.pop() {
+                if new.inertials[link] != old.inertials[link] {
+                    return false;
+                }
+                for (index, child) in new
+                    .joints
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, j)| j.parent == link)
+                {
+                    if !same_joint(index) {
+                        return false;
+                    }
+                    below.push(child.child);
+                }
+            }
+        }
+        true
     }
 
     /// These dynamics with one built robot's identified parameters in place of the
@@ -478,7 +577,8 @@ impl Dynamics {
     ///
     /// [`DynamicsError::Description`] when the calibration was identified against another
     /// description than the one these dynamics were read from ([`Dynamics::of`] hashes it;
-    /// dynamics built from a bare [`Tree`] accept none), and [`DynamicsError::Absent`] or
+    /// dynamics built from a bare [`Tree`] accept none), unless it is an earlier revision
+    /// ([`Dynamics::superseding`]) that differs in nothing the calibration depends on, and [`DynamicsError::Absent`] or
     /// [`DynamicsError::Repeated`] for a link or joint the tree lacks or the calibration lists
     /// twice. Which robot's units were fitted is the robot instance's to check
     /// (`sx_embodiments.instance.resolve`), which selects the calibration this is given.
@@ -489,7 +589,14 @@ impl Dynamics {
                 found: calibration.description_sha256.clone(),
             });
         };
-        if calibration.description_sha256 != digest {
+        let earlier = self
+            .superseded
+            .iter()
+            .find(|(sha, _)| *sha == calibration.description_sha256)
+            .map(|(_, tree)| tree);
+        if calibration.description_sha256 != digest
+            && !earlier.is_some_and(|tree| self.reaches_the_same(tree, calibration))
+        {
             return Err(DynamicsError::Description {
                 expected: digest.to_owned(),
                 found: calibration.description_sha256.clone(),
@@ -1092,5 +1199,64 @@ mod tests {
         assert!(!impossible.is_physical());
         let negative = LinkInertia { mass: -1.0, ..rod };
         assert!(!negative.is_physical());
+    }
+
+    /// A pendulum arm beside a neck whose camera is `camera` (an `xyz` centre of mass).
+    fn branched(camera: &str, arm: &str) -> String {
+        format!(
+            r#"<robot name="branched"><link name="base"/>
+      <link name="arm"><inertial><origin xyz="0 0 -0.5"/><mass value="{arm}"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+      <link name="neck"/>
+      <link name="camera"><inertial><origin xyz="{camera}"/><mass value="0.2"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial></link>
+      <joint name="hinge" type="revolute"><parent link="base"/><child link="arm"/>
+        <axis xyz="0 1 0"/><limit lower="-3" upper="3"/></joint>
+      <joint name="pan" type="revolute"><parent link="base"/><child link="neck"/>
+        <axis xyz="0 0 1"/><limit lower="-3" upper="3"/></joint>
+      <joint name="tilt" type="revolute"><parent link="neck"/><child link="camera"/>
+        <axis xyz="0 1 0"/><limit lower="-3" upper="3"/></joint>
+    </robot>"#
+        )
+    }
+
+    /// A calibration of the arm survives a re-render that only moves the neck's camera, and
+    /// only when the earlier revision is known; one reaching the arm, or fitting the neck,
+    /// does not.
+    #[test]
+    fn a_fit_survives_a_re_render_that_does_not_reach_it() {
+        let old = branched("0.03 0 0", "2");
+        let moved = branched("0 0.03 0", "2");
+        let fit = |joint: &str| DynamicsCalibration {
+            description_sha256: digest(&old),
+            stiction_velocity: 0.05,
+            links: vec![(
+                "arm".into(),
+                LinkInertia {
+                    mass: 2.1,
+                    first_moment: [0.0, 0.0, -1.0],
+                    inertia: [0.5, 0.0, 0.0, 0.5, 0.0, 0.01],
+                },
+            )],
+            joints: vec![(joint.into(), JointFriction::default())],
+        };
+        let current = |urdf: &str| Dynamics::of(urdf, UPRIGHT).expect("dynamics");
+        assert!(
+            current(&moved).calibrated(&fit("hinge")).is_err(),
+            "unknown revision"
+        );
+        let knowing = |urdf: &str| current(urdf).superseding(&[&old]).expect("earlier");
+        assert!(knowing(&moved).calibrated(&fit("hinge")).is_ok());
+        // The neck's own fit depends on the camera it carries.
+        assert!(matches!(
+            knowing(&moved).calibrated(&fit("pan")),
+            Err(DynamicsError::Description { .. })
+        ));
+        // A re-render that changes the arm itself.
+        assert!(
+            knowing(&branched("0.03 0 0", "3"))
+                .calibrated(&fit("hinge"))
+                .is_err()
+        );
     }
 }

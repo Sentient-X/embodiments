@@ -119,3 +119,13 @@ def test_a_change_no_identified_joint_carries_rekeys_and_one_it_carries_is_refus
             "excitations": [{"joints": ["neck_joint"]}],
         }
     ) == ({"arm"}, {"arm_joint", "neck_joint"})
+
+
+def test_a_compact_document_rekeys_as_a_spaced_one(tmp_path: Path) -> None:
+    old = _write(tmp_path, "old.urdf", "1.0", "0.5")
+    new = _write(tmp_path, "new.urdf", "1.0", "3.77")
+    old_sha, new_sha = rekey_dynamics.digest(old), rekey_dynamics.digest(new)
+    document = tmp_path / "station.dynamics.json"
+    document.write_text(json.dumps({"description_sha256": old_sha}, separators=(",", ":")))
+    assert rekey_dynamics.rekey(document, old_sha, new_sha)
+    assert json.loads(document.read_text())["description_sha256"] == new_sha
