@@ -257,6 +257,15 @@ pub enum DynamicsError {
     Repeated(String),
     #[error("{0:?} has mass properties no body has, or friction that is negative")]
     Unphysical(String),
+    #[error(
+        "{link:?} is fitted at {mass} kg (described: {design} kg), its centre of mass {shift} m from the description's"
+    )]
+    Implausible {
+        link: String,
+        mass: f64,
+        design: f64,
+        shift: f64,
+    },
     #[error("expected {expected} values, one per independent joint, got {found}")]
     Length { expected: usize, found: usize },
     #[error("joint {0:?} has a non-finite velocity or acceleration")]
@@ -264,6 +273,16 @@ pub enum DynamicsError {
     #[error(transparent)]
     Placement(#[from] PlacementError),
 }
+
+/// A fitted link is at most this many times its description's mass, plus [`FIT_MASS_SLACK`]:
+/// a CAD export misses motors and cable (fits on the static upper body reach 2.9x a wrist's
+/// design mass), but never a link many times heavier than the robot.
+pub const FIT_MASS_FACTOR: f64 = 2.0;
+/// kg: the absolute slack over [`FIT_MASS_FACTOR`] times the design mass.
+pub const FIT_MASS_SLACK: f64 = 1.0;
+/// m: a fitted link's centre of mass lies within this of its description's. Fits on the
+/// static upper body move it at most 5.2 cm (a wrist); the whole arm is about a metre.
+pub const FIT_CENTRE_SHIFT: f64 = 0.1;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -487,6 +506,31 @@ impl Dynamics {
                 .iter()
                 .position(|name| name == link)
                 .ok_or_else(|| DynamicsError::Absent(link.clone()))?;
+            // A physical fit can still be absurd (a 1000 kg forearm, a centre of mass off the
+            // link): bounded by the description's.
+            let described = self.inertia[index];
+            let centre = |of: &LinkInertia| {
+                of.first_moment
+                    .map(|moment| if of.mass > 0.0 { moment / of.mass } else { 0.0 })
+            };
+            let (fitted, designed) = (centre(inertia), centre(&described));
+            let shift = fitted
+                .iter()
+                .zip(&designed)
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
+            if inertia.mass > FIT_MASS_FACTOR * described.mass + FIT_MASS_SLACK
+                // A massless fit has no centre, and no torque to get wrong.
+                || (inertia.mass > 0.0 && shift > FIT_CENTRE_SHIFT)
+            {
+                return Err(DynamicsError::Implausible {
+                    link: link.clone(),
+                    mass: inertia.mass,
+                    design: described.mass,
+                    shift,
+                });
+            }
             self.inertia[index] = *inertia;
         }
         let mut seen = std::collections::HashSet::new();
@@ -984,6 +1028,51 @@ mod tests {
             dynamics.calibrated(&calibration),
             Err(DynamicsError::Repeated("arm".into()))
         );
+    }
+
+    #[test]
+    fn a_physical_but_absurd_fit_is_refused_and_a_plausible_one_kept() {
+        let dynamics = Dynamics::of(PENDULUM, UPRIGHT).expect("dynamics");
+        let arm = dynamics
+            .tree()
+            .links()
+            .iter()
+            .position(|link| link == "arm")
+            .expect("arm");
+        let design = dynamics.inertia[arm].mass;
+        let at = dynamics.inertia[arm]
+            .first_moment
+            .map(|moment| moment / design);
+        let fit = |mass: f64, shift: f64| DynamicsCalibration {
+            description_sha256: digest(PENDULUM),
+            stiction_velocity: 0.02,
+            links: vec![(
+                "arm".into(),
+                LinkInertia {
+                    mass,
+                    first_moment: [mass * at[0], mass * at[1], mass * (at[2] + shift)],
+                    inertia: [0.0; 6],
+                },
+            )],
+            joints: vec![],
+        };
+        // Heavier than its CAD and its centre a few centimetres off, as a real arm with its
+        // motors is: kept.
+        assert!(
+            dynamics
+                .clone()
+                .calibrated(&fit(2.0 * design + 0.5, 0.05))
+                .is_ok()
+        );
+        // A 1000 kg link, and a centre of mass 15 cm from the design's: refused.
+        assert!(matches!(
+            dynamics.clone().calibrated(&fit(1000.0, 0.0)),
+            Err(DynamicsError::Implausible { .. })
+        ));
+        assert!(matches!(
+            dynamics.calibrated(&fit(design, 0.15)),
+            Err(DynamicsError::Implausible { .. })
+        ));
     }
 
     #[test]
