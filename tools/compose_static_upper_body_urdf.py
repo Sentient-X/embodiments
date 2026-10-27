@@ -155,6 +155,15 @@ RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
 #: The camera tilt servo's horn, which the source exports into base_link.
 CAMERA_TILT_HORN = "_________step__Body1_1_.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
+#: The neck joints whose mechanism reaches past the official SO-101 limits: the folded rest
+#: the neck sits in unpowered (elbow 1.7215, wrist flex -1.7392 rad, 2026-10-27) lies beyond
+#: the official +-1.69 and +-1.65806, against the servos' stops. Each is this build's
+#: calibrated reach (LeRobot range 860..3124 and 798..3137 about its middle: +-1.737 and
+#: +-1.794 rad), rounded out to the hundredth; each unit's calibration still bounds its servo.
+NECK_REACH = {
+    "so101_elbow_flex_joint": ("-1.74", "1.74"),
+    "so101_wrist_flex_joint": ("-1.80", "1.80"),
+}
 #: How far the 2026-10-27 recalibration moved the tilt reading (above).
 CAMERA_RECALIBRATION = -1.1476259496
 CAMERA_MOUNT_TILT = math.radians(141.71) + CAMERA_RECALIBRATION
@@ -330,6 +339,11 @@ def _graft_neck(robot: ET.Element) -> None:
             assert limit is not None
             limit.set("lower", CAMERA_TILT_RANGE[0])
             limit.set("upper", CAMERA_TILT_RANGE[1])
+        if name in NECK_REACH:
+            limit = joint.find("limit")
+            assert limit is not None
+            limit.set("lower", NECK_REACH[name][0])
+            limit.set("upper", NECK_REACH[name][1])
         robot.insert(list(robot).index(mount) + 1, joint)
 
 

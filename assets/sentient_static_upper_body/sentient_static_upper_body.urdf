@@ -4105,14 +4105,14 @@
     <parent link="so101_shoulder_lift_link" />
     <child link="so101_elbow_flex_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.69" upper="1.69" />
+    <limit effort="10" velocity="10" lower="-1.74" upper="1.74" />
   </joint>
   <joint name="so101_wrist_flex_joint" type="revolute">
     <origin xyz="-0.1349 0.0052 3.62355e-17" rpy="4.02456e-15 8.67362e-16 -1.5708" />
     <parent link="so101_elbow_flex_link" />
     <child link="so101_wrist_flex_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.65806" upper="1.65806" />
+    <limit effort="10" velocity="10" lower="-1.80" upper="1.80" />
   </joint>
   <joint name="so101_wrist_roll_joint" type="revolute">
     <origin xyz="5.55112e-17 -0.0611 0.0181" rpy="1.5708 0.0486795 3.14159" />

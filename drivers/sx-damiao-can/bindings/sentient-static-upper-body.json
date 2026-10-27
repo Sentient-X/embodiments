@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
+  "id": "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
   "axes": [
     {
       "joint": "torso_joint",
@@ -273,8 +273,8 @@
     },
     {
       "joint": "so101_elbow_flex_joint",
-      "lower": -1.69,
-      "upper": 1.69,
+      "lower": -1.74,
+      "upper": 1.74,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -286,8 +286,8 @@
     },
     {
       "joint": "so101_wrist_flex_joint",
-      "lower": -1.65806,
-      "upper": 1.65806,
+      "lower": -1.8,
+      "upper": 1.8,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",

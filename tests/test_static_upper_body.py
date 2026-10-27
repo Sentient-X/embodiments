@@ -315,12 +315,17 @@ def test_the_neck_is_the_official_new_calibration_so101() -> None:
 
     from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_NECK
 
+    # This build's elbow and wrist flex reach the folded rest past the official limits.
+    reach = {"so101_elbow_flex_joint": [-1.74, 1.74], "so101_wrist_flex_joint": [-1.80, 1.80]}
+
     bounds = {axis.name: axis.bounds for axis in STATIC_UPPER_BODY_NECK.layout.axes}
     for upstream, name in names.items():
         theirs, mine = official[upstream], ours[name]
         tags = [("origin", ("xyz", "rpy")), ("axis", ("xyz",))]
-        if upstream != "gripper":
+        if upstream != "gripper" and name not in reach:
             tags.append(("limit", ("lower", "upper")))
+        if name in reach:
+            assert numbers(mine, "limit", ("lower", "upper")) == reach[name], name
         for tag, keys in tags:
             assert numbers(mine, tag, keys) == pytest.approx(
                 numbers(theirs, tag, keys), abs=1e-6

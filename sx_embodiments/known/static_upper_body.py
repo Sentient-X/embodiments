@@ -143,8 +143,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="e0c31b235c0827e434ef75eb6eb89d0b0bcccdeaf4dd6df68a6788c3e9950eb2",
-    size_bytes=221396,
+    sha256="f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934",
+    size_bytes=221390,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -309,8 +309,10 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
         # The official new-calibration SO-101's limits; the camera tilt's is the free arc it
         # rests in (the official joint's limits are its jaw's, and the camera meets the wrist),
         # in the reading of the 2026-10-27 calibration (the composer's CAMERA_TILT_RANGE).
-        lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385, -1.993966704),
-        upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121, 0.885826562),
+        # The elbow and wrist flex reach the folded rest, past the official limits (the
+        # composer's NECK_REACH).
+        lower=(-1.91986, -1.74533, -1.74, -1.80, -2.74385, -1.993966704),
+        upper=(1.91986, 1.74533, 1.74, 1.80, 2.84121, 0.885826562),
         actuations=tuple(_sts3215(bus_id, STATIC_UPPER_BODY_NECK_PORT) for bus_id in range(1, 7)),
         observations=(ActuatorFeedback(),) * 6,
     ),

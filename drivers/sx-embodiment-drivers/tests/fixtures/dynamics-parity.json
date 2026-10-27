@@ -36,7 +36,7 @@
  "calibration": {
   "schema": "sx.calibration/v1",
   "kind": "dynamics",
-  "description_sha256": "e0c31b235c0827e434ef75eb6eb89d0b0bcccdeaf4dd6df68a6788c3e9950eb2",
+  "description_sha256": "f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934",
   "stiction_velocity": 0.05,
   "links": [
    {
