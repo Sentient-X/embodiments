@@ -45,7 +45,9 @@
 //! An opened body changes in place bus by bus. [`changed_ports`] compares two [`Setup`]s of one
 //! drive (a servo recalibrated, an axis out of or back in service, new rails) and names the
 //! buses that open differently; [`reopen_ports`] closes just those bridges and opens them
-//! again, keeping every other bus open. A change of which body it is (another instance, another
+//! again, keeping every other bus open; [`lend_port`] closes one bus for another process (a
+//! calibration tool) and keeps its axes as unavailable data until it is reopened. A change of
+//! which body it is (another instance, another
 //! set of open ports, a port on another bridge) is [`OpenError::NotInPlace`]: it is opened anew.
 //!
 //! Every mismatch between the drive, the commissioning and the opener is refused before any
@@ -1340,6 +1342,50 @@ pub fn reopen_ports(
         chains[index] = Some(mask.chain(part.open(&port, link?, &after.commissioning.rails)?)?);
     }
     Ok(Chains::new(chains.into_iter().flatten().collect()))
+}
+
+/// `body`, opened from `drive` with `setup`, with `port`'s bus lent to another process on this
+/// host (a calibration tool): its chain is dropped, closing its bridge, and its axes keep their
+/// place in the vector as unavailable data, never commanded, reported unreached by every stop,
+/// as a bus that did not open is. [`reopen_ports`] takes it back. Stop the body, proven, before
+/// lending: nothing here sends the bus a frame.
+///
+/// # Errors
+///
+/// [`OpenError::NotInPlace`] when `port` is not one of `body`'s open buses, and what planning
+/// `setup` refuses; `body` is given back untouched with either.
+pub fn lend_port(
+    body: &mut Body,
+    drive: &InstanceDrive,
+    setup: Setup,
+    port: &str,
+) -> Result<(), OpenError> {
+    let plan = plan(
+        drive,
+        setup.commissioning,
+        setup.calibrations,
+        setup.options,
+    )?;
+    if body.chains().len() != plan.parts.len() {
+        return Err(OpenError::NotInPlace(format!(
+            "the opened body has {} buses and this setup opens {}",
+            body.chains().len(),
+            plan.parts.len()
+        )));
+    }
+    let Some((index, (_, _, mask))) = plan
+        .parts
+        .into_iter()
+        .enumerate()
+        .find(|(_, (name, _, _))| name == port)
+    else {
+        return Err(OpenError::NotInPlace(format!(
+            "{port} is not an open bus of this body"
+        )));
+    };
+    // Dropping the chain given back closes its bridge.
+    drop(body.replace(index, mask.unopened(None)?));
+    Ok(())
 }
 
 /// One bus read only, behind the one observing surface every bus shares.

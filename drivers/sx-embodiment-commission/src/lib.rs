@@ -32,5 +32,6 @@ pub mod matching;
 pub mod output;
 pub mod probe;
 pub mod record;
+pub mod station_loan;
 pub mod sysfs;
 pub mod tty;
