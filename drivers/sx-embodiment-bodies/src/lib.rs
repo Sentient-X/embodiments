@@ -1352,24 +1352,24 @@ pub fn reopen_ports(
 ///
 /// # Errors
 ///
-/// [`OpenError::NotInPlace`] when `port` is not one of `body`'s open buses.
+/// [`OpenError::NotInPlace`] when `port` is not one of `body`'s open buses, and what planning
+/// `setup` refuses; `body` is given back untouched with either.
 pub fn lend_port(
-    body: Body,
+    body: &mut Body,
     drive: &InstanceDrive,
     setup: Setup,
     port: &str,
-) -> Result<Body, OpenError> {
+) -> Result<(), OpenError> {
     let plan = plan(
         drive,
         setup.commissioning,
         setup.calibrations,
         setup.options,
     )?;
-    let mut chains = body.into_chains();
-    if chains.len() != plan.parts.len() {
+    if body.chains().len() != plan.parts.len() {
         return Err(OpenError::NotInPlace(format!(
             "the opened body has {} buses and this setup opens {}",
-            chains.len(),
+            body.chains().len(),
             plan.parts.len()
         )));
     }
@@ -1383,8 +1383,9 @@ pub fn lend_port(
             "{port} is not an open bus of this body"
         )));
     };
-    chains[index] = mask.unopened(None)?;
-    Ok(Chains::new(chains))
+    // Dropping the chain given back closes its bridge.
+    drop(body.replace(index, mask.unopened(None)?));
+    Ok(())
 }
 
 /// One bus read only, behind the one observing surface every bus shares.

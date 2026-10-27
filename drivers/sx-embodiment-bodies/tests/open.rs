@@ -530,7 +530,7 @@ fn a_bus_lent_to_a_tool_keeps_its_axes_as_unavailable_data_and_comes_back() {
     let neck = &serial["5A7C118709"];
     let written = neck.state().written.len();
     let frames = can.state().frames.len();
-    let mut body = lend_port(body, &drive, setup, "neck").expect("lent");
+    lend_port(&mut body, &drive, setup, "neck").expect("lent");
     // The neck's six axes keep their place, unavailable; nothing reaches its bus or the CAN.
     assert_eq!(body.axes().len(), 25);
     let readings = body.read_positions();
@@ -569,9 +569,10 @@ fn a_bus_lent_to_a_tool_keeps_its_axes_as_unavailable_data_and_comes_back() {
         "the CAN bus answered the stops throughout"
     );
     assert!(matches!(
-        lend_port(body, &drive, back, "tail"),
+        lend_port(&mut body, &drive, back, "tail"),
         Err(OpenError::NotInPlace(_))
     ));
+    assert_eq!(body.axes().len(), 25, "a refusal leaves the body whole");
 }
 
 #[test]

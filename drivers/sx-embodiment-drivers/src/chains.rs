@@ -86,6 +86,27 @@ impl<C: ActuatorChain> Chains<C> {
         &self.members
     }
 
+    /// Put `chain` in place of the chain at `index`, which is given back; the axes and their
+    /// commanded ranges are composed again.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `index` is not a chain of these.
+    pub fn replace(&mut self, index: usize, chain: C) -> C {
+        let old = std::mem::replace(&mut self.members[index], chain);
+        self.axes = self
+            .members
+            .iter()
+            .flat_map(|chain| chain.axes().iter().cloned())
+            .collect();
+        self.commandable = self
+            .members
+            .iter()
+            .flat_map(|chain| chain.commandable().iter().copied())
+            .collect();
+        old
+    }
+
     /// The chains themselves, in native state order, to compose again ([`Chains::new`]) after
     /// some are replaced.
     #[must_use]
