@@ -65,7 +65,7 @@ impl DamiaoBody {
     /// Returns why a body's bindings do not parse.
     pub fn of(embodiment: &str) -> Result<Option<&'static Self>, BodyError> {
         for body in BODIES {
-            if BodyBindings::parse(body.bindings)?.id == embodiment {
+            if BodyBindings::parse(body.bindings)?.is(embodiment) {
                 return Ok(Some(body));
             }
         }

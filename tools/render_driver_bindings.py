@@ -84,6 +84,7 @@ from sx_embodiments.media import (
 )
 from sx_embodiments.parts import ChainSpec
 from sx_embodiments.rendered import same_rendering
+from sx_embodiments.successor import superseded_ids
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -349,6 +350,9 @@ def render(name: str) -> str:
     if unknown := set(approach) - ports:
         raise ValueError(f"{name}: servo approach for ports {sorted(unknown)} it has no axes on")
     document: dict[str, object] = {"embodiment": name, "id": str(robot.id), "axes": axes}
+    # Earlier ids of this body that drive as it does: a robot still assigned one opens it.
+    if supersedes := superseded_ids(robot.name):
+        document["supersedes"] = list(supersedes)
     if approach:
         document["approach"] = {
             port: {"speed": limit.speed, "acceleration": limit.acceleration}

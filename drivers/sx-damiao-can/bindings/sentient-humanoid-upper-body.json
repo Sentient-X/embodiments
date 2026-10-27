@@ -145,5 +145,8 @@
       "reduction": 1.0,
       "home": 0.0
     }
+  ],
+  "supersedes": [
+    "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc"
   ]
 }

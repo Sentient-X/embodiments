@@ -89,10 +89,11 @@ impl BodyBindings {
     ///
     /// # Errors
     ///
-    /// Refuses a drive of another body, joints that are not exactly this body's driven joints
+    /// Refuses a drive of another body (one assigned an id this body supersedes is this body),
+    /// joints that are not exactly this body's driven joints
     /// in state order, and any zero or direction a calibration cannot carry.
     pub fn calibrated(self, drive: &InstanceDrive) -> Result<Self, BodyError> {
-        if drive.embodiment != self.id {
+        if !self.is(&drive.embodiment) {
             return Err(BodyError::Instance {
                 embodiment: self.embodiment,
                 found: drive.embodiment.clone(),

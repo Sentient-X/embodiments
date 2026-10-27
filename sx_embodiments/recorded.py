@@ -57,7 +57,8 @@ def _historical() -> dict[EmbodimentName, dict[EmbodimentId, str]]:
 
 
 def historical_identities(name: EmbodimentName) -> frozenset[EmbodimentId]:
-    """The identities ``name``'s canonical package carried under earlier schemas."""
+    """The identities ``name``'s canonical package was published under before: earlier
+    schemas, and superseded revisions at this one (``sx_embodiments.successor``)."""
     return frozenset(_historical().get(name, {}))
 
 

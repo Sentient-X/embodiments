@@ -61,7 +61,7 @@ impl FeetechBody {
     /// Returns why a body's bindings do not parse.
     pub fn of(embodiment: &str, port: &str) -> Result<Option<&'static Self>, BodyError> {
         for body in BODIES {
-            if body.port == port && BodyBindings::parse(body.bindings)?.id == embodiment {
+            if body.port == port && BodyBindings::parse(body.bindings)?.is(embodiment) {
                 return Ok(Some(body));
             }
         }
@@ -75,7 +75,7 @@ impl FeetechBody {
     /// Returns why a body's bindings do not parse.
     pub fn bindings_of(embodiment: &str) -> Result<Option<&'static str>, BodyError> {
         for body in BODIES {
-            if BodyBindings::parse(body.bindings)?.id == embodiment {
+            if BodyBindings::parse(body.bindings)?.is(embodiment) {
                 return Ok(Some(body.bindings));
             }
         }

@@ -598,7 +598,7 @@ fn in_service<T>(
 
 impl Opener {
     fn of(drive: &InstanceDrive) -> Result<Self, OpenError> {
-        if BodyBindings::parse(b601::BINDINGS)?.id == drive.embodiment {
+        if BodyBindings::parse(b601::BINDINGS)?.is(&drive.embodiment) {
             return Ok(Self::B601);
         }
         let embodiment = drive.embodiment.as_str();
