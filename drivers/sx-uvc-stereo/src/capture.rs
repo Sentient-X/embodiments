@@ -267,9 +267,8 @@ fn find(request: &CaptureRequest, attached: Vec<Attached>) -> Result<Attached, O
 /// frames rather than holding back the other tracks of its device.
 const QUEUE: usize = 2;
 
-/// How long the last source of a device waits for its capture thread to stop the stream and
-/// close the device: longer than [`FIRST_FRAME_WAIT`], the longest a read waits, with room to
-/// spare.
+/// How long [`close_all`] waits for each capture thread to stop its stream and close its device:
+/// longer than [`FIRST_FRAME_WAIT`], the longest a read waits, with room to spare.
 pub const STOP_WAIT: Duration = Duration::from_secs(4);
 
 /// No frame for this long ends a capture: the device is reported failed, its stream stopped and
@@ -281,28 +280,93 @@ pub const STALL: Duration = Duration::from_secs(1);
 /// How long the first frame after the stream starts may take.
 pub const FIRST_FRAME_WAIT: Duration = Duration::from_secs(3);
 
-/// One opened device's frames, captured on a thread of its own: a `nokhwa` camera may not
-/// leave the thread that opened it, and a [`Device`] is `Send`.
+/// One track's frames from its device's running capture. Dropping it unsubscribes the track;
+/// the device keeps streaming for the next one ([`open`]).
 pub struct CaptureDevice {
     frames: mpsc::Receiver<Result<Arc<RawFrame>, CaptureError>>,
-    _capture: Arc<CaptureThread>,
 }
 
-/// The capture thread of one opened device, shared by its tracks' sources. When the last
-/// source drops, it is told to stop and waited for (at most [`STOP_WAIT`]); it sees that after
-/// the frame it is reading or at most [`STALL`]. The thread stops
-/// the stream (`VIDIOC_STREAMOFF`, the buffers released) and closes the device itself, so a
-/// process that ends after its sources are dropped never leaves the camera mid-capture. A
-/// stream torn down by process exit instead, during a transfer, hung the DGX Spark's xHCI
-/// controller until a reboot ("xHCI host not responding to stop endpoint command", 10-27).
-struct CaptureThread {
-    stop: Arc<AtomicBool>,
-    thread: Mutex<Option<JoinHandle<()>>>,
+impl Device for CaptureDevice {
+    fn wait(&mut self) -> Result<Arc<RawFrame>, CaptureError> {
+        self.frames.recv().map_err(|_| CaptureError::Ended)?
+    }
+}
+
+/// The tracks a running capture hands its frames to.
+#[derive(Default)]
+struct Subscribers {
+    senders: Vec<FrameSender>,
+    /// The capture failed or was stopped: it takes no new track, and its device is closed
+    /// (or closing) on its thread.
+    ended: bool,
+}
+
+/// One device opened once and kept streaming for the process's life, on a thread of its own (a
+/// `nokhwa` camera may not leave the thread that opened it). Tracks subscribe and unsubscribe
+/// as watch and teleoperation intervals come and go; with none, frames are dropped. Stopping
+/// and reopening the stream every interval is what hung the DGX Spark's xHCI controller ("xHCI
+/// host not responding to stop endpoint command", 10-27) and cost a reconnect each time; now
+/// the stream stops only when the device fails (no frame within [`STALL`]) or [`close_all`]
+/// stops it as the process ends.
+struct Running {
     serial: String,
+    mode: ((u32, u32), u32),
+    subscribers: Mutex<Subscribers>,
+    stop: AtomicBool,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl Drop for CaptureThread {
-    fn drop(&mut self) {
+impl Running {
+    fn new(serial: String, mode: ((u32, u32), u32)) -> Self {
+        Self {
+            serial,
+            mode,
+            subscribers: Mutex::new(Subscribers::default()),
+            stop: AtomicBool::new(false),
+            thread: Mutex::new(None),
+        }
+    }
+
+    /// Hand `senders` this capture's frames, unless it has ended.
+    fn subscribe(&self, senders: Vec<FrameSender>) -> Result<(), Vec<FrameSender>> {
+        let Ok(mut subscribers) = self.subscribers.lock() else {
+            return Err(senders);
+        };
+        if subscribers.ended {
+            return Err(senders);
+        }
+        subscribers.senders.extend(senders);
+        Ok(())
+    }
+
+    /// Every live track gets the frame; a track whose source dropped is unsubscribed, and one
+    /// that fell behind misses it.
+    fn publish(&self, frame: &Arc<RawFrame>) {
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            subscribers.senders.retain(|sender| {
+                !matches!(
+                    sender.try_send(Ok(Arc::clone(frame))),
+                    Err(mpsc::TrySendError::Disconnected(_))
+                )
+            });
+        }
+    }
+
+    /// Take no new track, tell every track why (never blocking on one that stopped reading),
+    /// and let them go: their sources see the error, then the capture's end.
+    fn end(&self, error: Option<&CaptureError>) {
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            subscribers.ended = true;
+            for sender in subscribers.senders.drain(..) {
+                if let Some(error) = error {
+                    let _ = sender.try_send(Err(error.clone()));
+                }
+            }
+        }
+    }
+
+    /// Stop the capture and wait (at most [`STOP_WAIT`]) for its thread to close the device.
+    fn stop_and_wait(&self) {
         self.stop.store(true, Ordering::Release);
         let Some(thread) = self.thread.lock().ok().and_then(|mut thread| thread.take()) else {
             return;
@@ -322,9 +386,19 @@ impl Drop for CaptureThread {
     }
 }
 
-impl Device for CaptureDevice {
-    fn wait(&mut self) -> Result<Arc<RawFrame>, CaptureError> {
-        self.frames.recv().map_err(|_| CaptureError::Ended)?
+/// Every device this process keeps streaming.
+static RUNNING: Mutex<Vec<Arc<Running>>> = Mutex::new(Vec::new());
+
+/// Stop every running capture and wait for each to stop its stream and close its device. A
+/// station calls it as it ends, after its robot is stopped and off its control thread, so the
+/// stream is never torn down by process exit mid-transfer.
+pub fn close_all() {
+    let running = RUNNING
+        .lock()
+        .map(|mut running| std::mem::take(&mut *running))
+        .unwrap_or_default();
+    for capture in running {
+        capture.stop_and_wait();
     }
 }
 
@@ -368,36 +442,19 @@ fn rows_of(mut data: Vec<u8>, width: usize, rows: usize) -> Result<(usize, Vec<u
 /// One track's queue of frames.
 type FrameSender = mpsc::SyncSender<Result<Arc<RawFrame>, CaptureError>>;
 
-/// Hand every frame to every track's queue until told to stop, every track's source has
-/// dropped, or the device fails.
-fn serve(
-    stream: &mut Stream,
-    mut senders: Vec<FrameSender>,
-    (width, height): (u32, u32),
-    stopping: &AtomicBool,
-) {
-    // Told to stop, every track's source dropped, or the device failed: each ends the
-    // capture, and the stream is stopped and the device closed here, on this thread.
-    while !senders.is_empty() && !stopping.load(Ordering::Acquire) {
-        match frame(stream, width, height) {
-            Ok(frame) => {
-                let frame = Arc::new(frame);
-                senders.retain(|sender| {
-                    !matches!(
-                        sender.try_send(Ok(Arc::clone(&frame))),
-                        Err(mpsc::TrySendError::Disconnected(_))
-                    )
-                });
-            }
+/// Hand every frame to the capture's tracks until it is stopped or the device fails; then it
+/// takes no new track, and the caller closes the device.
+fn serve(running: &Running, mut next: impl FnMut() -> Result<RawFrame, CaptureError>) {
+    while !running.stop.load(Ordering::Acquire) {
+        match next() {
+            Ok(frame) => running.publish(&Arc::new(frame)),
             Err(error) => {
-                for sender in &senders {
-                    // Never block on a track that stopped reading: the device closes now.
-                    let _ = sender.try_send(Err(error.clone()));
-                }
-                break;
+                running.end(Some(&error));
+                return;
             }
         }
     }
+    running.end(None);
 }
 
 /// One device streaming at one mode, on the thread that opened it.
@@ -583,18 +640,48 @@ pub fn open(
             "the requests are not one device at one mode".to_owned(),
         ));
     }
-    let device = find(first, devices()?)?;
     let (width, height) = first.frame_raster();
-    let fps = first.fps;
-    let serial = first.serial.clone();
-    let (ready, opened) = mpsc::channel();
+    let mode = ((width, height), first.fps);
     let (senders, receivers): (Vec<_>, Vec<_>) =
         requests.iter().map(|_| mpsc::sync_channel(QUEUE)).unzip();
-    let stop = Arc::new(AtomicBool::new(false));
-    let stopping = Arc::clone(&stop);
-    let thread_serial = serial.clone();
+    // One open at a time: two intervals asking at once share one capture.
+    let mut running = RUNNING
+        .lock()
+        .map_err(|_| OpenError::Device("the capture registry is poisoned".to_owned()))?;
+    let mut senders = senders;
+    if let Some(index) = running
+        .iter()
+        .position(|capture| capture.serial == first.serial)
+    {
+        let capture = Arc::clone(&running[index]);
+        if capture.mode == mode {
+            match capture.subscribe(senders) {
+                Ok(()) => return Ok(sources(requests, receivers)),
+                Err(back) => senders = back,
+            }
+        }
+        // Ended (the device failed) or asked for another mode: its device is closed before
+        // this one opens it again.
+        running.swap_remove(index);
+        capture.stop_and_wait();
+    }
+    let capture = Arc::new(Running::new(first.serial.clone(), mode));
+    start(first, &capture)?;
+    capture
+        .subscribe(senders)
+        .map_err(|_| OpenError::Device("the capture ended as it opened".to_owned()))?;
+    running.push(capture);
+    Ok(sources(requests, receivers))
+}
+
+/// Open the device `request` names on a thread of its own and start serving `capture` from it.
+fn start(request: &CaptureRequest, capture: &Arc<Running>) -> Result<(), OpenError> {
+    let device = find(request, devices()?)?;
+    let ((width, height), fps) = capture.mode;
+    let (ready, opened) = mpsc::channel();
+    let serving = Arc::clone(capture);
     let thread = std::thread::Builder::new()
-        .name(format!("uvc-stereo-{serial}"))
+        .name(format!("uvc-stereo-{}", capture.serial))
         .spawn(move || {
             let mut stream = match Stream::open(device.index, (width, height), fps) {
                 Ok(stream) => {
@@ -602,35 +689,32 @@ pub fn open(
                     stream
                 }
                 Err(error) => {
+                    serving.end(None);
                     let _ = ready.send(Err(error));
                     return;
                 }
             };
-            serve(&mut stream, senders, (width, height), &stopping);
-            stream.close(&thread_serial);
+            serve(&serving, || frame(&mut stream, width, height));
+            stream.close(&serving.serial);
         })
         .map_err(|error| OpenError::Device(error.to_string()))?;
-    let capture = Arc::new(CaptureThread {
-        stop,
-        thread: Mutex::new(Some(thread)),
-        serial,
-    });
+    if let Ok(mut slot) = capture.thread.lock() {
+        *slot = Some(thread);
+    }
     opened
         .recv()
-        .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))??;
-    Ok(requests
+        .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))?
+}
+
+fn sources(
+    requests: Vec<CaptureRequest>,
+    receivers: Vec<mpsc::Receiver<Result<Arc<RawFrame>, CaptureError>>>,
+) -> Vec<UvcStereoSource<CaptureDevice>> {
+    requests
         .into_iter()
         .zip(receivers)
-        .map(|(request, frames)| {
-            UvcStereoSource::new(
-                CaptureDevice {
-                    frames,
-                    _capture: Arc::clone(&capture),
-                },
-                request,
-            )
-        })
-        .collect())
+        .map(|(request, frames)| UvcStereoSource::new(CaptureDevice { frames }, request))
+        .collect()
 }
 
 #[cfg(test)]
@@ -724,37 +808,88 @@ mod tests {
         ));
     }
 
-    /// The last source dropping stops the capture thread and waits for it to end, so the
-    /// device is closed before the caller goes on; a thread that will not stop is left after
-    /// the wait rather than hanging its caller.
+    fn raw() -> RawFrame {
+        RawFrame {
+            width: 2,
+            height: 1,
+            stride: 4,
+            data: vec![0; 4],
+            captured: CapturedAt {
+                monotonic: Instant::now(),
+                wall: SystemTime::now(),
+            },
+        }
+    }
+
+    /// The device keeps streaming as tracks come and go: a dropped track is unsubscribed, the
+    /// next one is served by the same capture, and frames with nobody subscribed are dropped.
+    /// A failure ends the capture: its tracks see the error, then its end, and it takes no
+    /// new track, so the next open starts a fresh one.
     #[test]
-    fn the_last_source_stops_and_waits_for_the_capture_thread() {
-        let stop = Arc::new(AtomicBool::new(false));
-        let seen = Arc::clone(&stop);
+    fn tracks_come_and_go_on_one_running_capture_until_it_fails() {
+        let capture = Arc::new(Running::new("test".to_owned(), ((2, 1), 15)));
+        let (feed, frames) = mpsc::channel::<Result<RawFrame, CaptureError>>();
+        let serving = Arc::clone(&capture);
+        let thread = std::thread::spawn(move || {
+            serve(&serving, || {
+                frames.recv().unwrap_or(Err(CaptureError::Ended))
+            });
+        });
+
+        let (first, watch) = mpsc::sync_channel(QUEUE);
+        capture.subscribe(vec![first]).expect("subscribed");
+        feed.send(Ok(raw())).expect("feed");
+        let mut watch = CaptureDevice { frames: watch };
+        watch.wait().expect("the watch's frame");
+        drop(watch);
+        // Nobody subscribed: the frame is dropped and the capture keeps running.
+        feed.send(Ok(raw())).expect("feed");
+        let (second, session) = mpsc::sync_channel(QUEUE);
+        capture
+            .subscribe(vec![second])
+            .expect("the same capture serves the next interval");
+        let mut session = CaptureDevice { frames: session };
+        feed.send(Ok(raw())).expect("feed");
+        session.wait().expect("the session's frame");
+
+        feed.send(Err(CaptureError::Device("no frame for 1s".to_owned())))
+            .expect("feed");
+        thread.join().expect("served");
+        // Frames still queued come first (the unsubscribed one may have raced the subscribe).
+        let failure = std::iter::from_fn(|| Some(session.wait()))
+            .find_map(Result::err)
+            .expect("an error");
+        assert_eq!(failure, CaptureError::Device("no frame for 1s".to_owned()));
+        assert_eq!(session.wait().err(), Some(CaptureError::Ended));
+        let (late, _) = mpsc::sync_channel(QUEUE);
+        assert!(
+            capture.subscribe(vec![late]).is_err(),
+            "an ended capture takes no track"
+        );
+    }
+
+    /// Stopping a capture ends its thread, which closes the device, before the stop returns.
+    #[test]
+    fn stopping_waits_for_the_capture_thread() {
+        let capture = Arc::new(Running::new("test".to_owned(), ((2, 1), 15)));
         let closed = Arc::new(AtomicBool::new(false));
+        let serving = Arc::clone(&capture);
         let device_closed = Arc::clone(&closed);
         let thread = std::thread::spawn(move || {
-            while !seen.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            serve(&serving, || {
+                std::thread::sleep(Duration::from_millis(2));
+                Ok(raw())
+            });
             std::thread::sleep(Duration::from_millis(20));
             device_closed.store(true, Ordering::Release);
         });
-        let capture = Arc::new(CaptureThread {
-            stop,
-            thread: Mutex::new(Some(thread)),
-            serial: "test".to_owned(),
-        });
-        let other = Arc::clone(&capture);
-        drop(capture);
-        assert!(
-            !closed.load(Ordering::Acquire),
-            "another source still holds it"
-        );
-        drop(other);
+        *capture.thread.lock().expect("slot") = Some(thread);
+        capture.stop_and_wait();
         assert!(
             closed.load(Ordering::Acquire),
-            "closed before the last drop returned"
+            "closed before the stop returned"
         );
+        let (late, _) = mpsc::sync_channel(QUEUE);
+        assert!(capture.subscribe(vec![late]).is_err());
     }
 }
