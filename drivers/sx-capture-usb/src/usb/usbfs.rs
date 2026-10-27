@@ -92,6 +92,7 @@ pub const REAP_URB_NDELAY: u64 = ioc(IOC_WRITE, 13, size_of::<*mut c_void>());
 pub const CLAIM_INTERFACE: u64 = ioc(IOC_READ, 15, size_of::<u32>());
 pub const RELEASE_INTERFACE: u64 = ioc(IOC_READ, 16, size_of::<u32>());
 pub const IOCTL: u64 = ioc(IOC_READ | IOC_WRITE, 18, size_of::<IoctlArgument>());
+pub const RESET: u64 = ioc(IOC_NONE, 20, 0);
 pub const CLEAR_HALT: u64 = ioc(IOC_READ, 21, size_of::<u32>());
 pub const DISCONNECT: u64 = ioc(IOC_NONE, 22, 0);
 pub const CONNECT: u64 = ioc(IOC_NONE, 23, 0);
@@ -233,6 +234,14 @@ impl Device {
     pub fn speed(&self) -> io::Result<i32> {
         // SAFETY: GET_SPEED takes no argument and returns the speed.
         unsafe { ioctl(self.fd, GET_SPEED, std::ptr::null_mut()) }
+    }
+
+    /// Reset the device on its hub port and re-enumerate it at the same address
+    /// (`USBDEVFS_RESET`). A kernel driver bound to it without reset hooks (`uvcvideo`) is
+    /// unbound and bound again before this returns, so its nodes come back new.
+    pub fn reset(&self) -> io::Result<()> {
+        // SAFETY: RESET takes no argument.
+        unsafe { ioctl(self.fd, RESET, std::ptr::null_mut()) }.map(drop)
     }
 
     pub fn clear_halt(&self, endpoint: u8) -> io::Result<()> {
@@ -586,6 +595,7 @@ mod tests {
         assert_eq!(CLAIM_INTERFACE, 0x8004_550f);
         assert_eq!(RELEASE_INTERFACE, 0x8004_5510);
         assert_eq!(IOCTL, 0xc010_5512);
+        assert_eq!(RESET, 0x0000_5514);
         assert_eq!(CLEAR_HALT, 0x8004_5515);
         assert_eq!(DISCONNECT, 0x0000_5516);
         assert_eq!(CONNECT, 0x0000_5517);

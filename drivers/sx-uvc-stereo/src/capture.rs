@@ -14,6 +14,7 @@
 //!
 //! The device is asked for exactly the request's side-by-side raster, YUYV, at its rate; a mode
 //! the link cannot carry (any but VGA through USB 2) is the device's refusal, reported as such.
+//! On Linux every stream starts on a device just reset on its USB port ([`RESET_WAIT`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -793,9 +794,92 @@ pub fn open(
     Ok(sources(requests, receivers))
 }
 
+/// How long a reset device may take to come back as a capture node this process may open
+/// (on the DGX Spark: 0.16-0.24 s, then udev's group grant).
+pub const RESET_WAIT: Duration = Duration::from_secs(5);
+
+/// `device`, reset on its USB port so its stream starts as after power-on, as it is found again.
+///
+/// A ZED 2i streams once per enumeration. On the DGX Spark (GB10 xHCI `NVDA8000:02`, Linux
+/// 6.17, 10-28) any second stream after a clean `VIDIOC_STREAMOFF` and close (another process,
+/// the station restarted, 0.1 s or 10 s later, autosuspend on or off) sends no frame, and
+/// stopping that frameless bulk stream hangs the controller ("xHCI host not responding to stop
+/// endpoint command", "HC died"): the ZED drops off USB until a reboot. A port reset before each
+/// stream gave frames on every one of six reopens and after a `kill -9` mid-stream. A reset the
+/// process may not make (no usbfs grant from the host) is reported and the device opened as is.
+#[cfg(target_os = "linux")]
+fn fresh(request: &CaptureRequest, device: Attached) -> Result<Attached, OpenError> {
+    if let Err(error) = reset(device.index) {
+        eprintln!(
+            "uvc-stereo {}: could not reset the device before streaming ({error}); a second \
+             stream since it enumerated may send no frame",
+            request.serial
+        );
+        return Ok(device);
+    }
+    let deadline = Instant::now() + RESET_WAIT;
+    loop {
+        match devices().and_then(|attached| find(request, attached)) {
+            Ok(back) if openable(back.index) => return Ok(back),
+            Err(error @ (OpenError::Permission | OpenError::Ambiguous { .. })) => {
+                return Err(error);
+            }
+            _ if Instant::now() >= deadline => {
+                return Err(OpenError::device(
+                    Unavailable::NotAttached,
+                    format!("the device did not come back within {RESET_WAIT:?} of its reset"),
+                ));
+            }
+            _ => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(clippy::unnecessary_wraps)]
+fn fresh(_request: &CaptureRequest, device: Attached) -> Result<Attached, OpenError> {
+    Ok(device)
+}
+
+/// Reset the USB device that carries video node `index` (`/dev/bus/usb/BBB/DDD`, usbfs).
+#[cfg(target_os = "linux")]
+fn reset(index: u32) -> std::io::Result<()> {
+    use std::fs;
+    use std::os::fd::AsRawFd;
+
+    let interface = fs::canonicalize(format!("/sys/class/video4linux/video{index}/device"))?;
+    let usb = interface
+        .parent()
+        .ok_or_else(|| std::io::Error::other("the video node has no USB device"))?;
+    let number = |name: &str| -> std::io::Result<u32> {
+        fs::read_to_string(usb.join(name))?
+            .trim()
+            .parse()
+            .map_err(std::io::Error::other)
+    };
+    let node = format!(
+        "/dev/bus/usb/{:03}/{:03}",
+        number("busnum")?,
+        number("devnum")?
+    );
+    let file = fs::OpenOptions::new().write(true).open(&node)?;
+    sx_capture_usb::usb::usbfs::Device::borrow(file.as_raw_fd()).reset()
+}
+
+/// Whether this process may open video node `index` now (udev grants a new node's group
+/// shortly after it appears). Opening a node starts nothing.
+#[cfg(target_os = "linux")]
+fn openable(index: u32) -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/dev/video{index}"))
+        .is_ok()
+}
+
 /// Open the device `request` names on a thread of its own and start serving `capture` from it.
 fn start(request: &CaptureRequest, capture: &Arc<Running>) -> Result<(), OpenError> {
-    let device = find(request, devices()?)?;
+    let device = fresh(request, find(request, devices()?)?)?;
     let ((width, height), fps) = capture.mode;
     let (ready, opened) = mpsc::channel();
     let serving = Arc::clone(capture);
