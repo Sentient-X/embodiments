@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -177,11 +178,12 @@ def rekey(document: Path, old_sha: str, new_sha: str, *, write: bool = True) -> 
         raise RekeyError(
             f"{document} names descriptions {sorted(set(map(str, recorded)))}, not {old_sha}"
         )
-    field = f'"description_sha256": "{old_sha}"'
-    if text.count(field) != len(recorded):
-        raise RekeyError(f"{document} does not carry each digest as {field}")
+    # Any JSON spacing: a station writes its calibrations compact.
+    field = re.compile(rf'("description_sha256"\s*:\s*")({old_sha})(")')
+    new, count = field.subn(rf"\g<1>{new_sha}\g<3>", text)
+    if count != len(recorded):
+        raise RekeyError(f"{document} does not carry each digest as a plain string field")
     if write:
-        new = text.replace(field, f'"description_sha256": "{new_sha}"')
         document.write_text(new, encoding="utf-8")
     return True
 
