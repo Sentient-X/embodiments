@@ -1,4 +1,4 @@
-//! The shared teleoperation solve on the static upper body: the head policies, the holds,
+//! The shared teleoperation solve on the static upper body: where the camera looks, the holds,
 //! the grippers, the reference rule, and one config both sides build from.
 
 #![allow(clippy::float_cmp)]
@@ -6,14 +6,14 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    HANDS, HeadPolicy, Pose, REFERENCE_GAP, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
+    HANDS, Pose, REFERENCE_GAP, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
 };
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
 
 /// Every joint at 1 rad/s, reached in a quarter second.
-fn config(head: HeadPolicy) -> TeleopConfig {
+fn config() -> TeleopConfig {
     let body = Body::static_upper_body();
     let speed: BTreeMap<String, f64> = body
         .model()
@@ -28,17 +28,16 @@ fn config(head: HeadPolicy) -> TeleopConfig {
         accel: BTreeMap::new(),
         ramp_s: 0.25,
         max_step_rad: 0.03,
-        head,
         held: Vec::new(),
         obstacles: Vec::new(),
     }
 }
 
-fn teleop(head: HeadPolicy) -> Teleop {
+fn teleop() -> Teleop {
     Teleop::new(
         STATIC_UPPER_BODY_URDF,
         STATIC_UPPER_BODY_COLLISION,
-        &config(head),
+        &config(),
     )
     .expect("solve")
 }
@@ -102,17 +101,20 @@ fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
 
 #[test]
 fn the_config_round_trips_and_a_foreign_schema_is_refused() {
-    let config = config(HeadPolicy::Gaze);
+    let config = config();
     let json = config.to_json();
     assert_eq!(TeleopConfig::parse(&json).expect("parsed"), config);
-    assert!(json.contains("\"head\":\"gaze\""));
+    assert!(
+        !json.contains("\"head\":"),
+        "no head choice in the config: who looks decides"
+    );
     let foreign = json.replace(TELEOP_SCHEMA, "sx.teleop-solve/v0");
     assert!(TeleopConfig::parse(&foreign).is_err());
 }
 
 #[test]
 fn gaze_turns_the_camera_to_the_head_and_holds_the_rest() {
-    let mut solve = teleop(HeadPolicy::Gaze);
+    let mut solve = teleop();
     let mut q = start(&solve);
     let begun = q.clone();
     let (f0, _) = camera_forward(&solve, &q);
@@ -144,7 +146,7 @@ fn gaze_turns_the_camera_to_the_head_and_holds_the_rest() {
 
 #[test]
 fn hands_looks_at_the_commanded_hands_even_from_facing_away() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let mut q: Vec<f64> = solve
         .model()
         .axes()
@@ -170,7 +172,7 @@ fn hands_looks_at_the_commanded_hands_even_from_facing_away() {
 
 #[test]
 fn an_idle_hand_and_the_torso_hold_while_one_hand_drives() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let mut q = start(&solve);
     let begun = q.clone();
     let mut target = tcp(&solve, &q, 0);
@@ -196,7 +198,7 @@ fn an_idle_hand_and_the_torso_hold_while_one_hand_drives() {
 
 #[test]
 fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     for (hand, gripper) in HANDS.iter().zip(solve.grippers()) {
         let gripper = gripper.as_ref().expect(hand);
         assert_eq!(gripper.fingers.len(), 2);
@@ -220,7 +222,7 @@ fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
 
 #[test]
 fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let q = start(&solve);
     let width = q.len();
     let elbow = index(&solve, "left_elbow_pitch_joint");
@@ -250,7 +252,7 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
 
 #[test]
 fn following_starts_only_with_every_driven_hand_at_its_gripper() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let q = start(&solve);
     let (left, right) = (tcp(&solve, &q, 0), tcp(&solve, &q, 1));
     let at = |left: Option<Pose>, right: Option<Pose>| Targets {

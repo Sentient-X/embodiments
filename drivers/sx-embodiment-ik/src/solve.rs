@@ -95,6 +95,9 @@ pub struct Settings {
     /// The longest one step may take: past it the QP stops and the step holds
     /// ([`Solve::Held`]). The only clock the solver reads.
     pub deadline: Duration,
+    /// The last stretch of a camera's line of sight to a tool that is the tool itself (the
+    /// gripper's fingers and base) and never hides it ([`LimbReport::hidden_by`]).
+    pub sight_tool_m: f64,
 }
 
 impl Default for Settings {
@@ -116,6 +119,7 @@ impl Default for Settings {
             tracking_rad: 0.05,
             max_iterations: 40,
             deadline: Duration::from_millis(4),
+            sight_tool_m: 0.1,
         }
     }
 }
@@ -185,6 +189,9 @@ pub struct LimbReport {
     pub reach: Reach,
     /// Constraints binding on the limb's axes.
     pub active: Vec<Active>,
+    /// For a driven tool, the link (index into [`crate::Model::links`]) standing between it
+    /// and the camera at the new positions; `None` in clear sight, or with no camera.
+    pub hidden_by: Option<usize>,
 }
 
 /// How the QP ended.
@@ -279,6 +286,12 @@ pub struct Ik {
     shared: Vec<bool>,
     /// Per limb, its solved columns.
     limb_columns: Vec<Vec<usize>>,
+    /// Per limb, per solved column: whether a look-at task may turn it. A camera turns on its
+    /// own neck, never on an axis it shares with other limbs (a torso carrying the arms):
+    /// looking around must not swing the hands. A camera with no axis of its own uses all.
+    look_columns: Vec<Vec<bool>>,
+    /// Per capsule: carried by a camera's own neck, so never between it and what it sees.
+    sight_skip: Vec<bool>,
     /// Last commanded velocity per solved column.
     velocity: Vec<f64>,
     work: Workspace,
@@ -344,12 +357,12 @@ impl Ik {
             }
         }
         let n = body.solved.len();
-        let shared = body
+        let shared: Vec<bool> = body
             .solved
             .iter()
             .map(|axis| body.limbs.iter().filter(|l| l.axes.contains(axis)).count() > 1)
             .collect();
-        let limb_columns = body
+        let limb_columns: Vec<Vec<usize>> = body
             .limbs
             .iter()
             .map(|l| {
@@ -357,6 +370,30 @@ impl Ik {
                     .iter()
                     .filter_map(|a| body.solved.binary_search(a).ok())
                     .collect()
+            })
+            .collect();
+        let look_columns: Vec<Vec<bool>> = limb_columns
+            .iter()
+            .map(|columns: &Vec<usize>| {
+                let own = columns.iter().any(|&c| !shared[c]);
+                (0..n)
+                    .map(|c| columns.contains(&c) && !(own && shared[c]))
+                    .collect()
+            })
+            .collect();
+        let sight_skip = body
+            .proxies
+            .capsules
+            .iter()
+            .map(|capsule| {
+                body.model.above(capsule.link).iter().any(|term| {
+                    body.solved.binary_search(&term.axis).is_ok_and(|c| {
+                        !shared[c]
+                            && body.limbs.iter().any(|l| {
+                                matches!(l.task, Task::LookAt { .. }) && l.axes.contains(&term.axis)
+                            })
+                    })
+                })
             })
             .collect();
         let k = settings.max_rows;
@@ -400,6 +437,7 @@ impl Ik {
                     residual_rad: 0.0,
                     reach: Reach::Idle,
                     active: Vec::with_capacity(n + k),
+                    hidden_by: None,
                 })
                 .collect(),
             solve: Solve::Solved,
@@ -416,6 +454,8 @@ impl Ik {
             scene_pairs,
             shared,
             limb_columns,
+            look_columns,
+            sight_skip,
             velocity: vec![0.0; n],
             work,
             qp,
@@ -622,7 +662,7 @@ impl Ik {
         w.h.iter_mut().for_each(|v| *v = 0.0);
         w.g.iter_mut().for_each(|v| *v = 0.0);
         let rho2 = s.orientation_m_per_rad * s.orientation_m_per_rad;
-        for (limb, target) in body.limbs.iter().zip(targets) {
+        for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let Some(target) = target else { continue };
             let pose = w.frames.links[limb.frame];
             for &axis in &body.solved {
@@ -659,6 +699,7 @@ impl Ik {
                     }
                 }
                 (Task::LookAt { forward }, Target::LookAt { point_m }) => {
+                    let mask = &self.look_columns[index];
                     let f = mat_vec(&pose.r, forward);
                     let d = sub(*point_m, pose.t);
                     let distance = norm(d);
@@ -686,15 +727,25 @@ impl Ik {
                     } else {
                         [0.0; 3]
                     };
-                    let e = clamp_norm(e, s.max_error_rad);
                     // Turn f toward u relative to u's own turn as the camera moves: the
                     // direction to the point turns at -(u x v) / distance, so the relative
                     // angular rate is w + (u x v) / distance; ask it for the error's rotation
                     // (its component along f, a roll, for none).
+                    for (column, &axis) in body.solved.iter().enumerate() {
+                        w.jp[axis] = if mask[column] {
+                            let turn = cross(u, w.jv[axis]);
+                            [0, 1, 2].map(|k| w.jw[axis][k] + turn[k] / distance)
+                        } else {
+                            [0.0; 3]
+                        };
+                    }
+                    // Closed no faster than the neck can still stop on it, as a pose error
+                    // is: asking for the whole turn at once overshot the acceleration caps
+                    // and the camera rang on every big swing (three bounces engaging).
+                    let share = pointing_approach(e, &w.jp, &body.solved, &self.caps, s, rho2, dt);
+                    let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
-                        fill(&mut w.task, &body.solved, |axis| {
-                            w.jw[axis][k] + cross(u, w.jv[axis])[k] / distance
-                        });
+                        fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e[k], rho2);
                     }
                 }
@@ -1027,6 +1078,10 @@ impl Ik {
                 .any(|a| matches!(a, Active::Speed { .. } | Active::Accel { .. }));
             report.residual_m = residual_m;
             report.residual_rad = residual_rad;
+            report.hidden_by = match (limb.task, target) {
+                (Task::Pose, Some(_)) => hidden(body, &w.after, &self.sight_skip, pose.t, s),
+                _ => None,
+            };
             report.reach = if target.is_none() {
                 Reach::Idle
             } else if residual_m <= s.tracking_m && residual_rad <= s.tracking_rad {
@@ -1090,6 +1145,36 @@ fn point_row(
         }
         scratch[term.axis] = [0.0; 3];
     }
+}
+
+/// What hides `tool` from the body's first camera at `frames`: the proxy the line of sight
+/// passes through, short of its last [`Settings::sight_tool_m`] (the tool itself). Proxies
+/// on the camera's own neck (`skip`) never stand between it and what it sees.
+fn hidden(body: &Body, frames: &Frames, skip: &[bool], tool: V3, s: &Settings) -> Option<usize> {
+    let camera = body
+        .limbs
+        .iter()
+        .find(|l| matches!(l.task, Task::LookAt { .. }))?;
+    let eye = frames.links[camera.frame].t;
+    let line = sub(tool, eye);
+    let length = norm(line);
+    if length <= s.sight_tool_m {
+        return None;
+    }
+    let end = [0, 1, 2].map(|k| eye[k] + line[k] * (1.0 - s.sight_tool_m / length));
+    let mut best: Option<(f64, usize)> = None;
+    for (capsule, skipped) in body.proxies.capsules.iter().zip(skip) {
+        if *skipped {
+            continue;
+        }
+        let (a, b) = world(frames, capsule);
+        let (x, y) = closest_segments(eye, end, a, b);
+        let gap = norm(sub(x, y)) - capsule.radius;
+        if gap < 0.0 && best.is_none_or(|(nearest, _)| gap < nearest) {
+            best = Some((gap, capsule.link));
+        }
+    }
+    best.map(|(_, link)| link)
 }
 
 fn fill(out: &mut [f64], solved: &[usize], value: impl Fn(usize) -> f64) {
@@ -1164,6 +1249,47 @@ fn approach(
     let mut accel = f64::INFINITY;
     for &axis in solved {
         let d: f64 = (0..6).map(|a| row(a, axis) * y[a]).sum::<f64>().abs();
+        if d > 1e-12 {
+            accel = accel.min(caps.accel[axis] / d);
+        }
+    }
+    if !accel.is_finite() {
+        return 1.0;
+    }
+    length.min(braking(length, s.braking_share * accel, dt)) / length
+}
+
+/// [`approach`] for a camera's pointing error `e` (radians) over its rows `jl` (per axis, the
+/// pointing rate per unit of joint motion; zero on axes it may not turn): the share of `e`
+/// one tick closes, no more than the neck can still stop on along its damped least-squares
+/// direction.
+fn pointing_approach(
+    e: V3,
+    jl: &[V3],
+    solved: &[usize],
+    caps: &Caps,
+    s: &Settings,
+    rho2: f64,
+    dt: f64,
+) -> f64 {
+    let length = norm(e);
+    if length < 1e-12 {
+        return 1.0;
+    }
+    // The 6x6 solve with the pointing rows in its first block and identity in the second.
+    let mut m = [[0.0; 6]; 6];
+    for a in 0..3 {
+        for b in 0..3 {
+            m[a][b] = solved.iter().map(|&axis| jl[axis][a] * jl[axis][b]).sum();
+        }
+        m[a][a] += s.damping / rho2;
+        m[a + 3][a + 3] = 1.0;
+    }
+    let mut y = [e[0] / length, e[1] / length, e[2] / length, 0.0, 0.0, 0.0];
+    cholesky_solve(&mut m, &mut y);
+    let mut accel = f64::INFINITY;
+    for &axis in solved {
+        let d: f64 = (0..3).map(|a| jl[axis][a] * y[a]).sum::<f64>().abs();
         if d > 1e-12 {
             accel = accel.min(caps.accel[axis] / d);
         }

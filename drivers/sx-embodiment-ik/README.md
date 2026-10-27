@@ -27,6 +27,20 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   declares it in `collision.json` (`support`, the mount frame's z = 0 plane, solid below
   everywhere within reach), and every `Ik` adds it to the scene it is given. Collision is checked on capsule proxies,
   with each pair's approach planned to stop before a 1 cm margin.
+- **The camera:** a look-at limb points at its target (teleop follows the operator's gaze when
+  they look through the robot, and otherwise aims halfway between the hands *as the camera
+  sees them*, so both sit the same angle from the
+  picture's centre), and turns on its own neck only, never on the torso that carries the
+  arms. `LimbReport::hidden_by` names the link standing between the camera and a tool.
+  Its pointing error is closed no faster than the neck can still stop on it, as a pose
+  error is: without that, every big swing rang (the first look down bounced three times).
+  Two more looking rows were tried and removed (October 2026): keeping the picture level and
+  stepping the camera around an arm. On recorded operators (`examples/film.rs`) they cut the
+  roll from about 20 to 2 degrees and added a few points of clear sight, but this SO-101 neck
+  cannot level the ZED inside its tilt range: the tilt sat at its stop up to 74% of the time
+  and the parallel pitch joints swung against each other (neck travel 4x main). Today the
+  neck moves as main's does (`the_neck_holds_steady_while_both_hands_circle`). A level
+  picture is better had by rotating the image from the known camera pose.
 - **Unreachable targets:** the solver degrades smoothly and reports
   `Reach::Unreachable` with the residual.
 - **Unavailable axes:** `available[axis] = false` holds an axis at its measured position.
