@@ -11,12 +11,16 @@ publish.workspace = true
 # Open real devices through `nokhwa` (V4L2 on Linux, AVFoundation on macOS). Without it the
 # crate builds anywhere: the request, the mode table, the side-by-side split and the source
 # over any `Device`, which the tests drive with synthetic frames.
-capture = ["dep:nokhwa"]
+capture = ["dep:nokhwa", "dep:v4l"]
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
 thiserror.workspace = true
 nokhwa = { version = "=0.10.11", default-features = false, features = ["input-v4l", "input-avfoundation"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The V4L2 capture `nokhwa` wraps, driven directly so a read waits at most `capture::STALL`.
+v4l = { version = "=0.14.0", optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
