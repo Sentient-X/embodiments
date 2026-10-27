@@ -35,6 +35,7 @@ pub mod approach;
 pub mod axes;
 pub mod binding;
 pub mod body;
+pub mod bus_timing;
 pub mod can;
 pub mod chain;
 pub mod chains;
@@ -61,6 +62,7 @@ pub use binding::{
     UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO, is_port_name, validate_chain,
 };
 pub use body::{BodyBindings, BodyError, Bus};
+pub use bus_timing::BusTiming;
 pub use chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
     FeedforwardLimit, MissingReason, Observe, ProvenStop, Receipt, StopReport, TargetError,

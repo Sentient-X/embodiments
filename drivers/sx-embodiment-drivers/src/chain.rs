@@ -441,6 +441,12 @@ pub trait ActuatorChain {
     /// chain that latches nothing has nothing to release.
     /// How many single exchanges the chain tried once more, since it opened, after an answer
     /// came back corrupt or not at all: line noise shows here before it ever stops the body.
+    /// Each chain's command times on its bus since it opened, one per chain a composition
+    /// drives one after another; empty for a single chain, which nothing composes.
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        Vec::new()
+    }
+
     fn retried(&self) -> u64 {
         0
     }

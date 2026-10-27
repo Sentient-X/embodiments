@@ -262,6 +262,12 @@ where
         self.second.clear_faults();
     }
 
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        let mut timing = self.first.bus_timing();
+        timing.extend(self.second.bus_timing());
+        timing
+    }
+
     fn retried(&self) -> u64 {
         self.first.retried().saturating_add(self.second.retried())
     }
