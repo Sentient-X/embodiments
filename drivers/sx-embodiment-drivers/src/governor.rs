@@ -909,6 +909,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.derated.clone()
     }
 
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        self.chain.bus_timing()
+    }
+
     fn retried(&self) -> u64 {
         self.chain.retried()
     }

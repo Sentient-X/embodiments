@@ -37,6 +37,8 @@ pub struct Chains<C> {
     members: Vec<C>,
     axes: Vec<BoundAxis>,
     commandable: Vec<CommandRange>,
+    /// Per member, its command times on its bus.
+    timing: Vec<crate::BusTiming>,
 }
 
 #[derive(Debug, Error)]
@@ -73,10 +75,20 @@ impl<C: ActuatorChain> Chains<C> {
             .iter()
             .flat_map(|chain| chain.commandable().iter().copied())
             .collect();
+        let mut first = 0;
+        let timing = chains
+            .iter()
+            .map(|chain| {
+                let timing = crate::BusTiming::new(first);
+                first += chain.axes().len();
+                timing
+            })
+            .collect();
         Self {
             members: chains,
             axes,
             commandable,
+            timing,
         }
     }
 
@@ -152,6 +164,7 @@ impl<C: ActuatorChain> Chains<C> {
             let width = chain.axes().len();
             let (head, tail) = rest.split_at(width);
             rest = tail;
+            let started = std::time::Instant::now();
             let receipt = match feedforward {
                 Some(wanted) => {
                     let (mine, others) = wanted.split_at(width);
@@ -159,8 +172,11 @@ impl<C: ActuatorChain> Chains<C> {
                     chain.command_with(head, mine)
                 }
                 None => chain.command(head),
+            };
+            if let Some(timing) = self.timing.get_mut(index) {
+                timing.record(started.elapsed());
             }
-            .map_err(|error| ChainsError::Chain {
+            let receipt = receipt.map_err(|error| ChainsError::Chain {
                 index,
                 applied: index > 0,
                 error,
@@ -324,6 +340,10 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         }
     }
 
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        self.timing.clone()
+    }
+
     fn retried(&self) -> u64 {
         self.members
             .iter()
@@ -386,6 +406,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn derated(&self) -> Vec<AxisDerate> {
         (**self).derated()
+    }
+
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        (**self).bus_timing()
     }
 
     fn retried(&self) -> u64 {

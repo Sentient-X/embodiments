@@ -254,6 +254,10 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
         self.inner.clear_faults();
     }
 
+    fn bus_timing(&self) -> Vec<crate::BusTiming> {
+        self.inner.bus_timing()
+    }
+
     fn retried(&self) -> u64 {
         self.inner.retried()
     }

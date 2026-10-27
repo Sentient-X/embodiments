@@ -1777,6 +1777,10 @@ where
         self.0.clear_faults();
     }
 
+    fn bus_timing(&self) -> Vec<sx_embodiment_drivers::BusTiming> {
+        self.0.bus_timing()
+    }
+
     fn retried(&self) -> u64 {
         self.0.retried()
     }
