@@ -61,10 +61,67 @@ pub enum OpenError {
         width: u32,
         height: u32,
         fps: u32,
+        /// Why, as the platform said it: held by another process, forbidden, or the mode itself.
+        kind: Unavailable,
         message: String,
     },
-    #[error("the device failed to open: {0}")]
-    Device(String),
+    #[error("the device failed to open: {message}")]
+    Device { kind: Unavailable, message: String },
+}
+
+/// Why a camera is not streaming, typed where the platform says it so no caller reads an
+/// error's words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unavailable {
+    /// No such device is attached, or it went away.
+    NotAttached,
+    /// Another process (or a capture of this one that has not closed it yet) holds it.
+    Busy,
+    /// This process may not open it.
+    PermissionDenied,
+    /// It cannot do what was asked: the mode, or a platform that cannot tell units apart.
+    Unsupported,
+    /// It opened and sends no pictures.
+    NoFrames,
+    /// Anything else the platform reported.
+    Failed,
+}
+
+impl Unavailable {
+    /// The kind of an operating-system error, or `otherwise` (V4L2 reports one; `AVFoundation`
+    /// through `nokhwa` does not).
+    #[cfg(any(target_os = "linux", test))]
+    fn of(error: &std::io::Error, otherwise: Self) -> Self {
+        match error.kind() {
+            std::io::ErrorKind::ResourceBusy => Self::Busy,
+            std::io::ErrorKind::PermissionDenied => Self::PermissionDenied,
+            std::io::ErrorKind::NotFound => Self::NotAttached,
+            // ENXIO and ENODEV: the device went away.
+            _ if matches!(error.raw_os_error(), Some(6 | 19)) => Self::NotAttached,
+            _ => otherwise,
+        }
+    }
+}
+
+impl OpenError {
+    /// Why the camera is not streaming.
+    #[must_use]
+    pub const fn unavailable(&self) -> Unavailable {
+        match self {
+            Self::Permission => Unavailable::PermissionDenied,
+            Self::Query(_) => Unavailable::Failed,
+            Self::NotFound { .. } => Unavailable::NotAttached,
+            Self::Ambiguous { .. } => Unavailable::Unsupported,
+            Self::Mode { kind, .. } | Self::Device { kind, .. } => *kind,
+        }
+    }
+
+    fn device(kind: Unavailable, message: impl Into<String>) -> Self {
+        Self::Device {
+            kind,
+            message: message.into(),
+        }
+    }
 }
 
 /// One attached camera as the platform names it.
@@ -498,37 +555,50 @@ struct Stream {
 impl Stream {
     fn open(index: u32, (width, height): (u32, u32), fps: u32) -> Result<Self, OpenError> {
         use v4l::video::Capture;
-        let refuse = |message: String| OpenError::Mode {
+        let refuse = |kind: Unavailable, message: String| OpenError::Mode {
             width,
             height,
             fps,
+            kind,
             message,
         };
-        let failed = |error: std::io::Error| OpenError::Device(error.to_string());
+        let refused = |error: std::io::Error| {
+            refuse(
+                Unavailable::of(&error, Unavailable::Unsupported),
+                error.to_string(),
+            )
+        };
+        let failed = |error: std::io::Error| {
+            OpenError::device(
+                Unavailable::of(&error, Unavailable::Failed),
+                error.to_string(),
+            )
+        };
         let device = v4l::Device::new(index as usize).map_err(failed)?;
         let yuyv = v4l::FourCC::new(b"YUYV");
         let mut format = device.format().map_err(failed)?;
         format.width = width;
         format.height = height;
         format.fourcc = yuyv;
-        let set = device
-            .set_format(&format)
-            .map_err(|error| refuse(error.to_string()))?;
+        let set = device.set_format(&format).map_err(refused)?;
         if (set.width, set.height, set.fourcc) != (width, height, yuyv) {
-            return Err(refuse(format!(
-                "it opened {}x{} {}",
-                set.width, set.height, set.fourcc
-            )));
+            return Err(refuse(
+                Unavailable::Unsupported,
+                format!("it opened {}x{} {}", set.width, set.height, set.fourcc),
+            ));
         }
         let interval = device
             .set_params(&v4l::video::capture::Parameters::with_fps(fps))
-            .map_err(|error| refuse(error.to_string()))?
+            .map_err(refused)?
             .interval;
         if interval.numerator == 0 || interval.denominator != fps * interval.numerator {
-            return Err(refuse(format!(
-                "it opened a frame interval of {}/{} s",
-                interval.numerator, interval.denominator
-            )));
+            return Err(refuse(
+                Unavailable::Unsupported,
+                format!(
+                    "it opened a frame interval of {}/{} s",
+                    interval.numerator, interval.denominator
+                ),
+            ));
         }
         let mut buffers =
             v4l::prelude::MmapStream::with_buffers(&device, v4l::buffer::Type::VideoCapture, 4)
@@ -603,10 +673,12 @@ impl Stream {
             CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
         };
         let format = CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps);
+        // `AVFoundation` through `nokhwa` reports no error code: a refusal is the mode's.
         let refuse = |message: String| OpenError::Mode {
             width,
             height,
             fps,
+            kind: Unavailable::Unsupported,
             message,
         };
         let mut camera = nokhwa::Camera::new(
@@ -620,7 +692,7 @@ impl Stream {
         }
         camera
             .open_stream()
-            .map_err(|error| OpenError::Device(error.to_string()))?;
+            .map_err(|error| OpenError::device(Unavailable::Failed, error.to_string()))?;
         Ok(Self(camera))
     }
 
@@ -662,8 +734,9 @@ pub fn open(
         .iter()
         .any(|request| shared(request) != shared(first))
     {
-        return Err(OpenError::Device(
-            "the requests are not one device at one mode".to_owned(),
+        return Err(OpenError::device(
+            Unavailable::Unsupported,
+            "the requests are not one device at one mode",
         ));
     }
     let (width, height) = first.frame_raster();
@@ -673,8 +746,9 @@ pub fn open(
     // One open at a time: two intervals asking at once share one capture.
     let mut registry = held(&RUNNING);
     if registry.closed {
-        return Err(OpenError::Device(
-            "the cameras are closed: the station is ending".to_owned(),
+        return Err(OpenError::device(
+            Unavailable::Failed,
+            "the cameras are closed: the station is ending",
         ));
     }
     let mut senders = senders;
@@ -698,8 +772,9 @@ pub fn open(
         }
         // Its device is closed before it is opened again; one that will not close keeps it.
         if !capture.stop_and_wait() {
-            return Err(OpenError::Device(
-                "the previous capture has not closed the device yet".to_owned(),
+            return Err(OpenError::device(
+                Unavailable::Busy,
+                "the previous capture has not closed the device yet",
             ));
         }
         registry.captures.swap_remove(index);
@@ -709,8 +784,9 @@ pub fn open(
     if let Err(senders) = capture.subscribe(senders) {
         drop(senders);
         capture.stop_and_wait();
-        return Err(OpenError::Device(
-            "the capture ended as it opened".to_owned(),
+        return Err(OpenError::device(
+            Unavailable::NoFrames,
+            "the capture ended as it opened",
         ));
     }
     registry.captures.push(capture);
@@ -740,11 +816,14 @@ fn start(request: &CaptureRequest, capture: &Arc<Running>) -> Result<(), OpenErr
             serve(&ending.0, || frame(&mut stream, width, height));
             stream.close(&ending.0.serial);
         })
-        .map_err(|error| OpenError::Device(error.to_string()))?;
+        .map_err(|error| OpenError::device(Unavailable::Failed, error.to_string()))?;
     *held(&capture.thread) = Some(thread);
-    opened
-        .recv()
-        .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))?
+    opened.recv().map_err(|_| {
+        OpenError::device(
+            Unavailable::Failed,
+            "the capture thread ended while opening",
+        )
+    })?
 }
 
 fn sources(
@@ -951,5 +1030,30 @@ mod tests {
         assert_eq!(track.wait().err(), Some(CaptureError::Ended));
         let (late, _) = mpsc::sync_channel(QUEUE);
         assert!(capture.subscribe(vec![late]).is_err());
+    }
+
+    /// An operating-system error is typed by its code, never its words.
+    #[test]
+    fn an_os_error_is_typed_by_its_code() {
+        let of = |code| {
+            Unavailable::of(
+                &std::io::Error::from_raw_os_error(code),
+                Unavailable::Failed,
+            )
+        };
+        assert_eq!(of(16), Unavailable::Busy);
+        assert_eq!(of(13), Unavailable::PermissionDenied);
+        assert_eq!(of(1), Unavailable::PermissionDenied);
+        assert_eq!(of(2), Unavailable::NotAttached);
+        assert_eq!(of(19), Unavailable::NotAttached);
+        assert_eq!(of(22), Unavailable::Failed);
+        assert_eq!(
+            OpenError::device(Unavailable::Busy, "held").unavailable(),
+            Unavailable::Busy
+        );
+        assert_eq!(
+            OpenError::Permission.unavailable(),
+            Unavailable::PermissionDenied
+        );
     }
 }
