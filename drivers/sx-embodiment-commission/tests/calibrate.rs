@@ -926,6 +926,27 @@ fn apply_refuses_a_servo_holding_torque_and_changes_nothing() {
         .is_err(),
         "--robot needs --port"
     );
+    let publish = |extra: &[&str]| {
+        let mut words: Vec<String> = ["apply", "--bus", BUS, "--calibration", "x.json", "--move"]
+            .map(String::from)
+            .to_vec();
+        words.extend(extra.iter().map(|word| (*word).to_owned()));
+        parse(&words)
+    };
+    assert_eq!(
+        publish(&["--publish", "--port", "neck"])
+            .expect("publish")
+            .install,
+        Some((
+            std::path::PathBuf::from(cli::STATION_CALIBRATION_INBOX),
+            "neck".to_owned()
+        ))
+    );
+    assert!(publish(&["--publish"]).is_err(), "--publish needs --port");
+    assert!(
+        publish(&["--publish", "--robot", "r", "--port", "neck"]).is_err(),
+        "--publish is the station's inbox"
+    );
     assert_eq!(register(&bus, 1, 31, 2), 0);
     assert_eq!(
         (register(&bus, 1, 9, 2), register(&bus, 1, 11, 2)),
