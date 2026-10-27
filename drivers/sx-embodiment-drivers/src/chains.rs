@@ -85,6 +85,13 @@ impl<C: ActuatorChain> Chains<C> {
     pub fn chains(&self) -> &[C] {
         &self.members
     }
+
+    /// The chains themselves, in native state order, to compose again ([`Chains::new`]) after
+    /// some are replaced.
+    #[must_use]
+    pub fn into_chains(self) -> Vec<C> {
+        self.members
+    }
 }
 
 impl<C: ActuatorChain> Chains<C> {
