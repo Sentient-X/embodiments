@@ -11,7 +11,8 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, closed_ports, observe, open, open_calibrated, open_with, ports,
+    ServoCalibrations, closed_ports, observe, open, open_available, open_calibrated, open_with,
+    ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -362,6 +363,129 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
             .collect::<Vec<_>>(),
         written
     );
+}
+
+/// The static upper body's bridges, the CAN bus answering and each Feetech bus as probed.
+fn static_bridges(
+    axes: &[sx_damiao_can::chain::DamiaoAxis],
+) -> (Sim, BTreeMap<String, SimBus>, Bridges) {
+    let can = Sim::for_axes(axes);
+    let serial = probed_buses();
+    let bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    (can, serial, bridges)
+}
+
+#[test]
+fn a_bus_that_does_not_answer_stays_in_the_body_as_unavailable_data() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    // The Spark, 10-27: one neck servo did not answer the open ("bus_id 3: RxTimeout").
+    let (can, serial, mut bridges) = static_bridges(&axes);
+    serial["5A7C118709"].kill(3);
+    let strict = open_with(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    );
+    assert!(
+        matches!(
+            &strict,
+            Err(OpenError::Chain(BusError::Feetech(
+                FeetechChainError::Comm { bus_id: 3, .. }
+            )))
+        ),
+        "a supervised bring-up still refuses it: {:?}",
+        strict.err()
+    );
+    let (can, serial, mut bridges) = {
+        let _ = (can, serial);
+        static_bridges(&axes)
+    };
+    serial["5A7C118709"].kill(3);
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("the robot opens without its neck");
+    let mut body = opened.body;
+    assert_eq!(opened.unopened.len(), 1);
+    assert_eq!(opened.unopened[0].0, "neck");
+    // The contract never shrinks: all 25 axes, the neck's six unavailable, in their places.
+    assert_eq!(body.axes().len(), 25);
+    assert_eq!(body.unavailable(), vec![19, 20, 21, 22, 23, 24]);
+    let readings = body.read_positions();
+    assert_eq!(readings.len(), 25);
+    for index in 19..25 {
+        assert_eq!(
+            readings[index],
+            sx_embodiment_drivers::AxisReading::Missing(
+                sx_embodiment_drivers::MissingReason::Unavailable
+            )
+        );
+    }
+    assert!(
+        readings[..19]
+            .iter()
+            .all(|reading| reading.position().is_some())
+    );
+    // The rest still rests where it is observed, and drives; the neck is never written.
+    let rest = body
+        .last_observed()
+        .expect("the opened buses report where they rest");
+    assert!(rest[..19].iter().all(|joint| joint.is_finite()));
+    assert!(rest[19..].iter().all(|joint| joint.is_nan()));
+    let neck_written = serial["5A7C118709"].state().written.len();
+    let receipt = body.command(&rest_inside(&body)).expect("a command");
+    assert_eq!(receipt.observed.len(), 25);
+    assert!(receipt.observed[19..].iter().all(|joint| joint.is_nan()));
+    assert!(can.state().motors.values().any(|motor| motor.state == 1));
+    assert_eq!(serial["5A7C118709"].state().written.len(), neck_written);
+    let stop = body.stop();
+    assert!(stop.is_proven(), "{stop:?}");
+    assert!(can.state().motors.values().all(|motor| motor.state == 0));
+}
+
+#[test]
+fn a_bridge_that_is_not_attached_leaves_its_bus_unavailable_and_no_bus_at_all_is_refused() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    let (_, _, mut bridges) = static_bridges(&axes);
+    bridges.serial.remove("5AB0158173");
+    assert!(matches!(
+        open_with(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut bridges),
+        Err(OpenError::NotAttached(serial)) if serial == "5AB0158173"
+    ));
+    let (_, _, mut bridges) = static_bridges(&axes);
+    bridges.serial.remove("5AB0158173");
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("the robot opens without its left gripper");
+    assert_eq!(opened.unopened.len(), 1);
+    assert_eq!(opened.unopened[0].0, "left_gripper");
+    assert!(matches!(opened.unopened[0].1, OpenError::NotAttached(_)));
+    assert_eq!(opened.body.unavailable(), vec![15, 16]);
+    // Nothing answering is no robot.
+    let mut nothing = Bridges::default();
+    assert!(matches!(
+        open_available(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut nothing),
+        Err(OpenError::NoBusOpened(ports)) if ports.len() == 4
+    ));
 }
 
 /// Whether every servo on every simulated bus has `Torque_Enable` at `value`.

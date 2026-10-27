@@ -32,6 +32,9 @@ pub struct Masked<C, F = ()> {
     /// The feedback an unavailable axis stands as, when set: then a receipt's feedback is one
     /// per axis, as every chain's is; otherwise it is `inner`'s alone.
     unanswered: Option<fn(&BoundAxis) -> F>,
+    /// What every read reports at an unavailable axis: [`MissingReason::OutOfService`] unless
+    /// [`Masked::missing_as`] says otherwise.
+    missing: MissingReason,
 }
 
 impl<C, F> Masked<C, F> {
@@ -81,7 +84,16 @@ impl<C, F> Masked<C, F> {
             unavailable,
             targets,
             unanswered: None,
+            missing: MissingReason::OutOfService,
         })
+    }
+
+    /// This chain with every read reporting `reason` at its unavailable axes: a bus that did
+    /// not open reads [`MissingReason::Unavailable`], not out of service.
+    #[must_use]
+    pub const fn missing_as(mut self, reason: MissingReason) -> Self {
+        self.missing = reason;
+        self
     }
 
     /// The chain or observer behind the available axes.
@@ -158,7 +170,7 @@ impl<C: Observe, F> Observe for Masked<C, F> {
 
     fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
-        self.spread(&readings, AxisReading::Missing(MissingReason::OutOfService))
+        self.spread(&readings, AxisReading::Missing(self.missing))
     }
 }
 
@@ -200,7 +212,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
 
     fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
-        self.spread(&readings, AxisReading::Missing(MissingReason::OutOfService))
+        self.spread(&readings, AxisReading::Missing(self.missing))
     }
     fn stop(&mut self) -> StopReport {
         self.inner.stop()
@@ -218,7 +230,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     fn command_readings(&self) -> Option<Axes<AxisReading>> {
         Some(self.spread(
             &self.inner.command_readings()?,
-            AxisReading::Missing(MissingReason::OutOfService),
+            AxisReading::Missing(self.missing),
         ))
     }
 
