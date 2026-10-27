@@ -1763,3 +1763,30 @@ fn a_rail_far_over_the_supported_supply_or_naming_nothing_is_refused() {
         Err(OpenError::Document(_))
     ));
 }
+
+/// A robot still assigned the static upper body's id from before its 10-27 head mount and
+/// neck limit corrections (Fleet renders the id it was assigned) opens as today's body: the
+/// earlier revision drives exactly as this one.
+#[test]
+fn a_drive_naming_a_superseded_id_of_the_body_opens_it() {
+    let mut drive = drive("sentient-static-upper-body");
+    drive.embodiment =
+        "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834".to_owned();
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let can = Sim::for_axes(&axes);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can)]),
+        serial: probed_buses(),
+        opened: Vec::new(),
+    };
+    let body = bring_up(
+        &drive,
+        &static_commissioning(&drive),
+        &probed_calibrations(),
+        &mut bridges,
+    )
+    .expect("the superseded id opens the body");
+    assert_eq!(body.axes().len(), 25);
+    drive.embodiment = "not-a-body".to_owned();
+    assert!(STATIC_UPPER_BODY.axes(&drive).is_err());
+}

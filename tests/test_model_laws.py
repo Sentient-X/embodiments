@@ -56,7 +56,8 @@ def test_every_registry_camera_names_a_listed_model() -> None:
 
 
 def test_every_published_earlier_document_still_reads() -> None:
-    """A recording made against any package this registry ever published converts today."""
+    """A recording made against any package this registry ever published converts today: an
+    earlier schema's by migration, a superseded revision at this schema as it reads."""
     published = [
         json.loads(entry.read_text())
         for entry in (resources.files("sx_embodiments") / "historical").iterdir()
@@ -64,6 +65,8 @@ def test_every_published_earlier_document_still_reads() -> None:
     ]
     assert published
     for document in published:
-        assert document["schema_version"] < SCHEMA_VERSION
-        migration = migrate(document)
-        assert str(migration.source_id) == document["id"]
+        assert document["schema_version"] <= SCHEMA_VERSION
+        if document["schema_version"] < SCHEMA_VERSION:
+            assert str(migrate(document).source_id) == document["id"]
+        else:
+            assert str(Embodiment.from_dict(document).id) == document["id"]

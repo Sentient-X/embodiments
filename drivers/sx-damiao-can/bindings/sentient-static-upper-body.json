@@ -324,6 +324,11 @@
       "home": 0.4135
     }
   ],
+  "supersedes": [
+    "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
+    "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
+    "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
+  ],
   "approach": {
     "left_gripper": {
       "speed": 4.0,

@@ -29,6 +29,9 @@ pub struct BodyBindings {
     pub embodiment: String,
     /// The body's content id when it was rendered.
     pub id: String,
+    /// Earlier ids of the body that drive exactly as this one (the registry's
+    /// `sx_embodiments.successor`): a robot still assigned one is this body.
+    pub supersedes: Vec<String>,
     pub axes: Vec<BoundAxis>,
     /// The ports whose bindings the registry marks provisional (`ActuatorBinding.provisional`):
     /// not yet verified on the robot, so not driven unless a supervised bring-up opts in.
@@ -58,6 +61,8 @@ struct Document {
     axes: Vec<Axis>,
     #[serde(default)]
     approach: BTreeMap<String, Approach>,
+    #[serde(default)]
+    supersedes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +161,7 @@ impl BodyBindings {
             id,
             axes,
             approach,
+            supersedes,
         } = serde_json::from_str(document)
             .map_err(|error| BodyError::Document(error.to_string()))?;
         let mut provisional: Vec<String> = Vec::new();
@@ -234,10 +240,18 @@ impl BodyBindings {
         Ok(Self {
             embodiment,
             id,
+            supersedes,
             axes,
             provisional,
             approach,
         })
+    }
+
+    /// Whether a drive assigned `embodiment` is this body: its id, or an earlier id it
+    /// supersedes.
+    #[must_use]
+    pub fn is(&self, embodiment: &str) -> bool {
+        self.id == embodiment || self.supersedes.iter().any(|id| id == embodiment)
     }
 
     /// The body's buses, in native state order: each port's axes, which must be one run of

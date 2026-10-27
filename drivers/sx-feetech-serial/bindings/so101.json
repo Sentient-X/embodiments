@@ -79,5 +79,9 @@
       "sign": 1,
       "reduction": 1.0
     }
+  ],
+  "supersedes": [
+    "89727a3d6c8cb40fd8b34b847b64de1531027a63774ffcc97dac3c869bf4e05c",
+    "e5523f6fe586138742b107ea674b7d4c63fdcb27ce1c210a4e58becb3dcfa1c8"
   ]
 }

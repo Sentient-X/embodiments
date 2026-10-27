@@ -92,5 +92,9 @@
       "sign": -1,
       "reduction": 111.11111111111111
     }
+  ],
+  "supersedes": [
+    "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa",
+    "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9"
   ]
 }

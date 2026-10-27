@@ -1,0 +1,24 @@
+"""An earlier id of a body that drives as it does stands for the current body."""
+
+from sx_embodiments.successor import current, successor, superseded_ids, wiring
+
+STATIC = "sentient-static-upper-body"
+# Before the 10-27 head mount and neck limit corrections: the id the Spark was assigned.
+BEFORE = "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
+# Schema 15: the body was wired otherwise then.
+REWIRED = "35e41a6209ee550da7ef857e8fef4f5011a388c68f9bc47834f8ca925a248c6f"
+
+
+def test_a_compatible_earlier_id_resolves_to_the_current_body() -> None:
+    body = current(STATIC)
+    assert BEFORE in superseded_ids(STATIC)
+    found = successor(BEFORE)
+    assert found is not None and found.id == body.id
+    assert wiring(found) == wiring(body)
+
+
+def test_a_rewired_or_unknown_id_has_no_successor() -> None:
+    assert REWIRED not in superseded_ids(STATIC)
+    assert successor(REWIRED) is None
+    assert successor("0" * 64) is None
+    assert successor(str(current(STATIC).id)) is None  # the current id is no earlier one
