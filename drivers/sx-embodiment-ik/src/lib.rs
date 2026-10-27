@@ -57,6 +57,7 @@
 
 mod body;
 mod geometry;
+pub mod hull;
 mod math;
 mod model;
 pub mod placement;

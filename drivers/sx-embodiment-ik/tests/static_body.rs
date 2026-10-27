@@ -685,3 +685,30 @@ fn an_arm_fit_keyed_to_the_earlier_description_still_applies() {
         .calibrated(&calibration)
         .expect("the arm fit applies");
 }
+
+/// The folded neck the robot rests in (measured 2026-10-27) is clear: its capsules overlap by
+/// about 9 mm where the wrist bracket's corner wraps the shoulder pan servo, and the convex
+/// pieces, which follow the bracket, prove the parts apart.
+#[test]
+fn the_folded_neck_rest_is_clear_of_itself() {
+    let ik = ik(None);
+    let model = ik.body().model();
+    let mut q = rest(&ik);
+    for (name, value) in [
+        ("so101_shoulder_pan_joint", -0.192_561_6),
+        ("so101_shoulder_lift_joint", -1.472_981_2),
+        ("so101_elbow_flex_joint", 1.721_546_8),
+        ("so101_wrist_flex_joint", -1.739_191_9),
+        ("so101_wrist_roll_joint", 0.241_661_0),
+        ("so101_camera_tilt_joint", -1.078_651_8),
+    ] {
+        let index = model
+            .axes()
+            .iter()
+            .position(|axis| axis.name == name)
+            .expect(name);
+        q[index] = value;
+    }
+    let (clearance, a, b) = ik.clearance(&q);
+    assert!(clearance > 0.0, "{a} and {b} at {clearance} m");
+}

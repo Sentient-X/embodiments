@@ -228,7 +228,15 @@ enum Bound {
 
 #[derive(Clone, Copy, Debug)]
 enum Pair {
-    Capsules(usize, usize),
+    /// Two capsules (by index) as measured this tick: a closest point on each and the
+    /// direction from the second to the first, on the parts where the pieces refined them.
+    Capsules {
+        i: usize,
+        j: usize,
+        x: V3,
+        y: V3,
+        direction: V3,
+    },
     /// A capsule and an obstacle.
     Scene(usize, usize),
 }
@@ -237,6 +245,8 @@ enum Pair {
 struct Candidate {
     distance: f64,
     pair: Pair,
+    /// Measured between the links' convex pieces.
+    refined: bool,
 }
 
 /// Every buffer a tick writes, sized once.
@@ -527,7 +537,7 @@ impl Ik {
         let links = body.model.links();
         let mut best = (f64::INFINITY, String::new(), String::new());
         for &(i, j) in &body.proxies.pairs {
-            let d = capsule_distance(body, &frames, i, j).0;
+            let d = capsule_distance(body, &frames, i, j, 0.0).0;
             if d < best.0 {
                 let (p, c) = (&body.proxies.capsules[i], &body.proxies.capsules[j]);
                 best = (d, links[p.link].clone(), links[c.link].clone());
@@ -813,21 +823,48 @@ impl Ik {
         }
     }
 
-    /// The closest pairs within influence, each as `row . dq <= rhs`: the pair closes no
-    /// faster this tick than a braking share of its axes' accelerations can still stop
-    /// before the margin.
-    fn collision_rows(&mut self, dt: f64) {
+    /// Every pair within influence this tick, measured once: capsules, refined between the
+    /// links' convex pieces where they touch, and capsules against the scene.
+    fn collision_candidates(&mut self) {
         let body = &self.body;
         let s = &self.settings;
         let w = &mut self.work;
-        let n = body.solved.len();
         w.candidates.clear();
         for &(i, j) in &body.proxies.pairs {
-            let distance = capsule_distance(body, &w.frames, i, j).0;
+            let links = (body.proxies.capsules[i].link, body.proxies.capsules[j].link);
+            // Two capsules of a link pair in contact are refined once: one row for the parts.
+            let refined_already = w.candidates.iter().any(|c| match c.pair {
+                Pair::Capsules { i: a, j: b, .. } => {
+                    c.refined
+                        && (body.proxies.capsules[a].link, body.proxies.capsules[b].link) == links
+                }
+                Pair::Scene(..) => false,
+            });
+            let (distance, x, y, direction, refined) = capsule_distance(
+                body,
+                &w.frames,
+                i,
+                j,
+                if refined_already {
+                    f64::NEG_INFINITY
+                } else {
+                    0.0
+                },
+            );
+            if refined_already && distance < 0.0 {
+                continue;
+            }
             if distance < s.influence_m {
                 w.candidates.push(Candidate {
                     distance,
-                    pair: Pair::Capsules(i, j),
+                    pair: Pair::Capsules {
+                        i,
+                        j,
+                        x,
+                        y,
+                        direction,
+                    },
+                    refined,
                 });
             }
         }
@@ -839,9 +876,21 @@ impl Ik {
                 w.candidates.push(Candidate {
                     distance,
                     pair: Pair::Scene(capsule, k),
+                    refined: false,
                 });
             }
         }
+    }
+
+    /// The closest pairs within influence, each as `row . dq <= rhs`: the pair closes no
+    /// faster this tick than a braking share of its axes' accelerations can still stop
+    /// before the margin.
+    fn collision_rows(&mut self, dt: f64) {
+        self.collision_candidates();
+        let body = &self.body;
+        let s = &self.settings;
+        let w = &mut self.work;
+        let n = body.solved.len();
         w.candidates
             .sort_unstable_by(|x, y| x.distance.total_cmp(&y.distance));
         w.used = 0;
@@ -854,8 +903,14 @@ impl Ik {
             let row = &mut w.rows[slot * n..(slot + 1) * n];
             row.fill(0.0);
             let (distance, active) = match candidate.pair {
-                Pair::Capsules(i, j) => {
-                    let (d, x, y, direction) = capsule_distance(body, &w.frames, i, j);
+                Pair::Capsules {
+                    i,
+                    j,
+                    x,
+                    y,
+                    direction,
+                } => {
+                    let d = candidate.distance;
                     let (p, c) = (&body.proxies.capsules[i], &body.proxies.capsules[j]);
                     point_row(body, &w.frames, &mut w.jp, p.link, x, direction, -1.0, row);
                     point_row(body, &w.frames, &mut w.jp, c.link, y, direction, 1.0, row);
@@ -1103,7 +1158,18 @@ fn braking(room: f64, accel: f64, dt: f64) -> f64 {
 
 /// Signed distance between two capsules at `frames`, their closest axis points, and the unit
 /// direction from the second to the first.
-fn capsule_distance(body: &Body, frames: &Frames, i: usize, j: usize) -> (f64, V3, V3, V3) {
+/// Two capsules' signed distance, a closest point on each axis, the direction from the second
+/// to the first, and whether the pieces measured it. Capsules closer than `refine_below` (in
+/// contact, at 0) are measured again between their links' convex pieces ([`crate::hull`]),
+/// which follow the parts where a capsule bulges past them: a separation the pieces prove
+/// stands for the pair, its closest points on the parts.
+fn capsule_distance(
+    body: &Body,
+    frames: &Frames,
+    i: usize,
+    j: usize,
+    refine_below: f64,
+) -> (f64, V3, V3, V3, bool) {
     let (p, c) = (&body.proxies.capsules[i], &body.proxies.capsules[j]);
     let (pa, pb) = world(frames, p);
     let (qa, qb) = world(frames, c);
@@ -1115,7 +1181,24 @@ fn capsule_distance(body: &Body, frames: &Frames, i: usize, j: usize) -> (f64, V
     } else {
         [0.0, 0.0, 1.0]
     };
-    (centres - p.radius - c.radius, x, y, direction)
+    let capsules = (centres - p.radius - c.radius, x, y, direction, false);
+    if capsules.0 >= refine_below {
+        return capsules;
+    }
+    let proxies = &body.proxies;
+    match crate::hull::link_distance(
+        &proxies.pieces,
+        &proxies.pieces_of[p.link],
+        &frames.links[p.link],
+        &proxies.pieces_of[c.link],
+        &frames.links[c.link],
+    ) {
+        Some((d, on_p, on_c)) if d > capsules.0 => {
+            let gap = sub(on_p, on_c);
+            (d, on_p, on_c, scale(gap, 1.0 / norm(gap)), true)
+        }
+        _ => capsules,
+    }
 }
 
 /// Add `sign * direction . J(point)` over the solved columns to `row`.

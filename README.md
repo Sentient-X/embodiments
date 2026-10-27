@@ -226,9 +226,12 @@ leader, so a headset needs only joint positions. `tools/render_packs.py` renders
 packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
 the crate's `tree-poses.json`, Python's poses at seeded positions that `Tree` is held equal to.
 
-A body with collision geometry also gets `collision.json` (`sx.collision-proxies/v3`,
+A body with collision geometry also gets `collision.json` (`sx.collision-proxies/v4`,
 `sx_embodiments.collision_proxies`): one to three capsules per link, fitted to contain every
-vertex of its collision meshes, and the link pairs a self-collision check skips (at most two
+vertex of its collision meshes; each link's convex pieces (hulls of its triangles cube by
+2 cm cube, to the millimetre), which a solver measures only where capsules touch, so a
+capsule bulging past a bracket's corner flags no contact the parts do not make; and the link
+pairs a self-collision check skips (at most two
 moving joints apart, or overlapping at the zero pose), and the surface it stands on from its
 declared base mount (the mount frame's z = 0 plane, solid below up to the support's declared
 edge, or everywhere within reach when it declares none). `drivers/sx-embodiment-ik` reads the
