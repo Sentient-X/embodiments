@@ -82,6 +82,12 @@ pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
 /// How many commands in a row one axis may go unobserved (`NaN` in the receipt) before the
 /// governor stops the chain.
 pub const MAX_MISSED_IN_A_ROW: u8 = 1;
+/// A joint resting outside its range that comes no closer to it by this much (rad, a few
+/// encoder counts above read noise) within [`OUTSIDE_STALL`] cannot come in.
+pub const OUTSIDE_PROGRESS: f64 = 0.005;
+/// How long a joint outside its range may make no progress toward it before the governor stops
+/// pushing it in and holds it where it is.
+pub const OUTSIDE_STALL: Duration = Duration::from_secs(2);
 
 /// One axis's bounds, in the joint's own unit (rad or m) and per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,6 +185,15 @@ impl<E: ChainError> ChainError for GovernorError<E> {
     }
 }
 
+/// An axis observed outside its range: since when it last came closer, how far out it was then,
+/// and whether the governor gave up pushing it in.
+#[derive(Clone, Copy, Debug)]
+struct Outside {
+    since: Instant,
+    out: f64,
+    given_up: bool,
+}
+
 /// The position last sent, the speed it was stepped at, and when.
 #[derive(Clone, Copy)]
 struct Held {
@@ -214,6 +229,9 @@ pub struct Governor<C, K = MonotonicClock> {
     opened_at: Option<Vec<f64>>,
     /// The first axis whose last target lay outside where it may go, and was brought in.
     brought_in: Option<usize>,
+    /// Per axis observed outside its range: since when it last came closer, how far out it was
+    /// then, and whether it was given up on (held where it rests, not pushed against its stop).
+    outside: Vec<Option<Outside>>,
     /// Each axis's interval (`Held::lower`), kept across a refused command, which re-seeds the
     /// position from the chain but must not widen the interval; cleared only where the governor
     /// takes the joint up anew (open, a stop, a fault, `clear_faults`, `start_at`).
@@ -336,6 +354,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             torque_caps,
             opened_at,
             brought_in: None,
+            outside: vec![None; width],
             interval: None,
         })
     }
@@ -352,6 +371,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.start = Some(Axes::from_slice(joints));
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
         Ok(())
     }
 
@@ -385,6 +405,17 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     #[must_use]
     pub const fn brought_in(&self) -> Option<usize> {
         self.brought_in
+    }
+
+    /// The first axis resting outside its range that made no progress toward it for
+    /// [`OUTSIDE_STALL`] (a servo too weak against gravity on its stop): it is held where it
+    /// rests, no longer pushed in, until it is observed inside its range again or the governor
+    /// takes the body up anew. A caller reports it.
+    #[must_use]
+    pub fn held_outside(&self) -> Option<usize> {
+        self.outside
+            .iter()
+            .position(|outside| outside.is_some_and(|outside| outside.given_up))
     }
 
     /// Whether a fault is latched: every command is refused until
@@ -451,6 +482,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.latched = true;
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
         self.missed.fill(0);
         let stop = self.chain.stop();
         make(stop)
@@ -539,6 +571,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|at| at.is_finite())
                 .unwrap_or(*value);
             let speed = held.velocity.get(index).copied().unwrap_or(0.0);
+            // Given up on: held where it rests, never pushed against its stop.
+            let target = if self.outside[index].is_some_and(|outside| outside.given_up) {
+                &at
+            } else {
+                target
+            };
             let now = range.reaching(at);
             // Never empty: both contain the range itself.
             let reach = CommandRange {
@@ -555,6 +593,41 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             uppers.push(reach.upper);
         }
         (positions, speeds, (lowers, uppers), brought_in)
+    }
+
+    /// Note how far each available axis observed outside its range is from it, and give up on
+    /// one that came no closer by [`OUTSIDE_PROGRESS`] within [`OUTSIDE_STALL`]; one observed
+    /// inside is followed as usual again.
+    fn note_outside(&mut self, observed: &[f64], now: Instant) {
+        for (index, (at, range)) in observed.iter().zip(self.chain.commandable()).enumerate() {
+            if self.unavailable.contains(&index) || !at.is_finite() {
+                continue;
+            }
+            let out = (range.lower - at).max(at - range.upper);
+            let slot = &mut self.outside[index];
+            if out <= 0.0 {
+                *slot = None;
+                continue;
+            }
+            match slot {
+                None => {
+                    *slot = Some(Outside {
+                        since: now,
+                        out,
+                        given_up: false,
+                    });
+                }
+                Some(outside) if out < outside.out - OUTSIDE_PROGRESS => {
+                    outside.since = now;
+                    outside.out = out;
+                }
+                Some(outside) => {
+                    if now.saturating_duration_since(outside.since) >= OUTSIDE_STALL {
+                        outside.given_up = true;
+                    }
+                }
+            }
+        }
     }
 
     /// Count each available axis' unobserved (`NaN`) commands in a row, restarting at an
@@ -707,6 +780,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 stop,
             }));
         }
+        self.note_outside(&receipt.observed[..width], now);
         self.held = Some(Held {
             position: next,
             velocity,
@@ -768,6 +842,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     fn stop(&mut self) -> StopReport {
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
         self.missed.fill(0);
         self.chain.stop()
     }
@@ -802,6 +877,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.missed.fill(0);
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
         self.chain.clear_faults();
     }
 }
@@ -848,6 +924,8 @@ mod tests {
         /// Each `command_with`'s feed-forward, and each feed-forward bound set.
         feedforward: Vec<Vec<Feedforward>>,
         feedforward_limits: Vec<Vec<FeedforwardLimit>>,
+        /// An axis that never moves: it observes this whatever it is sent.
+        pinned: Option<(usize, f64)>,
     }
 
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
@@ -891,6 +969,7 @@ mod tests {
             derated: Vec::new(),
             feedforward: Vec::new(),
             feedforward_limits: Vec::new(),
+            pinned: None,
         }
     }
 
@@ -917,6 +996,9 @@ mod tests {
             }
             self.sent.push(joints.to_vec());
             let mut observed: Vec<f64> = joints.iter().map(|joint| joint + self.lag).collect();
+            if let Some((index, at)) = self.pinned {
+                observed[index] = at;
+            }
             self.at = Some(observed.clone());
             if let Some(index) = self.silent {
                 observed[index] = f64::NAN;
@@ -1598,5 +1680,45 @@ mod tests {
         let governor = Governor::new(rated(fake(true)), vec![LIMITS; 2]).expect("limits");
         assert!(governor.derated().is_empty());
         assert_eq!(governor.limits(), &[LIMITS; 2]);
+    }
+
+    /// A joint resting past its range that its servo cannot lift (a gravity stop, a weak
+    /// servo) while the caller asks it inward: after [`OUTSIDE_STALL`] without progress it is
+    /// held where it rests, not driven against its stop, and nothing else stops.
+    #[test]
+    fn a_joint_outside_that_cannot_come_in_is_held_where_it_rests() {
+        let mut chain = fake(true);
+        chain.rest = vec![-0.993, 0.5];
+        chain.pinned = Some((0, -0.993));
+        let (mut governor, clock) = governed(chain);
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor
+                .command(&[-0.9, 0.6])
+                .expect("a stuck joint is not a fault");
+        }
+        let sent = governor.chain().sent.last().expect("sent").clone();
+        assert!((sent[0] + 0.993).abs() < 1e-9, "still pushed: {}", sent[0]);
+        assert!(
+            (sent[1] - 0.6).abs() < 1e-9,
+            "the other joint follows: {}",
+            sent[1]
+        );
+        assert_eq!(governor.held_outside(), Some(0));
+    }
+
+    /// One coming in, however slowly, is never given up on; once inside it is a normal joint.
+    #[test]
+    fn a_joint_outside_that_comes_in_is_followed_and_never_given_up_on() {
+        let mut chain = fake(true);
+        chain.rest = vec![-1.05, 0.5];
+        let (mut governor, clock) = governed(chain);
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[-0.5, 0.5]).expect("comes in");
+            assert_eq!(governor.held_outside(), None);
+        }
+        let sent = governor.chain().sent.last().expect("sent")[0];
+        assert!((sent + 0.5).abs() < 1e-9, "reached its target: {sent}");
     }
 }
