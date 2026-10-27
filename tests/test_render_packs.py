@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from sx_embodiments.rendered import same_rendering
+
 pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +37,7 @@ def test_committed_packs_and_poses_are_rendered_bytes() -> None:
     stale = [
         str(path.relative_to(ROOT))
         for path, data in _tool().rendered_files().items()
-        if not path.is_file() or path.read_bytes() != data
+        if not same_rendering(path, data)
     ]
     assert not stale, f"stale render pack files: {stale}"
 
@@ -133,3 +135,22 @@ def test_viewing_facts_are_carried_from_the_registry() -> None:
     assert gripper["ahead_m"] == 0.09
     drawn = gripper["links"]["left"] + gripper["links"]["right"]
     assert set(body["tcp_frames"].values()) <= set(drawn)
+
+
+def test_a_json_rendering_is_current_through_another_platforms_last_bits(tmp_path: Path) -> None:
+    """macOS and Linux disagree in a float's last bits; that is the same rendering, a real
+    change is not, and anything that is not JSON is compared byte for byte."""
+    committed = tmp_path / "poses.json"
+
+    def document(pose: list[float], name: str = "a") -> bytes:
+        return json.dumps({"pose": pose, "name": name}).encode()
+
+    committed.write_bytes(document([0.575051208457572, 1.0, 0.0]))
+    assert same_rendering(committed, document([0.5750512084575721, 1.0, 0.0]))
+    assert not same_rendering(committed, document([0.57505121, 1.0, 0.0]))
+    assert not same_rendering(committed, document([0.575051208457572, 1.0]))
+    assert not same_rendering(committed, document([0.575051208457572, 1.0, 0.0], "b"))
+    urdf = tmp_path / "body.urdf"
+    urdf.write_bytes(b'<origin xyz="0.1"/>')
+    assert not same_rendering(urdf, b'<origin xyz="0.1000000000000001"/>')
+    assert not same_rendering(tmp_path / "missing.json", b"{}")

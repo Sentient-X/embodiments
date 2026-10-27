@@ -33,7 +33,38 @@ def test_the_description_is_the_generators_rendering() -> None:
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
     for path, data in tool.render().items():
-        assert path.read_bytes() == data, path.relative_to(ROOT)
+        if path.suffix == ".urdf":
+            _assert_same_description(path.read_bytes(), data, path.relative_to(ROOT))
+        else:
+            assert path.read_bytes() == data, path.relative_to(ROOT)
+
+
+def _numbers(text: str) -> list[float] | None:
+    try:
+        return [float(token) for token in text.split()]
+    except ValueError:
+        return None
+
+
+def _assert_same_description(committed: bytes, rendered: bytes, where: object) -> None:
+    """The committed description is the rendering, element for element and attribute for
+    attribute, its numbers to 1e-6 relative (a micrometre in a metre). The hull-estimated
+    inertials come from qhull, whose last bits differ between macOS and Linux (CI renders on
+    Linux), so a byte comparison fails on one of them; re-rendering the committed bytes instead
+    would re-mint the body's identity and the dynamics evidence measured against it, for noise
+    far below any physics."""
+    ours, theirs = ET.fromstring(committed), ET.fromstring(rendered)
+    mine, others = list(ours.iter()), list(theirs.iter())
+    assert [e.tag for e in mine] == [e.tag for e in others], where
+    for a, b in zip(mine, others, strict=True):
+        assert a.attrib.keys() == b.attrib.keys(), (where, a.tag)
+        for key, value in a.attrib.items():
+            left, right = _numbers(value), _numbers(b.attrib[key])
+            if left is None or right is None or len(left) != len(right):
+                assert value == b.attrib[key], (where, a.tag, key)
+            else:
+                assert left == pytest.approx(right, rel=1e-6, abs=1e-9), (where, a.tag, key)
+    assert committed.count(b"\n") == rendered.count(b"\n"), where
 
 
 def test_the_body_is_a_table_clamped_development_body() -> None:

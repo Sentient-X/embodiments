@@ -1227,6 +1227,7 @@ dependencies = [
  "sx-dynamixel-serial",
  "sx-embodiment-drivers",
  "sx-feetech-serial",
+ "sx-realtime",
  "sx-socketcan",
  "sx-zlg-usbcanfd",
  "thiserror 2.0.21",
