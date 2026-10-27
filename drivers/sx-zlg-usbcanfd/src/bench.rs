@@ -120,6 +120,14 @@ impl<P: CanPort> CanPort for ReadOnly<P> {
     fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
         self.0.health()
     }
+
+    fn answered(&mut self, round_trip: Duration) {
+        self.0.answered(round_trip);
+    }
+
+    fn round_trip(&mut self) -> Option<sx_embodiment_drivers::can::RoundTrip> {
+        self.0.round_trip()
+    }
 }
 
 /// The static upper body's motors that answer: send ids 0x09, 0x10–0x15, 0x18–0x1E. The torso,

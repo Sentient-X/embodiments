@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use nusb::transfer::{Buffer, Bulk, In, Out};
 use nusb::{MaybeFuture, Speed};
 use sx_embodiment_drivers::Holder;
-use sx_embodiment_drivers::can::{CanFrame, CanPort};
+use sx_embodiment_drivers::can::{CanFrame, CanPort, RoundTrip, RoundTripWindow};
 use thiserror::Error;
 
 use crate::engine::{
@@ -423,6 +423,7 @@ impl UsbCanFd {
             core: core.clone(),
             index,
             options,
+            round_trips: RoundTripWindow::default(),
         })
     }
 }
@@ -754,6 +755,8 @@ pub struct Channel {
     core: Arc<Core>,
     index: u8,
     options: ChannelOptions,
+    /// How long the motor protocol's commands waited for their answers ([`CanPort::answered`]).
+    round_trips: RoundTripWindow,
 }
 
 impl Channel {
@@ -1148,6 +1151,15 @@ impl CanPort for Channel {
             ("rx_unopened", device.rx_unopened),
             ("rx_usb_errors", device.rx_usb_errors),
         ]
+    }
+
+    /// Recorded on the control thread into a fixed ring; nothing allocates.
+    fn answered(&mut self, round_trip: Duration) {
+        self.round_trips.record(round_trip);
+    }
+
+    fn round_trip(&mut self) -> Option<RoundTrip> {
+        self.round_trips.take()
     }
 }
 
