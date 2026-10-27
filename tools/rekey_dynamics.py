@@ -4,10 +4,17 @@
 A dynamics calibration (and every document that records the description it was identified
 against: plans, sweeps, the parity fixture) names its description by ``description_sha256``,
 and ``Dynamics::calibrated`` refuses one whose digest is not the description's. A re-render
-that changes only what dynamics never read (each joint's ``<limit velocity>`` and ``effort``,
-each still a finite positive number) leaves every
-identified parameter true, so the documents move to the new digest; anything else is refused,
-and the calibration must be identified again.
+leaves every identified parameter true, so the documents move to the new digest, when it
+changes only
+
+* what dynamics never read (each joint's ``<limit velocity>`` and ``effort``, each still a
+  finite positive number), or
+* links outside every identified joint's reach: no document identifies the link, and no joint
+  a document identifies lies between the root and it (a changed joint counts as a change to
+  its child). The torque at an identified joint depends only on the links it carries, so a
+  fit of the arms keeps when the neck's camera mount is corrected.
+
+Anything else is refused, and the calibration must be identified again.
 
 Run from the package root:
 ``python tools/rekey_dynamics.py --old <old.urdf> --new <new.urdf> <document.json>...``.
@@ -58,6 +65,81 @@ def _limits_are_numbers(path: Path) -> None:
                 raise RekeyError(f"{path}: <limit {name}={text!r}> is not a number") from None
             if not (math.isfinite(value) and value > 0.0):
                 raise RekeyError(f"{path}: <limit {name}={text!r}> is not finite and positive")
+
+
+def _identified(node: object) -> tuple[set[str], set[str]]:
+    """The links and joints every calibration in a document identifies, however deep."""
+    links: set[str] = set()
+    joints: set[str] = set()
+    if isinstance(node, dict):
+        for key, field in (("links", "link"), ("joints", "joint")):
+            value = node.get(key)
+            if isinstance(value, list):
+                # A calibration's entries name theirs; a plan lists the joints it excites.
+                named = {
+                    str(item[field]) if isinstance(item, dict) else item
+                    for item in value
+                    if (isinstance(item, dict) and field in item) or isinstance(item, str)
+                }
+                (links if key == "links" else joints).update(named)
+        for value in node.values():
+            more_links, more_joints = _identified(value)
+            links |= more_links
+            joints |= more_joints
+    elif isinstance(node, list):
+        for item in node:
+            more_links, more_joints = _identified(item)
+            links |= more_links
+            joints |= more_joints
+    return links, joints
+
+
+def _parts(path: Path) -> tuple[dict[str, bytes], dict[str, bytes], dict[str, tuple[str, str]]]:
+    """Each link's and joint's element (velocity and effort dropped), and each joint's parent
+    and child link."""
+    root = ET.fromstring(_without_unread(path))
+    links = {link.get("name", ""): ET.tostring(link) for link in root.findall("link")}
+    joints: dict[str, bytes] = {}
+    tree: dict[str, tuple[str, str]] = {}
+    for joint in root.findall("joint"):
+        name = joint.get("name", "")
+        joints[name] = ET.tostring(joint)
+        parent, child = joint.find("parent"), joint.find("child")
+        if parent is None or child is None:
+            raise RekeyError(f"{path}: joint {name} names no parent or child")
+        tree[name] = (parent.get("link", ""), child.get("link", ""))
+    return links, joints, tree
+
+
+def check_rekeyable(old: Path, new: Path, identified: tuple[set[str], set[str]]) -> None:
+    """Refuse two descriptions whose difference reaches an identified link or joint (see the
+    module), and a new one whose velocity or effort limits are not finite positive numbers."""
+    _limits_are_numbers(new)
+    if _without_unread(old) == _without_unread(new):
+        return
+    links, joints = identified
+    old_links, old_joints, tree = _parts(old)
+    new_links, new_joints, new_tree = _parts(new)
+    if set(old_links) != set(new_links) or tree != new_tree:
+        raise RekeyError(f"{new} has other links or joints than {old}: identify again")
+    changed = {name for name in old_links if old_links[name] != new_links[name]}
+    for name in old_joints:
+        if old_joints[name] != new_joints[name]:
+            if name in joints:
+                raise RekeyError(f"{new} changes identified joint {name}: identify again")
+            changed.add(tree[name][1])
+    parent_joint = {child: joint for joint, (_, child) in tree.items()}
+    for link in sorted(changed):
+        if link in links:
+            raise RekeyError(f"{new} changes identified link {link}: identify again")
+        at = link
+        while at in parent_joint:
+            joint = parent_joint[at]
+            if joint in joints:
+                raise RekeyError(
+                    f"{new} changes {link}, which identified joint {joint} carries: identify again"
+                )
+            at = tree[joint][0]
 
 
 def check_only_velocity(old: Path, new: Path) -> None:
@@ -113,7 +195,11 @@ def main() -> int:
     parser.add_argument("documents", type=Path, nargs="+")
     arguments = parser.parse_args()
     try:
-        check_only_velocity(arguments.old, arguments.new)
+        identified: tuple[set[str], set[str]] = (set(), set())
+        for document in arguments.documents:
+            links, joints = _identified(json.loads(document.read_text(encoding="utf-8")))
+            identified = (identified[0] | links, identified[1] | joints)
+        check_rekeyable(arguments.old, arguments.new, identified)
         old_sha, new_sha = digest(arguments.old), digest(arguments.new)
         # Every document is checked before any is written: one refused leaves all as they were.
         for document in arguments.documents:

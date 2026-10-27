@@ -77,3 +77,45 @@ def test_every_identified_static_upper_body_document_names_the_current_descripti
         recorded = rekey_dynamics._recorded(json.loads(document.read_text()))
         assert recorded, document
         assert set(recorded) == {STATIC_UPPER_BODY_URDF.sha256}, document
+
+
+BRANCHED = """<robot name="r"><link name="base"/>
+<link name="arm"><inertial><mass value="1.0"/></inertial></link>
+<link name="neck"/><link name="camera"><inertial><mass value="{camera}"/></inertial></link>
+<joint name="arm_joint" type="revolute"><parent link="base"/><child link="arm"/>
+<limit lower="-1" upper="1" effort="5" velocity="1"/></joint>
+<joint name="neck_joint" type="revolute"><parent link="base"/><child link="neck"/>
+<limit lower="-1" upper="1" effort="5" velocity="1"/></joint>
+<joint name="tilt_joint" type="revolute"><parent link="neck"/><child link="camera"/>
+<limit lower="{lower}" upper="1" effort="5" velocity="1"/></joint></robot>
+"""
+
+
+def _branched(tmp_path: Path, name: str, camera: str = "0.2", lower: str = "-1") -> Path:
+    path = tmp_path / name
+    path.write_text(BRANCHED.format(camera=camera, lower=lower))
+    return path
+
+
+def test_a_change_no_identified_joint_carries_rekeys_and_one_it_carries_is_refused(
+    tmp_path: Path,
+) -> None:
+    old = _branched(tmp_path, "old.urdf")
+    corrected = _branched(tmp_path, "new.urdf", camera="0.25", lower="-2")
+    arms = ({"arm"}, {"arm_joint"})
+    rekey_dynamics.check_rekeyable(old, corrected, arms)
+    # The neck carries the camera: a fit of it no longer holds.
+    with pytest.raises(rekey_dynamics.RekeyError, match="neck_joint"):
+        rekey_dynamics.check_rekeyable(old, corrected, ({"arm"}, {"arm_joint", "neck_joint"}))
+    with pytest.raises(rekey_dynamics.RekeyError, match="identified link camera"):
+        rekey_dynamics.check_rekeyable(old, corrected, ({"camera"}, set()))
+    with pytest.raises(rekey_dynamics.RekeyError, match="identified joint tilt_joint"):
+        rekey_dynamics.check_rekeyable(old, corrected, (set(), {"tilt_joint"}))
+    # What a calibration and a plan identify is read from the documents themselves.
+    assert rekey_dynamics._identified(
+        {
+            "links": [{"link": "arm"}],
+            "joints": [{"joint": "arm_joint"}],
+            "excitations": [{"joints": ["neck_joint"]}],
+        }
+    ) == ({"arm"}, {"arm_joint", "neck_joint"})

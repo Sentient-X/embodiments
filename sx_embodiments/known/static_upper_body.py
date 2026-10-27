@@ -143,8 +143,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7",
-    size_bytes=221402,
+    sha256="ca769021bf7ebaa51f7ae47989ba2c4716a16cb21ada3613ef2d0d8fb5ee8f32",
+    size_bytes=221394,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -307,14 +307,15 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
         ),
         units=(CoordinateUnit.RADIAN,) * 6,
         # The official new-calibration SO-101's limits; the camera tilt's is the free arc it
-        # rests in (the official joint's limits are its jaw's, and the camera meets the wrist).
-        lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385, -3.14159265),
-        upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121, -0.261799388),
+        # rests in (the official joint's limits are its jaw's, and the camera meets the wrist),
+        # in the reading of the 2026-10-27 calibration (the composer's CAMERA_TILT_RANGE).
+        lower=(-1.91986, -1.74533, -1.69, -1.65806, -2.74385, -2.407592654),
+        upper=(1.91986, 1.74533, 1.69, 1.65806, 2.84121, 0.472200612),
         actuations=tuple(_sts3215(bus_id, STATIC_UPPER_BODY_NECK_PORT) for bus_id in range(1, 7)),
         observations=(ActuatorFeedback(),) * 6,
     ),
-    # Zero but the camera tilt, which rests where the robot was recorded holding it.
-    home=(0.0, 0.0, 0.0, 0.0, 0.0, -2.2),
+    # All zero: the 2026-10-27 calibration's zero, where the camera faces forward.
+    home=(0.0,) * 6,
 )
 
 

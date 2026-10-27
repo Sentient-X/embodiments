@@ -120,6 +120,11 @@ Vec = NDArray[np.float64]
 #   comes out upside down against the ZED's own meshes (its z points down), so the frame built
 #   from allisa_bot's left optical frame, and the IMU mounted on it, carry a convention error
 #   that is still open; the IMU's reported pitch sign is wrong for the same reason.
+#   The neck was recalibrated on 2026-10-27 (the tilt servo, id 6: homing offset -575, range
+#   1243..2745), which moved its reading: at the new calibrated zero the operator sees the ZED
+#   facing forward, where this model had it 42 deg nose up. ``CAMERA_RECALIBRATION`` turns the
+#   mount by the reading's change, solved so the model's camera faces forward and level at the
+#   all-zero neck; the tilt range and home move with it.
 NECK_LINKS = {
     "base_link": "so101_base_link",
     "shoulder_link": "so101_shoulder_pan_link",
@@ -147,12 +152,18 @@ RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
 #: The camera tilt servo's horn, which the source exports into base_link.
 CAMERA_TILT_HORN = "_________step__Body1_1_.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
-CAMERA_MOUNT_TILT = math.radians(141.71)
+#: How far the 2026-10-27 recalibration moved the tilt reading (above).
+CAMERA_RECALIBRATION = -0.734
+CAMERA_MOUNT_TILT = math.radians(141.71) + CAMERA_RECALIBRATION
 #: The camera tilt's range. The official joint's limits are its jaw's; with the bracket on the
-#: horn the camera meets the wrist between about +10 and +130 deg (a MuJoCo sweep of the
-#: rendered collisions from the recorded rest), so the range is the free arc it rests in, kept
-#: 25 deg clear of that contact for the fitted mount angle's uncertainty.
-CAMERA_TILT_RANGE = ("-3.14159265", "-0.261799388")
+#: horn the camera meets the wrist between about +52 and +172 deg (a MuJoCo sweep of the
+#: rendered collisions from the recorded rest, +10..+130 deg before the recalibration), so the
+#: range is the free arc it rests in, kept 25 deg clear of that contact for the fitted mount
+#: angle's uncertainty: -pi..-0.2618 before, turned with the mount.
+CAMERA_TILT_RANGE = (
+    f"{-math.pi - CAMERA_RECALIBRATION:.9f}",
+    f"{-0.261799388 - CAMERA_RECALIBRATION:.9f}",
+)
 
 
 def _floats(text: str | None, default: tuple[float, float, float]) -> Vec:
