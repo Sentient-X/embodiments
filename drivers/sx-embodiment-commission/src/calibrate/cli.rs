@@ -1011,13 +1011,22 @@ fn install(
     sx_embodiment_bodies::ServoCalibrations::new()
         .with_lerobot(port, &document)
         .map_err(|e| refuse(format!("{}: {e}", applied.display())))?;
+    let inbox = robot == std::path::Path::new(STATION_CALIBRATION_INBOX);
+    if inbox && !robot.is_dir() {
+        // The station makes its inbox, so it owns it and can clear what it publishes; one made
+        // here, as root, it could not clear.
+        return Err(refuse(format!(
+            "{} is missing: no station runs here, or it has not started since it was installed",
+            robot.display()
+        )));
+    }
     std::fs::create_dir_all(robot).map_err(|e| refuse(format!("{}: {e}", robot.display())))?;
     let path = robot.join(sx_embodiment_bodies::calibration_file(port));
     let staging = path.with_extension("json.next");
     std::fs::write(&staging, &document)
         .and_then(|()| std::fs::rename(&staging, &path))
         .map_err(|e| refuse(format!("{}: {e}", path.display())))?;
-    if robot == std::path::Path::new(STATION_CALIBRATION_INBOX) {
+    if inbox {
         let _ = writeln!(
             out.stdout,
             "published {}: the station sends it to Fleet with its own key, and the robot runs it \
