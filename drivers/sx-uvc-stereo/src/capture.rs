@@ -268,8 +268,9 @@ fn find(request: &CaptureRequest, attached: Vec<Attached>) -> Result<Attached, O
 const QUEUE: usize = 2;
 
 /// How long the last source of a device waits for its capture thread to stop the stream and
-/// close the device: longer than [`STALL`], the longest a read waits, with room to spare.
-pub const STOP_WAIT: Duration = Duration::from_secs(2);
+/// close the device: longer than [`FIRST_FRAME_WAIT`], the longest a read waits, with room to
+/// spare.
+pub const STOP_WAIT: Duration = Duration::from_secs(4);
 
 /// No frame for this long ends a capture: the device is reported failed, its stream stopped and
 /// the device closed. A read that waited for ever held a stalled ZED 2i open on the DGX Spark
@@ -390,7 +391,8 @@ fn serve(
             }
             Err(error) => {
                 for sender in &senders {
-                    let _ = sender.send(Err(error.clone()));
+                    // Never block on a track that stopped reading: the device closes now.
+                    let _ = sender.try_send(Err(error.clone()));
                 }
                 break;
             }
@@ -405,6 +407,8 @@ struct Stream {
     buffers: v4l::prelude::MmapStream<'static>,
     device: v4l::Device,
     started: bool,
+    /// The bytes of one whole frame: a shorter one is dropped, not handed on.
+    frame_bytes: usize,
 }
 
 #[cfg(target_os = "linux")]
@@ -451,11 +455,13 @@ impl Stream {
             buffers,
             device,
             started: false,
+            frame_bytes: width as usize * height as usize * 2,
         })
     }
 
-    /// The next frame's bytes; no frame within [`STALL`] ([`FIRST_FRAME_WAIT`] for the first)
-    /// is the device's failure.
+    /// The next whole frame's bytes; no frame within [`STALL`] ([`FIRST_FRAME_WAIT`] for the
+    /// first) is the device's failure. A frame the driver flags as damaged, or one shorter than
+    /// the mode (a USB hiccup), is dropped and the next one read.
     fn frame(&mut self) -> Result<Vec<u8>, CaptureError> {
         use v4l::io::traits::CaptureStream;
         let wait = if self.started {
@@ -463,15 +469,20 @@ impl Stream {
         } else {
             FIRST_FRAME_WAIT
         };
-        let (data, meta) = self.buffers.next().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::TimedOut {
-                CaptureError::Device(format!("no frame for {wait:?}"))
-            } else {
-                CaptureError::Device(error.to_string())
+        let frame = loop {
+            let (data, meta) = self.buffers.next().map_err(|error| {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    CaptureError::Device(format!("no frame for {wait:?}"))
+                } else {
+                    CaptureError::Device(error.to_string())
+                }
+            })?;
+            let used =
+                usize::try_from(meta.bytesused).map_or(data.len(), |used| used.min(data.len()));
+            if !meta.flags.contains(v4l::buffer::Flags::ERROR) && used >= self.frame_bytes {
+                break data[..used].to_vec();
             }
-        })?;
-        let used = usize::try_from(meta.bytesused).map_or(data.len(), |used| used.min(data.len()));
-        let frame = data[..used].to_vec();
+        };
         if !self.started {
             self.started = true;
             self.buffers.set_timeout(STALL);
