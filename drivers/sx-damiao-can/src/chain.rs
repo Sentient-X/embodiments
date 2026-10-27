@@ -499,12 +499,18 @@ fn take<P: CanPort>(control: &mut MotorControl<P>, frame: CanFrame, registers: b
     }
 }
 
-/// Stamp `now` on every request whose answer is in, and tell the link how long the answer
-/// took: this is where a command and its answer are paired (its motor's feedback count moved
-/// past the phase's start, or the register it asked for came back), so the round trip is
-/// measured here, from the moment the link took the frame.
-fn stamp<P: CanPort>(control: &mut MotorControl<P>, requests: &[Request], phase: &mut Phase) {
-    let now = Instant::now();
+/// Stamp `arrival`, the moment the link handed over the frame just decoded, on every request
+/// whose answer is now in, and tell the link how long the answer took: this is where a command
+/// and its answer are paired (its motor's feedback count moved past the phase's start, or the
+/// register it asked for came back), so the round trip is measured here, from the moment the
+/// link took the command's frame to the moment its answer came off the link. Called once per
+/// frame received, so no answer waits for later frames of the phase to be sent.
+fn stamp<P: CanPort>(
+    control: &mut MotorControl<P>,
+    requests: &[Request],
+    phase: &mut Phase,
+    arrival: Instant,
+) {
     for (index, request) in requests.iter().enumerate() {
         let Some(sent) = phase.sent[index] else {
             continue;
@@ -520,10 +526,10 @@ fn stamp<P: CanPort>(control: &mut MotorControl<P>, requests: &[Request], phase:
             Awaits::Register(rid) => motor.get_param(rid).is_some(),
         };
         if answered {
-            phase.received[index] = Some(now);
+            phase.received[index] = Some(arrival);
             control
                 .port_mut()
-                .answered(now.saturating_duration_since(sent));
+                .answered(arrival.saturating_duration_since(sent));
         }
     }
 }
@@ -594,7 +600,11 @@ pub(crate) fn phase_into<P: CanPort>(
                 {
                     let until = (Instant::now() + QUEUE_SLICE).min(give_up);
                     match control.port_mut().receive_until(until) {
-                        Ok(Some(answer)) => take(control, answer, registers),
+                        Ok(Some(answer)) => {
+                            let arrival = Instant::now();
+                            take(control, answer, registers);
+                            stamp(control, requests, phase, arrival);
+                        }
                         Ok(None) => {}
                         Err(error) => break Err(DmCanError::Io(error)),
                     }
@@ -611,14 +621,17 @@ pub(crate) fn phase_into<P: CanPort>(
     }
     let deadline = Instant::now() + wait.after_last_frame(requests.len(), allowance);
     loop {
-        stamp(control, requests, phase);
         let pending =
             (0..requests.len()).any(|index| phase.sent[index].is_some() && !phase.answered(index));
         if !pending {
             break;
         }
         match control.port_mut().receive_until(deadline) {
-            Ok(Some(answer)) => take(control, answer, registers),
+            Ok(Some(answer)) => {
+                let arrival = Instant::now();
+                take(control, answer, registers);
+                stamp(control, requests, phase, arrival);
+            }
             Ok(None) => break,
             Err(error) => {
                 phase.failure.get_or_insert(DmCanError::Io(error));

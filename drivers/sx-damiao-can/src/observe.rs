@@ -101,6 +101,10 @@ impl<P: CanPort> CanPort for AskOnlyCanPort<P> {
     fn round_trip(&mut self) -> Option<sx_embodiment_drivers::can::RoundTrip> {
         self.0.round_trip()
     }
+
+    fn round_trip_max(&mut self) -> Option<Duration> {
+        self.0.round_trip_max()
+    }
 }
 
 /// How a motor's feedback is scaled.
