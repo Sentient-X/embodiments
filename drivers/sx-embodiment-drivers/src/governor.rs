@@ -909,6 +909,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.derated.clone()
     }
 
+    fn retried(&self) -> u64 {
+        self.chain.retried()
+    }
+
     fn clear_faults(&mut self) {
         self.latched = false;
         self.missed.fill(0);

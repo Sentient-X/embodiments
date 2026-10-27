@@ -253,6 +253,10 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     fn clear_faults(&mut self) {
         self.inner.clear_faults();
     }
+
+    fn retried(&self) -> u64 {
+        self.inner.retried()
+    }
 }
 
 impl<C: ActuatorChain> Masked<C, C::Feedback> {

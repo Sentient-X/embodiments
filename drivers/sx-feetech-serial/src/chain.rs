@@ -1073,14 +1073,6 @@ impl<P: SerialPort> FeetechChain<P> {
         &self.held_inside
     }
 
-    /// How many single exchanges (a register write and its acknowledgement, or a register
-    /// read, on the way to enabling) were answered corrupt or not at all and tried once more.
-    /// Noise on the line shows here before it ever stops the body.
-    #[must_use]
-    pub const fn retried(&self) -> u64 {
-        self.retried
-    }
-
     /// One exchange, tried once more when its answer came back corrupt or never came (10-28: one
     /// corrupt acknowledgement from the Spark's neck, among dozens of exchanges enabling it,
     /// latched the body and ended the session). Only exchanges that set or read an absolute
@@ -1209,6 +1201,12 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     /// The SYNC WRITE that carries a command has no answer; its observed joints are the SYNC
     /// READ that follows it.
     type Feedback = ();
+
+    /// Exchanges on the way to enabling (a register write and its acknowledgement, or a
+    /// register read) answered corrupt or not at all and tried once more.
+    fn retried(&self) -> u64 {
+        self.retried
+    }
 
     fn axes(&self) -> &[BoundAxis] {
         &self.axes

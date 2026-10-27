@@ -439,6 +439,12 @@ pub trait ActuatorChain {
 
     /// Release faults a chain latched from a proven stop. The caller's policy decides when; a
     /// chain that latches nothing has nothing to release.
+    /// How many single exchanges the chain tried once more, since it opened, after an answer
+    /// came back corrupt or not at all: line noise shows here before it ever stops the body.
+    fn retried(&self) -> u64 {
+        0
+    }
+
     fn clear_faults(&mut self) {}
 }
 
