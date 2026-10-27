@@ -11,7 +11,8 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, closed_ports, observe, open, open_calibrated, open_with, ports,
+    ServoCalibrations, Setup, changed_ports, closed_ports, observe, open, open_calibrated,
+    open_with, ports, reopen_ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -362,6 +363,180 @@ fn the_static_upper_body_opens_across_its_can_bus_and_three_feetech_buses_and_st
             .collect::<Vec<_>>(),
         written
     );
+}
+
+/// The static upper body's commissioning with `out` out of service.
+fn static_commissioning_without(drive: &InstanceDrive, out: &[&str]) -> Commissioning {
+    let mut ports: BTreeMap<String, String> =
+        BTreeMap::from([("can".to_owned(), "CAN".to_owned())]);
+    ports.extend(FEETECH_PORTS.map(|(port, serial)| (port.to_owned(), serial.to_owned())));
+    let document = serde_json::json!({
+        "schema": "sx.station-commissioning/v1",
+        "instance": drive.instance,
+        "pod_id": "pod-a",
+        "pod_revision": 3,
+        "ports": ports,
+        "out_of_service": out,
+    });
+    Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning")
+}
+
+/// The neck's pan servo recalibrated on the robot (homing offset -700): its register written,
+/// as `sx-commission calibrate apply` writes it, and the calibrations with its new file.
+fn recalibrate_neck_pan(neck: &SimBus) -> ServoCalibrations {
+    let mut probe = probe();
+    probe["calibration"]["neck"]["so101_shoulder_pan_joint"]["homing_offset"] = (-700).into();
+    let recalibrated =
+        FEETECH_PORTS
+            .iter()
+            .fold(ServoCalibrations::new(), |calibrations, (port, _)| {
+                calibrations
+                    .with_lerobot(port, &probe["calibration"][port].to_string())
+                    .expect("a LeRobot calibration")
+            });
+    {
+        // Sign-magnitude at bit 11, at Ofs_L (31).
+        let offset = (700_u16 | (1 << 11)).to_le_bytes();
+        let mut state = neck.state();
+        let registers = state.servos.get_mut(&1).expect("the pan servo");
+        registers[31] = offset[0];
+        registers[32] = offset[1];
+    }
+    recalibrated
+}
+
+#[test]
+fn a_changed_commissioning_reopens_only_the_buses_it_changes_and_leaves_the_rest_open() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let can = Sim::for_axes(&axes);
+    let serial = probed_buses();
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    let before = Setup {
+        commissioning: &commissioning,
+        calibrations: &calibrations,
+        options: BRING_UP,
+    };
+    let body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
+    bridges.opened.clear();
+    assert!(
+        changed_ports(&drive, before, before)
+            .expect("same")
+            .is_empty(),
+        "an unchanged setup reopens nothing"
+    );
+
+    // The neck's pan servo is recalibrated: its register is written on the robot, then its
+    // calibration file. Only the neck's bus closes and opens again; the CAN bus is untouched.
+    let recalibrated = recalibrate_neck_pan(&serial["5A7C118709"]);
+    let after = Setup {
+        calibrations: &recalibrated,
+        ..before
+    };
+    assert_eq!(
+        changed_ports(&drive, before, after).expect("in place"),
+        ["neck"]
+    );
+    let frames = can.state().frames.len();
+    let body = reopen_ports(body, &drive, after, &["neck".to_owned()], &mut bridges)
+        .expect("the neck opens again");
+    assert_eq!(bridges.opened, ["5A7C118709@1000000"]);
+    assert_eq!(
+        can.state().frames.len(),
+        frames,
+        "the CAN bus is not touched"
+    );
+    assert_eq!(body.axes().len(), 25);
+
+    // A finger taken out of service reopens its gripper; the torso, the CAN bus. Each keeps
+    // its place in the vector.
+    let out = static_commissioning_without(&drive, &["left_gripper_left_finger_joint"]);
+    let finger = Setup {
+        commissioning: &out,
+        ..after
+    };
+    assert_eq!(
+        changed_ports(&drive, after, finger).expect("in place"),
+        ["left_gripper"]
+    );
+    bridges.opened.clear();
+    let body = reopen_ports(
+        body,
+        &drive,
+        finger,
+        &["left_gripper".to_owned()],
+        &mut bridges,
+    )
+    .expect("the gripper opens again");
+    assert_eq!(bridges.opened, ["5AB0158173@1000000"]);
+    assert_eq!(body.axes().len(), 25);
+    assert_eq!(body.unavailable(), [15]);
+    let torso = static_commissioning_without(&drive, &["torso_joint"]);
+    let torso = Setup {
+        commissioning: &torso,
+        ..after
+    };
+    assert_eq!(
+        changed_ports(&drive, finger, torso).expect("in place"),
+        ["can", "left_gripper"]
+    );
+
+    // A calibration the servo does not hold refuses as it opens, and the body is gone with it:
+    // the station opens it anew.
+    let mut body = reopen_ports(
+        body,
+        &drive,
+        after,
+        &["left_gripper".to_owned()],
+        &mut bridges,
+    )
+    .expect("the finger back in service");
+    assert!(body.unavailable().is_empty());
+    assert!(body.stop().is_proven());
+    let stale = probed_calibrations();
+    let stale = Setup {
+        calibrations: &stale,
+        ..after
+    };
+    assert!(reopen_ports(body, &drive, stale, &["neck".to_owned()], &mut bridges).is_err());
+}
+
+#[test]
+fn a_port_on_another_bridge_or_another_set_of_open_ports_is_another_body() {
+    let drive = drive("sentient-static-upper-body");
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    let before = Setup {
+        commissioning: &commissioning,
+        calibrations: &calibrations,
+        options: BRING_UP,
+    };
+    let mut moved = commissioning.clone();
+    moved.ports.insert("neck".to_owned(), "ANOTHER".to_owned());
+    let moved = Setup {
+        commissioning: &moved,
+        ..before
+    };
+    assert!(matches!(
+        changed_ports(&drive, before, moved),
+        Err(OpenError::NotInPlace(_))
+    ));
+    let fewer = Setup {
+        options: OpenOptions {
+            allow_provisional: &["left_gripper", "right_gripper"],
+        },
+        ..before
+    };
+    assert!(matches!(
+        changed_ports(&drive, before, fewer),
+        Err(OpenError::NotInPlace(_))
+    ));
 }
 
 /// Whether every servo on every simulated bus has `Torque_Enable` at `value`.

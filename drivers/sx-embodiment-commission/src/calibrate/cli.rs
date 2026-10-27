@@ -31,7 +31,8 @@ pub const USAGE: &str = "usage:
   sx-commission calibrate range --bus <tty> --ids 1-6 [--joints a,b,..] [--full-turn 5]
                                 [--out <file>]
   sx-commission calibrate apply --bus <tty> --calibration <file> --move
-                                [--robot <robot dir> --port <port>] [--protection neck-defaults]
+                                [--robot <robot dir> --port <port> | --publish --port <port>]
+                                [--protection neck-defaults]
   sx-commission calibrate --restore <journal>
 
   Without --move, gripper and jog only read and print what they would do.
@@ -39,11 +40,17 @@ pub const USAGE: &str = "usage:
   then moves each through its full travel (Enter ends); it prints and writes (--out) a LeRobot
   calibration keyed by joint. apply --move writes a file's homing offsets and limits, and
   with --robot/--port installs it as the robot's commissioned <port>.calibration.json, which
-  the station and the bench tools load by default.
+  the station and the bench tools load by default. With --publish/--port it goes to the
+  station's calibration inbox instead, and the station publishes it to Fleet with its own key:
+  the robot runs it within seconds, between sessions, with no other step.
   motion settings (defaults): --goal-speed 20 --acceleration 5 --torque-limit 250
     --load-threshold 150 --lead 20 --backoff 30 --stall-ms 600 --min-progress 3
     --max-travel 1500 --inset 10 --max-seconds 180 --baud 1000000 --journal-dir <dir>
     --trace <file> (one JSON line per motion step)";
+
+/// Where an installed station takes calibrations measured on its robot and publishes them to
+/// Fleet (`fleet/station`, `CalibrationInbox`).
+pub const STATION_CALIBRATION_INBOX: &str = "/var/lib/sx-station/calibrations";
 
 /// The largest nudge `jog` takes, ticks (about 35 degrees).
 pub const MAX_JOG: i32 = 400;
@@ -228,7 +235,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
     };
     let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
     let mut calibration = None;
-    let (mut robot, mut port) = (None, None);
+    let (mut robot, mut port, mut publish) = (None, None, false);
     while let Some(flag) = words.next() {
         let mut value = || words.next().ok_or(format!("{flag} needs a value"));
         let sweep = &mut args.sweep;
@@ -273,6 +280,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--full-turn" => args.full_turn = ids(value()?)?,
             "--out" => args.out = Some(PathBuf::from(value()?)),
             "--robot" => robot = Some(PathBuf::from(value()?)),
+            "--publish" => publish = true,
             "--port" => port = Some(value()?.to_owned()),
             "--protection" => match value()? {
                 "neck-defaults" => args.protection = Some(NECK_DEFAULTS),
@@ -334,9 +342,14 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         (Some(other), None) => return Err(format!("unknown calibrate mode {other}")),
         (None, None) => return Err("calibrate needs a mode".to_owned()),
     };
-    args.install = match (robot, port) {
-        (Some(robot), Some(port)) => Some((robot, port)),
-        (None, None) => None,
+    args.install = match (robot, port, publish) {
+        (Some(robot), Some(port), false) => Some((robot, port)),
+        (None, Some(port), true) => Some((PathBuf::from(STATION_CALIBRATION_INBOX), port)),
+        (None, None, false) => None,
+        (Some(_), _, true) => {
+            return Err("--publish installs into the station's inbox; drop --robot".to_owned());
+        }
+        (None, None, true) => return Err("--publish needs --port".to_owned()),
         _ => return Err("--robot and --port go together".to_owned()),
     };
     if (args.protection.is_some() || args.install.is_some()) && !matches!(args.mode, Mode::Apply(_))
@@ -1004,12 +1017,22 @@ fn install(
     std::fs::write(&staging, &document)
         .and_then(|()| std::fs::rename(&staging, &path))
         .map_err(|e| refuse(format!("{}: {e}", path.display())))?;
-    let _ = writeln!(
-        out.stdout,
-        "installed {} as {port}'s commissioned calibration: the station and the bench tools load \
-         it by default",
-        path.display()
-    );
+    if robot == std::path::Path::new(STATION_CALIBRATION_INBOX) {
+        let _ = writeln!(
+            out.stdout,
+            "published {}: the station sends it to Fleet with its own key, and the robot runs it \
+             within seconds, between sessions (Fleet's GetStationRobot names the new digest as \
+             running)",
+            path.display()
+        );
+    } else {
+        let _ = writeln!(
+            out.stdout,
+            "installed {} as {port}'s commissioned calibration: the station and the bench tools \
+             load it by default",
+            path.display()
+        );
+    }
     Ok(())
 }
 

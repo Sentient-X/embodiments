@@ -448,6 +448,13 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         &mut self.chain
     }
 
+    /// The governed chain, given up: everything this governor learned of it (where it rests,
+    /// a latched fault, its derates) is dropped with it, so the chain is governed again only
+    /// by a new governor, which takes it up from what it reads.
+    pub fn into_chain(self) -> C {
+        self.chain
+    }
+
     /// Where the next command starts: the operator's start, else the chain's observation.
     fn seed(&mut self) -> Result<Held, GovernorError<C::Error>> {
         let width = self.chain.axes().len();

@@ -42,6 +42,12 @@
 //! in and is what a station opens through. It returns one [`Body`], an [`ActuatorChain`] the
 //! station drives without naming a vendor, a joint or a limit.
 //!
+//! An opened body changes in place bus by bus. [`changed_ports`] compares two [`Setup`]s of one
+//! drive (a servo recalibrated, an axis out of or back in service, new rails) and names the
+//! buses that open differently; [`reopen_ports`] closes just those bridges and opens them
+//! again, keeping every other bus open. A change of which body it is (another instance, another
+//! set of open ports, a port on another bridge) is [`OpenError::NotInPlace`]: it is opened anew.
+//!
 //! Every mismatch between the drive, the commissioning and the opener is refused before any
 //! bridge is opened: commissioning for another instance, a drive for a body no opener
 //! composes or whose joints are not the ones it composes, a port the opener does not declare,
@@ -905,6 +911,193 @@ pub fn open_with(
     Ok(Chains::new(chains))
 }
 
+/// One way of opening a body's drive: the commissioning that places it, its serial servos'
+/// calibrations and the provisional ports it opts in to. Two of them are compared, bus by bus,
+/// to change an opened body in place ([`changed_ports`], [`reopen_ports`]).
+#[derive(Clone, Copy, Debug)]
+pub struct Setup<'a> {
+    pub commissioning: &'a Commissioning,
+    pub calibrations: &'a ServoCalibrations,
+    pub options: OpenOptions<'a>,
+}
+
+/// What one open bus is, beyond its port: the joints it drives in service, each serial
+/// servo's calibration, and where its out-of-service axes sit in its whole vector.
+type BusShape = (Vec<String>, Vec<Option<MotorCalibration>>, Vec<usize>);
+
+impl Part {
+    fn calibrations(&self) -> Vec<Option<MotorCalibration>> {
+        match self {
+            Self::Damiao(_) => Vec::new(),
+            Self::Feetech { calibrations, .. } | Self::Dynamixel { calibrations, .. } => {
+                calibrations.clone()
+            }
+        }
+    }
+}
+
+fn shape(part: &Part, mask: &Mask) -> BusShape {
+    (
+        part.axes()
+            .into_iter()
+            .map(|axis| axis.joint.clone())
+            .collect(),
+        part.calibrations(),
+        mask.out.clone(),
+    )
+}
+
+/// The ports of `drive`'s opened body whose bus opens differently with `after` than it did
+/// with `before`, in the body's order: a servo's calibration changed, an axis taken out of or
+/// put back into service, or the rails changed (which may derate any bus, so every port).
+/// Ports that share a CAN bridge change together, since their bridge is opened once.
+///
+/// Everything [`open_with`] refuses before a bridge is opened is refused here for `after`, so
+/// nothing is closed for a change that would not open. A change of which body this is is
+/// [`OpenError::NotInPlace`]: another instance, another set of open ports (a provisional port
+/// opted in, a port with every axis out of service), or a port moved to another bridge.
+///
+/// # Errors
+///
+/// [`OpenError::NotInPlace`] for a change that is another body; what [`open_with`] refuses
+/// for `after` before a bridge is opened.
+pub fn changed_ports(
+    drive: &InstanceDrive,
+    before: Setup,
+    after: Setup,
+) -> Result<Vec<String>, OpenError> {
+    let was = plan(
+        drive,
+        before.commissioning,
+        before.calibrations,
+        before.options,
+    )?;
+    let will = plan(
+        drive,
+        after.commissioning,
+        after.calibrations,
+        after.options,
+    )?;
+    if let Some(refused) = will.parts.iter().find_map(|(port, part, _)| {
+        part.uncalibrated(port)
+            .or_else(|| part.over_rail(port, &after.commissioning.rails))
+    }) {
+        return Err(refused);
+    }
+    if before.commissioning.instance != after.commissioning.instance {
+        return Err(OpenError::NotInPlace(format!(
+            "the robot instance changed from {} to {}",
+            before.commissioning.instance, after.commissioning.instance
+        )));
+    }
+    let ports = |plan: &Plan| -> Vec<String> {
+        plan.parts.iter().map(|(port, _, _)| port.clone()).collect()
+    };
+    if ports(&was) != ports(&will) {
+        return Err(OpenError::NotInPlace(format!(
+            "the open ports change from {:?} to {:?}",
+            ports(&was),
+            ports(&will)
+        )));
+    }
+    let bridge = |setup: &Setup, port: &str| setup.commissioning.ports.get(port).cloned();
+    if let Some((port, _, _)) = will
+        .parts
+        .iter()
+        .find(|(port, _, _)| bridge(&before, port) != bridge(&after, port))
+    {
+        return Err(OpenError::NotInPlace(format!(
+            "port {port} moves to another bridge"
+        )));
+    }
+    let rails = before.commissioning.rails != after.commissioning.rails;
+    let mut changed: Vec<String> = was
+        .parts
+        .iter()
+        .zip(&will.parts)
+        .filter(|((_, a, a_mask), (_, b, b_mask))| rails || shape(a, a_mask) != shape(b, b_mask))
+        .map(|((port, _, _), _)| port.clone())
+        .collect();
+    // A CAN bridge carrying several ports is one handle: reopen every port on it.
+    for (port, _, _) in &will.parts {
+        let shares = changed.iter().any(|other| {
+            other != port
+                && bridge(&after, other).is_some()
+                && bridge(&after, other) == bridge(&after, port)
+        });
+        if shares && !changed.contains(port) {
+            changed.push(port.clone());
+        }
+    }
+    let order = ports(&will);
+    changed.sort_by_key(|port| order.iter().position(|p| p == port));
+    Ok(changed)
+}
+
+/// `body`, opened from `drive` with some earlier [`Setup`], with the buses of `ports`
+/// ([`changed_ports`]) opened again with `after`; every other bus is kept as it is, open. Each
+/// bus being replaced is dropped first, closing its bridge, and only then is its bridge opened
+/// again, so one process owns a bus throughout. A stop should have proven every actuator
+/// disabled before this is called; each reopened chain opens disabled, as at boot.
+///
+/// # Errors
+///
+/// What [`open_with`] refuses for `after`, and [`OpenError::NotInPlace`] when `body` is not
+/// `after`'s body (another number of buses). A bridge that does not open again leaves the body
+/// dropped: the caller opens it anew.
+pub fn reopen_ports(
+    body: Body,
+    drive: &InstanceDrive,
+    after: Setup,
+    ports: &[String],
+    source: &mut dyn PortSource,
+) -> Result<Body, OpenError> {
+    let plan = plan(
+        drive,
+        after.commissioning,
+        after.calibrations,
+        after.options,
+    )?;
+    if let Some(refused) = plan.parts.iter().find_map(|(port, part, _)| {
+        part.uncalibrated(port)
+            .or_else(|| part.over_rail(port, &after.commissioning.rails))
+    }) {
+        return Err(refused);
+    }
+    let mut chains: Vec<Option<BusChain>> = body.into_chains().into_iter().map(Some).collect();
+    if chains.len() != plan.parts.len() {
+        return Err(OpenError::NotInPlace(format!(
+            "the opened body has {} buses and this setup opens {}",
+            chains.len(),
+            plan.parts.len()
+        )));
+    }
+    let mut reopened = Vec::new();
+    for (index, (port, part, mask)) in plan.parts.into_iter().enumerate() {
+        if ports.contains(&port) {
+            // Closing its bridge before it is opened again.
+            chains[index] = None;
+            reopened.push((index, port, part, mask));
+        }
+    }
+    let serials: Vec<(String, Wire)> = reopened
+        .iter()
+        .map(|(_, port, part, _)| {
+            after
+                .commissioning
+                .ports
+                .get(port)
+                .map(|serial| (serial.clone(), part.wire()))
+                .ok_or_else(|| OpenError::MissingPort(port.clone()))
+        })
+        .collect::<Result<_, _>>()?;
+    let links = open_links(&serials, source)?;
+    for ((index, port, part, mask), link) in reopened.into_iter().zip(links) {
+        chains[index] = Some(mask.chain(part.open(&port, link, &after.commissioning.rails)?)?);
+    }
+    Ok(Chains::new(chains.into_iter().flatten().collect()))
+}
+
 /// One bus read only, behind the one observing surface every bus shares.
 pub type BusObserver = Box<dyn Observe + Send>;
 
@@ -1012,9 +1205,23 @@ fn bridges(
     {
         return Err(OpenError::SharedBridge((*serial).to_owned()));
     }
+    let serials: Vec<(String, Wire)> = serials
+        .into_iter()
+        .map(|(serial, wire)| (serial.to_owned(), wire))
+        .collect();
+    open_links(&serials, source)
+}
+
+/// Open each bridge, in order; a CAN bridge named more than once is opened once and shared.
+fn open_links(
+    serials: &[(String, Wire)],
+    source: &mut dyn PortSource,
+) -> Result<Vec<Link>, OpenError> {
+    let shared = |serial: &str| serials.iter().filter(|(s, _)| s == serial).count() > 1;
     let mut can_bridges: BTreeMap<&str, SharedCanPort<Port>> = BTreeMap::new();
     let mut links = Vec::with_capacity(serials.len());
-    for (serial, wire) in &serials {
+    for (serial, wire) in serials {
+        let serial = serial.as_str();
         links.push(match wire {
             Wire::Serial { baud } => Link::Serial(source.open_serial(serial, *baud)?),
             Wire::Can if shared(serial) => {
@@ -1074,6 +1281,9 @@ pub enum OpenError {
     MissingPort(String),
     #[error("bridge {0} carries a serial bus and is commissioned under more than one port")]
     SharedBridge(String),
+    /// A change that is another body, so it is opened anew rather than bus by bus.
+    #[error("the body cannot change in place: {0}")]
+    NotInPlace(String),
     #[error("no bridge with USB serial {0} is attached")]
     NotAttached(String),
     #[error("more than one bridge carries identity {identity}: {}", bridges.join(", "))]
