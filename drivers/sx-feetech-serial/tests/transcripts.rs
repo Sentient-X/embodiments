@@ -1000,3 +1000,49 @@ fn a_silent_corrupt_or_flagged_servo_is_marked_on_its_own_axis() {
     assert_eq!(read[3], AxisReading::Faulted(0x20));
     assert!(read.iter().enumerate().all(|(i, r)| i == 3 || r.is_fresh()));
 }
+
+#[test]
+fn one_corrupt_acknowledgement_while_enabling_is_tried_again_and_two_are_the_fault() {
+    // 10-28, the Spark: servo 5's acknowledgement of Torque_Enable came back corrupt once,
+    // among dozens of exchanges enabling the neck, and the body latched. The same write is
+    // now tried once more; only a second corrupt answer in a row is the fault.
+    let golden = golden();
+    let torque_enable_5 = |exchange: &Exchange| {
+        let request = bytes(&exchange.request);
+        request.get(2) == Some(&5) && request.get(4..7) == Some(&[0x03, 40, 1][..])
+    };
+    let position = golden
+        .torque_enable
+        .iter()
+        .position(torque_enable_5)
+        .expect("servo 5 enables");
+    let corrupt = |exchange: &Exchange| {
+        let mut exchange = exchange.clone();
+        let mut response = bytes(&exchange.response);
+        let last = response.len() - 1;
+        response[last] ^= 0xFF;
+        exchange.response = hex(&response);
+        exchange
+    };
+    // Once corrupt: the retry finds the real answer and the command goes out.
+    let mut enable = golden.torque_enable.clone();
+    enable.insert(position, corrupt(&golden.torque_enable[position]));
+    let mut chain = open(&with(&[&opening(&golden), &enable]), "so101");
+    chain
+        .command(&golden.goal_positions[1].radians)
+        .expect("one corrupt answer is tried again");
+    assert_eq!(chain.retried(), 1);
+    assert!(chain.port().expected.is_empty(), "every exchange was made");
+    // Twice corrupt: the fault, as before.
+    let mut enable = golden.torque_enable.clone();
+    enable.insert(position, corrupt(&golden.torque_enable[position]));
+    enable[position + 1] = corrupt(&golden.torque_enable[position]);
+    let mut chain = open(&with(&[&opening(&golden), &enable]), "so101");
+    assert!(matches!(
+        chain.command(&golden.goal_positions[1].radians),
+        Err(FeetechChainError::Comm {
+            bus_id: 5,
+            result: CommResult::RxCorrupt
+        })
+    ));
+}

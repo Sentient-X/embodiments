@@ -553,6 +553,8 @@ pub struct FeetechChain<P> {
     /// The servos the last enable found resting outside their calibrated limits, and the
     /// goal each was given inside them.
     held_inside: Vec<HeldInside>,
+    /// Exchanges answered corrupt or not at all and tried once more ([`Self::retried`]).
+    retried: u64,
 }
 
 /// A servo an enable found resting outside its calibrated limits: its goal was written as its
@@ -734,6 +736,7 @@ impl<P: SerialPort> FeetechChain<P> {
             approach_limited: Vec::new(),
             pulling_in: Vec::new(),
             held_inside: Vec::new(),
+            retried: 0,
         };
         chain.is_calibrated()?;
         chain.configure()?;
@@ -747,7 +750,10 @@ impl<P: SerialPort> FeetechChain<P> {
     }
 
     fn read2(&mut self, bus_id: u16, scs_id: u8, address: u8) -> Result<u16, FeetechChainError> {
-        let (value, result, error) = self.sms.ph.read2_byte_tx_rx(scs_id, address);
+        let (value, result, error) = self.retried_once(
+            |sms| sms.ph.read2_byte_tx_rx(scs_id, address),
+            |answer| answer.1,
+        );
         expect(bus_id, (result, error))?;
         Ok(value)
     }
@@ -759,10 +765,11 @@ impl<P: SerialPort> FeetechChain<P> {
         address: u8,
         value: u8,
     ) -> Result<(), FeetechChainError> {
-        expect(
-            bus_id,
-            self.sms.ph.write1_byte_tx_rx(scs_id, address, value),
-        )
+        let answer = self.retried_once(
+            |sms| sms.ph.write1_byte_tx_rx(scs_id, address, value),
+            |answer| answer.0,
+        );
+        expect(bus_id, answer)
     }
 
     /// `FeetechMotorsBus.is_calibrated` over `read_calibration`: every servo's position limits
@@ -894,12 +901,14 @@ impl<P: SerialPort> FeetechChain<P> {
         if !held {
             self.approach_limited[index] = false;
             self.write1(bus_id, scs_id, SMS_STS_ACC, acceleration)?;
-            expect(
-                bus_id,
-                self.sms
-                    .ph
-                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_SPEED_L, speed),
-            )?;
+            let answer = self.retried_once(
+                |sms| {
+                    sms.ph
+                        .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_SPEED_L, speed)
+                },
+                |answer| answer.0,
+            );
+            expect(bus_id, answer)?;
             let (read_speed, read_acceleration) = self.reads_approach(bus_id, scs_id)?;
             if (read_speed, read_acceleration) != (speed, acceleration) {
                 return Err(FeetechChainError::ApproachUnconfirmed {
@@ -918,7 +927,10 @@ impl<P: SerialPort> FeetechChain<P> {
     /// `Goal_Speed`'s high byte (47).
     fn reads_approach(&mut self, bus_id: u16, scs_id: u8) -> Result<(u16, u8), FeetechChainError> {
         let length = SMS_STS_GOAL_SPEED_L + 2 - SMS_STS_ACC;
-        let (data, result, error) = self.sms.ph.read_tx_rx(scs_id, SMS_STS_ACC, length);
+        let (data, result, error) = self.retried_once(
+            |sms| sms.ph.read_tx_rx(scs_id, SMS_STS_ACC, length),
+            |answer| answer.1,
+        );
         expect(bus_id, (result, error))?;
         let speed_at = usize::from(SMS_STS_GOAL_SPEED_L - SMS_STS_ACC);
         match (data.first(), data.get(speed_at), data.get(speed_at + 1)) {
@@ -1054,6 +1066,36 @@ impl<P: SerialPort> FeetechChain<P> {
         &self.held_inside
     }
 
+    /// How many single exchanges (a register write and its acknowledgement, or a register
+    /// read, on the way to enabling) were answered corrupt or not at all and tried once more.
+    /// Noise on the line shows here before it ever stops the body.
+    #[must_use]
+    pub const fn retried(&self) -> u64 {
+        self.retried
+    }
+
+    /// One exchange, tried once more when its answer came back corrupt or never came (10-28: one
+    /// corrupt acknowledgement from the Spark's neck, among dozens of exchanges enabling it,
+    /// latched the body and ended the session). Only exchanges that set or read an absolute
+    /// register use this, so the repeat writes the same value again and cannot move anything
+    /// further; a second failure in a row is the fault, exactly as before. The stop and its
+    /// torque read-back keep their own proof and never use it.
+    fn retried_once<T>(
+        &mut self,
+        mut exchange: impl FnMut(&mut SmsSts<P>) -> T,
+        result: impl Fn(&T) -> CommResult,
+    ) -> T {
+        let first = exchange(&mut self.sms);
+        if !matches!(
+            result(&first),
+            CommResult::RxCorrupt | CommResult::RxTimeout
+        ) {
+            return first;
+        }
+        self.retried = self.retried.saturating_add(1);
+        exchange(&mut self.sms)
+    }
+
     /// The servos, in native state order.
     #[must_use]
     pub fn servos(&self) -> &[FeetechServo] {
@@ -1126,22 +1168,28 @@ impl<P: SerialPort> FeetechChain<P> {
                     range_max,
                 });
             };
-            expect(
-                bus_id,
-                self.sms
-                    .ph
-                    .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_POSITION_L, goal),
-            )?;
+            let answer = self.retried_once(
+                |sms| {
+                    sms.ph
+                        .write2_byte_tx_rx(scs_id, SMS_STS_GOAL_POSITION_L, goal)
+                },
+                |answer| answer.0,
+            );
+            expect(bus_id, answer)?;
         }
-        for servo in &self.servos {
-            let (bus_id, scs_id) = (servo.axis.binding.bus_id, servo.scs_id());
-            expect(
-                bus_id,
-                self.sms
-                    .ph
-                    .write1_byte_tx_rx(scs_id, SMS_STS_TORQUE_ENABLE, 1),
-            )?;
-            expect(bus_id, self.sms.lock_eprom(scs_id))?;
+        let ids: Vec<(u16, u8)> = self
+            .servos
+            .iter()
+            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
+            .collect();
+        for (bus_id, scs_id) in ids {
+            let enabled = self.retried_once(
+                |sms| sms.ph.write1_byte_tx_rx(scs_id, SMS_STS_TORQUE_ENABLE, 1),
+                |answer| answer.0,
+            );
+            expect(bus_id, enabled)?;
+            let locked = self.retried_once(|sms| sms.lock_eprom(scs_id), |answer| answer.0);
+            expect(bus_id, locked)?;
         }
         Ok(())
     }
