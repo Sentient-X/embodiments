@@ -8,7 +8,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use sx_embodiment_drivers::can::{CanFrame, CanPort};
+use sx_embodiment_drivers::can::{CanFrame, CanPort, RoundTrip, RoundTripWindow};
 
 use crate::{
     BusEvent, FD_FRAME_BYTES, FRAME_BYTES, InterfaceLock, LinkError, Received, SocketCanError,
@@ -100,6 +100,8 @@ pub struct SocketCanPort {
     /// A transmit went unacknowledged and no frame has arrived since.
     unanswered: bool,
     counts: Counts,
+    /// How long the motor protocol's commands waited for their answers ([`CanPort::answered`]).
+    round_trips: RoundTripWindow,
     _lock: Option<InterfaceLock>,
     /// Cores kept able to wake at once while the port is open (`sx_realtime`), where the host
     /// grants it.
@@ -301,6 +303,7 @@ impl SocketCanPort {
             passive: false,
             unanswered: false,
             counts: Counts::default(),
+            round_trips: RoundTripWindow::default(),
             _lock: lock,
             _wake: sx_realtime::hold_wake_latency()
                 .inspect_err(|refused| {
@@ -622,5 +625,14 @@ impl CanPort for SocketCanPort {
             ("tx_queue_waits", counts.queue_waits),
             ("tx_queue_full", counts.queue_full),
         ]
+    }
+
+    /// Recorded on the control thread into a fixed ring; nothing allocates.
+    fn answered(&mut self, round_trip: Duration) {
+        self.round_trips.record(round_trip);
+    }
+
+    fn round_trip(&mut self) -> Option<RoundTrip> {
+        self.round_trips.take()
     }
 }

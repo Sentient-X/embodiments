@@ -12,6 +12,87 @@ use std::time::{Duration, Instant};
 /// and the answer at 921600 baud, and up to a 1 ms USB full-speed frame of latency each way.
 pub const FRAME_ALLOWANCE: Duration = Duration::from_millis(2);
 
+/// How many of a link's latest answer times a [`RoundTripWindow`] keeps for its percentiles:
+/// a few seconds of a body's ticks, in 4 KiB held inline.
+pub const ROUND_TRIP_SAMPLES: usize = 512;
+
+/// How long a link's commands waited for their answers over one period: from the moment the
+/// command was handed to the link to the moment the motor protocol took the answer it paired
+/// with it, host scheduling included, as `sx-can-bench` measures a round trip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoundTrip {
+    /// Answers paired with their command in the period.
+    pub answers: u64,
+    /// The median of the period's latest [`ROUND_TRIP_SAMPLES`] answers.
+    pub p50: Duration,
+    /// The 99th percentile (nearest rank) of the same answers.
+    pub p99: Duration,
+    /// The slowest answer of the period, every answer counted.
+    pub max: Duration,
+}
+
+/// The answer times a link was told of since it was last read ([`CanPort::answered`],
+/// [`CanPort::round_trip`]). Fixed size: recording writes one slot of a ring and allocates
+/// nothing, so it runs on the control thread; reading sorts a copy on the reader's stack.
+#[derive(Clone, Debug)]
+pub struct RoundTripWindow {
+    nanos: [u64; ROUND_TRIP_SAMPLES],
+    /// The slot the next answer is written to.
+    next: usize,
+    /// How many slots hold an answer of this period (at most [`ROUND_TRIP_SAMPLES`]).
+    held: usize,
+    answers: u64,
+    max: Duration,
+}
+
+impl Default for RoundTripWindow {
+    fn default() -> Self {
+        Self {
+            nanos: [0; ROUND_TRIP_SAMPLES],
+            next: 0,
+            held: 0,
+            answers: 0,
+            max: Duration::ZERO,
+        }
+    }
+}
+
+impl RoundTripWindow {
+    /// One command answered `round_trip` after it went out; the oldest answer leaves the
+    /// percentiles once the ring is full, never the period's slowest.
+    pub fn record(&mut self, round_trip: Duration) {
+        self.nanos[self.next] = u64::try_from(round_trip.as_nanos()).unwrap_or(u64::MAX);
+        self.next = (self.next + 1) % ROUND_TRIP_SAMPLES;
+        self.held = (self.held + 1).min(ROUND_TRIP_SAMPLES);
+        self.answers = self.answers.saturating_add(1);
+        self.max = self.max.max(round_trip);
+    }
+
+    /// The period's answer times, and a new period begun; `None` when nothing was answered.
+    pub fn take(&mut self) -> Option<RoundTrip> {
+        if self.answers == 0 {
+            return None;
+        }
+        let mut sorted = self.nanos;
+        let held = &mut sorted[..self.held];
+        held.sort_unstable();
+        let rank = |percent: usize| {
+            Duration::from_nanos(held[(held.len() * percent).div_ceil(100).saturating_sub(1)])
+        };
+        let taken = RoundTrip {
+            answers: self.answers,
+            p50: rank(50),
+            p99: rank(99),
+            max: self.max,
+        };
+        self.next = 0;
+        self.held = 0;
+        self.answers = 0;
+        self.max = Duration::ZERO;
+        Some(taken)
+    }
+}
+
 /// One classic CAN data frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CanFrame {
@@ -137,6 +218,22 @@ pub trait CanPort: Send {
     fn health(&self) -> LinkHealth {
         LinkHealth::Unknown
     }
+
+    /// One of the link's commands was answered `round_trip` after it went out, as the motor
+    /// protocol that paired the answer with its command measured it (the link cannot: only the
+    /// protocol knows which frame answers which). Called on the control thread; a link that
+    /// keeps answer times records them in a [`RoundTripWindow`], allocating nothing. Ignored
+    /// where the link keeps none.
+    fn answered(&mut self, round_trip: Duration) {
+        let _ = round_trip;
+    }
+
+    /// The link's answer times since this was last called, which begins a new period: for
+    /// whoever owns the port to read beside [`CanPort::counters`], between ticks, never per
+    /// tick. `None` when nothing was answered or the link keeps no answer times.
+    fn round_trip(&mut self) -> Option<RoundTrip> {
+        None
+    }
 }
 
 /// A port chosen at run time, as a station opens whichever bridge its commissioning names.
@@ -167,6 +264,14 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn health(&self) -> LinkHealth {
         (**self).health()
+    }
+
+    fn answered(&mut self, round_trip: Duration) {
+        (**self).answered(round_trip);
+    }
+
+    fn round_trip(&mut self) -> Option<RoundTrip> {
+        (**self).round_trip()
     }
 }
 
@@ -236,5 +341,68 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
         self.0
             .try_lock()
             .map_or(LinkHealth::Unknown, |port| port.health())
+    }
+
+    /// Held by the chain whose answer it is, so the lock is its own.
+    fn answered(&mut self, round_trip: Duration) {
+        if let Ok(mut port) = self.0.lock() {
+            port.answered(round_trip);
+        }
+    }
+
+    fn round_trip(&mut self) -> Option<RoundTrip> {
+        self.0.lock().ok()?.round_trip()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_period_reports_its_slowest_answer_and_its_percentiles() {
+        let mut window = RoundTripWindow::default();
+        assert_eq!(window.take(), None, "nothing answered: nothing claimed");
+        for micros in 1..=100 {
+            window.record(Duration::from_micros(micros));
+        }
+        assert_eq!(
+            window.take(),
+            Some(RoundTrip {
+                answers: 100,
+                p50: Duration::from_micros(50),
+                p99: Duration::from_micros(99),
+                max: Duration::from_micros(100),
+            })
+        );
+        assert_eq!(window.take(), None, "a read begins a new period");
+        window.record(Duration::from_micros(479));
+        let one = window.take().expect("one answer");
+        let rtt = Duration::from_micros(479);
+        assert_eq!((one.answers, one.p50, one.p99, one.max), (1, rtt, rtt, rtt));
+    }
+
+    #[test]
+    fn a_full_ring_keeps_its_size_and_the_periods_slowest() {
+        let mut window = RoundTripWindow::default();
+        let size = std::mem::size_of_val(&window);
+        window.record(Duration::from_millis(9));
+        for _ in 0..ROUND_TRIP_SAMPLES * 3 {
+            window.record(Duration::from_micros(400));
+        }
+        assert_eq!(std::mem::size_of_val(&window), size, "nothing grows");
+        assert_eq!(window.held, ROUND_TRIP_SAMPLES);
+        let taken = window.take().expect("answered");
+        assert_eq!(taken.answers, 1 + 3 * ROUND_TRIP_SAMPLES as u64);
+        assert_eq!(
+            taken.p99,
+            Duration::from_micros(400),
+            "the slow one left the ring"
+        );
+        assert_eq!(
+            taken.max,
+            Duration::from_millis(9),
+            "but not the period's slowest"
+        );
     }
 }

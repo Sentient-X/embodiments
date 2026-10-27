@@ -93,6 +93,14 @@ impl<P: CanPort> CanPort for AskOnlyCanPort<P> {
     fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
         self.0.health()
     }
+
+    fn answered(&mut self, round_trip: Duration) {
+        self.0.answered(round_trip);
+    }
+
+    fn round_trip(&mut self) -> Option<sx_embodiment_drivers::can::RoundTrip> {
+        self.0.round_trip()
+    }
 }
 
 /// How a motor's feedback is scaled.
@@ -204,7 +212,7 @@ impl<P: CanPort> DamiaoObserver<P> {
                     return AxisReading::Missing(MissingReason::Unavailable);
                 };
                 let Some(at) = asked.received[index] else {
-                    return AxisReading::Missing(if !asked.sent[index] || link_failed {
+                    return AxisReading::Missing(if asked.sent[index].is_none() || link_failed {
                         MissingReason::Unavailable
                     } else if asked.before[index] > 0 {
                         MissingReason::Stale

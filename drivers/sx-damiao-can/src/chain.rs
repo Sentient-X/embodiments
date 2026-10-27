@@ -452,8 +452,8 @@ pub(crate) fn every(ids: &[u16], awaits: Awaits) -> Vec<Request> {
 
 /// What one phase saw, request by request.
 pub(crate) struct Phase {
-    /// Whether the link took the request's frame.
-    pub(crate) sent: Vec<bool>,
+    /// When the link took the request's frame; `None` when it did not.
+    pub(crate) sent: Vec<Option<Instant>>,
     /// Each request's motor's feedback count before the phase's frames.
     pub(crate) before: Vec<u64>,
     /// When each request's answer was first seen.
@@ -499,11 +499,17 @@ fn take<P: CanPort>(control: &mut MotorControl<P>, frame: CanFrame, registers: b
     }
 }
 
-/// Stamp `now` on every request whose answer is in.
-fn stamp<P: CanPort>(control: &MotorControl<P>, requests: &[Request], phase: &mut Phase) {
+/// Stamp `now` on every request whose answer is in, and tell the link how long the answer
+/// took: this is where a command and its answer are paired (its motor's feedback count moved
+/// past the phase's start, or the register it asked for came back), so the round trip is
+/// measured here, from the moment the link took the frame.
+fn stamp<P: CanPort>(control: &mut MotorControl<P>, requests: &[Request], phase: &mut Phase) {
     let now = Instant::now();
     for (index, request) in requests.iter().enumerate() {
-        if phase.received[index].is_some() || !phase.sent[index] {
+        let Some(sent) = phase.sent[index] else {
+            continue;
+        };
+        if phase.received[index].is_some() {
             continue;
         }
         let Ok(motor) = control.motor(request.bus_id) else {
@@ -515,6 +521,9 @@ fn stamp<P: CanPort>(control: &MotorControl<P>, requests: &[Request], phase: &mu
         };
         if answered {
             phase.received[index] = Some(now);
+            control
+                .port_mut()
+                .answered(now.saturating_duration_since(sent));
         }
     }
 }
@@ -552,7 +561,7 @@ pub(crate) fn phase_into<P: CanPort>(
         control.recv()
     };
     phase.sent.clear();
-    phase.sent.resize(requests.len(), false);
+    phase.sent.resize(requests.len(), None);
     phase.received.clear();
     phase.received.resize(requests.len(), None);
     phase.before.clear();
@@ -572,6 +581,7 @@ pub(crate) fn phase_into<P: CanPort>(
     for (index, request) in requests.iter().enumerate() {
         let give_up = Instant::now() + allowance;
         let result = loop {
+            let attempt = Instant::now();
             match frame(control, index, *request) {
                 // A full queue, or a link its driver just recovered from a stall without a
                 // replug (the ZLG's `Interrupted`: "this frame was not sent: send again"): wait
@@ -589,11 +599,11 @@ pub(crate) fn phase_into<P: CanPort>(
                         Err(error) => break Err(DmCanError::Io(error)),
                     }
                 }
-                other => break other,
+                other => break other.map(|()| attempt),
             }
         };
         match result {
-            Ok(()) => phase.sent[index] = true,
+            Ok(sent) => phase.sent[index] = Some(sent),
             Err(error) => {
                 phase.failure.get_or_insert(error);
             }
@@ -602,7 +612,8 @@ pub(crate) fn phase_into<P: CanPort>(
     let deadline = Instant::now() + wait.after_last_frame(requests.len(), allowance);
     loop {
         stamp(control, requests, phase);
-        let pending = (0..requests.len()).any(|index| phase.sent[index] && !phase.answered(index));
+        let pending =
+            (0..requests.len()).any(|index| phase.sent[index].is_some() && !phase.answered(index));
         if !pending {
             break;
         }
@@ -743,7 +754,7 @@ fn disable_all<P: CanPort>(
     let unsent: Vec<u16> = ids
         .iter()
         .zip(&disabled.sent)
-        .filter(|(_, sent)| !**sent)
+        .filter(|(_, sent)| sent.is_none())
         .map(|(bus_id, _)| *bus_id)
         .collect();
     if unsent.is_empty() {
@@ -1320,7 +1331,7 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                     return AxisReading::Missing(MissingReason::Unavailable);
                 };
                 let Some(at) = asked.received[index] else {
-                    return AxisReading::Missing(if !asked.sent[index] || link_failed {
+                    return AxisReading::Missing(if asked.sent[index].is_none() || link_failed {
                         MissingReason::Unavailable
                     } else if asked.before[index] > 0 {
                         MissingReason::Stale
