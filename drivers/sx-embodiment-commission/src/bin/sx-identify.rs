@@ -891,7 +891,7 @@ fn latency(args: &Args, axes: Vec<DamiaoAxis>) -> Result<(), String> {
                         MissingReason::Timeout => 0,
                         MissingReason::Stale => 1,
                         MissingReason::Corrupt => 2,
-                        MissingReason::Unavailable => 3,
+                        MissingReason::Unavailable | MissingReason::OutOfService => 3,
                     };
                     missed[index][slot] += 1;
                     if events.len() < events.capacity() {
