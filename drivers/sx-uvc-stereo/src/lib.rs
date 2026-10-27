@@ -11,12 +11,12 @@
 //!
 //! [`UvcStereoSource`] cuts each delivered frame into its track's planned eyes ([`split::eye`])
 //! over any [`Device`]: `capture::open` (feature `capture`) opens one device once for all its
-//! tracks through `nokhwa`, V4L2 on Linux and `AVFoundation` on macOS, and the tests drive it
+//! tracks, through V4L2 on Linux and `nokhwa`'s `AVFoundation` on macOS, and the tests drive it
 //! with synthetic frames.
 //!
 //! # Capture time
 //!
-//! A UVC frame through `nokhwa` carries no device timestamp, so an exposure is stamped when the
+//! A frame is not yet stamped by the device, so an exposure is stamped when the
 //! host has the frame: later than the exposure by its readout and USB transfer, a bounded but
 //! unmeasured lag (about a frame interval). The stamp is monotonic per source.
 //!

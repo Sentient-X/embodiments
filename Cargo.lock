@@ -1337,6 +1337,7 @@ dependencies = [
  "serde_json",
  "sx-embodiment-drivers",
  "thiserror 2.0.21",
+ "v4l",
 ]
 
 [[package]]

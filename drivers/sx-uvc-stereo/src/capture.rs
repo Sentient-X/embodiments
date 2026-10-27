@@ -1,4 +1,6 @@
-//! Attached devices through `nokhwa`: V4L2 on Linux, `AVFoundation` on macOS.
+//! Attached devices: listed through `nokhwa`, captured through V4L2 itself on Linux (the `v4l`
+//! crate `nokhwa` uses, so a read can wait with a timeout) and through `nokhwa`'s
+//! `AVFoundation` on macOS.
 //!
 //! A device is found by its product's USB vendor and product ids, and by serial where the
 //! platform says it. On Linux the serial is read from `sysfs`, so the request's serial must match
@@ -18,12 +20,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
-use nokhwa::Camera;
-use nokhwa::pixel_format::YuyvFormat;
-use nokhwa::utils::{
-    ApiBackend, CameraFormat, CameraIndex, CameraInfo, FrameFormat, RequestedFormat,
-    RequestedFormatType, Resolution,
-};
+use nokhwa::utils::{ApiBackend, CameraIndex, CameraInfo};
 use sx_embodiment_drivers::{CaptureError, CapturedAt};
 use thiserror::Error;
 
@@ -271,18 +268,28 @@ fn find(request: &CaptureRequest, attached: Vec<Attached>) -> Result<Attached, O
 const QUEUE: usize = 2;
 
 /// How long the last source of a device waits for its capture thread to stop the stream and
-/// close the device: about one frame of the slowest mode, with room to spare.
+/// close the device: longer than [`STALL`], the longest a read waits, with room to spare.
 pub const STOP_WAIT: Duration = Duration::from_secs(2);
+
+/// No frame for this long ends a capture: the device is reported failed, its stream stopped and
+/// the device closed. A read that waited for ever held a stalled ZED 2i open on the DGX Spark
+/// (10-27): the capture thread never saw it was told to stop, the device stayed open, and every
+/// later interval's open was refused as busy.
+pub const STALL: Duration = Duration::from_secs(1);
+
+/// How long the first frame after the stream starts may take.
+pub const FIRST_FRAME_WAIT: Duration = Duration::from_secs(3);
 
 /// One opened device's frames, captured on a thread of its own: a `nokhwa` camera may not
 /// leave the thread that opened it, and a [`Device`] is `Send`.
-pub struct NokhwaDevice {
+pub struct CaptureDevice {
     frames: mpsc::Receiver<Result<Arc<RawFrame>, CaptureError>>,
     _capture: Arc<CaptureThread>,
 }
 
 /// The capture thread of one opened device, shared by its tracks' sources. When the last
-/// source drops, it is told to stop and waited for (at most [`STOP_WAIT`]): the thread stops
+/// source drops, it is told to stop and waited for (at most [`STOP_WAIT`]); it sees that after
+/// the frame it is reading or at most [`STALL`]. The thread stops
 /// the stream (`VIDIOC_STREAMOFF`, the buffers released) and closes the device itself, so a
 /// process that ends after its sources are dropped never leaves the camera mid-capture. A
 /// stream torn down by process exit instead, during a transfer, hung the DGX Spark's xHCI
@@ -314,17 +321,14 @@ impl Drop for CaptureThread {
     }
 }
 
-impl Device for NokhwaDevice {
+impl Device for CaptureDevice {
     fn wait(&mut self) -> Result<Arc<RawFrame>, CaptureError> {
         self.frames.recv().map_err(|_| CaptureError::Ended)?
     }
 }
 
-fn frame(camera: &mut Camera, width: u32, height: u32) -> Result<RawFrame, CaptureError> {
-    let data = camera
-        .frame_raw()
-        .map_err(|error| CaptureError::Device(error.to_string()))?
-        .into_owned();
+fn frame(stream: &mut Stream, width: u32, height: u32) -> Result<RawFrame, CaptureError> {
+    let data = stream.frame()?;
     let captured = CapturedAt {
         monotonic: Instant::now(),
         wall: SystemTime::now(),
@@ -366,7 +370,7 @@ type FrameSender = mpsc::SyncSender<Result<Arc<RawFrame>, CaptureError>>;
 /// Hand every frame to every track's queue until told to stop, every track's source has
 /// dropped, or the device fails.
 fn serve(
-    camera: &mut Camera,
+    stream: &mut Stream,
     mut senders: Vec<FrameSender>,
     (width, height): (u32, u32),
     stopping: &AtomicBool,
@@ -374,7 +378,7 @@ fn serve(
     // Told to stop, every track's source dropped, or the device failed: each ends the
     // capture, and the stream is stopped and the device closed here, on this thread.
     while !senders.is_empty() && !stopping.load(Ordering::Acquire) {
-        match frame(camera, width, height) {
+        match frame(stream, width, height) {
             Ok(frame) => {
                 let frame = Arc::new(frame);
                 senders.retain(|sender| {
@@ -394,13 +398,152 @@ fn serve(
     }
 }
 
-/// Stop the stream (`VIDIOC_STREAMOFF`, the buffers released) and close the device, on the
-/// thread that opened it.
-fn close(mut camera: Camera, serial: &str) {
-    if let Err(error) = camera.stop_stream() {
-        eprintln!("uvc-stereo {serial}: stopping the stream failed: {error}");
+/// One device streaming at one mode, on the thread that opened it.
+#[cfg(target_os = "linux")]
+struct Stream {
+    // Declared before the device: the stream stops and its buffers are released first.
+    buffers: v4l::prelude::MmapStream<'static>,
+    device: v4l::Device,
+    started: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl Stream {
+    fn open(index: u32, (width, height): (u32, u32), fps: u32) -> Result<Self, OpenError> {
+        use v4l::video::Capture;
+        let refuse = |message: String| OpenError::Mode {
+            width,
+            height,
+            fps,
+            message,
+        };
+        let failed = |error: std::io::Error| OpenError::Device(error.to_string());
+        let device = v4l::Device::new(index as usize).map_err(failed)?;
+        let yuyv = v4l::FourCC::new(b"YUYV");
+        let mut format = device.format().map_err(failed)?;
+        format.width = width;
+        format.height = height;
+        format.fourcc = yuyv;
+        let set = device
+            .set_format(&format)
+            .map_err(|error| refuse(error.to_string()))?;
+        if (set.width, set.height, set.fourcc) != (width, height, yuyv) {
+            return Err(refuse(format!(
+                "it opened {}x{} {}",
+                set.width, set.height, set.fourcc
+            )));
+        }
+        let interval = device
+            .set_params(&v4l::video::capture::Parameters::with_fps(fps))
+            .map_err(|error| refuse(error.to_string()))?
+            .interval;
+        if interval.numerator == 0 || interval.denominator != fps * interval.numerator {
+            return Err(refuse(format!(
+                "it opened a frame interval of {}/{} s",
+                interval.numerator, interval.denominator
+            )));
+        }
+        let mut buffers =
+            v4l::prelude::MmapStream::with_buffers(&device, v4l::buffer::Type::VideoCapture, 4)
+                .map_err(failed)?;
+        buffers.set_timeout(FIRST_FRAME_WAIT);
+        Ok(Self {
+            buffers,
+            device,
+            started: false,
+        })
     }
-    drop(camera);
+
+    /// The next frame's bytes; no frame within [`STALL`] ([`FIRST_FRAME_WAIT`] for the first)
+    /// is the device's failure.
+    fn frame(&mut self) -> Result<Vec<u8>, CaptureError> {
+        use v4l::io::traits::CaptureStream;
+        let wait = if self.started {
+            STALL
+        } else {
+            FIRST_FRAME_WAIT
+        };
+        let (data, meta) = self.buffers.next().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                CaptureError::Device(format!("no frame for {wait:?}"))
+            } else {
+                CaptureError::Device(error.to_string())
+            }
+        })?;
+        let used = usize::try_from(meta.bytesused).map_or(data.len(), |used| used.min(data.len()));
+        let frame = data[..used].to_vec();
+        if !self.started {
+            self.started = true;
+            self.buffers.set_timeout(STALL);
+        }
+        Ok(frame)
+    }
+
+    /// Stop the stream (`VIDIOC_STREAMOFF`), release its buffers and close the device.
+    fn close(self, serial: &str) {
+        use v4l::io::traits::Stream as _;
+        let Self {
+            mut buffers,
+            device,
+            ..
+        } = self;
+        if let Err(error) = buffers.stop() {
+            eprintln!("uvc-stereo {serial}: stopping the stream failed: {error}");
+        }
+        // `v4l`'s stream panics when stopping fails as it drops; its buffers and the device's
+        // descriptor are released by the unwinding all the same.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(buffers)));
+        drop(device);
+    }
+}
+
+/// One device streaming at one mode, on the thread that opened it.
+#[cfg(not(target_os = "linux"))]
+struct Stream(nokhwa::Camera);
+
+#[cfg(not(target_os = "linux"))]
+impl Stream {
+    fn open(index: u32, (width, height): (u32, u32), fps: u32) -> Result<Self, OpenError> {
+        use nokhwa::pixel_format::YuyvFormat;
+        use nokhwa::utils::{
+            CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+        };
+        let format = CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps);
+        let refuse = |message: String| OpenError::Mode {
+            width,
+            height,
+            fps,
+            message,
+        };
+        let mut camera = nokhwa::Camera::new(
+            CameraIndex::Index(index),
+            RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(format)),
+        )
+        .map_err(|error| refuse(error.to_string()))?;
+        let delivered = camera.camera_format();
+        if delivered != format {
+            return Err(refuse(format!("it opened {delivered}")));
+        }
+        camera
+            .open_stream()
+            .map_err(|error| OpenError::Device(error.to_string()))?;
+        Ok(Self(camera))
+    }
+
+    fn frame(&mut self) -> Result<Vec<u8>, CaptureError> {
+        Ok(self
+            .0
+            .frame_raw()
+            .map_err(|error| CaptureError::Device(error.to_string()))?
+            .into_owned())
+    }
+
+    /// Stop the stream and close the device.
+    fn close(mut self, serial: &str) {
+        if let Err(error) = self.0.stop_stream() {
+            eprintln!("uvc-stereo {serial}: stopping the stream failed: {error}");
+        }
+    }
 }
 
 /// What the tracks of one capture share: the device and its mode.
@@ -417,7 +560,7 @@ fn shared(request: &CaptureRequest) -> (&str, (u32, u32), u32) {
 /// be told apart, or it refuses the mode, and for requests that are not one device at one mode.
 pub fn open(
     requests: Vec<CaptureRequest>,
-) -> Result<Vec<UvcStereoSource<NokhwaDevice>>, OpenError> {
+) -> Result<Vec<UvcStereoSource<CaptureDevice>>, OpenError> {
     let Some(first) = requests.first() else {
         return Ok(Vec::new());
     };
@@ -442,44 +585,18 @@ pub fn open(
     let thread = std::thread::Builder::new()
         .name(format!("uvc-stereo-{serial}"))
         .spawn(move || {
-            let format = CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps);
-            let refuse = |message: String| OpenError::Mode {
-                width,
-                height,
-                fps,
-                message,
-            };
-            let camera = Camera::new(
-                CameraIndex::Index(device.index),
-                RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(format)),
-            )
-            .map_err(|error| refuse(error.to_string()))
-            .and_then(|camera| {
-                let delivered = camera.camera_format();
-                if delivered == format {
-                    Ok(camera)
-                } else {
-                    Err(refuse(format!("it opened {delivered}")))
-                }
-            })
-            .and_then(|mut camera| {
-                camera
-                    .open_stream()
-                    .map(|()| camera)
-                    .map_err(|error| OpenError::Device(error.to_string()))
-            });
-            let mut camera = match camera {
-                Ok(camera) => {
+            let mut stream = match Stream::open(device.index, (width, height), fps) {
+                Ok(stream) => {
                     let _ = ready.send(Ok(()));
-                    camera
+                    stream
                 }
                 Err(error) => {
                     let _ = ready.send(Err(error));
                     return;
                 }
             };
-            serve(&mut camera, senders, (width, height), &stopping);
-            close(camera, &thread_serial);
+            serve(&mut stream, senders, (width, height), &stopping);
+            stream.close(&thread_serial);
         })
         .map_err(|error| OpenError::Device(error.to_string()))?;
     let capture = Arc::new(CaptureThread {
@@ -495,7 +612,7 @@ pub fn open(
         .zip(receivers)
         .map(|(request, frames)| {
             UvcStereoSource::new(
-                NokhwaDevice {
+                CaptureDevice {
                     frames,
                     _capture: Arc::clone(&capture),
                 },

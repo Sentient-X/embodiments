@@ -30,12 +30,15 @@ sits on the USB 2 half of the same connector, so the device takes that one (seen
 so there the one attached device of the product is opened and two are refused as ambiguous. It
 asks for exactly the side-by-side raster, YUYV, at the planned rate, and refuses a device that
 opens anything else. The camera is read on its own thread (a `nokhwa` camera may not cross
-threads) into a two-frame queue. A process without camera permission (macOS) gets
+threads) into a two-frame queue. On Linux the read is V4L2's own, through the `v4l` crate, and
+waits at most `STALL` (1 s): a device that stops sending frames ends the capture with an error,
+its stream stopped and the device closed, instead of a read that never returns keeping it open
+(on 10-27 that left a stalled ZED 2i busy for every later teleoperation interval). A process without camera permission (macOS) gets
 `OpenError::Permission` instead of a hang.
 
 ## What it does not do
 
-* **Exposure time.** `nokhwa` carries no UVC timestamp, so a frame is stamped when the host has it,
+* **Exposure time.** A frame carries no device timestamp yet, so a frame is stamped when the host has it,
   later than the exposure by its readout and transfer. V4L2's own buffer timestamps would close
   that on Linux.
 * **Depth, rectification.** The ZED SDK is not used; the IMU is `sx-stereolabs-sensors`. A unit's intrinsics and its eyes' relative
