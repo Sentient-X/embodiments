@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use sx_embodiment_drivers::{FrameSource, I420Image};
-use sx_uvc_stereo::{CaptureRequest, PRODUCTS, capture};
+use sx_uvc_stereo::{CaptureRequest, Eye, PRODUCTS, capture};
 
 /// BT.601 limited range back to RGB, for looking at.
 fn ppm(image: &I420Image) -> Vec<u8> {
@@ -51,10 +51,12 @@ fn an_attached_zed_streams_both_eyes_of_one_mode() {
         eye_width: width.parse().expect("width"),
         eye_height: height.parse().expect("height"),
         fps: fps.parse().expect("fps"),
-        cameras: ["left".to_owned(), "right".to_owned()],
+        cameras: vec!["left".to_owned(), "right".to_owned()],
+        eyes: vec![Eye::Left, Eye::Right],
     };
     let (eye_width, eye_height) = (request.eye_width, request.eye_height);
-    let mut source = capture::open(request).expect("open");
+    let [mut source] = <[_; 1]>::try_from(capture::open(vec![request]).expect("open"))
+        .unwrap_or_else(|_| panic!("one source"));
     let mut last = None;
     let mut pair = None;
     for _ in 0..10 {
