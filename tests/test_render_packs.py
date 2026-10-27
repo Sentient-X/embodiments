@@ -154,3 +154,47 @@ def test_a_json_rendering_is_current_through_another_platforms_last_bits(tmp_pat
     urdf.write_bytes(b'<origin xyz="0.1"/>')
     assert not same_rendering(urdf, b'<origin xyz="0.1000000000000001"/>')
     assert not same_rendering(tmp_path / "missing.json", b"{}")
+
+
+def test_pieces_follow_a_concave_part_and_cover_its_surface() -> None:
+    """An L of two 4 cm by 1 cm bars: its pieces keep the inside corner empty (a hull of the
+    whole would fill it), and every vertex lies in a piece."""
+    import numpy as np
+    from scipy.spatial import Delaunay, QhullError
+
+    from sx_embodiments.collision_proxies import pieces
+
+    def bar(lo: tuple[float, float, float], hi: tuple[float, float, float]) -> np.ndarray:
+        corners = np.array(
+            [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        )
+        faces = [
+            (0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1),
+            (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4), (1, 5, 7), (1, 7, 3),
+        ]  # fmt: skip
+        return corners[np.array(faces)]
+
+    shape = np.vstack([bar((0, 0, 0), (0.04, 0.01, 0.01)), bar((0, 0, 0), (0.01, 0.04, 0.01))])
+    found = pieces(shape)
+    corner = np.array([0.03, 0.03, 0.005])  # inside the L's bend, outside the part
+
+    def inside(piece: np.ndarray) -> bool:
+        try:
+            return bool(Delaunay(piece).find_simplex(corner) >= 0)
+        except QhullError:  # a flat piece (one face) holds no volume
+            return False
+
+    assert not any(inside(piece) for piece in found)
+
+    def covers(piece: np.ndarray, point: np.ndarray) -> bool:
+        """Whether `point` is a convex combination of the piece's corners (to a micrometre)."""
+        from scipy.optimize import linprog
+
+        n = len(piece)
+        equalities = np.vstack([piece.T, np.ones(n)])
+        target = np.append(point, 1.0)
+        found = linprog(np.zeros(n), A_eq=equalities, b_eq=target, bounds=(0, None))
+        return bool(found.status == 0)
+
+    for vertex in shape.reshape(-1, 3):
+        assert any(covers(piece, vertex) for piece in found), vertex

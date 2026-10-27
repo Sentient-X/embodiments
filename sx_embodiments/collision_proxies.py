@@ -1,7 +1,7 @@
 """Collision proxies: capsules fitted to a body's collision geometry, for a solver that must
 keep links apart many times a second.
 
-``collision.json`` (``sx.collision-proxies/v3``) sits in a body's render pack beside
+``collision.json`` (``sx.collision-proxies/v4``) sits in a body's render pack beside
 ``robot.urdf``. For every link with ``<collision>`` geometry it holds one to three capsules in
 the link frame, each a segment ``a``-``b`` and a radius, that together **contain** every vertex
 of the link's collision meshes (and so their hulls): a distance between proxies never
@@ -12,6 +12,15 @@ self-collision check skips, each for its reason:
   joint whose own design keeps them apart, and their fitted proxies overlap there.
 * ``touching_at_zero``: proxies that overlap with every joint at zero, the description's
   as-built pose; a constraint there could never be satisfied.
+
+``hulls`` is each link's collision geometry as convex pieces, for a second pass where two
+capsules overlap: a capsule contains its whole link, so it bulges past a bracket's inside
+corner and overlaps a part resting a few millimetres from it (the static upper body's folded
+neck rests 1.5 mm clear), while the pieces follow the part. Each piece is the convex hull of
+one link mesh's triangles whose centres fall in one :data:`_PIECE_CELL_M` cube, its points
+snapped to :data:`_PIECE_GRID_M` (so a piece is the part to within about a millimetre), and
+only the hull's corners kept. A solver measures pieces only where capsules come within its
+margin; a separation the pieces prove stands, and a contact they cannot rule out stays.
 
 ``support`` is the surface the body stands on, from its declared
 :class:`~sx_embodiments.compose.BaseMount`: the top is the ``z = 0`` plane of the mount's
@@ -38,6 +47,10 @@ from typing import Final
 
 import numpy as np
 import numpy.typing as npt
+from scipy.spatial import (
+    ConvexHull,  # pyright: ignore[reportMissingTypeStubs]  # no stubs
+    QhullError,  # pyright: ignore[reportMissingTypeStubs]
+)
 from sx_contracts.identity import JsonValue, canonical_bytes
 
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
@@ -46,14 +59,18 @@ from .embodiment import Embodiment
 from .kinematics import JointType, Kinematics, Transform, from_xyz_rpy
 from .materialize import materialize
 
-SCHEMA: Final = "sx.collision-proxies/v3"
-GENERATOR: Final = "sx_embodiments.collision_proxies/v3"
+SCHEMA: Final = "sx.collision-proxies/v4"
+GENERATOR: Final = "sx_embodiments.collision_proxies/v4"
 FILE: Final = "collision.json"
 #: Links at most this many moving joints apart are not checked against each other.
 ADJACENT_JOINTS: Final = 2
 _MAX_CAPSULES: Final = 3
 _SPLIT_GAIN: Final = 0.15
 _MICRO: Final = 1e-6
+#: The edge of the cube a convex piece's triangles share, m.
+_PIECE_CELL_M: Final = 0.02
+#: The grid a piece's points snap to, m.
+_PIECE_GRID_M: Final = 0.001
 
 Floats = npt.NDArray[np.float64]
 Capsule = tuple[Floats, Floats, float]
@@ -75,6 +92,17 @@ def _matrix(transform: Transform) -> Floats:
 
 def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
     """Each link's collision mesh vertices (and primitive corners) in the link frame."""
+    return {
+        link: np.vstack([vertices for vertices, _ in meshes])
+        for link, meshes in _collision_meshes(embodiment, urdf).items()
+    }
+
+
+def _collision_meshes(
+    embodiment: Embodiment, urdf: bytes
+) -> dict[str, list[tuple[Floats, Floats]]]:
+    """Each link's collision meshes in the link frame: vertices ``(n, 3)`` and triangles
+    ``(m, 3, 3)``."""
     from .render_pack import (
         RenderPackError,
         box_mesh,
@@ -88,10 +116,10 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
     root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
     directory = materialize(embodiment)
     description = embodiment.urdf.asset.uri
-    points: dict[str, Floats] = {}
+    meshes: dict[str, list[tuple[Floats, Floats]]] = {}
     for link in root.findall("link"):
         name = link.get("name", "")
-        parts: list[Floats] = []
+        parts: list[tuple[Floats, Floats]] = []
         for collision in link.findall("collision"):
             origin = collision.find("origin")
             transform = _matrix(
@@ -120,23 +148,43 @@ def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
                     if not uri.startswith(PACKAGE_URI_PREFIX):
                         raise RenderPackError(f"link {name!r}: {filename!r} is not packaged")
                     relpath = uri.removeprefix(PACKAGE_URI_PREFIX)
-                    vertices = load_mesh(directory / relpath, relpath, scale).vertices
+                    mesh = load_mesh(directory / relpath, relpath, scale)
                 case "box":
-                    vertices = box_mesh(urdf_floats(shape.get("size"), 3, "", "box size")).vertices
+                    mesh = box_mesh(urdf_floats(shape.get("size"), 3, "", "box size"))
                 case "cylinder":
                     radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
                     length = urdf_floats(shape.get("length"), 1, "", "length")[0]
-                    vertices = cylinder_mesh(radius, length).vertices
+                    mesh = cylinder_mesh(radius, length)
                 case "sphere":
-                    vertices = sphere_mesh(
-                        urdf_floats(shape.get("radius"), 1, "", "radius")[0]
-                    ).vertices
+                    mesh = sphere_mesh(urdf_floats(shape.get("radius"), 1, "", "radius")[0])
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} collision")
-            parts.append(vertices @ transform[:3, :3].T + transform[:3, 3])
+            vertices = mesh.vertices @ transform[:3, :3].T + transform[:3, 3]
+            parts.append((vertices, vertices[np.asarray(mesh.faces)]))
         if parts:
-            points[name] = np.vstack(parts)
-    return points
+            meshes[name] = parts
+    return meshes
+
+
+def pieces(triangles: Floats) -> list[Floats]:
+    """One mesh's convex pieces: the hull corners of its triangles grouped by the cube their
+    centres fall in, snapped to the grid, in cube order."""
+    cells = np.floor(triangles.mean(axis=1) / _PIECE_CELL_M).astype(np.int64)
+    order = np.lexsort(cells.T[::-1])
+    cells, triangles = cells[order], triangles[order]
+    breaks = np.flatnonzero(np.any(np.diff(cells, axis=0) != 0, axis=1)) + 1
+    found: list[Floats] = []
+    for group in np.split(triangles, breaks):
+        points = np.unique(np.round(group.reshape(-1, 3) / _PIECE_GRID_M), axis=0)
+        try:
+            corners = np.sort(ConvexHull(points).vertices)
+            points = points[corners]
+        except QhullError:
+            pass  # flat or a line: every snapped point stays
+        # Millimetres to metres, then rounded so each is the shortest decimal (0.052, not
+        # 0.052000000000000005).
+        found.append(np.round(points * _PIECE_GRID_M, 6) + 0.0)
+    return found
 
 
 def _principal(points: Floats) -> Floats:
@@ -251,7 +299,10 @@ def _pairs(pairs: list[tuple[str, str]]) -> JsonValue:
 def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
     """``embodiment``'s ``collision.json``, or ``None`` when no link has collision geometry."""
     urdf = embodiment.urdf_bytes
-    points = _collision_points(embodiment, urdf)
+    meshes = _collision_meshes(embodiment, urdf)
+    points = {
+        link: np.vstack([vertices for vertices, _ in parts]) for link, parts in meshes.items()
+    }
     if not points:
         return None
     kinematics = Kinematics.of(urdf)
@@ -290,6 +341,12 @@ def proxies(embodiment: Embodiment, *, name: str | None = None) -> bytes | None:
             {"link": link, "a": [float(v) for v in a], "b": [float(v) for v in b], "radius": r}
             for link, shapes in capsules.items()
             for a, b, r in shapes
+        ],
+        "hulls": [
+            {"link": link, "points": [[float(v) for v in point] for point in piece]}
+            for link, parts in meshes.items()
+            for _, triangles in parts
+            for piece in pieces(triangles)
         ],
         "ignored_pairs": {"adjacent": _pairs(adjacent), "touching_at_zero": _pairs(touching)},
         "adjacent_joints": ADJACENT_JOINTS,

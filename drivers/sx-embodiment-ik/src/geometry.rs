@@ -1,13 +1,15 @@
-//! Collision proxies (`collision.json`, `sx.collision-proxies/v3`) and the distances between
-//! them and the scene.
+//! Collision proxies (`collision.json`, `sx.collision-proxies/v4`): capsules and, for the
+//! second pass, each link's convex pieces ([`crate::hull`]); and the distances between them
+//! and the scene.
 
 use serde::Deserialize;
 
 use crate::IkError;
+use crate::hull::Piece;
 use crate::math::{V3, add, dot, mat_vec, norm, scale, sub};
 use crate::model::Model;
 
-pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v3";
+pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v4";
 
 /// How far a declared support reaches from its frame, m: past any limb's reach.
 const SUPPORT_REACH_M: f64 = 3.0;
@@ -21,6 +23,7 @@ struct Document {
     #[allow(dead_code)]
     urdf_sha256: String,
     capsules: Vec<CapsuleDocument>,
+    hulls: Vec<HullDocument>,
     ignored_pairs: Ignored,
     #[allow(dead_code)]
     adjacent_joints: u32,
@@ -80,6 +83,13 @@ struct CapsuleDocument {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct HullDocument {
+    link: String,
+    points: Vec<V3>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Ignored {
     adjacent: Vec<[String; 2]>,
     touching_at_zero: Vec<[String; 2]>,
@@ -107,6 +117,9 @@ pub struct Proxies {
     pub capsules: Vec<Capsule>,
     /// Capsule index pairs on links that are neither ignored nor rigidly joined.
     pub pairs: Vec<(usize, usize)>,
+    /// Every link's convex pieces, and each link's (by link index) indices into them.
+    pub pieces: Vec<Piece>,
+    pub pieces_of: Vec<Vec<usize>>,
     /// The surface the body stands on, as its embodiment declares it (its base mount): the
     /// mount frame's `z = 0` plane, solid below up to the support's declared edge, or
     /// everywhere within reach when it declares none. A link below the top and behind the
@@ -119,8 +132,8 @@ impl Proxies {
     ///
     /// # Errors
     ///
-    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v3`, names a link
-    /// the tree lacks, or declares a support on a frame that moves or is not level with the
+    /// [`IkError::Proxies`] when the document is not `sx.collision-proxies/v4`, names a link
+    /// the tree lacks, has a piece with no point, or declares a support on a frame that moves or is not level with the
     /// root.
     pub fn parse(json: &str, model: &Model) -> Result<Self, IkError> {
         let document: Document =
@@ -148,6 +161,19 @@ impl Proxies {
                 })
             })
             .collect::<Result<Vec<_>, IkError>>()?;
+        let mut pieces = Vec::with_capacity(document.hulls.len());
+        let mut pieces_of = vec![Vec::new(); model.links().len()];
+        for hull in document.hulls {
+            if hull.points.is_empty() {
+                return Err(IkError::Proxies(format!(
+                    "{:?} has an empty piece",
+                    hull.link
+                )));
+            }
+            let index = link(&hull.link)?;
+            pieces_of[index].push(pieces.len());
+            pieces.push(Piece::new(index, hull.points));
+        }
         let mut ignored = Vec::new();
         for [first, second] in document
             .ignored_pairs
@@ -181,6 +207,8 @@ impl Proxies {
         Ok(Self {
             capsules,
             pairs,
+            pieces,
+            pieces_of,
             support,
         })
     }
@@ -364,7 +392,7 @@ mod tests {
     fn proxies(model: &Model, edge: &str) -> Result<Proxies, IkError> {
         let json = format!(
             r#"{{"schema":"{PROXIES_SCHEMA}","embodiment_id":"r","urdf_sha256":"0",
-            "capsules":[],"ignored_pairs":{{"adjacent":[],"touching_at_zero":[]}},
+            "capsules":[],"hulls":[],"ignored_pairs":{{"adjacent":[],"touching_at_zero":[]}},
             "adjacent_joints":2,"generated_by":"test",
             "support":{{"frame":"base","kind":"clamp_edge","edge":{edge}}}}}"#
         );
