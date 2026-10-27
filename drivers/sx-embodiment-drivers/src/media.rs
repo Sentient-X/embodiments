@@ -316,7 +316,7 @@ pub struct AudioChunk {
 }
 
 /// A capture device failed or ended.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum CaptureError {
     #[error("capture device ended")]
     Ended,

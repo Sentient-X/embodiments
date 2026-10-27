@@ -1,9 +1,10 @@
 //! A planned ZED track captured from synthetic side-by-side frames, no hardware.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use sx_embodiment_drivers::{CaptureError, CapturedAt, FrameSource, MediaPlan, Track};
-use sx_uvc_stereo::{CaptureRequest, Device, RawFrame, RequestError, UvcStereoSource};
+use sx_uvc_stereo::{CaptureRequest, Device, Eye, RawFrame, RequestError, UvcStereoSource};
 
 const PLANS: &str = include_str!("fixtures/media-plans.json");
 const NOMINAL: &str = include_str!("../../sx-embodiment-drivers/tests/fixtures/media-plans.json");
@@ -85,10 +86,10 @@ fn a_track_that_is_not_one_zeds_left_then_right_eye_is_refused() {
         CaptureRequest::for_track(&other),
         Err(RequestError::NotAStereoCamera { .. })
     ));
-    let mut mono = head();
-    mono.views.pop();
+    let mut both_left = head();
+    both_left.views[1].unit = Some("30371653/left".to_owned());
     assert!(matches!(
-        CaptureRequest::for_track(&mono),
+        CaptureRequest::for_track(&both_left),
         Err(RequestError::NotOneExposure { .. })
     ));
 }
@@ -102,7 +103,7 @@ struct Synthetic {
 }
 
 impl Device for Synthetic {
-    fn wait(&mut self) -> Result<RawFrame, CaptureError> {
+    fn wait(&mut self) -> Result<Arc<RawFrame>, CaptureError> {
         self.n += 1;
         let half = self.width as usize;
         let mut data = Vec::with_capacity(half * 2 * self.height as usize);
@@ -112,7 +113,7 @@ impl Device for Synthetic {
                 data.extend([y, 128, y, 128]);
             }
         }
-        Ok(RawFrame {
+        Ok(Arc::new(RawFrame {
             width: self.width,
             height: self.height,
             stride: half * 2,
@@ -121,7 +122,7 @@ impl Device for Synthetic {
                 monotonic: self.start + Duration::from_millis(33 * u64::from(self.n)),
                 wall: SystemTime::now(),
             },
-        })
+        }))
     }
 }
 
@@ -166,4 +167,71 @@ fn a_frame_of_another_raster_stops_the_track() {
         request,
     );
     assert!(matches!(source.next(), Err(CaptureError::Device(_))));
+}
+
+/// The head as Fleet renders it today: one single-view track per eye of the same unit.
+fn eye_tracks() -> [Track; 2] {
+    let head = head();
+    let eye = |index: usize| {
+        let mut track = head.clone();
+        track.views = vec![track.views[index].clone()];
+        track.track.clone_from(&track.views[0].camera);
+        track
+    };
+    [eye(0), eye(1)]
+}
+
+#[test]
+fn the_eyes_of_one_unit_as_two_tracks_share_one_device_capture() {
+    let [left, right] = eye_tracks();
+    let left = CaptureRequest::for_track(&left).expect("left eye");
+    let right = CaptureRequest::for_track(&right).expect("right eye");
+    assert_eq!(
+        (left.eyes.as_slice(), right.eyes.as_slice()),
+        (&[Eye::Left][..], &[Eye::Right][..])
+    );
+    assert_eq!(left.frame_raster(), (2560, 720));
+    assert_eq!(right.cameras, ["head_right"]);
+    let [device] = <[_; 1]>::try_from(
+        CaptureRequest::by_device(vec![left.clone(), right.clone()]).expect("one device"),
+    )
+    .expect("one device");
+    assert_eq!(device, [left.clone(), right.clone()]);
+
+    // Each track cuts its own eye from the one side-by-side frame.
+    let (width, height) = left.frame_raster();
+    let start = Instant::now();
+    for (request, luma) in [(left.clone(), 50), (right.clone(), 200)] {
+        let mut source = UvcStereoSource::new(
+            Synthetic {
+                width,
+                height,
+                start,
+                n: 0,
+            },
+            request,
+        );
+        let exposure = source.next().expect("exposure");
+        let [view] = exposure.views.as_slice() else {
+            panic!("one view");
+        };
+        assert_eq!((view.width, view.height), (1280, 720));
+        assert!(view.is_well_formed() && view.y.iter().all(|&y| y == luma));
+    }
+
+    // One device runs one mode; another unit is another device.
+    let mut fast = right.clone();
+    fast.fps = 15;
+    assert!(matches!(
+        CaptureRequest::by_device(vec![left.clone(), fast]),
+        Err(RequestError::SharedMode { .. })
+    ));
+    let mut other = right;
+    other.serial = "40000000".to_owned();
+    assert_eq!(
+        CaptureRequest::by_device(vec![left, other])
+            .expect("two devices")
+            .len(),
+        2
+    );
 }

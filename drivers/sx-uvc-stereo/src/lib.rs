@@ -2,15 +2,17 @@
 //!
 //! A ZED exposes both eyes together and delivers them over USB Video Class as one YUYV frame,
 //! left eye first, twice an eye's width. A station publishes what its robot's [`MediaPlan`]
-//! names: a planned track whose two views are the left and right eyes of one device becomes one
-//! [`CaptureRequest`] ([`CaptureRequest::for_track`]), which device by serial, at which eye
-//! raster and rate. The device comes from the camera units the robot instance placed in the two
-//! views' slots, spelled `<device serial>/left` and `<device serial>/right` ([`StereoUnit`]),
-//! and the mode is one the product lists ([`PRODUCTS`]).
+//! names: a planned track whose views are one eye, or the left then the right eye, of one device
+//! becomes one [`CaptureRequest`] ([`CaptureRequest::for_track`]), which device by serial, at
+//! which eye raster and rate. The device comes from the camera units the robot instance placed in
+//! the views' slots, spelled `<device serial>/left` and `<device serial>/right` ([`StereoUnit`]),
+//! and the mode is one the product lists ([`PRODUCTS`]). Tracks that are eyes of one unit (a
+//! track per eye) share one capture of it ([`CaptureRequest::by_device`]).
 //!
-//! [`UvcStereoSource`] splits each delivered frame into the two planned views ([`split`]) over
-//! any [`Device`]: `capture::open` (feature `capture`) is the device through `nokhwa`, V4L2 on
-//! Linux and `AVFoundation` on macOS, and the tests drive it with synthetic frames.
+//! [`UvcStereoSource`] cuts each delivered frame into its track's planned eyes ([`split::eye`])
+//! over any [`Device`]: `capture::open` (feature `capture`) opens one device once for all its
+//! tracks through `nokhwa`, V4L2 on Linux and `AVFoundation` on macOS, and the tests drive it
+//! with synthetic frames.
 //!
 //! # Capture time
 //!

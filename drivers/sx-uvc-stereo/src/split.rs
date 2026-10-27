@@ -7,6 +7,8 @@
 use sx_embodiment_drivers::I420Image;
 use thiserror::Error;
 
+use crate::product::Eye;
+
 /// A frame that is not two eyes of the planned raster.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SplitError {
@@ -38,6 +40,25 @@ pub fn split(
     stride: usize,
     data: &[u8],
 ) -> Result<[I420Image; 2], SplitError> {
+    Ok([
+        eye(Eye::Left, eye_width, height, stride, data)?,
+        eye(Eye::Right, eye_width, height, stride, data)?,
+    ])
+}
+
+/// One eye of a `2 * eye_width` x `height` YUYV frame, `stride` bytes a row: what a track of
+/// that eye alone publishes, cut without converting the other.
+///
+/// # Errors
+///
+/// As [`split`].
+pub fn eye(
+    side: Eye,
+    eye_width: u32,
+    height: u32,
+    stride: usize,
+    data: &[u8],
+) -> Result<I420Image, SplitError> {
     if !eye_width.is_multiple_of(2) {
         return Err(SplitError::OddEye { eye_width });
     }
@@ -61,29 +82,30 @@ pub fn split(
         return Err(refuse());
     }
     let half = eye / 2;
-    let eye_at = |offset: usize| {
-        let mut image = I420Image::filled(eye_width, height, (0, 0, 0));
-        let byte = |x: usize, y: usize| data[y * stride + offset + x];
-        for y in 0..lines {
-            for x in 0..eye {
-                // Pixel x of the eye is byte 2x of its row: Y0 at 4m, Y1 at 4m + 2.
-                image.y[y * eye + x] = byte(2 * x, y);
-            }
-        }
-        for cy in 0..lines.div_ceil(2) {
-            let (top, bottom) = (2 * cy, (2 * cy + 1).min(lines - 1));
-            for cx in 0..half {
-                let mean = |at: usize| {
-                    let sum = u16::from(byte(at, top)) + u16::from(byte(at, bottom));
-                    u8::try_from(sum.div_ceil(2)).unwrap_or(u8::MAX)
-                };
-                image.u[cy * half + cx] = mean(4 * cx + 1);
-                image.v[cy * half + cx] = mean(4 * cx + 3);
-            }
-        }
-        image
+    let offset = match side {
+        Eye::Left => 0,
+        Eye::Right => row / 2,
     };
-    Ok([eye_at(0), eye_at(row / 2)])
+    let mut image = I420Image::filled(eye_width, height, (0, 0, 0));
+    let byte = |x: usize, y: usize| data[y * stride + offset + x];
+    for y in 0..lines {
+        for x in 0..eye {
+            // Pixel x of the eye is byte 2x of its row: Y0 at 4m, Y1 at 4m + 2.
+            image.y[y * eye + x] = byte(2 * x, y);
+        }
+    }
+    for cy in 0..lines.div_ceil(2) {
+        let (top, bottom) = (2 * cy, (2 * cy + 1).min(lines - 1));
+        for cx in 0..half {
+            let mean = |at: usize| {
+                let sum = u16::from(byte(at, top)) + u16::from(byte(at, bottom));
+                u8::try_from(sum.div_ceil(2)).unwrap_or(u8::MAX)
+            };
+            image.u[cy * half + cx] = mean(4 * cx + 1);
+            image.v[cy * half + cx] = mean(4 * cx + 3);
+        }
+    }
+    Ok(image)
 }
 
 #[cfg(test)]

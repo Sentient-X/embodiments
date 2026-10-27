@@ -13,7 +13,7 @@
 //! The device is asked for exactly the request's side-by-side raster, YUYV, at its rate; a mode
 //! the link cannot carry (any but VGA through USB 2) is the device's refusal, reported as such.
 
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 
 use nokhwa::Camera;
@@ -264,18 +264,18 @@ fn find(request: &CaptureRequest, attached: Vec<Attached>) -> Result<Attached, O
     }
 }
 
-/// How many frames may wait for the source before the capture thread blocks (and the device
-/// drops the newest).
+/// How many frames may wait for a track's source; a track that falls further behind misses
+/// frames rather than holding back the other tracks of its device.
 const QUEUE: usize = 2;
 
 /// One opened device's frames, captured on a thread of its own: a `nokhwa` camera may not
 /// leave the thread that opened it, and a [`Device`] is `Send`.
 pub struct NokhwaDevice {
-    frames: mpsc::Receiver<Result<RawFrame, CaptureError>>,
+    frames: mpsc::Receiver<Result<Arc<RawFrame>, CaptureError>>,
 }
 
 impl Device for NokhwaDevice {
-    fn wait(&mut self) -> Result<RawFrame, CaptureError> {
+    fn wait(&mut self) -> Result<Arc<RawFrame>, CaptureError> {
         self.frames.recv().map_err(|_| CaptureError::Ended)?
     }
 }
@@ -320,20 +320,41 @@ fn rows_of(mut data: Vec<u8>, width: usize, rows: usize) -> Result<(usize, Vec<u
     )))
 }
 
-/// Open the device `request` names at its mode and capture it.
+/// What the tracks of one capture share: the device and its mode.
+fn shared(request: &CaptureRequest) -> (&str, (u32, u32), u32) {
+    (&request.serial, request.frame_raster(), request.fps)
+}
+
+/// Open the one device `requests` share ([`CaptureRequest::by_device`]) once, at their mode,
+/// and capture it for each: every frame is handed to every track, which cuts its own eyes.
 ///
 /// # Errors
 ///
 /// Returns [`OpenError`] when cameras are not permitted, the device is not attached or cannot
-/// be told apart, or it refuses the mode.
-pub fn open(request: CaptureRequest) -> Result<UvcStereoSource<NokhwaDevice>, OpenError> {
-    let device = find(&request, devices()?)?;
-    let (width, height) = request.frame_raster();
-    let fps = request.fps;
+/// be told apart, or it refuses the mode, and for requests that are not one device at one mode.
+pub fn open(
+    requests: Vec<CaptureRequest>,
+) -> Result<Vec<UvcStereoSource<NokhwaDevice>>, OpenError> {
+    let Some(first) = requests.first() else {
+        return Ok(Vec::new());
+    };
+    if requests
+        .iter()
+        .any(|request| shared(request) != shared(first))
+    {
+        return Err(OpenError::Device(
+            "the requests are not one device at one mode".to_owned(),
+        ));
+    }
+    let device = find(first, devices()?)?;
+    let (width, height) = first.frame_raster();
+    let fps = first.fps;
+    let serial = first.serial.clone();
     let (ready, opened) = mpsc::channel();
-    let (sender, frames) = mpsc::sync_channel(QUEUE);
+    let (mut senders, receivers): (Vec<_>, Vec<_>) =
+        requests.iter().map(|_| mpsc::sync_channel(QUEUE)).unzip();
     std::thread::Builder::new()
-        .name(format!("uvc-stereo-{}", request.track))
+        .name(format!("uvc-stereo-{serial}"))
         .spawn(move || {
             let format = CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps);
             let refuse = |message: String| OpenError::Mode {
@@ -371,12 +392,24 @@ pub fn open(request: CaptureRequest) -> Result<UvcStereoSource<NokhwaDevice>, Op
                     return;
                 }
             };
-            loop {
-                let next = frame(&mut camera, width, height);
-                let failed = next.is_err();
-                // The source was dropped, or the device failed: either ends the capture.
-                if sender.send(next).is_err() || failed {
-                    break;
+            // Every track's source was dropped, or the device failed: either ends the capture.
+            while !senders.is_empty() {
+                match frame(&mut camera, width, height) {
+                    Ok(frame) => {
+                        let frame = Arc::new(frame);
+                        senders.retain(|sender| {
+                            !matches!(
+                                sender.try_send(Ok(Arc::clone(&frame))),
+                                Err(mpsc::TrySendError::Disconnected(_))
+                            )
+                        });
+                    }
+                    Err(error) => {
+                        for sender in &senders {
+                            let _ = sender.send(Err(error.clone()));
+                        }
+                        break;
+                    }
                 }
             }
         })
@@ -384,13 +417,17 @@ pub fn open(request: CaptureRequest) -> Result<UvcStereoSource<NokhwaDevice>, Op
     opened
         .recv()
         .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))??;
-    Ok(UvcStereoSource::new(NokhwaDevice { frames }, request))
+    Ok(requests
+        .into_iter()
+        .zip(receivers)
+        .map(|(request, frames)| UvcStereoSource::new(NokhwaDevice { frames }, request))
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::PRODUCTS;
+    use crate::product::{Eye, PRODUCTS};
 
     fn request() -> CaptureRequest {
         CaptureRequest {
@@ -400,7 +437,8 @@ mod tests {
             eye_width: 672,
             eye_height: 376,
             fps: 15,
-            cameras: ["head_left".to_owned(), "head_right".to_owned()],
+            cameras: vec!["head_left".to_owned(), "head_right".to_owned()],
+            eyes: vec![Eye::Left, Eye::Right],
         }
     }
 
