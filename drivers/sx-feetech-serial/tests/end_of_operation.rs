@@ -99,7 +99,7 @@ fn the_neck_returns_home_smoothly_then_disables_torque() {
         .iter()
         .map(|axis| axis.home.expect("every neck joint declares a home"))
         .collect();
-    assert_eq!(homes, [0.0, 0.0, 0.0, 0.0, 0.0, -2.2]);
+    assert_eq!(homes, [0.0; 6]);
     // The operation drove it: enabled, holding where it rests.
     let rest = governor.last_observed().expect("rest");
     governor.command(&rest).expect("enable where it rests");
@@ -109,8 +109,8 @@ fn the_neck_returns_home_smoothly_then_disables_torque() {
     };
     assert_eq!(*to, AtEnd::Home);
     assert!(stop.is_proven(), "{stop:?}");
-    // The camera tilt's 1.2 rad at half the 0.25 rad/s cap.
-    assert!(*took >= Duration::from_secs_f64(9.6), "{took:?}");
+    // The camera tilt's 1.0 rad at half the 0.25 rad/s cap.
+    assert!(*took >= Duration::from_secs_f64(8.0), "{took:?}");
     for (id, home) in (1..=6).zip(&homes) {
         assert!(
             (radians(&bus, id) - home).abs() < 0.01,

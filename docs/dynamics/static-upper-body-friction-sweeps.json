@@ -1,6 +1,6 @@
 {
  "schema": "sx.friction-sweep-plan/v1",
- "description_sha256": "a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7",
+ "description_sha256": "ca769021bf7ebaa51f7ae47989ba2c4716a16cb21ada3613ef2d0d8fb5ee8f32",
  "clearance_m": 0.05,
  "ready": {
   "left_shoulder_pitch_joint": 0.0,
