@@ -1776,6 +1776,10 @@ where
     fn clear_faults(&mut self) {
         self.0.clear_faults();
     }
+
+    fn retried(&self) -> u64 {
+        self.0.retried()
+    }
 }
 
 /// What the host must provide to open a USB serial bridge (a Feetech or Dynamixel servo adapter,

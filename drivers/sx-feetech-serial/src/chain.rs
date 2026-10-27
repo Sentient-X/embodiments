@@ -555,6 +555,10 @@ pub struct FeetechChain<P> {
     held_inside: Vec<HeldInside>,
     /// Exchanges answered corrupt or not at all and tried once more ([`Self::retried`]).
     retried: u64,
+    /// Whether an exchange may be tried once more: opening and enabling only, never a command's
+    /// tick, where a repeat would only stretch the tick (a failed raise of a pulled-in servo is
+    /// already tried again on the next command).
+    retrying: bool,
 }
 
 /// A servo an enable found resting outside its calibrated limits: its goal was written as its
@@ -737,6 +741,7 @@ impl<P: SerialPort> FeetechChain<P> {
             pulling_in: Vec::new(),
             held_inside: Vec::new(),
             retried: 0,
+            retrying: true,
         };
         chain.is_calibrated()?;
         chain.configure()?;
@@ -1028,6 +1033,7 @@ impl<P: SerialPort> FeetechChain<P> {
     /// registers, still pulling in, and is tried on the next command; a servo the failure left
     /// holding neither is caught by the next SYNC READ and enabled afresh.
     fn raise_pulled_in(&mut self, readings: &[AxisReading]) {
+        self.retrying = false;
         for (index, reading) in readings.iter().enumerate() {
             let inside = reading
                 .position()
@@ -1040,6 +1046,7 @@ impl<P: SerialPort> FeetechChain<P> {
                 self.pulling_in[index] = true;
             }
         }
+        self.retrying = true;
     }
 
     /// The servos being pulled in from outside their limits at their pull-in registers, by bus
@@ -1066,14 +1073,6 @@ impl<P: SerialPort> FeetechChain<P> {
         &self.held_inside
     }
 
-    /// How many single exchanges (a register write and its acknowledgement, or a register
-    /// read, on the way to enabling) were answered corrupt or not at all and tried once more.
-    /// Noise on the line shows here before it ever stops the body.
-    #[must_use]
-    pub const fn retried(&self) -> u64 {
-        self.retried
-    }
-
     /// One exchange, tried once more when its answer came back corrupt or never came (10-28: one
     /// corrupt acknowledgement from the Spark's neck, among dozens of exchanges enabling it,
     /// latched the body and ended the session). Only exchanges that set or read an absolute
@@ -1086,10 +1085,12 @@ impl<P: SerialPort> FeetechChain<P> {
         result: impl Fn(&T) -> CommResult,
     ) -> T {
         let first = exchange(&mut self.sms);
-        if !matches!(
-            result(&first),
-            CommResult::RxCorrupt | CommResult::RxTimeout
-        ) {
+        if !self.retrying
+            || !matches!(
+                result(&first),
+                CommResult::RxCorrupt | CommResult::RxTimeout
+            )
+        {
             return first;
         }
         self.retried = self.retried.saturating_add(1);
@@ -1200,6 +1201,12 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     /// The SYNC WRITE that carries a command has no answer; its observed joints are the SYNC
     /// READ that follows it.
     type Feedback = ();
+
+    /// Exchanges on the way to enabling (a register write and its acknowledgement, or a
+    /// register read) answered corrupt or not at all and tried once more.
+    fn retried(&self) -> u64 {
+        self.retried
+    }
 
     fn axes(&self) -> &[BoundAxis] {
         &self.axes

@@ -323,6 +323,12 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             chain.clear_faults();
         }
     }
+
+    fn retried(&self) -> u64 {
+        self.members
+            .iter()
+            .fold(0, |sum, chain| sum.saturating_add(chain.retried()))
+    }
 }
 
 /// A boxed chain is its chain, so a list of differently built chains can share one type.
@@ -380,6 +386,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn derated(&self) -> Vec<AxisDerate> {
         (**self).derated()
+    }
+
+    fn retried(&self) -> u64 {
+        (**self).retried()
     }
 
     fn clear_faults(&mut self) {

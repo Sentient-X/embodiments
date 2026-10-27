@@ -261,6 +261,10 @@ where
         self.first.clear_faults();
         self.second.clear_faults();
     }
+
+    fn retried(&self) -> u64 {
+        self.first.retried().saturating_add(self.second.retried())
+    }
 }
 
 #[cfg(test)]
