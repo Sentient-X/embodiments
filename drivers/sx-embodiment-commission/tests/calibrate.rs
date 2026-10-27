@@ -943,6 +943,12 @@ fn apply_refuses_a_servo_holding_torque_and_changes_nothing() {
         ))
     );
     assert!(publish(&["--publish"]).is_err(), "--publish needs --port");
+    let borrowed = publish(&["--from-station", "--publish", "--port", "neck"]).expect("borrow");
+    assert_eq!(borrowed.borrow.as_deref(), Some("neck"));
+    assert!(
+        publish(&["--from-station"]).is_err(),
+        "--from-station needs --port"
+    );
     assert!(
         publish(&["--publish", "--robot", "r", "--port", "neck"]).is_err(),
         "--publish is the station's inbox"
@@ -951,5 +957,44 @@ fn apply_refuses_a_servo_holding_torque_and_changes_nothing() {
     assert_eq!(
         (register(&bus, 1, 9, 2), register(&bus, 1, 11, 2)),
         (0, 4095)
+    );
+}
+
+#[test]
+fn a_bus_is_borrowed_from_the_station_and_returned_when_the_loan_drops() {
+    use sx_embodiment_commission::station_loan::Loan;
+    let root = journal_dir("loans");
+    std::fs::create_dir_all(&root).expect("loans");
+    let stop = AtomicUsize::new(0);
+    // The station lends what is asked: here, a thread standing in for it.
+    let lender = {
+        let root = root.clone();
+        std::thread::spawn(move || {
+            while !root.join("neck.borrow").exists() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            std::fs::write(root.join("neck.lent"), "").expect("lent");
+        })
+    };
+    let loan = Loan::borrow(&root, "neck", std::time::Duration::from_secs(5), &stop).expect("lent");
+    lender.join().expect("lender");
+    assert_eq!(
+        std::fs::read_to_string(root.join("neck.borrow")).expect("request"),
+        std::process::id().to_string()
+    );
+    drop(loan);
+    assert!(!root.join("neck.borrow").exists(), "returned");
+    // A station that does not lend in time leaves nothing behind.
+    let refused = Loan::borrow(&root, "tail", std::time::Duration::from_millis(200), &stop);
+    assert!(refused.is_err());
+    assert!(!root.join("tail.borrow").exists());
+    assert!(
+        Loan::borrow(
+            &root.join("missing"),
+            "neck",
+            std::time::Duration::ZERO,
+            &stop
+        )
+        .is_err()
     );
 }

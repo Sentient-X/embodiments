@@ -11,8 +11,8 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, Setup, changed_ports, closed_ports, observe, open, open_available,
-    open_calibrated, open_with, ports, reopen_ports,
+    ServoCalibrations, Setup, changed_ports, closed_ports, lend_port, observe, open,
+    open_available, open_calibrated, open_with, ports, reopen_ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -505,6 +505,73 @@ fn a_changed_commissioning_reopens_only_the_buses_it_changes_and_leaves_the_rest
         ..after
     };
     assert!(reopen_ports(body, &drive, stale, &["neck".to_owned()], &mut bridges).is_err());
+}
+
+#[test]
+fn a_bus_lent_to_a_tool_keeps_its_axes_as_unavailable_data_and_comes_back() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let can = Sim::for_axes(&axes);
+    let serial = probed_buses();
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    let setup = Setup {
+        commissioning: &commissioning,
+        calibrations: &calibrations,
+        options: BRING_UP,
+    };
+    let mut body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
+    assert!(body.stop().is_proven());
+    let neck = &serial["5A7C118709"];
+    let written = neck.state().written.len();
+    let frames = can.state().frames.len();
+    let mut body = lend_port(body, &drive, setup, "neck").expect("lent");
+    // The neck's six axes keep their place, unavailable; nothing reaches its bus or the CAN.
+    assert_eq!(body.axes().len(), 25);
+    let readings = body.read_positions();
+    assert!(readings[19..25].iter().all(|reading| !reading.is_fresh()));
+    assert!(
+        readings[..15]
+            .iter()
+            .all(sx_embodiment_drivers::AxisReading::is_fresh)
+    );
+    let stop = body.stop();
+    assert!(stop.is_proven(), "{stop:?}");
+    assert_eq!(stop.unreached, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(
+        neck.state().written.len(),
+        written,
+        "the lent bus is the tool's"
+    );
+    // The tool recalibrates the pan servo, then the station takes the bus back with it.
+    let recalibrated = recalibrate_neck_pan(neck);
+    let back = Setup {
+        calibrations: &recalibrated,
+        ..setup
+    };
+    bridges.opened.clear();
+    let mut body =
+        reopen_ports(body, &drive, back, &["neck".to_owned()], &mut bridges).expect("taken back");
+    assert_eq!(bridges.opened, ["5A7C118709@1000000"]);
+    assert!(
+        body.read_positions()
+            .iter()
+            .all(sx_embodiment_drivers::AxisReading::is_fresh)
+    );
+    assert!(body.stop().is_proven());
+    assert!(
+        can.state().frames.len() > frames,
+        "the CAN bus answered the stops throughout"
+    );
+    assert!(matches!(
+        lend_port(body, &drive, back, "tail"),
+        Err(OpenError::NotInPlace(_))
+    ));
 }
 
 #[test]

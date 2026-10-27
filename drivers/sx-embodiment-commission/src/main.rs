@@ -81,6 +81,26 @@ fn calibrate(words: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     }
+    // Held for the whole run, so the station takes the bus back only after it, with any
+    // calibration the run published.
+    let _loan = match &args.borrow {
+        Some(port) => match sx_embodiment_commission::station_loan::Loan::borrow(
+            std::path::Path::new(sx_embodiment_commission::station_loan::STATION_LOANS),
+            port,
+            std::time::Duration::from_secs(30),
+            &stop,
+        ) {
+            Ok(loan) => {
+                println!("the station lent {port}; it takes it back when this run ends");
+                Some(loan)
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::from(1);
+            }
+        },
+        None => None,
+    };
     let code = cli::run(
         &args,
         TtyPort::open,

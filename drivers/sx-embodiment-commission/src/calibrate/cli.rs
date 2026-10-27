@@ -35,6 +35,9 @@ pub const USAGE: &str = "usage:
                                 [--protection neck-defaults]
   sx-commission calibrate --restore <journal>
 
+  --from-station --port <port> (any mode): the station running on this host lends the bus for
+  the run, between sessions, and takes it back after; it never stops.
+
   Without --move, gripper and jog only read and print what they would do.
   range writes nothing: with every servo limp, a person shows each joint's middle (Enter),
   then moves each through its full travel (Enter ends); it prints and writes (--out) a LeRobot
@@ -107,6 +110,9 @@ pub struct Args {
     /// `apply`: the robot directory, and the port in it, whose commissioned calibration the
     /// applied file becomes.
     pub install: Option<(PathBuf, String)>,
+    /// The port the station running on this host lends this run (`--from-station`), so the
+    /// station keeps running while the bus is calibrated.
+    pub borrow: Option<String>,
     /// `range`: redraw the live lines in place (standard output is a terminal).
     pub redraw: bool,
 }
@@ -231,11 +237,12 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         out: None,
         protection: None,
         install: None,
+        borrow: None,
         redraw: false,
     };
     let (mut id, mut delta, mut restore, mut to) = (None, None, None, None);
     let mut calibration = None;
-    let (mut robot, mut port, mut publish) = (None, None, false);
+    let (mut robot, mut port, mut publish, mut from_station) = (None, None, false, false);
     while let Some(flag) = words.next() {
         let mut value = || words.next().ok_or(format!("{flag} needs a value"));
         let sweep = &mut args.sweep;
@@ -281,6 +288,7 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
             "--out" => args.out = Some(PathBuf::from(value()?)),
             "--robot" => robot = Some(PathBuf::from(value()?)),
             "--publish" => publish = true,
+            "--from-station" => from_station = true,
             "--port" => port = Some(value()?.to_owned()),
             "--protection" => match value()? {
                 "neck-defaults" => args.protection = Some(NECK_DEFAULTS),
@@ -342,10 +350,16 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         (Some(other), None) => return Err(format!("unknown calibrate mode {other}")),
         (None, None) => return Err("calibrate needs a mode".to_owned()),
     };
+    args.borrow = match (from_station, &port) {
+        (true, Some(port)) => Some(port.clone()),
+        (true, None) => return Err("--from-station needs --port".to_owned()),
+        (false, _) => None,
+    };
     args.install = match (robot, port, publish) {
         (Some(robot), Some(port), false) => Some((robot, port)),
         (None, Some(port), true) => Some((PathBuf::from(STATION_CALIBRATION_INBOX), port)),
         (None, None, false) => None,
+        (None, Some(_), false) if from_station => None,
         (Some(_), _, true) => {
             return Err("--publish installs into the station's inbox; drop --robot".to_owned());
         }
