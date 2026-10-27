@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use sx_embodiment_ik::teleop::{HeadPolicy, Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{
     Body, Caps, Ik, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Settings, Target,
 };
@@ -27,7 +27,7 @@ impl Rng {
     }
 }
 
-fn teleop(head: HeadPolicy) -> Teleop {
+fn teleop() -> Teleop {
     let body = Body::static_upper_body();
     let speed: BTreeMap<String, f64> = body
         .model()
@@ -42,7 +42,6 @@ fn teleop(head: HeadPolicy) -> Teleop {
         accel: BTreeMap::new(),
         ramp_s: 0.25,
         max_step_rad: 0.03,
-        head,
         held: Vec::new(),
         obstacles: Vec::new(),
     };
@@ -114,7 +113,7 @@ fn angle(forward: [f64; 3], from: [f64; 3], to: [f64; 3]) -> f64 {
 
 #[test]
 fn both_hands_sit_the_same_angle_from_the_centre_however_far_each_is() {
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let (left, right) = (tcp(&body, &q, 0), tcp(&body, &q, 1));
@@ -143,7 +142,7 @@ fn both_hands_sit_the_same_angle_from_the_centre_however_far_each_is() {
 
 #[test]
 fn only_the_neck_turns_the_camera() {
-    let mut solve = teleop(HeadPolicy::Gaze);
+    let mut solve = teleop();
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let begun = q.clone();
@@ -245,7 +244,7 @@ fn the_neck_holds_steady_while_both_hands_circle() {
     // Both hands trace slow circles (12 cm, 4 s a turn) for 10 s. The looking rows that
     // levelled the picture and stepped around the arms swung this neck through its parallel
     // pitch joints and pinned the camera tilt at its stop; pointing alone must not.
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let start = [tcp(&body, &q, 0), tcp(&body, &q, 1)];
@@ -303,7 +302,7 @@ fn the_first_look_down_at_the_hands_settles_without_bouncing() {
     // Engaging from the neck's rest, the camera swings well down onto both hands. Pointing
     // once asked for its whole error each tick and overshot the acceleration caps: the pitch
     // joints rang three times before settling (the replay films' first half second).
-    let mut solve = teleop(HeadPolicy::Hands);
+    let mut solve = teleop();
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let targets = Targets {

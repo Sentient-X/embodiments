@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use sx_embodiment_ik::teleop::{HeadPolicy, Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
@@ -51,7 +51,6 @@ fn main() {
         accel: BTreeMap::new(),
         ramp_s,
         max_step_rad: 0.08,
-        head: HeadPolicy::Hands,
         held: Vec::new(),
         obstacles: Vec::new(),
     };

@@ -27,8 +27,9 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   declares it in `collision.json` (`support`, the mount frame's z = 0 plane, solid below
   everywhere within reach), and every `Ik` adds it to the scene it is given. Collision is checked on capsule proxies,
   with each pair's approach planned to stop before a 1 cm margin.
-- **The camera:** a look-at limb points at its target (teleop's `HeadPolicy::Hands` aims
-  halfway between the hands *as the camera sees them*, so both sit the same angle from the
+- **The camera:** a look-at limb points at its target (teleop follows the operator's gaze when
+  they look through the robot, and otherwise aims halfway between the hands *as the camera
+  sees them*, so both sit the same angle from the
   picture's centre), and turns on its own neck only, never on the torso that carries the
   arms. `LimbReport::hidden_by` names the link standing between the camera and a tool.
   Its pointing error is closed no faster than the neck can still stop on it, as a pose

@@ -8,7 +8,7 @@
 //!
 //! `episodes.json` is `replay`'s input. The episode is placed as `replay` places it (the
 //! operator's mean eye on the ZED, their mean heading along +x), the hands and jaws drive
-//! [`Teleop`] at 100 Hz with [`HeadPolicy::Hands`] (the neck ignores the operator's head), and
+//! [`Teleop`] at 100 Hz with no head pose (the camera looks between the hands), and
 //! every joint runs at `arm_rad_s` (2) except the SO-101 neck at `neck_rad_s` (3), each reached
 //! in 0.1 s. The output holds the link names and, per frame: time, each link's position and
 //! quaternion (xyzw), the operator's two tool points, both jaw widths, the head's pointing
@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use sx_embodiment_ik::teleop::{HeadPolicy, Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
@@ -171,7 +171,6 @@ fn main() {
         accel,
         ramp_s: 0.1,
         max_step_rad: 0.08,
-        head: HeadPolicy::Hands,
         held: Vec::new(),
         obstacles: Vec::new(),
     };

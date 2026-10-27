@@ -3,8 +3,8 @@
 //!
 //! [`Teleop`] wraps one [`Ik`] built from a [`TeleopConfig`]: the body's limbs, each joint's
 //! speed and acceleration caps (the governor's, derate included, on the station), the
-//! per-tick step bound, the [`HeadPolicy`], the joints held this run and the scene. The station
-//! builds the config from its open body and serves it (`sx.teleop-solve/v1`, JSON); the
+//! per-tick step bound, the joints held this run and the scene. The station
+//! builds the config from its open body and serves it (`sx.teleop-solve/v2`, JSON); the
 //! headset builds its solver from those same bytes, so both answer the same step to the same
 //! inputs. On top of [`Ik::step`] it owns every teleoperation rule:
 //!
@@ -19,10 +19,11 @@
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
 //!   the head are driven. Joints the config holds are never solved.
-//! - **head**: the limb named `head` (a camera, [`Task::LookAt`]) looks where the
-//!   [`HeadPolicy`] says: at the commanded hands, or along the operator's gaze (the head pose's
-//!   local +x, by looking at the point [`GAZE_DISTANCE_M`] ahead of the camera along it). The
-//!   neck alone turns it ([`Ik`] owns that).
+//! - **head**: the limb named `head` (a camera, [`Task::LookAt`]) looks along the operator's
+//!   gaze when the ask carries their head (they look through the robot: the head pose's local
+//!   +x, as the point [`GAZE_DISTANCE_M`] ahead of the camera along it), and otherwise between
+//!   the commanded hands. There is no choice to make: who is looking decides. The neck alone
+//!   turns it ([`Ik`] owns that).
 //! - **grippers**: each hand's gripper width moves its fingers, linear between the fingertips'
 //!   closed and open distance ([`Gripper`]).
 //!
@@ -39,7 +40,7 @@ use crate::model::{Frames, Model};
 use crate::solve::{Caps, Ik, LimbReport, Reach, Settings, Solve};
 
 /// The config's schema, written in every config and refused when another.
-pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v1";
+pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
 
 /// The hands an operator's intent names, in the order [`Targets`] carries them.
 pub const HANDS: [&str; 2] = ["left", "right"];
@@ -57,40 +58,6 @@ pub const GAZE_DISTANCE_M: f64 = 1.0;
 /// stands, before following starts: control starts from the robot's own pose, never by jumping
 /// to the operator's hands. The station and the headset both ask [`Teleop::may_engage`].
 pub const ENGAGE_RADIUS_M: f64 = 0.06;
-
-/// What the camera (the limb named `head`) looks at; chosen per run.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HeadPolicy {
-    /// At the hands: the direction halfway between the commanded tool points as the camera
-    /// sees them, so both sit the same angle from the picture's centre however far each is
-    /// (the midpoint between them would put the nearer one closer to the edge); or the one
-    /// commanded. The operator needs no head tracking; with no hand driven the neck holds.
-    #[default]
-    Hands,
-    /// Along the operator's gaze: the head pose's local +x. With no head pose the neck holds.
-    Gaze,
-}
-
-impl HeadPolicy {
-    /// The policy named `hands` or `gaze`.
-    #[must_use]
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "hands" => Some(Self::Hands),
-            "gaze" => Some(Self::Gaze),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Hands => "hands",
-            Self::Gaze => "gaze",
-        }
-    }
-}
 
 /// One limb of the config: a frame of the description and its task.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -119,7 +86,6 @@ pub struct TeleopConfig {
     pub ramp_s: f64,
     /// The most any joint moves in one tick ([`Settings::max_step_rad`]).
     pub max_step_rad: f64,
-    pub head: HeadPolicy,
     /// Joints never solved this run: held where they are.
     #[serde(default)]
     pub held: Vec<String>,
@@ -194,7 +160,9 @@ pub struct Targets {
     pub tcp: [Option<Pose>; 2],
     /// Per hand: the gripper opening in metres.
     pub gripper_width_m: [Option<f64>; 2],
-    /// The operator's head; its local +x is the gaze.
+    /// The operator's head when they look through the robot (remote): its local +x is the
+    /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
+    /// looks between the commanded hands.
     pub head: Option<Pose>,
 }
 
@@ -584,44 +552,40 @@ impl Teleop {
                 });
         }
         if let Some(head) = self.head {
-            self.wanted[head] = match self.config.head {
-                HeadPolicy::Hands => {
-                    self.ik.body().model().poses_into(&self.q, &mut self.frames);
-                    let camera = self.ik.body().frame(&self.frames, head).t;
-                    let mut sum = [0.0; 3];
-                    let mut bisector = [0.0; 3];
-                    let mut distance = 0.0;
-                    let mut count = 0.0;
-                    for pose in targets.tcp.iter().flatten() {
-                        let to = [0, 1, 2].map(|k| pose.translation_m[k] - camera[k]);
-                        let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
-                        for k in 0..3 {
-                            sum[k] += pose.translation_m[k];
-                            bisector[k] += to[k] / length;
-                        }
-                        distance += length;
-                        count += 1.0;
+            self.wanted[head] = if let Some(gaze) = targets.head {
+                self.ik.body().model().poses_into(&self.q, &mut self.frames);
+                let camera = self.ik.body().frame(&self.frames, head);
+                let forward = rotate(gaze.rotation_xyzw, [1.0, 0.0, 0.0]);
+                Some(Target::LookAt {
+                    point_m: [0, 1, 2].map(|k| GAZE_DISTANCE_M.mul_add(forward[k], camera.t[k])),
+                })
+            } else {
+                self.ik.body().model().poses_into(&self.q, &mut self.frames);
+                let camera = self.ik.body().frame(&self.frames, head).t;
+                let mut sum = [0.0; 3];
+                let mut bisector = [0.0; 3];
+                let mut distance = 0.0;
+                let mut count = 0.0;
+                for pose in targets.tcp.iter().flatten() {
+                    let to = [0, 1, 2].map(|k| pose.translation_m[k] - camera[k]);
+                    let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+                    for k in 0..3 {
+                        sum[k] += pose.translation_m[k];
+                        bisector[k] += to[k] / length;
                     }
-                    let across = bisector.iter().map(|v| v * v).sum::<f64>().sqrt();
-                    (count > 0.0).then(|| Target::LookAt {
-                        // Hands on opposite sides of the camera have no bisector: their midpoint.
-                        point_m: if across > 1e-6 {
-                            let reach = distance / count / across;
-                            [0, 1, 2].map(|k| reach.mul_add(bisector[k], camera[k]))
-                        } else {
-                            sum.map(|total| total / count)
-                        },
-                    })
+                    distance += length;
+                    count += 1.0;
                 }
-                HeadPolicy::Gaze => targets.head.map(|gaze| {
-                    self.ik.body().model().poses_into(&self.q, &mut self.frames);
-                    let camera = self.ik.body().frame(&self.frames, head);
-                    let forward = rotate(gaze.rotation_xyzw, [1.0, 0.0, 0.0]);
-                    Target::LookAt {
-                        point_m: [0, 1, 2]
-                            .map(|k| GAZE_DISTANCE_M.mul_add(forward[k], camera.t[k])),
-                    }
-                }),
+                let across = bisector.iter().map(|v| v * v).sum::<f64>().sqrt();
+                (count > 0.0).then(|| Target::LookAt {
+                    // Hands on opposite sides of the camera have no bisector: their midpoint.
+                    point_m: if across > 1e-6 {
+                        let reach = distance / count / across;
+                        [0, 1, 2].map(|k| reach.mul_add(bisector[k], camera[k]))
+                    } else {
+                        sum.map(|total| total / count)
+                    },
+                })
             };
         }
         let mut idle = 0_u64;
