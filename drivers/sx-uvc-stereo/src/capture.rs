@@ -16,7 +16,7 @@
 //! the link cannot carry (any but VGA through USB 2) is the device's refusal, reported as such.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -329,9 +329,7 @@ impl Running {
 
     /// Hand `senders` this capture's frames, unless it has ended.
     fn subscribe(&self, senders: Vec<FrameSender>) -> Result<(), Vec<FrameSender>> {
-        let Ok(mut subscribers) = self.subscribers.lock() else {
-            return Err(senders);
-        };
+        let mut subscribers = held(&self.subscribers);
         if subscribers.ended {
             return Err(senders);
         }
@@ -342,34 +340,33 @@ impl Running {
     /// Every live track gets the frame; a track whose source dropped is unsubscribed, and one
     /// that fell behind misses it.
     fn publish(&self, frame: &Arc<RawFrame>) {
-        if let Ok(mut subscribers) = self.subscribers.lock() {
-            subscribers.senders.retain(|sender| {
-                !matches!(
-                    sender.try_send(Ok(Arc::clone(frame))),
-                    Err(mpsc::TrySendError::Disconnected(_))
-                )
-            });
-        }
+        held(&self.subscribers).senders.retain(|sender| {
+            !matches!(
+                sender.try_send(Ok(Arc::clone(frame))),
+                Err(mpsc::TrySendError::Disconnected(_))
+            )
+        });
     }
 
     /// Take no new track, tell every track why (never blocking on one that stopped reading),
     /// and let them go: their sources see the error, then the capture's end.
     fn end(&self, error: Option<&CaptureError>) {
-        if let Ok(mut subscribers) = self.subscribers.lock() {
-            subscribers.ended = true;
-            for sender in subscribers.senders.drain(..) {
-                if let Some(error) = error {
-                    let _ = sender.try_send(Err(error.clone()));
-                }
+        let mut subscribers = held(&self.subscribers);
+        subscribers.ended = true;
+        for sender in subscribers.senders.drain(..) {
+            if let Some(error) = error {
+                let _ = sender.try_send(Err(error.clone()));
             }
         }
     }
 
-    /// Stop the capture and wait (at most [`STOP_WAIT`]) for its thread to close the device.
-    fn stop_and_wait(&self) {
+    /// Stop the capture and wait (at most [`STOP_WAIT`]) for its thread to close the device:
+    /// whether it did. A thread that did not is kept, so it can be waited for again.
+    fn stop_and_wait(&self) -> bool {
         self.stop.store(true, Ordering::Release);
-        let Some(thread) = self.thread.lock().ok().and_then(|mut thread| thread.take()) else {
-            return;
+        let mut slot = held(&self.thread);
+        let Some(thread) = slot.take() else {
+            return true;
         };
         let deadline = Instant::now() + STOP_WAIT;
         while !thread.is_finished() {
@@ -378,26 +375,55 @@ impl Running {
                     "uvc-stereo {}: the capture thread did not stop within {STOP_WAIT:?}; left running",
                     self.serial
                 );
-                return;
+                *slot = Some(thread);
+                return false;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
         let _ = thread.join();
+        true
     }
 }
 
-/// Every device this process keeps streaming.
-static RUNNING: Mutex<Vec<Arc<Running>>> = Mutex::new(Vec::new());
+/// A lock whose holder panicked is still the state it guards: a capture's tracks and thread
+/// must be reachable to end and stop it.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Ends its capture however its thread leaves, a panic included, so no track waits for ever.
+struct EndOnExit(Arc<Running>);
+
+impl Drop for EndOnExit {
+    fn drop(&mut self) {
+        self.0.end(None);
+    }
+}
+
+/// Every device this process keeps streaming; once closed ([`close_all`]), nothing opens.
+struct Registry {
+    captures: Vec<Arc<Running>>,
+    closed: bool,
+}
+
+static RUNNING: Mutex<Registry> = Mutex::new(Registry {
+    captures: Vec::new(),
+    closed: false,
+});
 
 /// Stop every running capture and wait for each to stop its stream and close its device. A
 /// station calls it as it ends, after its robot is stopped and off its control thread, so the
 /// stream is never torn down by process exit mid-transfer.
 pub fn close_all() {
-    let running = RUNNING
-        .lock()
-        .map(|mut running| std::mem::take(&mut *running))
-        .unwrap_or_default();
-    for capture in running {
+    let captures = {
+        let mut registry = held(&RUNNING);
+        registry.closed = true;
+        std::mem::take(&mut registry.captures)
+    };
+    for capture in captures {
+        capture.end(Some(&CaptureError::Device(
+            "the station is ending".to_owned(),
+        )));
         capture.stop_and_wait();
     }
 }
@@ -645,32 +671,49 @@ pub fn open(
     let (senders, receivers): (Vec<_>, Vec<_>) =
         requests.iter().map(|_| mpsc::sync_channel(QUEUE)).unzip();
     // One open at a time: two intervals asking at once share one capture.
-    let mut running = RUNNING
-        .lock()
-        .map_err(|_| OpenError::Device("the capture registry is poisoned".to_owned()))?;
+    let mut registry = held(&RUNNING);
+    if registry.closed {
+        return Err(OpenError::Device(
+            "the cameras are closed: the station is ending".to_owned(),
+        ));
+    }
     let mut senders = senders;
-    if let Some(index) = running
+    if let Some(index) = registry
+        .captures
         .iter()
         .position(|capture| capture.serial == first.serial)
     {
-        let capture = Arc::clone(&running[index]);
+        let capture = Arc::clone(&registry.captures[index]);
         if capture.mode == mode {
             match capture.subscribe(senders) {
                 Ok(()) => return Ok(sources(requests, receivers)),
                 Err(back) => senders = back,
             }
+        } else {
+            // Another mode: the tracks still on the old one are told why they end.
+            capture.end(Some(&CaptureError::Device(format!(
+                "the device was reopened at {width}x{height} {} fps",
+                first.fps
+            ))));
         }
-        // Ended (the device failed) or asked for another mode: its device is closed before
-        // this one opens it again.
-        running.swap_remove(index);
-        capture.stop_and_wait();
+        // Its device is closed before it is opened again; one that will not close keeps it.
+        if !capture.stop_and_wait() {
+            return Err(OpenError::Device(
+                "the previous capture has not closed the device yet".to_owned(),
+            ));
+        }
+        registry.captures.swap_remove(index);
     }
     let capture = Arc::new(Running::new(first.serial.clone(), mode));
     start(first, &capture)?;
-    capture
-        .subscribe(senders)
-        .map_err(|_| OpenError::Device("the capture ended as it opened".to_owned()))?;
-    running.push(capture);
+    if let Err(senders) = capture.subscribe(senders) {
+        drop(senders);
+        capture.stop_and_wait();
+        return Err(OpenError::Device(
+            "the capture ended as it opened".to_owned(),
+        ));
+    }
+    registry.captures.push(capture);
     Ok(sources(requests, receivers))
 }
 
@@ -683,24 +726,22 @@ fn start(request: &CaptureRequest, capture: &Arc<Running>) -> Result<(), OpenErr
     let thread = std::thread::Builder::new()
         .name(format!("uvc-stereo-{}", capture.serial))
         .spawn(move || {
+            let ending = EndOnExit(serving);
             let mut stream = match Stream::open(device.index, (width, height), fps) {
                 Ok(stream) => {
                     let _ = ready.send(Ok(()));
                     stream
                 }
                 Err(error) => {
-                    serving.end(None);
                     let _ = ready.send(Err(error));
                     return;
                 }
             };
-            serve(&serving, || frame(&mut stream, width, height));
-            stream.close(&serving.serial);
+            serve(&ending.0, || frame(&mut stream, width, height));
+            stream.close(&ending.0.serial);
         })
         .map_err(|error| OpenError::Device(error.to_string()))?;
-    if let Ok(mut slot) = capture.thread.lock() {
-        *slot = Some(thread);
-    }
+    *held(&capture.thread) = Some(thread);
     opened
         .recv()
         .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))?
@@ -884,11 +925,30 @@ mod tests {
             device_closed.store(true, Ordering::Release);
         });
         *capture.thread.lock().expect("slot") = Some(thread);
-        capture.stop_and_wait();
+        assert!(capture.stop_and_wait());
         assert!(
             closed.load(Ordering::Acquire),
             "closed before the stop returned"
         );
+        let (late, _) = mpsc::sync_channel(QUEUE);
+        assert!(capture.subscribe(vec![late]).is_err());
+    }
+
+    /// A capture thread that panics still ends its capture: its tracks see the end rather
+    /// than waiting for ever, and it takes no new track.
+    #[test]
+    fn a_panicking_capture_thread_still_ends_its_tracks() {
+        let capture = Arc::new(Running::new("test".to_owned(), ((2, 1), 15)));
+        let (sender, frames) = mpsc::sync_channel(QUEUE);
+        capture.subscribe(vec![sender]).expect("subscribed");
+        let serving = Arc::clone(&capture);
+        let thread = std::thread::spawn(move || {
+            let ending = EndOnExit(serving);
+            serve(&ending.0, || panic!("the driver panicked"));
+        });
+        assert!(thread.join().is_err());
+        let mut track = CaptureDevice { frames };
+        assert_eq!(track.wait().err(), Some(CaptureError::Ended));
         let (late, _) = mpsc::sync_channel(QUEUE);
         assert!(capture.subscribe(vec![late]).is_err());
     }
