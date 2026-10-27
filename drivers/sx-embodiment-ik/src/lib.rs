@@ -88,6 +88,9 @@ pub const STATIC_UPPER_BODY_SUPERSEDED: &[&str] = &[
     include_str!(
         "../../../assets/sentient_static_upper_body/_by_digest/ca769021bf7ebaa51f7ae47989ba2c4716a16cb21ada3613ef2d0d8fb5ee8f32/sentient_static_upper_body.urdf"
     ),
+    include_str!(
+        "../../../assets/sentient_static_upper_body/_by_digest/e0c31b235c0827e434ef75eb6eb89d0b0bcccdeaf4dd6df68a6788c3e9950eb2/sentient_static_upper_body.urdf"
+    ),
 ];
 pub const STATIC_UPPER_BODY_COLLISION: &str =
     include_str!("../../../render_packs/sentient-static-upper-body/collision.json");
