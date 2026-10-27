@@ -604,6 +604,27 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         (positions, speeds, (lowers, uppers), brought_in)
     }
 
+    /// The feed-forward each axis is sent: its planned velocity held to its speed, its torque to
+    /// its derate's cap, and none for an axis given up on outside its range, which rests on its
+    /// stop with neither planned motion nor torque lifting it.
+    fn held_feedforward(&self, wanted: &[Feedforward]) -> Axes<Feedforward> {
+        wanted
+            .iter()
+            .zip(self.limits.iter().zip(&self.torque_caps))
+            .zip(&self.outside)
+            .map(|((wanted, (limit, cap)), outside)| {
+                if outside.is_some_and(|outside| outside.given_up) {
+                    Feedforward::default()
+                } else {
+                    Feedforward {
+                        velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
+                        torque: cap.map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// Note how far each available axis observed outside its range is from it, and give up on
     /// one that came no closer by [`OUTSIDE_PROGRESS`] within [`OUTSIDE_STALL`]; one observed
     /// inside is followed as usual again.
@@ -729,23 +750,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.interval = Some((lower, upper));
         let receipt = match feedforward {
             Some(wanted) => {
-                let held: Axes<Feedforward> = wanted
-                    .iter()
-                    .zip(self.limits.iter().zip(&self.torque_caps))
-                    .zip(&self.outside)
-                    .map(|((wanted, (limit, cap)), outside)| {
-                        if outside.is_some_and(|outside| outside.given_up) {
-                            // Rests on its stop: neither planned motion nor torque lifts it.
-                            Feedforward::default()
-                        } else {
-                            Feedforward {
-                                velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
-                                torque: cap
-                                    .map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
-                            }
-                        }
-                    })
-                    .collect();
+                let held = self.held_feedforward(wanted);
                 self.chain.command_with(&next, &held)
             }
             None => self.chain.command(&next),
@@ -1751,7 +1756,7 @@ mod tests {
     // ---- refute pass: attempts to break the outside-progress hold ----
 
     /// A joint outside its range that has been idle (the caller sent nothing) for longer than
-    /// OUTSIDE_STALL is given up on at its first tick back, though nothing was commanded.
+    /// [`OUTSIDE_STALL`] is given up on at its first tick back, though nothing was commanded.
     #[test]
     fn a_pause_in_commands_is_not_counted_as_a_stall() {
         let mut chain = fake(true);
