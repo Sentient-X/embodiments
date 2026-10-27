@@ -13,7 +13,9 @@
 //! The device is asked for exactly the request's side-by-side raster, YUYV, at its rate; a mode
 //! the link cannot carry (any but VGA through USB 2) is the device's refusal, reported as such.
 
-use std::sync::{Arc, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
 use nokhwa::Camera;
@@ -268,10 +270,48 @@ fn find(request: &CaptureRequest, attached: Vec<Attached>) -> Result<Attached, O
 /// frames rather than holding back the other tracks of its device.
 const QUEUE: usize = 2;
 
+/// How long the last source of a device waits for its capture thread to stop the stream and
+/// close the device: about one frame of the slowest mode, with room to spare.
+pub const STOP_WAIT: Duration = Duration::from_secs(2);
+
 /// One opened device's frames, captured on a thread of its own: a `nokhwa` camera may not
 /// leave the thread that opened it, and a [`Device`] is `Send`.
 pub struct NokhwaDevice {
     frames: mpsc::Receiver<Result<Arc<RawFrame>, CaptureError>>,
+    _capture: Arc<CaptureThread>,
+}
+
+/// The capture thread of one opened device, shared by its tracks' sources. When the last
+/// source drops, it is told to stop and waited for (at most [`STOP_WAIT`]): the thread stops
+/// the stream (`VIDIOC_STREAMOFF`, the buffers released) and closes the device itself, so a
+/// process that ends after its sources are dropped never leaves the camera mid-capture. A
+/// stream torn down by process exit instead, during a transfer, hung the DGX Spark's xHCI
+/// controller until a reboot ("xHCI host not responding to stop endpoint command", 10-27).
+struct CaptureThread {
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+    serial: String,
+}
+
+impl Drop for CaptureThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        let Some(thread) = self.thread.lock().ok().and_then(|mut thread| thread.take()) else {
+            return;
+        };
+        let deadline = Instant::now() + STOP_WAIT;
+        while !thread.is_finished() {
+            if Instant::now() >= deadline {
+                eprintln!(
+                    "uvc-stereo {}: the capture thread did not stop within {STOP_WAIT:?}; left running",
+                    self.serial
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _ = thread.join();
+    }
 }
 
 impl Device for NokhwaDevice {
@@ -320,6 +360,49 @@ fn rows_of(mut data: Vec<u8>, width: usize, rows: usize) -> Result<(usize, Vec<u
     )))
 }
 
+/// One track's queue of frames.
+type FrameSender = mpsc::SyncSender<Result<Arc<RawFrame>, CaptureError>>;
+
+/// Hand every frame to every track's queue until told to stop, every track's source has
+/// dropped, or the device fails.
+fn serve(
+    camera: &mut Camera,
+    mut senders: Vec<FrameSender>,
+    (width, height): (u32, u32),
+    stopping: &AtomicBool,
+) {
+    // Told to stop, every track's source dropped, or the device failed: each ends the
+    // capture, and the stream is stopped and the device closed here, on this thread.
+    while !senders.is_empty() && !stopping.load(Ordering::Acquire) {
+        match frame(camera, width, height) {
+            Ok(frame) => {
+                let frame = Arc::new(frame);
+                senders.retain(|sender| {
+                    !matches!(
+                        sender.try_send(Ok(Arc::clone(&frame))),
+                        Err(mpsc::TrySendError::Disconnected(_))
+                    )
+                });
+            }
+            Err(error) => {
+                for sender in &senders {
+                    let _ = sender.send(Err(error.clone()));
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// Stop the stream (`VIDIOC_STREAMOFF`, the buffers released) and close the device, on the
+/// thread that opened it.
+fn close(mut camera: Camera, serial: &str) {
+    if let Err(error) = camera.stop_stream() {
+        eprintln!("uvc-stereo {serial}: stopping the stream failed: {error}");
+    }
+    drop(camera);
+}
+
 /// What the tracks of one capture share: the device and its mode.
 fn shared(request: &CaptureRequest) -> (&str, (u32, u32), u32) {
     (&request.serial, request.frame_raster(), request.fps)
@@ -351,9 +434,12 @@ pub fn open(
     let fps = first.fps;
     let serial = first.serial.clone();
     let (ready, opened) = mpsc::channel();
-    let (mut senders, receivers): (Vec<_>, Vec<_>) =
+    let (senders, receivers): (Vec<_>, Vec<_>) =
         requests.iter().map(|_| mpsc::sync_channel(QUEUE)).unzip();
-    std::thread::Builder::new()
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let thread_serial = serial.clone();
+    let thread = std::thread::Builder::new()
         .name(format!("uvc-stereo-{serial}"))
         .spawn(move || {
             let format = CameraFormat::new(Resolution::new(width, height), FrameFormat::YUYV, fps);
@@ -392,35 +478,30 @@ pub fn open(
                     return;
                 }
             };
-            // Every track's source was dropped, or the device failed: either ends the capture.
-            while !senders.is_empty() {
-                match frame(&mut camera, width, height) {
-                    Ok(frame) => {
-                        let frame = Arc::new(frame);
-                        senders.retain(|sender| {
-                            !matches!(
-                                sender.try_send(Ok(Arc::clone(&frame))),
-                                Err(mpsc::TrySendError::Disconnected(_))
-                            )
-                        });
-                    }
-                    Err(error) => {
-                        for sender in &senders {
-                            let _ = sender.send(Err(error.clone()));
-                        }
-                        break;
-                    }
-                }
-            }
+            serve(&mut camera, senders, (width, height), &stopping);
+            close(camera, &thread_serial);
         })
         .map_err(|error| OpenError::Device(error.to_string()))?;
+    let capture = Arc::new(CaptureThread {
+        stop,
+        thread: Mutex::new(Some(thread)),
+        serial,
+    });
     opened
         .recv()
         .map_err(|_| OpenError::Device("the capture thread ended while opening".to_owned()))??;
     Ok(requests
         .into_iter()
         .zip(receivers)
-        .map(|(request, frames)| UvcStereoSource::new(NokhwaDevice { frames }, request))
+        .map(|(request, frames)| {
+            UvcStereoSource::new(
+                NokhwaDevice {
+                    frames,
+                    _capture: Arc::clone(&capture),
+                },
+                request,
+            )
+        })
         .collect())
 }
 
@@ -513,5 +594,39 @@ mod tests {
             Path::new("/sys/devices/pci0000:00/0000:00:14.0/usb2/2-3/2-3.1"),
             Path::new("/sys/devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3.1/1-3.1.2")
         ));
+    }
+
+    /// The last source dropping stops the capture thread and waits for it to end, so the
+    /// device is closed before the caller goes on; a thread that will not stop is left after
+    /// the wait rather than hanging its caller.
+    #[test]
+    fn the_last_source_stops_and_waits_for_the_capture_thread() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&stop);
+        let closed = Arc::new(AtomicBool::new(false));
+        let device_closed = Arc::clone(&closed);
+        let thread = std::thread::spawn(move || {
+            while !seen.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            device_closed.store(true, Ordering::Release);
+        });
+        let capture = Arc::new(CaptureThread {
+            stop,
+            thread: Mutex::new(Some(thread)),
+            serial: "test".to_owned(),
+        });
+        let other = Arc::clone(&capture);
+        drop(capture);
+        assert!(
+            !closed.load(Ordering::Acquire),
+            "another source still holds it"
+        );
+        drop(other);
+        assert!(
+            closed.load(Ordering::Acquire),
+            "closed before the last drop returned"
+        );
     }
 }
