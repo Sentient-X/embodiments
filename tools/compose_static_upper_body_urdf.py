@@ -121,10 +121,13 @@ Vec = NDArray[np.float64]
 #   from allisa_bot's left optical frame, and the IMU mounted on it, carry a convention error
 #   that is still open; the IMU's reported pitch sign is wrong for the same reason.
 #   The neck was recalibrated on 2026-10-27 (the tilt servo, id 6: homing offset -575, range
-#   1243..2745), which moved its reading: at the new calibrated zero the operator sees the ZED
-#   facing forward, where this model had it 42 deg nose up. ``CAMERA_RECALIBRATION`` turns the
-#   mount by the reading's change, solved so the model's camera faces forward and level at the
-#   all-zero neck; the tilt range and home move with it.
+#   1243..2745), which moved its reading. ``CAMERA_RECALIBRATION`` turns the mount by the
+#   reading's change, solved so the model's camera faces straight forward and level at the
+#   neck's measured rest, where the operator saw it face forward (2026-10-27 19:50 IST, read
+#   from the production room's joint state: pan -0.1926, lift -1.4730, elbow 1.7215, wrist
+#   flex -1.7392, wrist roll 0.2417, tilt -1.0787 rad; the model then heads +0.4 deg). The
+#   tilt range turns with it; the tilt's home is where the camera faces forward with the rest
+#   of the neck at zero.
 NECK_LINKS = {
     "base_link": "so101_base_link",
     "shoulder_link": "so101_shoulder_pan_link",
@@ -153,7 +156,7 @@ RECEIVED_CAMERA_HOLDER = "Wrist_Roll_Follower_SO101_5__Fillet1.stl"
 CAMERA_TILT_HORN = "_________step__Body1_1_.stl"
 SO101_BASE_IN_RECEIVED = (0.013891, -0.031756, -0.005189)
 #: How far the 2026-10-27 recalibration moved the tilt reading (above).
-CAMERA_RECALIBRATION = -0.734
+CAMERA_RECALIBRATION = -1.1476259496
 CAMERA_MOUNT_TILT = math.radians(141.71) + CAMERA_RECALIBRATION
 #: The camera tilt's range. The official joint's limits are its jaw's; with the bracket on the
 #: horn the camera meets the wrist between about +52 and +172 deg (a MuJoCo sweep of the

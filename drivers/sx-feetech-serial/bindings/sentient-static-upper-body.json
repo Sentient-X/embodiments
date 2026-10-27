@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
+  "id": "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
   "axes": [
     {
       "joint": "torso_joint",
@@ -312,8 +312,8 @@
     },
     {
       "joint": "so101_camera_tilt_joint",
-      "lower": -2.407592654,
-      "upper": 0.472200612,
+      "lower": -1.993966704,
+      "upper": 0.885826562,
       "model": "feetech_sts3215",
       "bus": "feetech_serial",
       "port": "neck",
@@ -321,7 +321,7 @@
       "bus_id": 6,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.4135
     }
   ],
   "approach": {
