@@ -781,7 +781,15 @@ def main() -> None:
     fitting.add_argument("--plan", type=Path, default=PLAN)
     fitting.add_argument("--holds", type=Path, required=True)
     fitting.add_argument("--excitation", type=Path, action="append", default=[])
-    fitting.add_argument("--unit", action="append", default=[], help="a fitted motor's serial")
+    fitting.add_argument(
+        "--unit",
+        action="append",
+        required=True,
+        help=(
+            "the commissioned identity of the bus the run was recorded on (e.g. "
+            "A30F115DD0120A949B80:1); the station refuses a fit naming no unit of its own"
+        ),
+    )
     fitting.add_argument("--out", type=Path, required=True)
     fitting.add_argument(
         "--friction",
@@ -805,7 +813,15 @@ def main() -> None:
         required=True,
         help="sx-identify's CSV of a sweep:<joint> or breakaway:<joint> part",
     )
-    friction.add_argument("--unit", action="append", default=[], help="a fitted motor's serial")
+    friction.add_argument(
+        "--unit",
+        action="append",
+        required=True,
+        help=(
+            "the commissioned identity of the bus the run was recorded on (e.g. "
+            "A30F115DD0120A949B80:1); the station refuses a fit naming no unit of its own"
+        ),
+    )
     friction.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     urdf = URDF.read_bytes()

@@ -72,7 +72,7 @@ target/release/sx-identify --plan docs/dynamics/static-upper-body-friction-sweep
 
 ```bash
 python tools/identify_dynamics.py fit-friction --recording sweep-L.csv --recording break-L.csv \
-  --recording sweep-R.csv --recording break-R.csv --unit <motor serials> --out friction.json
+  --recording sweep-R.csv --recording break-R.csv --unit A30F115DD0120A949B80:1 --out friction.json
 ```
 
 **What the fit does:**
@@ -128,8 +128,10 @@ target/release/sx-identify --plan ... --part right --record right.csv --speed 0.
 
 ```bash
 python tools/identify_dynamics.py fit --holds holds.csv --excitation left.csv --excitation right.csv \
-  --unit <motor serials> --out dynamics.json
+  --unit A30F115DD0120A949B80:1 --out dynamics.json
 ```
+
+`--unit` is required: each is the commissioned identity of a bus the run was recorded on (`<ZLG serial>:<channel>`, as in the robot's `commissioning.json` ports). The station applies a fit only to a robot that has that bus, so a fit from one robot is never fed forward on another.
 
 **What the fit does:**
 - Weighted least squares on the base parameters, plus friction.
