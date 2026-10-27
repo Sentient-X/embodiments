@@ -82,6 +82,16 @@ pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
 /// How many commands in a row one axis may go unobserved (`NaN` in the receipt) before the
 /// governor stops the chain.
 pub const MAX_MISSED_IN_A_ROW: u8 = 1;
+/// A joint resting outside its range that comes no closer to it by this much (rad, a few
+/// encoder counts above read noise) within [`OUTSIDE_STALL`] cannot come in.
+pub const OUTSIDE_PROGRESS: f64 = 0.005;
+/// How far past its range (rad) a joint must be observed to count as outside it: a few
+/// encoder counts and more than a servo's sag or deadband at the edge, which is not a stuck
+/// joint (a joint 3 mrad past the edge it holds must never be given up on).
+pub const OUTSIDE_TOLERANCE: f64 = 0.01;
+/// How long a joint outside its range may make no progress toward it before the governor stops
+/// pushing it in and holds it where it is.
+pub const OUTSIDE_STALL: Duration = Duration::from_secs(2);
 
 /// One axis's bounds, in the joint's own unit (rad or m) and per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,6 +189,15 @@ impl<E: ChainError> ChainError for GovernorError<E> {
     }
 }
 
+/// An axis observed outside its range: since when it last came closer, how far out it was then,
+/// and whether the governor gave up pushing it in.
+#[derive(Clone, Copy, Debug)]
+struct Outside {
+    since: Instant,
+    out: f64,
+    given_up: bool,
+}
+
 /// The position last sent, the speed it was stepped at, and when.
 #[derive(Clone, Copy)]
 struct Held {
@@ -214,6 +233,11 @@ pub struct Governor<C, K = MonotonicClock> {
     opened_at: Option<Vec<f64>>,
     /// The first axis whose last target lay outside where it may go, and was brought in.
     brought_in: Option<usize>,
+    /// Per axis observed outside its range: since when it last came closer, how far out it was
+    /// then, and whether it was given up on (held where it rests, not pushed against its stop).
+    outside: Vec<Option<Outside>>,
+    /// When the last receipt was noted: a pause in commands is not time to make progress in.
+    noted: Option<Instant>,
     /// Each axis's interval (`Held::lower`), kept across a refused command, which re-seeds the
     /// position from the chain but must not widen the interval; cleared only where the governor
     /// takes the joint up anew (open, a stop, a fault, `clear_faults`, `start_at`).
@@ -336,6 +360,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             torque_caps,
             opened_at,
             brought_in: None,
+            outside: vec![None; width],
+            noted: None,
             interval: None,
         })
     }
@@ -352,6 +378,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.start = Some(Axes::from_slice(joints));
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
+        self.noted = None;
         Ok(())
     }
 
@@ -385,6 +413,17 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     #[must_use]
     pub const fn brought_in(&self) -> Option<usize> {
         self.brought_in
+    }
+
+    /// The first axis resting outside its range that made no progress toward it for
+    /// [`OUTSIDE_STALL`] (a servo too weak against gravity on its stop): it is held where it
+    /// rests, no longer pushed in, until it is observed inside its range again or the governor
+    /// takes the body up anew. A caller reports it.
+    #[must_use]
+    pub fn held_outside(&self) -> Option<usize> {
+        self.outside
+            .iter()
+            .position(|outside| outside.is_some_and(|outside| outside.given_up))
     }
 
     /// Whether a fault is latched: every command is refused until
@@ -451,6 +490,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.latched = true;
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
+        self.noted = None;
         self.missed.fill(0);
         let stop = self.chain.stop();
         make(stop)
@@ -539,6 +580,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 .filter(|at| at.is_finite())
                 .unwrap_or(*value);
             let speed = held.velocity.get(index).copied().unwrap_or(0.0);
+            // Given up on: held where it rests, never pushed against its stop.
+            let target = if self.outside[index].is_some_and(|outside| outside.given_up) {
+                &at
+            } else {
+                target
+            };
             let now = range.reaching(at);
             // Never empty: both contain the range itself.
             let reach = CommandRange {
@@ -555,6 +602,68 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             uppers.push(reach.upper);
         }
         (positions, speeds, (lowers, uppers), brought_in)
+    }
+
+    /// The feed-forward each axis is sent: its planned velocity held to its speed, its torque to
+    /// its derate's cap, and none for an axis given up on outside its range, which rests on its
+    /// stop with neither planned motion nor torque lifting it.
+    fn held_feedforward(&self, wanted: &[Feedforward]) -> Axes<Feedforward> {
+        wanted
+            .iter()
+            .zip(self.limits.iter().zip(&self.torque_caps))
+            .zip(&self.outside)
+            .map(|((wanted, (limit, cap)), outside)| {
+                if outside.is_some_and(|outside| outside.given_up) {
+                    Feedforward::default()
+                } else {
+                    Feedforward {
+                        velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
+                        torque: cap.map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Note how far each available axis observed outside its range is from it, and give up on
+    /// one that came no closer by [`OUTSIDE_PROGRESS`] within [`OUTSIDE_STALL`]; one observed
+    /// inside is followed as usual again.
+    fn note_outside(&mut self, observed: &[f64], now: Instant) {
+        // After a pause in commands (longer than a step), every approach starts its wait anew:
+        // nothing was asked of the joint meanwhile, so it had no chance to come in.
+        let paused = self
+            .noted
+            .is_none_or(|noted| now.saturating_duration_since(noted) > MAX_STEP_INTERVAL);
+        self.noted = Some(now);
+        for (index, (at, range)) in observed.iter().zip(self.chain.commandable()).enumerate() {
+            if self.unavailable.contains(&index) || !at.is_finite() {
+                continue;
+            }
+            let out = (range.lower - at).max(at - range.upper);
+            let slot = &mut self.outside[index];
+            if out <= OUTSIDE_TOLERANCE {
+                *slot = None;
+                continue;
+            }
+            match slot {
+                None => {
+                    *slot = Some(Outside {
+                        since: now,
+                        out,
+                        given_up: false,
+                    });
+                }
+                Some(outside) if paused || out < outside.out - OUTSIDE_PROGRESS => {
+                    outside.since = now;
+                    outside.out = outside.out.min(out);
+                }
+                Some(outside) => {
+                    if now.saturating_duration_since(outside.since) >= OUTSIDE_STALL {
+                        outside.given_up = true;
+                    }
+                }
+            }
+        }
     }
 
     /// Count each available axis' unobserved (`NaN`) commands in a row, restarting at an
@@ -641,14 +750,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.interval = Some((lower, upper));
         let receipt = match feedforward {
             Some(wanted) => {
-                let held: Axes<Feedforward> = wanted
-                    .iter()
-                    .zip(self.limits.iter().zip(&self.torque_caps))
-                    .map(|(wanted, (limit, cap))| Feedforward {
-                        velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
-                        torque: cap.map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
-                    })
-                    .collect();
+                let held = self.held_feedforward(wanted);
                 self.chain.command_with(&next, &held)
             }
             None => self.chain.command(&next),
@@ -707,6 +809,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 stop,
             }));
         }
+        self.note_outside(&receipt.observed[..width], now);
         self.held = Some(Held {
             position: next,
             velocity,
@@ -768,6 +871,8 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     fn stop(&mut self) -> StopReport {
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
+        self.noted = None;
         self.missed.fill(0);
         self.chain.stop()
     }
@@ -802,6 +907,8 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.missed.fill(0);
         self.held = None;
         self.interval = None;
+        self.outside.fill(None);
+        self.noted = None;
         self.chain.clear_faults();
     }
 }
@@ -848,6 +955,8 @@ mod tests {
         /// Each `command_with`'s feed-forward, and each feed-forward bound set.
         feedforward: Vec<Vec<Feedforward>>,
         feedforward_limits: Vec<Vec<FeedforwardLimit>>,
+        /// An axis that never moves: it observes this whatever it is sent.
+        pinned: Option<(usize, f64)>,
     }
 
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
@@ -891,6 +1000,7 @@ mod tests {
             derated: Vec::new(),
             feedforward: Vec::new(),
             feedforward_limits: Vec::new(),
+            pinned: None,
         }
     }
 
@@ -917,6 +1027,9 @@ mod tests {
             }
             self.sent.push(joints.to_vec());
             let mut observed: Vec<f64> = joints.iter().map(|joint| joint + self.lag).collect();
+            if let Some((index, at)) = self.pinned {
+                observed[index] = at;
+            }
             self.at = Some(observed.clone());
             if let Some(index) = self.silent {
                 observed[index] = f64::NAN;
@@ -1598,5 +1711,104 @@ mod tests {
         let governor = Governor::new(rated(fake(true)), vec![LIMITS; 2]).expect("limits");
         assert!(governor.derated().is_empty());
         assert_eq!(governor.limits(), &[LIMITS; 2]);
+    }
+
+    /// A joint resting past its range that its servo cannot lift (a gravity stop, a weak
+    /// servo) while the caller asks it inward: after [`OUTSIDE_STALL`] without progress it is
+    /// held where it rests, not driven against its stop, and nothing else stops.
+    #[test]
+    fn a_joint_outside_that_cannot_come_in_is_held_where_it_rests() {
+        let mut chain = fake(true);
+        chain.rest = vec![-0.993, 0.5];
+        chain.pinned = Some((0, -0.993));
+        let (mut governor, clock) = governed(chain);
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor
+                .command(&[-0.9, 0.6])
+                .expect("a stuck joint is not a fault");
+        }
+        let sent = governor.chain().sent.last().expect("sent").clone();
+        assert!((sent[0] + 0.993).abs() < 1e-9, "still pushed: {}", sent[0]);
+        assert!(
+            (sent[1] - 0.6).abs() < 1e-9,
+            "the other joint follows: {}",
+            sent[1]
+        );
+        assert_eq!(governor.held_outside(), Some(0));
+    }
+
+    /// One coming in, however slowly, is never given up on; once inside it is a normal joint.
+    #[test]
+    fn a_joint_outside_that_comes_in_is_followed_and_never_given_up_on() {
+        let mut chain = fake(true);
+        chain.rest = vec![-1.05, 0.5];
+        let (mut governor, clock) = governed(chain);
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[-0.5, 0.5]).expect("comes in");
+            assert_eq!(governor.held_outside(), None);
+        }
+        let sent = governor.chain().sent.last().expect("sent")[0];
+        assert!((sent + 0.5).abs() < 1e-9, "reached its target: {sent}");
+    }
+
+    // ---- refute pass: attempts to break the outside-progress hold ----
+
+    /// A joint outside its range that has been idle (the caller sent nothing) for longer than
+    /// [`OUTSIDE_STALL`] is given up on at its first tick back, though nothing was commanded.
+    #[test]
+    fn a_pause_in_commands_is_not_counted_as_a_stall() {
+        let mut chain = fake(true);
+        chain.rest = vec![-0.993, 0.5];
+        let (mut governor, clock) = governed(chain);
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[-0.5, 0.5]).expect("first");
+        clock.advance(Duration::from_secs(3));
+        governor.command(&[-0.5, 0.5]).expect("after idle");
+        assert_eq!(governor.held_outside(), None, "given up after an idle gap");
+    }
+
+    /// A joint that settles a few mrad past its edge while the caller holds the edge (steady
+    /// state error) is given up on, then ignores every later inward command for good.
+    #[test]
+    fn a_joint_sagging_just_past_the_edge_it_holds_is_never_given_up_on() {
+        let mut chain = fake(true);
+        chain.rest = vec![0.0, 0.5];
+        chain.lag = -0.003; // observes 3 mrad short of what it is sent
+        let (mut governor, clock) = governed(chain);
+        for _ in 0..350 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[-0.9, 0.5]).expect("hold the edge");
+        }
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.0, 0.5]).expect("inward");
+        }
+        let sent = governor.chain().sent.last().expect("sent")[0];
+        assert!(sent > -0.5, "joint frozen near the edge: {sent}");
+    }
+
+    /// Given up: the feed-forward torque and velocity the caller planned still go out with it.
+    #[test]
+    fn a_joint_given_up_on_is_sent_no_feed_forward() {
+        let mut chain = fake(true);
+        chain.rest = vec![-0.993, 0.5];
+        chain.pinned = Some((0, -0.993));
+        let (mut governor, clock) = governed(chain);
+        let ff = [Feedforward {
+            velocity: 0.2,
+            torque: 1.0,
+        }; 2];
+        for _ in 0..500 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command_with(&[-0.9, 0.5], &ff).expect("ok");
+        }
+        assert_eq!(governor.held_outside(), Some(0));
+        let last = governor.chain().feedforward.last().expect("ff")[0];
+        assert!(
+            last.torque == 0.0 && last.velocity == 0.0,
+            "still pushing: {last:?}"
+        );
     }
 }
