@@ -1335,6 +1335,7 @@ version = "0.1.0"
 dependencies = [
  "nokhwa",
  "serde_json",
+ "sx-capture-usb",
  "sx-embodiment-drivers",
  "thiserror 2.0.21",
  "v4l",

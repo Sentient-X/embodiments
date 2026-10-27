@@ -33,7 +33,13 @@ opens anything else. The camera is read on its own thread (a `nokhwa` camera may
 threads) into a two-frame queue. On Linux the read is V4L2's own, through the `v4l` crate, and
 waits at most `STALL` (1 s): a device that stops sending frames ends the capture with an error,
 its stream stopped and the device closed, instead of a read that never returns keeping it open
-(on 10-27 that left a stalled ZED 2i busy for every later teleoperation interval). A process without camera permission (macOS) gets
+(on 10-27 that left a stalled ZED 2i busy for every later teleoperation interval). On Linux each
+stream starts on a device just reset on its USB port (`USBDEVFS_RESET` through
+`sx-capture-usb`'s usbfs, then the capture node found again, at most `RESET_WAIT`): a ZED 2i
+streams once per enumeration, and on the DGX Spark (10-28) a second stream after a clean
+`VIDIOC_STREAMOFF` sent no frame, and stopping it hung the GB10 xHCI controller until a reboot.
+The process needs write access to the camera's `/dev/bus/usb/BBB/DDD` (the station's host-apply
+grants it); without it the reset is reported and the device opened as it is. A process without camera permission (macOS) gets
 `OpenError::Permission` instead of a hang.
 
 ## What it does not do
