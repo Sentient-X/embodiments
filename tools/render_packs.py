@@ -32,6 +32,7 @@ from sx_embodiments.known.static_upper_body import (
 )
 from sx_embodiments.known.yubi import YUBI_TRACKING
 from sx_embodiments.render_pack import RenderPack, build
+from sx_embodiments.rendered import same_rendering
 from sx_embodiments.viewing import Viewing
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,13 +132,13 @@ def main() -> int:
     arguments = parser.parse_args()
     files = rendered_files()
     if arguments.check:
-        stale = [
-            path for path, data in files.items() if not path.is_file() or path.read_bytes() != data
-        ]
+        stale = [path for path, data in files.items() if not same_rendering(path, data)]
         for path in stale:
             print(f"stale: {path.relative_to(ROOT)}", file=sys.stderr)  # noqa: T201
         return 1 if stale else 0
     for path, data in files.items():
+        if same_rendering(path, data):
+            continue  # unchanged but for another platform's last bits; keep the committed bytes
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return 0

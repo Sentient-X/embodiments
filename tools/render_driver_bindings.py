@@ -83,6 +83,7 @@ from sx_embodiments.media import (
     mount_pose_at,
 )
 from sx_embodiments.parts import ChainSpec
+from sx_embodiments.rendered import same_rendering
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -358,9 +359,7 @@ def render(name: str) -> str:
 
 def stale() -> list[Path]:
     return [
-        path
-        for path, text in rendered().items()
-        if not path.is_file() or path.read_text(encoding="utf-8") != text
+        path for path, text in rendered().items() if not same_rendering(path, text.encode("utf-8"))
     ]
 
 
@@ -373,6 +372,8 @@ def main() -> int:
             sys.stderr.write(f"stale: {path.relative_to(ROOT)}\n")
         return 1 if stale() else 0
     for path, text in rendered().items():
+        if same_rendering(path, text.encode("utf-8")):
+            continue  # unchanged but for another platform's last bits; keep the committed bytes
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     return 0
