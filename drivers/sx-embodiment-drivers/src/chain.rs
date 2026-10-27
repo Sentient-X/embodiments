@@ -202,6 +202,8 @@ pub enum MissingReason {
     Stale,
     /// The link could not carry the request or the answer.
     Unavailable,
+    /// Commissioning put the actuator out of service: no frame ever addresses it.
+    OutOfService,
 }
 
 /// One axis's part of a read: what the actuator answered to this poll, if anything.
@@ -408,7 +410,7 @@ pub trait ActuatorChain {
     }
 
     /// The axes (indices in native state order) commissioning marked unavailable: kept in the
-    /// vector as data, read as [`MissingReason::Unavailable`], observed as `NaN`, and never
+    /// vector as data, read as [`MissingReason::OutOfService`], observed as `NaN`, and never
     /// commanded ([`crate::Masked`]). Fixed once the chain is open.
     fn unavailable(&self) -> Vec<usize> {
         Vec::new()

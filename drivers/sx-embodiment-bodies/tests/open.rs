@@ -1101,7 +1101,7 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
     assert_eq!(body.axes()[torso].joint, "torso_joint");
     assert_eq!(body.unavailable(), vec![torso]);
     let unavailable = sx_embodiment_drivers::AxisReading::Missing(
-        sx_embodiment_drivers::MissingReason::Unavailable,
+        sx_embodiment_drivers::MissingReason::OutOfService,
     );
     let mut governed = Governor::new(
         body,

@@ -4,7 +4,7 @@
 //! An actuator found faulty (the static upper body's torso motor, 2026-10-26) is marked
 //! unavailable by the station's commissioning. Its axis keeps its place in the native state
 //! order, so the layout an episode records, a policy reads and a leader maps never shrinks or
-//! reorders: every read reports it [`MissingReason::Unavailable`], every receipt observes it as
+//! reorders: every read reports it [`MissingReason::OutOfService`], every receipt observes it as
 //! `NaN`, its target is dropped before the bus, and [`ActuatorChain::unavailable`] names it, so a
 //! [`crate::Governor`] neither steps nor tracks it. The chain underneath drives the rest, opened
 //! without it, so the faulty actuator is never addressed and cannot fail the open.
@@ -125,7 +125,7 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
 
 impl<C: Observe> Masked<C> {
     /// An observer of `axes` reading every axis but those at `unavailable` through `inner`,
-    /// which reports them as [`MissingReason::Unavailable`].
+    /// which reports them as [`MissingReason::OutOfService`].
     ///
     /// # Errors
     ///
@@ -158,7 +158,7 @@ impl<C: Observe, F> Observe for Masked<C, F> {
 
     fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
-        self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+        self.spread(&readings, AxisReading::Missing(MissingReason::OutOfService))
     }
 }
 
@@ -200,7 +200,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
 
     fn read_positions(&mut self) -> Axes<AxisReading> {
         let readings = self.inner.read_positions();
-        self.spread(&readings, AxisReading::Missing(MissingReason::Unavailable))
+        self.spread(&readings, AxisReading::Missing(MissingReason::OutOfService))
     }
     fn stop(&mut self) -> StopReport {
         self.inner.stop()
@@ -218,7 +218,7 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     fn command_readings(&self) -> Option<Axes<AxisReading>> {
         Some(self.spread(
             &self.inner.command_readings()?,
-            AxisReading::Missing(MissingReason::Unavailable),
+            AxisReading::Missing(MissingReason::OutOfService),
         ))
     }
 

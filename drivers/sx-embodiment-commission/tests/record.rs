@@ -102,7 +102,7 @@ fn a_recording_reads_every_joint_through_the_layer_and_writes_nothing_to_the_bus
         let positions = line["positions"].as_object().expect("positions");
         assert_eq!(positions.len(), 15, "every axis, the torso in its place");
         assert!(positions["torso_joint"].is_null());
-        assert_eq!(line["missing"]["torso_joint"], "unavailable");
+        assert_eq!(line["missing"]["torso_joint"], "out_of_service");
         let at = positions["right_elbow_pitch_joint"]
             .as_f64()
             .expect("the elbow");

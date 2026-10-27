@@ -127,6 +127,7 @@ fn why(reading: AxisReading) -> Option<String> {
                 MissingReason::Corrupt => "corrupt",
                 MissingReason::Stale => "stale",
                 MissingReason::Unavailable => "unavailable",
+                MissingReason::OutOfService => "out_of_service",
             }
             .to_owned(),
         ),
