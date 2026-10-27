@@ -635,4 +635,8 @@ impl CanPort for SocketCanPort {
     fn round_trip(&mut self) -> Option<RoundTrip> {
         self.round_trips.take()
     }
+
+    fn round_trip_max(&mut self) -> Option<Duration> {
+        self.round_trips.take_max()
+    }
 }

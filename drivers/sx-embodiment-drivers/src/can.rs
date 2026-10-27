@@ -17,8 +17,8 @@ pub const FRAME_ALLOWANCE: Duration = Duration::from_millis(2);
 pub const ROUND_TRIP_SAMPLES: usize = 512;
 
 /// How long a link's commands waited for their answers over one period: from the moment the
-/// command was handed to the link to the moment the motor protocol took the answer it paired
-/// with it, host scheduling included, as `sx-can-bench` measures a round trip.
+/// link took the command's frame to the moment the link handed over the answer the motor
+/// protocol paired with it, host scheduling included, as `sx-can-bench` measures a round trip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RoundTrip {
     /// Answers paired with their command in the period.
@@ -32,8 +32,10 @@ pub struct RoundTrip {
 }
 
 /// The answer times a link was told of since it was last read ([`CanPort::answered`],
-/// [`CanPort::round_trip`]). Fixed size: recording writes one slot of a ring and allocates
-/// nothing, so it runs on the control thread; reading sorts a copy on the reader's stack.
+/// [`CanPort::round_trip`], [`CanPort::round_trip_max`]). Fixed size: recording writes one
+/// slot of a ring and allocates nothing, so it runs on the control thread, and so does reading
+/// the period's slowest ([`RoundTripWindow::take_max`]); the percentiles
+/// ([`RoundTripWindow::take`]) sort a 4 KiB copy, for a bench or a tool, never a control loop.
 #[derive(Clone, Debug)]
 pub struct RoundTripWindow {
     nanos: [u64; ROUND_TRIP_SAMPLES],
@@ -68,7 +70,23 @@ impl RoundTripWindow {
         self.max = self.max.max(round_trip);
     }
 
+    /// The period's slowest answer, and a new period begun; `None` when nothing was answered.
+    /// Constant time, no copy and no sort: what a control thread reads.
+    pub fn take_max(&mut self) -> Option<Duration> {
+        let max = (self.answers > 0).then_some(self.max);
+        self.restart();
+        max
+    }
+
+    fn restart(&mut self) {
+        self.next = 0;
+        self.held = 0;
+        self.answers = 0;
+        self.max = Duration::ZERO;
+    }
+
     /// The period's answer times, and a new period begun; `None` when nothing was answered.
+    /// Sorts a copy of the ring: for a bench or a tool, not a control thread.
     pub fn take(&mut self) -> Option<RoundTrip> {
         if self.answers == 0 {
             return None;
@@ -85,10 +103,7 @@ impl RoundTripWindow {
             p99: rank(99),
             max: self.max,
         };
-        self.next = 0;
-        self.held = 0;
-        self.answers = 0;
-        self.max = Duration::ZERO;
+        self.restart();
         Some(taken)
     }
 }
@@ -228,10 +243,18 @@ pub trait CanPort: Send {
         let _ = round_trip;
     }
 
-    /// The link's answer times since this was last called, which begins a new period: for
-    /// whoever owns the port to read beside [`CanPort::counters`], between ticks, never per
-    /// tick. `None` when nothing was answered or the link keeps no answer times.
+    /// The link's answer times since this or [`CanPort::round_trip_max`] was last called,
+    /// which begins a new period: for a bench or a tool to read beside [`CanPort::counters`];
+    /// it sorts, so never on a control thread. `None` when nothing was answered or the link
+    /// keeps no answer times.
     fn round_trip(&mut self) -> Option<RoundTrip> {
+        None
+    }
+
+    /// The slowest answer since this or [`CanPort::round_trip`] was last called, which begins
+    /// a new period: constant time, no copy and no sort, so a control thread may read it
+    /// between two frames. `None` when nothing was answered or the link keeps no answer times.
+    fn round_trip_max(&mut self) -> Option<Duration> {
         None
     }
 }
@@ -272,6 +295,10 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
 
     fn round_trip(&mut self) -> Option<RoundTrip> {
         (**self).round_trip()
+    }
+
+    fn round_trip_max(&mut self) -> Option<Duration> {
+        (**self).round_trip_max()
     }
 }
 
@@ -335,23 +362,31 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
             .map_or_else(|_| Vec::new(), |port| port.counters())
     }
 
-    /// `Unknown` while a chain holds the link (it does for a whole phase): a health poll never
-    /// waits on the bus.
+    /// `Unknown` while another call holds the link (the lock is taken per call, and a
+    /// `receive_until` or `sleep` keeps it until its deadline): a health poll never waits on
+    /// the bus.
     fn health(&self) -> LinkHealth {
         self.0
             .try_lock()
             .map_or(LinkHealth::Unknown, |port| port.health())
     }
 
-    /// Held by the chain whose answer it is, so the lock is its own.
+    /// The lock is taken per call, so another chain's `receive_until` may hold the link until
+    /// its deadline: the sample is dropped rather than the control thread kept waiting.
     fn answered(&mut self, round_trip: Duration) {
-        if let Ok(mut port) = self.0.lock() {
+        if let Ok(mut port) = self.0.try_lock() {
             port.answered(round_trip);
         }
     }
 
     fn round_trip(&mut self) -> Option<RoundTrip> {
         self.0.lock().ok()?.round_trip()
+    }
+
+    /// Read on a control thread, so it never waits behind another chain's `receive_until`:
+    /// `None` then, and the period runs on until the next read.
+    fn round_trip_max(&mut self) -> Option<Duration> {
+        self.0.try_lock().ok()?.round_trip_max()
     }
 }
 
@@ -380,6 +415,18 @@ mod tests {
         let one = window.take().expect("one answer");
         let rtt = Duration::from_micros(479);
         assert_eq!((one.answers, one.p50, one.p99, one.max), (1, rtt, rtt, rtt));
+    }
+
+    #[test]
+    fn the_slowest_answer_reads_without_sorting_and_begins_a_new_period() {
+        let mut window = RoundTripWindow::default();
+        assert_eq!(window.take_max(), None, "nothing answered: nothing claimed");
+        for micros in [300, 2_100, 450] {
+            window.record(Duration::from_micros(micros));
+        }
+        assert_eq!(window.take_max(), Some(Duration::from_micros(2_100)));
+        assert_eq!(window.take_max(), None, "a read begins a new period");
+        assert_eq!(window.take(), None, "for the percentiles too");
     }
 
     #[test]
