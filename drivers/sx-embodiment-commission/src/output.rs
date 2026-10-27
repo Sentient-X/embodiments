@@ -328,6 +328,10 @@ pub fn commission_report(result: &Result<Vec<PortMatch>, Vec<PortError>>) -> Str
 #[must_use]
 pub fn host_needs(probe: &Probe, matched: &[PortMatch]) -> sx_embodiment_drivers::HostNeeds {
     let mut needs = sx_embodiment_drivers::HostNeeds::new();
+    needs.add(
+        sx_embodiment_drivers::host_needs::STATION,
+        sx_embodiment_drivers::host_needs::station_needs(),
+    );
     for port in matched {
         needs.add(&port.port, port_needs(probe, port));
     }
