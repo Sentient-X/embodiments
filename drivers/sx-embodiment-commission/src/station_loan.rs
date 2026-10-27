@@ -49,7 +49,14 @@ impl Loan {
             .map_err(|error| format!("{}: {error}", request.display()))?;
         let loan = Self { request };
         let started = Instant::now();
-        while !lent.exists() {
+        // The answer names the run it lends to, so no run takes an answer meant for another.
+        let mine = std::process::id().to_string();
+        while std::fs::read_to_string(&lent)
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            != Some(mine.as_str())
+        {
             if stop.load(Ordering::SeqCst) != 0 {
                 return Err(format!(
                     "stopped while waiting for the station to lend {port}"

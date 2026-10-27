@@ -359,7 +359,14 @@ pub fn parse(words: &[String]) -> Result<Args, String> {
         (Some(robot), Some(port), false) => Some((robot, port)),
         (None, Some(port), true) => Some((PathBuf::from(STATION_CALIBRATION_INBOX), port)),
         (None, None, false) => None,
-        (None, Some(_), false) if from_station => None,
+        (None, Some(_), false) if from_station => {
+            if matches!(args.mode, Mode::Apply(_)) {
+                // The servos would hold a calibration the station does not: it could not
+                // open the bus again when it takes it back.
+                return Err("apply --from-station also needs --publish".to_owned());
+            }
+            None
+        }
         (Some(_), _, true) => {
             return Err("--publish installs into the station's inbox; drop --robot".to_owned());
         }

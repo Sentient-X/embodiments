@@ -950,6 +950,10 @@ fn apply_refuses_a_servo_holding_torque_and_changes_nothing() {
         "--from-station needs --port"
     );
     assert!(
+        publish(&["--from-station", "--port", "neck"]).is_err(),
+        "apply from the station publishes what it writes"
+    );
+    assert!(
         publish(&["--publish", "--robot", "r", "--port", "neck"]).is_err(),
         "--publish is the station's inbox"
     );
@@ -973,7 +977,8 @@ fn a_bus_is_borrowed_from_the_station_and_returned_when_the_loan_drops() {
             while !root.join("neck.borrow").exists() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            std::fs::write(root.join("neck.lent"), "").expect("lent");
+            let pid = std::fs::read_to_string(root.join("neck.borrow")).expect("request");
+            std::fs::write(root.join("neck.lent"), pid).expect("lent");
         })
     };
     let loan = Loan::borrow(&root, "neck", std::time::Duration::from_secs(5), &stop).expect("lent");
