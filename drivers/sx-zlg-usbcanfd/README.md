@@ -40,6 +40,19 @@ it marks **[unknown]** stays unknown here and is reported, not guessed (below).
   while the first reply is pending. The reference never does this and whether the device
   accepts it is unknown; it stays opt-in until hardware shows it safe and faster.
 
+`CanPort::send_batch` admits a bounded ordered group under one transmit lock, or refuses it
+before queuing any frame. The group has its own transfer boundary: queued frames ahead of it
+cannot split it across acknowledgements. `batch_capacity()` is the smaller of the device's
+transfer limit and its bus-time budget (74 classic frames on the current bench adapter).
+Damiao motion phases use this operation; individual sends still go out immediately. No
+coalescing delay or additional in-flight transfer is introduced. `tx_ack_max_us` records the
+longest USB transmit acknowledgement wait since open, including host scheduling.
+
+An offline delayed-ack test reproduces a nine-frame transfer holding a five-frame suffix past
+the motion deadline; admitting all fourteen together removes that split while receive
+continues independently of the acknowledgement. This does not prevent a preceding phase's
+late acknowledgement from delaying the entire next phase, and is not a hardware timing proof.
+
 ### Transmit budget (a departure: the reference has none)
 
 The reference queues 10240 frames per channel and writes up to 96 per batch whatever the bus

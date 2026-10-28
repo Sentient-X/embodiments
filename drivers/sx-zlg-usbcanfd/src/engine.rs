@@ -97,6 +97,7 @@ pub struct Counters {
     pub tx_queued: AtomicU64,
     pub tx_queue_full: AtomicU64,
     pub tx_batches: AtomicU64,
+    pub tx_ack_max_us: AtomicU64,
     pub tx_reported_sent: AtomicU64,
     pub tx_partial_batches: AtomicU64,
     pub tx_failed_batches: AtomicU64,
@@ -120,6 +121,8 @@ pub struct ChannelStats {
     /// Sends refused because the queue already held its bus-time budget.
     pub tx_queue_full: u64,
     pub tx_batches: u64,
+    /// Longest USB transmit acknowledgement wait since open, including host scheduling.
+    pub tx_ack_max_us: u64,
     /// The sum of the replies' sent counts (their meaning is unverified, §4.4).
     pub tx_reported_sent: u64,
     /// Accepted replies whose sent count was below the batch size.
@@ -147,6 +150,7 @@ impl Counters {
             tx_queued: read(&self.tx_queued),
             tx_queue_full: read(&self.tx_queue_full),
             tx_batches: read(&self.tx_batches),
+            tx_ack_max_us: read(&self.tx_ack_max_us),
             tx_reported_sent: read(&self.tx_reported_sent),
             tx_partial_batches: read(&self.tx_partial_batches),
             tx_failed_batches: read(&self.tx_failed_batches),
@@ -324,9 +328,22 @@ pub enum TxState {
     },
 }
 
+/// One queued frame; a nonzero group length starts an indivisible transmit batch.
+#[derive(Clone, Copy)]
+pub struct QueuedFrame {
+    frame: TxFrame,
+    group_len: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BatchRefused {
+    Capacity,
+    Full,
+}
+
 /// A channel's transmit side.
 pub struct TxSide {
-    pub ring: Ring<TxFrame>,
+    pub ring: Ring<QueuedFrame>,
     pub bitrate: Bitrate,
     pub budget: TxBudget,
     /// The bus time of what is queued.
@@ -351,7 +368,13 @@ impl TxSide {
     #[must_use]
     pub fn new(bitrate: Bitrate, budget: TxBudget) -> Self {
         Self {
-            ring: Ring::new(budget.ring_slots, EMPTY_TX),
+            ring: Ring::new(
+                budget.ring_slots,
+                QueuedFrame {
+                    frame: EMPTY_TX,
+                    group_len: 0,
+                },
+            ),
             bitrate,
             budget,
             queued: Duration::ZERO,
@@ -380,7 +403,40 @@ impl TxSide {
         if self.queued + cost > self.budget.queue {
             return Err(frame);
         }
-        self.ring.push(frame)?;
+        self.ring
+            .push(QueuedFrame {
+                frame,
+                group_len: 0,
+            })
+            .map_err(|queued| queued.frame)?;
+        self.queued += cost;
+        Ok(())
+    }
+
+    /// Preflight the entire group under the transmit lock. No frame is queued on refusal;
+    /// a group that fits is transmitted alone so earlier queued frames cannot split it.
+    ///
+    /// # Errors
+    /// Returns `Capacity` when the group cannot fit one transfer, or `Full` for queue pressure.
+    ///
+    /// # Panics
+    /// Only if the ring violates its checked capacity while exclusively borrowed.
+    pub fn push_batch(&mut self, frames: &[TxFrame]) -> Result<(), BatchRefused> {
+        let cost: Duration = frames.iter().map(|frame| self.cost(frame)).sum();
+        if frames.len() > self.budget.batch_frames || cost > self.budget.batch {
+            return Err(BatchRefused::Capacity);
+        }
+        if self.queued + cost > self.budget.queue || frames.len() > self.ring.free() {
+            return Err(BatchRefused::Full);
+        }
+        for (index, frame) in frames.iter().copied().enumerate() {
+            // Capacity was checked for the whole group with this queue exclusively held.
+            let queued = QueuedFrame {
+                frame,
+                group_len: if index == 0 { frames.len() } else { 0 },
+            };
+            assert!(self.ring.push(queued).is_ok());
+        }
         self.queued += cost;
         Ok(())
     }
@@ -523,6 +579,7 @@ impl Shared {
 
 /// One transmit batch awaiting its reply.
 struct InFlight {
+    submitted: Instant,
     channel: u8,
     frames: usize,
     deadline: Instant,
@@ -838,6 +895,11 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
             let Some(channel) = self.shared.channels.get(usize::from(batch.channel)) else {
                 continue;
             };
+            channel.counters.tx_ack_max_us.fetch_max(
+                u64::try_from(now.saturating_duration_since(batch.submitted).as_micros())
+                    .unwrap_or(u64::MAX),
+                Ordering::Relaxed,
+            );
             match reply {
                 Ok(Ok(reply)) if reply.status == 0 => {
                     let counters = &channel.counters;
@@ -968,15 +1030,22 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
                 if tx.ring.is_empty() {
                     continue;
                 }
-                let (limit, budget) = (
+                let (mut limit, budget) = (
                     tx.budget.batch_frames.min(self.config.batch_limit),
                     tx.budget.batch,
                 );
                 let (mut count, mut bus) = (0, Duration::ZERO);
                 while count < limit {
-                    let Some(frame) = tx.ring.peek().copied() else {
+                    let Some(queued) = tx.ring.peek().copied() else {
                         break;
                     };
+                    if queued.group_len > 0 {
+                        if count > 0 {
+                            break;
+                        }
+                        limit = queued.group_len;
+                    }
+                    let frame = queued.frame;
                     let cost = tx.cost(&frame);
                     if count > 0 && bus + cost > budget {
                         break;
@@ -1006,6 +1075,7 @@ impl<R: Pipe, W: Pipe, A: Pipe> Engine<R, W, A> {
             self.writer.submit(out);
             self.replies.submit(reply);
             self.in_flight.push_back(InFlight {
+                submitted: now,
                 channel: channel_index,
                 frames: count,
                 deadline: now + self.config.reply_timeout,
@@ -1240,6 +1310,86 @@ mod tests {
         assert_eq!(stats.tx_partial_batches, 1);
         assert_eq!(stats.tx_reported_sent, 1 + 12 + 12 + 2);
         assert_eq!(engine.outstanding(), 0);
+    }
+
+    fn full_batch_engine() -> (Engine<Fake, Fake, Fake>, Arc<Shared>) {
+        let (mut engine, shared) = engine(1);
+        engine.config.batch_limit = MAX_BATCH;
+        *lock(&shared.channels[0].tx) = TxSide::new(
+            Bitrate::CLASSIC_1M,
+            TxBudget::new(Bitrate::CLASSIC_1M, CONFIG.transmit_timeout, MAX_BATCH),
+        );
+        (engine, shared)
+    }
+
+    #[test]
+    fn an_atomic_phase_avoids_a_suffix_waiting_for_an_earlier_transmit_ack() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_micros(28_780);
+        let (mut split, shared) = full_batch_engine();
+        queue(&shared, 0, 9);
+        split.step(&mut cx(), now);
+        split.writer.complete_out();
+        queue(&shared, 0, 5);
+        split.step(&mut cx(), deadline);
+        assert_eq!(split.writer.submitted.len(), 1);
+        assert_eq!(lock(&shared.channels[0].tx).ring.len(), 5);
+        assert_eq!(failure(&shared, 0), None);
+        split.replies.complete(&reply(0, 0, 9));
+        split.step(&mut cx(), now + Duration::from_millis(35));
+        assert_eq!(count_of(&split.writer.submitted[1]), 5);
+        assert_eq!(shared.channels[0].counters.snapshot().tx_ack_max_us, 35_000);
+
+        let (mut whole, shared) = full_batch_engine();
+        let frames = [TxFrame::classic(0x17, false, &[0; 8]).expect("frame"); 14];
+        lock(&shared.channels[0].tx)
+            .push_batch(&frames)
+            .expect("fits");
+        whole.step(&mut cx(), now);
+        whole.writer.complete_out();
+        let answers: Vec<_> = (0..14).map(|id| classic(0, id + 32)).collect();
+        whole.rx.complete(&transfer(TYPE_CLASSIC, &answers));
+        whole.step(&mut cx(), now + Duration::from_millis(4));
+        whole.step(&mut cx(), deadline);
+        assert_eq!(count_of(&whole.writer.submitted[0]), 14);
+        assert!(lock(&shared.channels[0].tx).ring.is_empty());
+        assert_eq!(lock(&shared.channels[0].rx).ring.len(), 14);
+        assert_eq!(
+            whole.outstanding(),
+            1,
+            "answers need not await the TX acknowledgement"
+        );
+    }
+
+    #[test]
+    fn a_batch_is_refused_whole_or_keeps_its_boundary_behind_queued_frames() {
+        let (mut engine, shared) = full_batch_engine();
+        let frame = TxFrame::classic(0x17, false, &[0; 8]).expect("frame");
+        queue(&shared, 0, 61);
+        {
+            let mut tx = lock(&shared.channels[0].tx);
+            assert_eq!(tx.push_batch(&[frame; 14]), Err(BatchRefused::Full));
+            assert_eq!(tx.ring.len(), 61, "no accepted prefix on refusal");
+            assert_eq!(tx.push_batch(&[frame; 75]), Err(BatchRefused::Capacity));
+            assert_eq!(tx.ring.len(), 61);
+            tx.clear();
+        }
+        queue(&shared, 0, 60);
+        lock(&shared.channels[0].tx)
+            .push_batch(&[frame; 14])
+            .expect("fits exactly");
+        let now = Instant::now();
+        engine.step(&mut cx(), now);
+        assert_eq!(
+            count_of(&engine.writer.submitted[0]),
+            60,
+            "the group is not appended or split"
+        );
+        engine.writer.complete_out();
+        engine.replies.complete(&reply(0, 0, 60));
+        engine.step(&mut cx(), now);
+        assert_eq!(count_of(&engine.writer.submitted[1]), 14);
+        assert!(lock(&shared.channels[0].tx).ring.is_empty());
     }
 
     #[test]

@@ -356,6 +356,21 @@ impl<P: CanPort> MotorControl<P> {
         dq: f64,
         tau: f64,
     ) -> Result<(), DmCanError> {
+        let frame = self.mit_frame(slave_id, kp, kd, q, dq, tau)?;
+        self.port.send(&frame)?;
+        Ok(())
+    }
+
+    /// Build before submitting a phase, so an invalid target never admits a partial group.
+    pub(crate) fn mit_frame(
+        &self,
+        slave_id: u16,
+        kp: f64,
+        kd: f64,
+        q: f64,
+        dq: f64,
+        tau: f64,
+    ) -> Result<CanFrame, DmCanError> {
         let index = self.index(slave_id)?;
         let kp_uint = float_to_uint(kp, 0.0, 500.0, 12)?;
         let kd_uint = float_to_uint(kd, 0.0, 5.0, 12)?;
@@ -373,7 +388,10 @@ impl<P: CanPort> MotorControl<P> {
             low_byte(((kd_uint & 0xf) << 4) | ((tau_uint >> 8) & 0xf)),
             low_byte(tau_uint),
         ];
-        self.send_data(slave_id, data_buf)
+        Ok(CanFrame {
+            id: u32::from(slave_id),
+            data: data_buf,
+        })
     }
 
     /// One `FF..cmd` control frame, without the vendor's wait (not in `DM_CAN.py`).

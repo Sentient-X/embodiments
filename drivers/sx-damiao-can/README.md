@@ -58,6 +58,13 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   `tests/transcripts.rs` holds motor by motor against the vendor's recordings; only the
   interleaving across motors and the waits differ. A frame refused for a full transmit queue
   (`WouldBlock`) is sent again as the bus drains, within the port's `frame_allowance`.
+- **Atomic motion admission.** MIT frames are built before enable or submission, then admitted
+  in groups bounded by `CanPort::batch_capacity()`. A refused group accepted no prefix, so only
+  that group is retried; a single-frame transport retains its existing sequence. On ZLG a
+  fourteen-motor phase fits one transfer instead of a scheduling-dependent split whose suffix
+  must wait for an earlier USB acknowledgement. Feedback deadlines and missing readings are
+  unchanged: queue admission never proves a motor answered. Bring-up, refresh and stop retain
+  their existing per-frame sequencing.
 - **Commandable ranges.** `commandable()` is each axis's declared bounds intersected with the
   motor range: for the arm, the URDF limits inside the deployed LeRobot driver's soft box; for
   the gripper, 0..0.045 m, what the motor's -5.0 rad open angle reaches of the 0.0715 m stroke.

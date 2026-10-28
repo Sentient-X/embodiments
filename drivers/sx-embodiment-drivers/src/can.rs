@@ -109,7 +109,7 @@ impl RoundTripWindow {
 }
 
 /// One classic CAN data frame.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CanFrame {
     /// The arbitration id: 11-bit standard or 29-bit extended, as the bus's protocol uses.
     pub id: u32,
@@ -182,6 +182,29 @@ pub trait CanPort: Send {
     ///
     /// Returns the link's I/O error.
     fn send(&mut self, frame: &CanFrame) -> io::Result<()>;
+
+    /// Maximum frames admitted together by `send_batch`; always at least one.
+    /// Single-frame links keep their existing sequencing.
+    fn batch_capacity(&self) -> std::num::NonZeroUsize {
+        std::num::NonZeroUsize::MIN
+    }
+
+    /// Admit one ordered group without accepting a prefix on error. Buffered links preserve
+    /// its boundary through transmission; success means admitted, not observed on the bus.
+    ///
+    /// # Errors
+    /// Rejects a group above `batch_capacity` before accepting any frame, or reports the link's
+    /// failure. A caller may retry a refused group, never a successfully admitted one.
+    fn send_batch(&mut self, frames: &[CanFrame]) -> io::Result<()> {
+        match frames {
+            [] => Ok(()),
+            [frame] => self.send(frame),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CAN batch exceeds capacity",
+            )),
+        }
+    }
 
     /// The next frame the link has received, or `None` when nothing is pending.
     ///
@@ -265,6 +288,14 @@ impl<P: CanPort + ?Sized> CanPort for Box<P> {
         (**self).send(frame)
     }
 
+    fn batch_capacity(&self) -> std::num::NonZeroUsize {
+        (**self).batch_capacity()
+    }
+
+    fn send_batch(&mut self, frames: &[CanFrame]) -> io::Result<()> {
+        (**self).send_batch(frames)
+    }
+
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
         (**self).receive()
     }
@@ -326,6 +357,19 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
             .lock()
             .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
             .send(frame)
+    }
+
+    fn batch_capacity(&self) -> std::num::NonZeroUsize {
+        self.0
+            .lock()
+            .map_or(std::num::NonZeroUsize::MIN, |port| port.batch_capacity())
+    }
+
+    fn send_batch(&mut self, frames: &[CanFrame]) -> io::Result<()> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("the shared CAN port is poisoned"))?
+            .send_batch(frames)
     }
 
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
@@ -393,6 +437,35 @@ impl<P: CanPort> CanPort for SharedCanPort<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_single_frame_port_refuses_a_larger_group_without_sending_a_prefix() {
+        #[derive(Default)]
+        struct Single(Vec<CanFrame>);
+        impl CanPort for Single {
+            fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
+                self.0.push(*frame);
+                Ok(())
+            }
+            fn receive(&mut self) -> io::Result<Option<CanFrame>> {
+                Ok(None)
+            }
+        }
+        let mut port = Single::default();
+        let frame = CanFrame {
+            id: 1,
+            data: [0; 8],
+        };
+        assert_eq!(port.batch_capacity().get(), 1);
+        assert_eq!(
+            port.send_batch(&[frame; 2]).expect_err("too large").kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(port.0.is_empty());
+        port.send_batch(&[]).expect("empty");
+        port.send_batch(&[frame]).expect("one");
+        assert_eq!(port.0, [frame]);
+    }
 
     #[test]
     fn a_period_reports_its_slowest_answer_and_its_percentiles() {
