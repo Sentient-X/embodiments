@@ -558,6 +558,26 @@ pub(crate) fn phase_into<P: CanPort>(
     mut frame: impl FnMut(&mut MotorControl<P>, usize, Request) -> Result<(), DmCanError>,
     phase: &mut Phase,
 ) {
+    phase_groups_into(
+        control,
+        requests,
+        wait,
+        1,
+        |control, index, _| frame(control, index, requests[index]),
+        phase,
+    );
+}
+
+/// The same phase with atomic, bounded transmit groups. Every group is attempted; retrying a
+/// refused group cannot duplicate any admitted prefix (`CanPort::send_batch`).
+fn phase_groups_into<P: CanPort>(
+    control: &mut MotorControl<P>,
+    requests: &[Request],
+    wait: Wait,
+    group_size: usize,
+    mut frame: impl FnMut(&mut MotorControl<P>, usize, usize) -> Result<(), DmCanError>,
+    phase: &mut Phase,
+) {
     let registers = requests
         .iter()
         .any(|request| matches!(request.awaits, Awaits::Register(_)));
@@ -584,11 +604,12 @@ pub(crate) fn phase_into<P: CanPort>(
         }
     }
     let allowance = control.port().frame_allowance();
-    for (index, request) in requests.iter().enumerate() {
+    for index in (0..requests.len()).step_by(group_size) {
+        let end = (index + group_size).min(requests.len());
         let give_up = Instant::now() + allowance;
         let result = loop {
             let attempt = Instant::now();
-            match frame(control, index, *request) {
+            match frame(control, index, end) {
                 // A full queue, or a link its driver just recovered from a stall without a
                 // replug (the ZLG's `Interrupted`: "this frame was not sent: send again"): wait
                 // for room, reading answers meanwhile, and send the frame again.
@@ -613,7 +634,7 @@ pub(crate) fn phase_into<P: CanPort>(
             }
         };
         match result {
-            Ok(sent) => phase.sent[index] = Some(sent),
+            Ok(sent) => phase.sent[index..end].fill(Some(sent)),
             Err(error) => {
                 phase.failure.get_or_insert(error);
             }
@@ -1130,20 +1151,29 @@ impl<P: CanPort> DamiaoChain<P> {
             sent.push(frame);
             applied.push(at_joint);
         }
+        let mut frames: Axes<CanFrame> = Axes::new();
+        for (index, motor) in self.motors.iter().enumerate() {
+            let (dq, tau) = sent[index];
+            frames.push(self.control.mit_frame(
+                self.ids[index],
+                motor.kp,
+                motor.kd,
+                targets[index],
+                dq,
+                tau,
+            )?);
+        }
         if !self.enabled {
             self.arm_and_enable()?;
         }
         self.command_readings = None;
-        let motors = &self.motors;
-        phase_into(
+        let group_size = self.control.port().batch_capacity().get();
+        phase_groups_into(
             &mut self.control,
             &self.every_feedback,
             Wait::Tick,
-            |control, index, request| {
-                let DamiaoAxis { kp, kd, .. } = motors[index];
-                let (dq, tau) = sent[index];
-                control.send_mit(request.bus_id, kp, kd, targets[index], dq, tau)
-            },
+            group_size,
+            |control, start, end| Ok(control.port_mut().send_batch(&frames[start..end])?),
             &mut self.tick,
         );
         if let Some(failure) = self.tick.failure.take() {

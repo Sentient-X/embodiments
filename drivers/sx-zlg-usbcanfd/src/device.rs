@@ -22,8 +22,9 @@ use sx_embodiment_drivers::can::{CanFrame, CanPort, RoundTrip, RoundTripWindow};
 use thiserror::Error;
 
 use crate::engine::{
-    Buffers, ChannelStats, DeviceStats, Engine, EngineConfig, RX_RING, RX_TRANSFER_LEN,
-    RX_TRANSFERS, Shared, Stall, ThreadWaker, TxBudget, TxFailure, TxSide, TxState, lock,
+    BatchRefused, Buffers, ChannelStats, DeviceStats, Engine, EngineConfig, RX_RING,
+    RX_TRANSFER_LEN, RX_TRANSFERS, Shared, Stall, ThreadWaker, TxBudget, TxFailure, TxSide,
+    TxState, lock,
 };
 use crate::timing::{Bitrate, TimingError};
 use crate::usb::{BulkPipe, CommandError, Commands, control_in};
@@ -801,6 +802,10 @@ impl Channel {
     ///
     /// As [`CanPort::send`]; every refusal carries a [`LinkError`].
     pub fn send_frame(&mut self, frame: TxFrame) -> io::Result<()> {
+        self.enqueue(&[frame], false)
+    }
+
+    fn enqueue(&mut self, frames: &[TxFrame], grouped: bool) -> io::Result<()> {
         self.usable()?;
         let state = self.state();
         let mut tx = lock(&state.tx);
@@ -833,7 +838,18 @@ impl Channel {
             }
             .into());
         }
-        if tx.push(frame).is_err() {
+        let admitted = if grouped {
+            tx.push_batch(frames)
+        } else {
+            tx.push(frames[0]).map_err(|_| BatchRefused::Full)
+        };
+        if admitted == Err(BatchRefused::Capacity) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CAN batch exceeds transport capacity",
+            ));
+        }
+        if admitted == Err(BatchRefused::Full) {
             state.counters.tx_queue_full.fetch_add(1, Ordering::Relaxed);
             return Err(LinkError::QueueFull {
                 channel: self.index,
@@ -843,7 +859,10 @@ impl Channel {
             .into());
         }
         drop(tx);
-        state.counters.tx_queued.fetch_add(1, Ordering::Relaxed);
+        state
+            .counters
+            .tx_queued
+            .fetch_add(frames.len() as u64, Ordering::Relaxed);
         self.core.shared.wake();
         Ok(())
     }
@@ -1054,6 +1073,30 @@ impl CanPort for Channel {
         self.send_frame(frame)
     }
 
+    fn batch_capacity(&self) -> std::num::NonZeroUsize {
+        std::num::NonZeroUsize::new(self.budget().batch_frames)
+            .expect("a transmit budget holds a frame")
+    }
+
+    fn send_batch(&mut self, frames: &[CanFrame]) -> io::Result<()> {
+        if frames.is_empty() {
+            return Ok(());
+        }
+        if frames.len() > self.batch_capacity().get() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CAN batch exceeds transport capacity",
+            ));
+        }
+        let empty = TxFrame::classic(0, false, &[]).expect("empty classic frame");
+        let mut batch = [empty; MAX_BATCH];
+        for (slot, frame) in batch.iter_mut().zip(frames) {
+            *slot = TxFrame::classic(frame.id, frame.id > 0x7FF, &frame.data)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        }
+        self.enqueue(&batch[..frames.len()], true)
+    }
+
     /// The next classic data frame, or `None` when nothing is pending. CAN FD frames longer
     /// than 8 bytes and remote frames are not classic data and are read past; a full receive
     /// ring's losses are reported once.
@@ -1140,6 +1183,7 @@ impl CanPort for Channel {
             ("tx_queued", channel.tx_queued),
             ("tx_queue_full", channel.tx_queue_full),
             ("tx_batches", channel.tx_batches),
+            ("tx_ack_max_us", channel.tx_ack_max_us),
             ("tx_partial_batches", channel.tx_partial_batches),
             ("tx_failed_batches", channel.tx_failed_batches),
             ("tx_holds", channel.tx_holds),
