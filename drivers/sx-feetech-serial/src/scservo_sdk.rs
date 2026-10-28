@@ -581,6 +581,19 @@ impl GroupSyncRead {
         result
     }
 
+    /// The SYNC READ again, once, for answers the last one lost: a servo that answered keeps
+    /// its answer, and one that did not takes this read's, if it arrives.
+    pub fn tx_rx_lost<P: SerialPort>(&mut self, ph: &mut ProtocolPacketHandler<P>) -> CommResult {
+        let kept = self.data_dict.clone();
+        let result = self.tx_rx_packet(ph);
+        for ((_, again), (_, first)) in self.data_dict.iter_mut().zip(kept) {
+            if first.is_some() {
+                *again = first;
+            }
+        }
+        result
+    }
+
     /// The status error byte `scs_id` answered with, when its packet arrived whole. The vendor's
     /// `GroupSyncRead` parses it and never returns it; a caller that must refuse a faulted servo
     /// reads it here.

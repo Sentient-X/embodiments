@@ -44,6 +44,8 @@ use crate::scservo_sdk::{
 pub struct SimState {
     pub servos: BTreeMap<u8, [u8; 256]>,
     pub dead: BTreeSet<u8>,
+    /// How many SYNC READ answers each servo still loses, as a noisy line drops one reply.
+    pub lost: BTreeMap<u8, u32>,
     pub inbox: VecDeque<u8>,
     /// Every packet written, in order.
     pub written: Vec<Vec<u8>>,
@@ -248,6 +250,11 @@ impl SimBus {
     pub fn kill(&self, id: u8) {
         self.state().dead.insert(id);
     }
+
+    /// Lose `count` of servo `id`'s next SYNC READ answers, then answer again.
+    pub fn lose_replies(&self, id: u8, count: u32) {
+        self.state().lost.insert(id, count);
+    }
 }
 
 fn checksum(bytes: &[u8]) -> u8 {
@@ -278,6 +285,12 @@ impl SimState {
             if let [address, count, servos @ ..] = params {
                 for servo in servos {
                     if self.dead.contains(servo) {
+                        continue;
+                    }
+                    if let Some(left) = self.lost.get_mut(servo)
+                        && *left > 0
+                    {
+                        *left -= 1;
                         continue;
                     }
                     if let Some(registers) = self.servos.get(servo) {
@@ -1011,5 +1024,25 @@ mod tests {
             crate::chain::pull_in_registers(declared, 100.0).expect("a slower pull-in");
         assert!(speed <= declared.0 / 2 + 1, "{speed} vs {declared:?}");
         assert_eq!(acceleration, declared.1);
+    }
+
+    #[test]
+    fn one_lost_answer_is_read_again_and_two_in_a_row_are_missing() {
+        let bus = calibrated_bus();
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        chain.command(&[0.0; 6]).expect("enabled");
+        bus.lose_replies(5, 1);
+        let receipt = chain.command(&[0.0; 6]).expect("commanded");
+        assert!(
+            receipt.observed.iter().all(|joint| joint.is_finite()),
+            "one lost answer is read again: {:?}",
+            receipt.observed
+        );
+        bus.lose_replies(5, 2);
+        let receipt = chain.command(&[0.0; 6]).expect("commanded");
+        assert!(
+            receipt.observed.iter().any(|joint| joint.is_nan()),
+            "two lost answers in one command leave the servo unobserved"
+        );
     }
 }

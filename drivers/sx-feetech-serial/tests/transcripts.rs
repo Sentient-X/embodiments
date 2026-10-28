@@ -312,14 +312,15 @@ fn goal_positions_are_the_vendors_packets_byte_for_byte() {
             Some(golden.sync_read.request.clone()),
             "the SYNC READ follows it"
         );
-        // An enabled chain sends the SYNC WRITE and the SYNC READ alone. Nothing answers this
-        // read: every axis is unobserved, NaN, and the chain will enable afresh.
+        // An enabled chain sends the SYNC WRITE and the SYNC READ alone, and the SYNC READ once
+        // more for answers it lost. Nothing answers either read: every axis is unobserved,
+        // NaN, and the chain will enable afresh.
         let before = chain.port().written.len();
         let observed = chain
             .command(&case.radians)
             .expect("second command")
             .observed;
-        assert_eq!(chain.port().written.len(), before + 2);
+        assert_eq!(chain.port().written.len(), before + 3);
         assert!(observed.iter().all(|joint| joint.is_nan()));
     }
 }
