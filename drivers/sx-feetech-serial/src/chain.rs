@@ -975,13 +975,18 @@ impl<P: SerialPort> FeetechChain<P> {
     fn sync_read_positions(&mut self) -> Result<Axes<f64>, FeetechChainError> {
         let _ = self.reader.tx_rx_packet(&mut self.sms.ph);
         // One lost answer is asked again, once: a read moves nothing, and every servo must
-        // still answer this command's own read. A noisy line drops a single reply now and then
+        // still answer this command's own read. The miss already waited the packet timeout
+        // (50 ms); a second read that answers adds about 1-2 ms, one that does not, another
+        // timeout. A noisy line drops a single reply now and then
         // (10-28: the Spark's left gripper, three in three minutes, each ending the session).
         if self
             .servos
             .iter()
             .any(|servo| self.reader.get_error(servo.scs_id()).is_none())
         {
+            // Counted with every other exchange tried once more, so a line that drops replies
+            // still shows in the chain's retry count, whose owner logs it.
+            self.retried += 1;
             let _ = self.reader.tx_rx_lost(&mut self.sms.ph);
         }
         let reader = &self.reader;
