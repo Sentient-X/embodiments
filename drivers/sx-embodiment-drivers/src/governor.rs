@@ -200,8 +200,6 @@ struct Outside {
     /// the edge it rests outside of; negative inside). Only a target deeper still approaches it
     /// again.
     asked: Option<f64>,
-    /// How many times it was approached again, at most [`MAX_REAPPROACHES`].
-    rearmed: u8,
 }
 
 /// How many times one joint given up on outside its range is approached again, each on a
@@ -235,6 +233,10 @@ pub struct Governor<C, K = MonotonicClock> {
     unavailable: Vec<usize>,
     /// Per axis, the commands in a row whose receipt did not observe it.
     missed: Vec<u8>,
+    /// Per axis, how many times it was approached again outside its range since the chain
+    /// was last stopped or cleared: kept apart from the outside record, which a joint reading
+    /// near its edge clears and recreates, so the cap holds (refute of the re-approach).
+    reapproached: Vec<u8>,
     /// The chain's derated axes, already applied to `limits` and `torque_caps`.
     derated: Vec<AxisDerate>,
     /// The largest feed-forward torque each axis is sent, N·m, where a derate bounds it.
@@ -367,6 +369,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             latched: false,
             unavailable: chain_unavailable,
             missed: vec![0; width],
+            reapproached: vec![0; width],
             derated,
             torque_caps,
             opened_at,
@@ -628,10 +631,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 } else {
                     position
                 };
-                if (brought - position).abs() > f64::EPSILON && step > 0.0 {
-                    speed = (brought - value) / step;
+                // Two commands at one instant move nothing further.
+                if step > 0.0 {
+                    if (brought - position).abs() > f64::EPSILON {
+                        // The speed sent, held to the axis's bound so a later step's
+                        // acceleration limit never starts from past it.
+                        speed = ((brought - value) / step).clamp(-limit.max_speed, limit.max_speed);
+                    }
+                    position = brought;
                 }
-                position = brought;
             }
             positions.push(position);
             speeds.push(speed);
@@ -696,20 +704,21 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             };
             let asked = past(*target);
             match outside.asked {
-                // The deepest target asked since it was given up on: held while the caller asks
-                // no further in than any request before.
+                // The request it was given up on (or last approached again on): the anchor a
+                // request must go deeper than, fixed, so an operator easing it in slowly
+                // re-arms it once the request is OUTSIDE_TOLERANCE deeper, and jitter never does.
                 None => outside.asked = Some(asked),
-                Some(deepest)
-                    if asked + OUTSIDE_TOLERANCE < deepest
+                Some(anchor)
+                    if asked + OUTSIDE_TOLERANCE < anchor
                         && asked < past(*at)
-                        && outside.rearmed < MAX_REAPPROACHES =>
+                        && self.reapproached[index] < MAX_REAPPROACHES =>
                 {
                     outside.given_up = false;
                     outside.since = now;
-                    outside.asked = Some(asked);
-                    outside.rearmed += 1;
+                    outside.asked = None;
+                    self.reapproached[index] += 1;
                 }
-                Some(deepest) => outside.asked = Some(deepest.min(asked)),
+                Some(_) => {}
             }
         }
     }
@@ -741,7 +750,6 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                         out,
                         given_up: false,
                         asked: None,
-                        rearmed: 0,
                     });
                 }
                 Some(outside) if paused || out < outside.out - OUTSIDE_PROGRESS => {
@@ -966,6 +974,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.outside.fill(None);
         self.noted = None;
         self.missed.fill(0);
+        self.reapproached.fill(0);
         self.chain.stop()
     }
 
@@ -1005,6 +1014,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     fn clear_faults(&mut self) {
         self.latched = false;
         self.missed.fill(0);
+        self.reapproached.fill(0);
         self.held = None;
         self.interval = None;
         self.outside.fill(None);
@@ -1878,32 +1888,52 @@ mod tests {
     }
 
     /// A joint pushed further out after take-up is not followed out by the lead toward where it
-    /// is: the command stays at the interval's edge and the tracking check catches it (refute
-    /// of the re-approach).
+    /// is: the command stays at the interval's edge (refute of the re-approach).
     #[test]
-    fn a_joint_pushed_far_out_is_not_led_out_and_faults() {
+    fn a_joint_pushed_further_out_is_not_led_out() {
+        // Taken up outside its range (upper edge 0.9) at 1.0, so the interval reaches 1.0;
+        // then pushed to 1.15, within the tracking bound of what is sent.
         let mut chain = fake(true);
-        chain.rest = vec![0.5, 0.5];
+        chain.rest = vec![1.0, 0.5];
         let (mut governor, clock) = governed(chain);
         clock.advance(MAX_STEP_INTERVAL);
-        governor.command(&[0.5, 0.5]).expect("taken up inside");
-        governor.chain_mut().pinned = Some((0, 1.2));
-        let mut faulted = false;
+        governor.chain_mut().pinned = Some((0, 1.0));
+        governor.command(&[0.5, 0.5]).expect("taken up outside");
+        governor.chain_mut().pinned = Some((0, 1.15));
         for _ in 0..20 {
             clock.advance(MAX_STEP_INTERVAL);
-            match governor.command(&[0.5, 0.5]) {
-                Ok(_) => {
-                    let sent = governor.chain().sent.last().expect("sent")[0];
-                    assert!(sent <= 0.9 + 1e-9, "led out to {sent}");
-                }
-                Err(GovernorError::Tracking { .. }) => {
-                    faulted = true;
-                    break;
-                }
-                Err(other) => panic!("{other:?}"),
+            if governor.command(&[0.5, 0.5]).is_err() {
+                break;
+            }
+            let sent = governor.chain().sent.last().expect("sent")[0];
+            assert!(sent <= 1.0 + 1e-9, "led out to {sent}");
+        }
+    }
+
+    /// The re-approaches of one joint are capped, however often its record is cleared by its
+    /// reading crossing the tolerance line.
+    #[test]
+    fn re_approaches_are_capped() {
+        let mut chain = fake(true);
+        chain.rest = vec![-0.921, 0.5];
+        chain.pinned = Some((0, -0.921));
+        let (mut governor, clock) = governed(chain);
+        let mut target = -0.9;
+        let mut rearmed = 0;
+        for _ in 0..(usize::from(MAX_REAPPROACHES) + 3) {
+            for _ in 0..150 {
+                clock.advance(MAX_STEP_INTERVAL);
+                governor.command(&[target, 0.5]).expect("held or pushed");
+            }
+            assert_eq!(governor.held_outside(), Some(0));
+            target += 0.05;
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[target, 0.5]).expect("deeper");
+            if governor.held_outside().is_none() {
+                rearmed += 1;
             }
         }
-        assert!(faulted, "a joint pushed 0.3 rad out is a tracking fault");
+        assert_eq!(rearmed, usize::from(MAX_REAPPROACHES));
     }
 
     /// One coming in, however slowly, is never given up on; once inside it is a normal joint.
