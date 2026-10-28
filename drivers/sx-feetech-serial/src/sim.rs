@@ -1045,4 +1045,22 @@ mod tests {
             "two lost answers in one command leave the servo unobserved"
         );
     }
+
+    #[test]
+    fn one_lost_answer_in_fifty_never_leaves_a_servo_unobserved() {
+        let bus = calibrated_bus();
+        let mut chain = crate::FeetechChain::open(bus.clone(), neck_fast()).expect("opens");
+        chain.command(&[0.0; 6]).expect("enabled");
+        for tick in 1..=500_u32 {
+            if tick % 50 == 0 {
+                bus.lose_replies(u8::try_from(1 + tick / 50 % 6).expect("id"), 1);
+            }
+            let receipt = chain.command(&[0.0; 6]).expect("commanded");
+            assert!(
+                receipt.observed.iter().all(|joint| joint.is_finite()),
+                "tick {tick}: {:?}",
+                receipt.observed
+            );
+        }
+    }
 }
