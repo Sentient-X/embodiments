@@ -1032,7 +1032,9 @@ fn one_corrupt_acknowledgement_while_enabling_is_tried_again_and_two_are_the_fau
     chain
         .command(&golden.goal_positions[1].radians)
         .expect("one corrupt answer is tried again");
-    assert_eq!(chain.retried(), 1);
+    // The enable's retry, and the command's own read asked once more (no answer is scripted
+    // for it here).
+    assert_eq!(chain.retried(), 2);
     assert!(chain.port().expected.is_empty(), "every exchange was made");
     // Twice corrupt: the fault, as before.
     let mut enable = golden.torque_enable.clone();
