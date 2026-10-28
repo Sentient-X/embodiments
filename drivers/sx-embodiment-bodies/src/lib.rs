@@ -1669,20 +1669,24 @@ impl ChainError for BusError {
 }
 
 /// A feedback type a bus's chain answers in, as the body's one feedback type: a Damiao motor's
-/// own answer, or none from a bus whose command has no answer.
+/// own answer, or, from a bus whose command has no answer, one `Unavailable` answer per axis, so
+/// a body mixing buses keeps one answer per axis (`Chains` drops a body's feedback when any bus
+/// is short of its width) and a Damiao motor's temperatures still reach the station.
 trait Answer: Copy + Default {
-    fn into_feedback(answers: Axes<Self>) -> Axes<MotorFeedback>;
+    fn into_feedback(answers: Axes<Self>, axes: &[BoundAxis]) -> Axes<MotorFeedback>;
 }
 
 impl Answer for MotorFeedback {
-    fn into_feedback(answers: Axes<Self>) -> Axes<MotorFeedback> {
+    fn into_feedback(answers: Axes<Self>, _axes: &[BoundAxis]) -> Axes<MotorFeedback> {
         answers
     }
 }
 
 impl Answer for () {
-    fn into_feedback(_answers: Axes<Self>) -> Axes<MotorFeedback> {
-        Axes::new()
+    fn into_feedback(_answers: Axes<Self>, axes: &[BoundAxis]) -> Axes<MotorFeedback> {
+        axes.iter()
+            .map(|axis| MotorFeedback::unavailable(axis.binding.bus_id))
+            .collect()
     }
 }
 
@@ -1725,7 +1729,7 @@ where
         Ok(Receipt {
             evidence: receipt.evidence,
             observed: receipt.observed,
-            feedback: Answer::into_feedback(receipt.feedback),
+            feedback: Answer::into_feedback(receipt.feedback, self.0.axes()),
         })
     }
 
@@ -1741,7 +1745,7 @@ where
         Ok(Receipt {
             evidence: receipt.evidence,
             observed: receipt.observed,
-            feedback: Answer::into_feedback(receipt.feedback),
+            feedback: Answer::into_feedback(receipt.feedback, self.0.axes()),
         })
     }
 
