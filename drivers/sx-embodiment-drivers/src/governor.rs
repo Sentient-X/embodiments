@@ -440,6 +440,19 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .position(|outside| outside.is_some_and(|outside| outside.given_up))
     }
 
+    /// Each axis observed outside its range: its index, how far out it was last seen (rad),
+    /// whether it was given up on, and how many times it was approached again since the last
+    /// stop. For the station's log of every give-up and re-approach; allocates nothing.
+    pub fn outside_axes(&self) -> impl Iterator<Item = (usize, f64, bool, u8)> + '_ {
+        self.outside
+            .iter()
+            .zip(&self.reapproached)
+            .enumerate()
+            .filter_map(|(index, (outside, again))| {
+                outside.map(|outside| (index, outside.out, outside.given_up, *again))
+            })
+    }
+
     /// Whether a fault is latched: every command is refused until
     /// [`ActuatorChain::clear_faults`].
     #[must_use]
