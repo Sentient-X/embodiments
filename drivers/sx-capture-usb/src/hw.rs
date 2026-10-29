@@ -359,6 +359,10 @@ impl cdc::BulkIn for DeviceBulk {
             Err(error) => Err(error),
         }
     }
+
+    fn clear_halt(&self) -> std::io::Result<()> {
+        self.device.clear_halt(self.endpoint)
+    }
 }
 
 struct UsbfsEncoder {

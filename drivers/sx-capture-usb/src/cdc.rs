@@ -85,10 +85,36 @@ pub fn reopen_lines(control: &impl Control, interfaces: &AcmInterfaces) -> io::R
 pub trait BulkIn: Send + Sync + 'static {
     /// Up to `buffer.len()` bytes within `timeout_ms`; `Ok(0)` when nothing came.
     fn read(&self, buffer: &mut [u8], timeout_ms: u32) -> io::Result<usize>;
+    /// Clear a halt (stall) on the endpoint so it can be read again.
+    fn clear_halt(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
+/// Transfer errors after which Linux's `cdc_acm` resubmits its read rather than closing the
+/// tty: a stall (`EPIPE`, cleared first) and a bus-level transaction error (`EPROTO`,
+/// `EILSEQ`, `ETIME`, `EOVERFLOW`). The laptop pod's encoders never see them; over usbfs
+/// they ended the episode (pod5-quest's left encoder: 33 episodes in four days). A device
+/// that is gone answers `ENODEV`/`ESHUTDOWN`, which stays fatal.
+fn transient(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::EPIPE | libc::EPROTO | libc::EILSEQ | libc::ETIME | libc::EOVERFLOW)
+    )
+}
+
+/// Transient errors in a row, with no transfer between them, after which the link fails.
+pub const MAX_TRANSIENT_IN_ROW: u32 = 5;
+/// The pause before re-reading after a transient error.
+const TRANSIENT_PAUSE: std::time::Duration = std::time::Duration::from_millis(10);
+/// What a recovered error leaves in the listener's bytes: a NUL on each side of a newline,
+/// so the line cut by the error and the line resumed after it both fail to parse as a
+/// sample and are dropped, and no two halves of different lines are ever joined into a
+/// plausible angle.
+pub const DISCONTINUITY: &[u8] = b"\0\n\0";
+
 /// Bytes the link keeps for its listener before the oldest go.
-const LINK_BUFFER: usize = 1 << 16;
+pub const LINK_BUFFER: usize = 1 << 16;
 /// How long one read waits for bytes.
 const READ_TIMEOUT_MS: u32 = 200;
 
@@ -103,6 +129,9 @@ struct LinkState {
     reads: u64,
     empty: u64,
     bytes: u64,
+    /// Transient transfer errors read past, and the last one's detail.
+    recovered: u64,
+    last_recovered: Option<String>,
 }
 
 struct LinkShared {
@@ -227,14 +256,42 @@ impl Drop for CdcLink {
 fn read_link(shared: &LinkShared, bulk: &dyn BulkIn, size: usize) {
     use std::sync::atomic::Ordering;
     let mut buffer = vec![0_u8; size];
+    let mut in_row = 0_u32;
     while !shared.stop.load(Ordering::SeqCst) {
         match bulk.read(&mut buffer, READ_TIMEOUT_MS) {
             Ok(0) => {
+                in_row = 0;
                 let mut state = shared.lock();
                 state.reads += 1;
                 state.empty += 1;
             }
+            Err(error) if transient(&error) && in_row < MAX_TRANSIENT_IN_ROW => {
+                in_row += 1;
+                let cleared = if error.raw_os_error() == Some(libc::EPIPE) {
+                    bulk.clear_halt()
+                } else {
+                    Ok(())
+                };
+                let mut state = shared.lock();
+                if let Err(clear) = cleared {
+                    state.failure = Some((
+                        clear.kind(),
+                        format!("{error}; clearing the stalled endpoint failed: {clear}"),
+                    ));
+                    drop(state);
+                    shared.arrived.notify_all();
+                    return;
+                }
+                state.recovered += 1;
+                state.last_recovered = Some(error.to_string());
+                if state.listener.is_some() {
+                    state.buffer.extend(DISCONTINUITY);
+                }
+                drop(state);
+                std::thread::sleep(TRANSIENT_PAUSE);
+            }
             Ok(count) => {
+                in_row = 0;
                 let mut state = shared.lock();
                 state.reads += 1;
                 state.bytes += count as u64;
@@ -266,10 +323,17 @@ impl LinkSource {
     pub fn diagnostics(&self) -> String {
         let state = self.shared.lock();
         format!(
-            "link: {} bulk reads, {} empty, {} bytes{}",
+            "link: {} bulk reads, {} empty, {} bytes{}{}",
             state.reads,
             state.empty,
             state.bytes,
+            state
+                .last_recovered
+                .as_ref()
+                .map_or_else(String::new, |last| format!(
+                    ", {} transfer errors read past (last: {last})",
+                    state.recovered
+                )),
             state
                 .failure
                 .as_ref()
@@ -494,6 +558,132 @@ mod tests {
         assert_eq!(read_some(&mut third), b"fresh\n");
         assert_eq!(bulk.most.load(Ordering::SeqCst), 1, "one reader at a time");
         drop(third);
+        drop(link);
+    }
+
+    /// A bulk IN endpoint that answers from a script of results, then nothing.
+    #[derive(Default)]
+    struct FlakyBulk {
+        script: std::sync::Mutex<std::collections::VecDeque<io::Result<Vec<u8>>>>,
+        cleared: std::sync::atomic::AtomicUsize,
+    }
+
+    impl FlakyBulk {
+        fn new(script: Vec<io::Result<Vec<u8>>>) -> Self {
+            Self {
+                script: std::sync::Mutex::new(script.into()),
+                cleared: 0.into(),
+            }
+        }
+    }
+
+    impl BulkIn for FlakyBulk {
+        fn read(&self, buffer: &mut [u8], _timeout_ms: u32) -> io::Result<usize> {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            match self.script.lock().unwrap().pop_front() {
+                Some(Ok(bytes)) => {
+                    buffer[..bytes.len()].copy_from_slice(&bytes);
+                    Ok(bytes.len())
+                }
+                Some(Err(error)) => Err(error),
+                None => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    Ok(0)
+                }
+            }
+        }
+
+        fn clear_halt(&self) -> io::Result<()> {
+            self.cleared
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn os(errno: i32) -> io::Result<Vec<u8>> {
+        Err(io::Error::from_raw_os_error(errno))
+    }
+
+    fn read_until_quiet(source: &mut LinkSource) -> io::Result<Vec<u8>> {
+        let mut got = Vec::new();
+        let mut buffer = [0_u8; 64];
+        let mut quiet = 0;
+        while quiet < 3 {
+            let count = source.read(&mut buffer)?;
+            quiet = if count == 0 { quiet + 1 } else { 0 };
+            got.extend_from_slice(&buffer[..count]);
+        }
+        Ok(got)
+    }
+
+    /// A stall and a transaction error mid-stream are read past as `cdc_acm` reads past
+    /// them: the stall is cleared, the stream goes on, and the line each error cut is
+    /// poisoned so no halves of two lines are joined into an angle.
+    #[test]
+    fn a_stall_or_transaction_error_mid_stream_is_read_past_and_marks_the_cut() {
+        let controls = Controls::default();
+        let link = CdcLink::default();
+        let bulk = std::sync::Arc::new(FlakyBulk::new(vec![
+            Ok(b"0.1\n0.2".to_vec()),
+            os(libc::EPIPE),
+            Ok(b"5\n0.3\n".to_vec()),
+            os(libc::EPROTO),
+            Ok(b"0.4\n".to_vec()),
+        ]));
+        let mut source = link.open(&controls, &interfaces(), bulk.clone()).unwrap();
+        let got = read_until_quiet(&mut source).unwrap();
+        assert_eq!(got, b"0.1\n0.2\x00\n\x005\n0.3\n\x00\n\x000.4\n");
+        assert_eq!(bulk.cleared.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let mut lines = sx_yubi::encoder_line::Lines::default();
+        let mut angles = Vec::new();
+        lines
+            .feed(&[b"x\n".as_slice(), &got].concat(), |line| {
+                if let Some((_, angle)) = sx_yubi::encoder_line::parse(line)? {
+                    angles.push(angle);
+                }
+                Ok::<(), String>(())
+            })
+            .unwrap();
+        // The line after a cut may be a tail, so it goes too, even when (as the 0.4 here)
+        // the cut fell between lines: a lost sample, which the seal's drop count judges.
+        assert_eq!(
+            angles.len(),
+            2,
+            "the cut lines are dropped, never joined: {angles:?}"
+        );
+        assert!((angles[0] - 0.1).abs() < 1e-9 && (angles[1] - 0.3).abs() < 1e-9);
+        assert!(
+            source.diagnostics().contains("2 transfer errors read past"),
+            "{}",
+            source.diagnostics()
+        );
+        drop(source);
+        drop(link);
+    }
+
+    /// An endpoint that keeps failing is not retried forever: past the bound the link fails
+    /// with the device's own error, and a gone device fails it at once.
+    #[test]
+    fn errors_in_a_row_past_the_bound_or_a_gone_device_fail_the_link() {
+        let controls = Controls::default();
+        let link = CdcLink::default();
+        let script = (0..=MAX_TRANSIENT_IN_ROW)
+            .map(|_| os(libc::EPROTO))
+            .collect();
+        let bulk = std::sync::Arc::new(FlakyBulk::new(script));
+        let mut source = link.open(&controls, &interfaces(), bulk).unwrap();
+        let error = read_until_quiet(&mut source).unwrap_err();
+        assert_eq!(error.raw_os_error(), None);
+        assert!(error.to_string().contains("Protocol error"), "{error}");
+        drop(source);
+        drop(link);
+
+        let link = CdcLink::default();
+        let bulk = std::sync::Arc::new(FlakyBulk::new(vec![os(libc::ENODEV)]));
+        let mut source = link.open(&controls, &interfaces(), bulk).unwrap();
+        let error = read_until_quiet(&mut source).unwrap_err();
+        assert!(error.to_string().contains("No such device"), "{error}");
+        drop(source);
         drop(link);
     }
 
