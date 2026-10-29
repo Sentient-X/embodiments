@@ -103,9 +103,61 @@ pub type Port = Box<dyn CanPort>;
 /// A boxed bridge to one serial-servo bus.
 pub type SerialLink = Box<dyn SerialPort>;
 
+/// Explicit commissioned targets. Absence never means home, zero, or the observed start.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RobotExitPoses {
+    pub ready: Option<RobotJointPose>,
+    pub parked: Option<RobotParkedPose>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RobotJointPose {
+    #[serde(deserialize_with = "unique_pose_joints")]
+    pub joints: BTreeMap<String, f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RobotParkedPose {
+    pub pose: RobotJointPose,
+    pub configuration_sha256: String,
+    /// The authorized person's physical support verification; parsing cannot prove it true.
+    pub verification_reference: String,
+}
+
+fn unique_pose_joints<'de, D>(deserializer: D) -> Result<BTreeMap<String, f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Joints;
+    impl<'de> serde::de::Visitor<'de> for Joints {
+        type Value = BTreeMap<String, f64>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("unique finite joint targets")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut joints = BTreeMap::new();
+            while let Some((joint, value)) = map.next_entry::<String, f64>()? {
+                if joint.is_empty() || !value.is_finite() || joints.insert(joint, value).is_some() {
+                    return Err(serde::de::Error::custom(
+                        "pose joints must be unique, named and finite",
+                    ));
+                }
+            }
+            Ok(joints)
+        }
+    }
+    deserializer.deserialize_map(Joints)
+}
+
 /// What commissioning recorded for one station's robot: the instance it is, the Fleet pod
 /// revision it was committed as, and which bridge carries each of the body's ports.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Commissioning {
     /// The robot instance's content id.
     pub instance: String,
@@ -125,6 +177,7 @@ pub struct Commissioning {
     /// with the derate declared for this robot (`derate`: `max_speed` and `decided`, who
     /// decided it and why), else the rail module's automatic one.
     pub rails: Rails,
+    pub exit_poses: RobotExitPoses,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +194,8 @@ struct CommissioningDocument {
     rails: BTreeMap<String, f64>,
     #[serde(default)]
     derate: Option<DeclaredDerate>,
+    #[serde(default)]
+    exit_poses: RobotExitPoses,
 }
 
 /// A derate commissioning declares for this robot's over-rail axes.
@@ -202,6 +257,7 @@ impl Commissioning {
             ports: parsed.ports,
             out_of_service: parsed.out_of_service,
             rails,
+            exit_poses: parsed.exit_poses,
         })
     }
 }
