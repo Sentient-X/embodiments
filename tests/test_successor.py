@@ -30,3 +30,12 @@ def test_the_body_before_its_square_pixel_optics_is_the_same_robot() -> None:
     assert before_optics in superseded_ids(STATIC)
     found = successor(before_optics)
     assert found is not None and found.id == current(STATIC).id
+
+
+def test_the_body_before_its_work_ready_posture_is_the_same_robot() -> None:
+    """The square-pixel revision (embodiments #180), superseded by the work-ready posture
+    (#177): a station sealed episodes on it, so it stays readable and drawable."""
+    before_posture = "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4"
+    assert before_posture in superseded_ids(STATIC)
+    found = successor(before_posture)
+    assert found is not None and found.id == current(STATIC).id
