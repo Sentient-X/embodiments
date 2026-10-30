@@ -101,6 +101,7 @@ PUBLIC_SURFACE = frozenset(
         "embodiments",
         "preview_asset",
         "resolve_asset",
+        "viewing_of",
     }
 )
 

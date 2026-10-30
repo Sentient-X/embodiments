@@ -42,7 +42,7 @@ from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
 from ..sites import BodySite
-from ..viewing import TrackedDevice
+from ..viewing import TrackedDevice, Viewing
 from ._authoring import bounded_layout
 from .sources import capture_source
 
@@ -221,6 +221,34 @@ YUBI_MODULE: Final = Module(
     ),
 )
 
+
+_TOUCH_PLUS_PROVENANCE: Final = (
+    "ICP (RMS 0.69 mm) of the {side}_controller_link CAD mesh against Meta's "
+    "webxr-input-profiles assets@1.0 meta-quest-touch-plus/{side}.glb, defined in grip space"
+)
+
+#: The Touch Plus WebXR/OpenXR grip space in each controller link (``controller_link_from_grip``).
+YUBI_TRACKING: Final = (
+    TrackedDevice(
+        side="left",
+        device="meta-quest-touch-plus",
+        space="openxr-grip",
+        frame="left_controller_link",
+        translation_m=(-0.018771, -0.002003, -0.019933),
+        rotation_xyzw=(0.664879, -0.635962, -0.281326, 0.272661),
+        provenance=_TOUCH_PLUS_PROVENANCE.format(side="left"),
+    ),
+    TrackedDevice(
+        side="right",
+        device="meta-quest-touch-plus",
+        space="openxr-grip",
+        frame="right_controller_link",
+        translation_m=(-0.021116, 0.001244, -0.021668),
+        rotation_xyzw=(-0.645548, 0.666414, 0.250385, -0.276528),
+        provenance=_TOUCH_PLUS_PROVENANCE.format(side="right"),
+    ),
+)
+
 YUBI_SPEC: Final = EmbodimentDefinition(
     collection=CollectionSetup(
         method=CollectionMethod.UMI,
@@ -275,31 +303,6 @@ YUBI_SPEC: Final = EmbodimentDefinition(
             "quest_right_controller",
         ),
     ),
-)
-
-_TOUCH_PLUS_PROVENANCE: Final = (
-    "ICP (RMS 0.69 mm) of the {side}_controller_link CAD mesh against Meta's "
-    "webxr-input-profiles assets@1.0 meta-quest-touch-plus/{side}.glb, defined in grip space"
-)
-
-#: The Touch Plus WebXR/OpenXR grip space in each controller link (``controller_link_from_grip``).
-YUBI_TRACKING: Final = (
-    TrackedDevice(
-        side="left",
-        device="meta-quest-touch-plus",
-        space="openxr-grip",
-        frame="left_controller_link",
-        translation_m=(-0.018771, -0.002003, -0.019933),
-        rotation_xyzw=(0.664879, -0.635962, -0.281326, 0.272661),
-        provenance=_TOUCH_PLUS_PROVENANCE.format(side="left"),
-    ),
-    TrackedDevice(
-        side="right",
-        device="meta-quest-touch-plus",
-        space="openxr-grip",
-        frame="right_controller_link",
-        translation_m=(-0.021116, 0.001244, -0.021668),
-        rotation_xyzw=(-0.645548, 0.666414, 0.250385, -0.276528),
-        provenance=_TOUCH_PLUS_PROVENANCE.format(side="right"),
-    ),
+    # Both hands are in every frame beside the robot, so each is drawn lighter.
+    viewing=Viewing(tracking=YUBI_TRACKING, triangle_budget=60_000),
 )

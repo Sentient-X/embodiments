@@ -32,7 +32,7 @@ from .errors import (
     UnknownEmbodimentError,
 )
 from .identity import EmbodimentId, EmbodimentKind, EmbodimentName
-from .known import development_embodiments, embodiments, preview_asset
+from .known import development_embodiments, embodiments, preview_asset, viewing_of
 from .layout import (
     ActuationBinding,
     ActuatorBinding,
@@ -130,4 +130,5 @@ __all__ = [
     "preview_asset",
     "read_recorded",
     "resolve_asset",
+    "viewing_of",
 ]

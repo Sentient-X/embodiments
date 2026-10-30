@@ -14,6 +14,7 @@ from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
 from ..errors import CompositionError, UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
 from ..mechanical import Module
+from ..viewing import Viewing
 from ._previews import PREVIEWS
 from .aloha import ALOHA_SPEC
 from .b601 import B601_DM_SPEC, B601_DM_STATION_SPEC, BIMANUAL_B601_DM_SPEC
@@ -154,6 +155,18 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
 
     def __len__(self) -> int:
         return len(self._definitions)
+
+
+def viewing_of(name: str) -> Viewing:
+    """The viewing facts ``name``'s registry module declares, the default when it declares
+    none; raises `UnknownEmbodimentError` for a name no registry holds."""
+    key = EmbodimentName(name)
+    definition = _DEFINITIONS.get(key)
+    if definition is None and key in DEVELOPMENT_EMBODIMENTS:
+        definition = DEVELOPMENT_EMBODIMENTS[key].spec
+    if definition is None:
+        raise UnknownEmbodimentError(name)
+    return definition.viewing
 
 
 def collection_definitions() -> tuple[EmbodimentDefinition, ...]:

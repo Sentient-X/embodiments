@@ -55,7 +55,6 @@ from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
 GENERATOR: Final = "sx_embodiments.render_pack/v1"
-DEFAULT_TRIANGLE_BUDGET: Final = 150_000
 URDF_FILE: Final = "robot.urdf"
 GLB_FILE: Final = "pack.glb"
 JSON_FILE: Final = "pack.json"
@@ -595,14 +594,18 @@ def build(
     embodiment: Embodiment,
     *,
     name: str | None = None,
-    triangle_budget: int = DEFAULT_TRIANGLE_BUDGET,
+    triangle_budget: int | None = None,
     viewing: Viewing | None = None,
 ) -> RenderPack:
     """``embodiment``'s render pack, decimated to at most ``triangle_budget`` triangles.
 
     ``name`` is the registry key the pack is filed under (the body's name by default);
-    ``viewing`` the body's declared viewing facts, written into ``pack.json``.
+    ``viewing`` the body's declared viewing facts, written into ``pack.json``; the budget is
+    the viewing's unless given (:data:`~sx_embodiments.viewing.DEFAULT_TRIANGLE_BUDGET`
+    without either).
     """
+    if triangle_budget is None:
+        triangle_budget = (viewing or Viewing()).triangle_budget
     urdf = embodiment.urdf_bytes
     links, visuals = _visuals(embodiment, urdf)
     source_total = sum(len(visual.source.faces) for visual in visuals)
