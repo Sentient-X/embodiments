@@ -37,6 +37,7 @@ pub const MASTER_ID_OFFSET: u16 = 0x20;
 
 /// The torso yaw and both arms on one bus.
 pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
+    embodiment: "sentient-static-upper-body",
     bindings: BINDINGS,
     master_id_offset: MASTER_ID_OFFSET,
     // The received driver's heartbeat_timeout, written to every motor's TIMEOUT register.

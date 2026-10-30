@@ -326,17 +326,25 @@ several buses (the static upper body's Damiao CAN bus and Feetech `neck`) is ope
 port, each bus by its vendor's crate. A serial servo's `LeRobot` calibration is per unit
 (`sx_embodiment_drivers::lerobot`), shared by the Feetech and Dynamixel crates.
 
-Any other driven body opens from `drivers/sx-embodiment-bodies/bindings/registry.json`, every
-driven body's bindings in one file. A composition that repeats a part on one bus kind (the
-bimanual SO-101's two arms, each servos 1 to 6) is split into a bus per chain, named by the
-chain's root and the port it repeats (`left_arm_serial`), and its joints are named as its
-description names them (`left_shoulder_pan`): `sx_embodiments.buses.driven_axes`, from the
-composition alone, so no id changes and a body that reuses no address renders as before. Each
-joint names its twin (`of`): the same part's same joint, on the same drive, in a body a crate
-composes. The opener opens that bus with the twin's controller configuration and gives the axes
-back their own names (`BodyBindings::as_twin`); `tests/every_body.rs` opens every body in the
-file on simulated buses. The B601-DM compositions are refused: the B601's arm and gripper
-bridges are its opener's, not the registry's.
+Every body opens one way, from `drivers/sx-embodiment-bodies/bindings/registry.json`: every
+driven body's bindings in one file, the only bindings the station's opener reads. A crate's own
+bindings file is its standalone API's and a golden the registry's document must equal
+(`registry_is_the_one_source` in `sx-embodiment-bodies`); its constant contributes only its
+vendor's controller configuration (servo setups, motor gains), found by the body's registry
+name and port. A composition that repeats a part on one bus kind (the bimanual SO-101's two
+arms, each servos 1 to 6) is split into a bus per chain, named by the chain's root and the port
+it repeats (`left_arm_serial`), and its joints are named as its description names them
+(`left_shoulder_pan`): `sx_embodiments.buses.driven_axes`, from the composition alone, so no id
+changes and a body that reuses no address renders as before. Each joint of a body no crate
+configures names its twin (`of`): the same part's same joint on the same drive (part, joint,
+model, bus, port, id, sign, reduction) in a body a crate configures, and its bus is opened with
+that configuration and given back its own names (`BodyBindings::configured_by`). That is the
+bimanual SO-101 (its arms are SO-101s) and also any body built on another's module whose drives
+match it exactly: the full humanoid and the upper body with grippers open with the humanoid
+upper body's gains. `tests/every_body.rs` opens every body in the file on simulated buses and
+holds each axis to its own joint, port and calibration. The B601-DM compositions are refused:
+the B601's arm and gripper bridges are its opener's, not the registry's, until the registry
+carries them.
 
 | Crate | Bus | Vendor driver it translates | Consumer |
 |---|---|---|---|

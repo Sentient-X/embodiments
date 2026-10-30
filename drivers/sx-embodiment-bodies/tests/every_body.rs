@@ -36,15 +36,17 @@ fn documents() -> Vec<String> {
         .collect()
 }
 
-/// The body's nominal drive: every joint uncalibrated.
+/// A drive of the body with a distinct zero and direction on every joint, so an axis that
+/// lands on another joint's motor, or keeps its twin's name, shows.
 fn nominal(body: &BodyBindings) -> InstanceDrive {
     let instance = format!("{}-unit", body.embodiment);
     let document = serde_json::json!({
         "schema": "sx.instance-drive/v1",
         "embodiment": body.id,
         "instance": instance,
-        "joints": body.axes.iter().map(|axis| serde_json::json!({
-            "joint": axis.joint, "zero": 0.0, "direction": 1, "calibration": null,
+        "joints": body.axes.iter().enumerate().map(|(index, axis)| serde_json::json!({
+            "joint": axis.joint, "zero": zero(index),
+            "direction": if index % 2 == 0 { 1 } else { -1 }, "calibration": null,
         })).collect::<Vec<_>>(),
     });
     InstanceDrive::parse(&document.to_string(), &instance).expect("drive")
@@ -73,6 +75,10 @@ impl PortSource for Simulated {
     }
 }
 
+fn zero(index: usize) -> f64 {
+    0.001 * f64::from(u32::try_from(index).expect("index"))
+}
+
 fn lerobot(ids: &[u16]) -> String {
     let motors: serde_json::Map<String, serde_json::Value> = ids
         .iter()
@@ -90,8 +96,13 @@ fn lerobot(ids: &[u16]) -> String {
 }
 
 /// Open `document`'s body with a simulated bridge on every port it declares, every provisional
-/// port opted in, and stop it: the number of axes it opened with.
-fn open_simulated(document: &str) -> Result<usize, OpenError> {
+/// port opted in and `out_of_service` out, check every axis is its own joint on its own port
+/// with its own calibration, and stop it: the number of axes it opened with, and the indices
+/// it reports unavailable.
+fn open_simulated(
+    document: &str,
+    out_of_service: &[&str],
+) -> Result<(usize, Vec<usize>), OpenError> {
     let body = BodyBindings::parse(document).expect("bindings");
     let drive = nominal(&body);
     let mut bridges = Simulated::default();
@@ -132,6 +143,7 @@ fn open_simulated(document: &str) -> Result<usize, OpenError> {
             "pod_id": "pod-a",
             "pod_revision": 1,
             "ports": ports,
+            "out_of_service": out_of_service,
         })
         .to_string(),
         &drive.instance,
@@ -142,9 +154,28 @@ fn open_simulated(document: &str) -> Result<usize, OpenError> {
         allow_provisional: &provisional,
     };
     let mut opened = open_with(&drive, &commissioning, &calibrations, options, &mut bridges)?;
-    let axes = opened.axes().len();
+    let axes = opened.axes();
+    assert_eq!(axes.len(), body.axes.len(), "{}", body.embodiment);
+    for (index, (axis, declared)) in axes.iter().zip(&body.axes).enumerate() {
+        let what = format!("{}/{}", body.embodiment, declared.joint);
+        assert_eq!(axis.joint, declared.joint, "{what}");
+        assert_eq!(axis.port, declared.port, "{what}");
+        assert_eq!(axis.binding.bus_id, declared.binding.bus_id, "{what}");
+        assert!(
+            (axis.zero - zero(index)).abs() < 1e-12,
+            "{what} zero {}",
+            axis.zero
+        );
+        assert_eq!(
+            axis.direction,
+            if index % 2 == 0 { 1 } else { -1 },
+            "{what}"
+        );
+    }
+    let count = axes.len();
+    let unavailable = opened.unavailable();
     assert!(opened.stop().is_proven(), "{} stops", body.embodiment);
-    Ok(axes)
+    Ok((count, unavailable))
 }
 
 #[test]
@@ -152,7 +183,7 @@ fn every_driven_body_opens_on_simulated_buses() {
     let mut opened = Vec::new();
     for document in documents() {
         let body = BodyBindings::parse(&document).expect("bindings");
-        let result = open_simulated(&document);
+        let result = open_simulated(&document, &[]);
         if UNOPENED.contains(&body.embodiment.as_str()) {
             assert!(
                 matches!(result, Err(OpenError::Bus { .. })),
@@ -161,7 +192,7 @@ fn every_driven_body_opens_on_simulated_buses() {
             );
             continue;
         }
-        let axes = result.unwrap_or_else(|error| panic!("{}: {error}", body.embodiment));
+        let (axes, _) = result.unwrap_or_else(|error| panic!("{}: {error}", body.embodiment));
         assert_eq!(axes, body.axes.len(), "{}", body.embodiment);
         opened.push(body.embodiment);
     }
@@ -191,5 +222,14 @@ fn the_bimanual_so101_opens_each_arm_on_its_own_serial_bus() {
         .map(|(port, _, _)| port)
         .collect();
     assert_eq!(ports, ["left_arm_serial", "right_arm_serial"]);
-    assert_eq!(open_simulated(&document).expect("opens"), 12);
+    assert_eq!(open_simulated(&document, &[]).expect("opens").0, 12);
+    // A joint out of service is the one masked, by this body's name, not its twin's.
+    let (axes, unavailable) = open_simulated(&document, &["left_gripper"]).expect("opens");
+    assert_eq!(axes, 12);
+    let left_gripper = body
+        .axes
+        .iter()
+        .position(|axis| axis.joint == "left_gripper")
+        .expect("left_gripper");
+    assert_eq!(unavailable, [left_gripper]);
 }

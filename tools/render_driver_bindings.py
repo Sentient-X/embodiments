@@ -378,22 +378,23 @@ def document(name: str) -> dict[str, object]:
         home = homes.get((str(coordinate.instance), coordinate.axis.name))
         if home is None and str(coordinate.instance) in chains:
             raise ValueError(f"{name}/{driven.joint} is a chain joint with no home")
-        axes.append(
-            {
-                "joint": driven.joint,
-                "lower": coordinate.lower,
-                "upper": coordinate.upper,
-                "model": binding.model.value,
-                "bus": binding.bus.value,
-                "port": driven.port,
-                "provisional": binding.provisional,
-                "bus_id": binding.bus_id,
-                "sign": binding.sign,
-                "reduction": binding.reduction,
-            }
-            | ({} if home is None else {"home": home})
-            | ({"of": twins[driven.joint]} if driven.joint in twins else {})
-        )
+        entry: dict[str, object] = {
+            "joint": driven.joint,
+            "lower": coordinate.lower,
+            "upper": coordinate.upper,
+            "model": binding.model.value,
+            "bus": binding.bus.value,
+            "port": driven.port,
+            "provisional": binding.provisional,
+            "bus_id": binding.bus_id,
+            "sign": binding.sign,
+            "reduction": binding.reduction,
+        }
+        if home is not None:
+            entry["home"] = home
+        if driven.joint in twins:
+            entry["of"] = twins[driven.joint]
+        axes.append(entry)
     approach = SERVO_APPROACH.get(name, {})
     ports = {axis["port"] for axis in axes}
     if unknown := set(approach) - ports:

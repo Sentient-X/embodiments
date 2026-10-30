@@ -43,6 +43,9 @@ use crate::chain::{DamiaoAxis, DamiaoChain, DamiaoChainError};
 /// The registry's B601-DM axes, rendered.
 pub const BINDINGS: &str = include_str!("../bindings/b601-dm.json");
 
+/// The registry name of the body these bindings are.
+pub const EMBODIMENT: &str = "b601-dm";
+
 /// The vendor's answer-id convention: `feedback_id = motor_id + 0x10`.
 pub const MASTER_ID_OFFSET: u16 = 0x10;
 /// The gripper motor's fully open angle, radians (`position_limits.open`).

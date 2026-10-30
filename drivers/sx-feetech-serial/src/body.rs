@@ -12,7 +12,7 @@
 //! native state order, and [`FeetechChain::open`] refuses a servo whose registers disagree.
 
 use sx_embodiment_drivers::serial::SerialPort;
-use sx_embodiment_drivers::{BodyBindings, BodyError, BoundAxis, InstanceDrive};
+use sx_embodiment_drivers::{ApproachLimit, BodyBindings, BodyError, BoundAxis, InstanceDrive};
 
 use crate::chain::{
     FEETECH_SERIAL, FeetechChain, FeetechChainError, FeetechServo, MotorCalibration, MotorNormMode,
@@ -31,6 +31,9 @@ pub struct ServoSetup {
 /// One Feetech bus of a body.
 #[derive(Clone, Copy, Debug)]
 pub struct FeetechBody {
+    /// The registry name of the body whose bus this is: what the opener finds this bus's
+    /// controller configuration by, for that body and any body whose bus repeats it.
+    pub embodiment: &'static str,
     /// The registry's rendered bindings (`bindings/<body>.json`).
     pub bindings: &'static str,
     /// The port the bindings put this bus's axes on.
@@ -68,20 +71,13 @@ impl FeetechBody {
         Ok(None)
     }
 
-    /// The bus among [`BODIES`] on `port` of the body the registry names `body`: the twin a
-    /// composed body's bus repeats (`BodyBindings::twin_bus`).
-    ///
-    /// # Errors
-    ///
-    /// Returns why a body's bindings do not parse.
-    pub fn named(body: &str, port: &str) -> Result<Option<&'static Self>, BodyError> {
-        for candidate in BODIES {
-            if candidate.port == port && BodyBindings::parse(candidate.bindings)?.embodiment == body
-            {
-                return Ok(Some(candidate));
-            }
-        }
-        Ok(None)
+    /// The bus among [`BODIES`] on `port` of the body the registry names `body`: the
+    /// configuration a bus of that body, or of a body whose bus repeats it, is opened with.
+    #[must_use]
+    pub fn named(body: &str, port: &str) -> Option<&'static Self> {
+        BODIES
+            .into_iter()
+            .find(|candidate| candidate.port == port && candidate.embodiment == body)
     }
 
     /// The rendered bindings of `embodiment`, when any bus among [`BODIES`] is one of its.
@@ -131,11 +127,29 @@ impl FeetechBody {
     /// the registry declares none for its port.
     pub fn setups(&self) -> Result<Vec<ServoSetup>, BodyError> {
         let bindings = BodyBindings::parse(self.bindings)?;
-        let approach = bindings.approach.get(self.port).copied();
+        self.setups_with(
+            bindings.approach.get(self.port).copied(),
+            &bindings.embodiment,
+            self.port,
+        )
+    }
+
+    /// Every joint's setup, in native state order, its servo's approach limit `approach` (the
+    /// registry's for the port of `embodiment` this bus is opened on), else the setup's own.
+    ///
+    /// # Errors
+    ///
+    /// A bus that takes its approach from the registry when `approach` is `None`.
+    pub fn setups_with(
+        &self,
+        approach: Option<ApproachLimit>,
+        embodiment: &str,
+        port: &str,
+    ) -> Result<Vec<ServoSetup>, BodyError> {
         if self.registry_approach && approach.is_none() {
             return Err(BodyError::NoApproach {
-                embodiment: bindings.embodiment,
-                port: self.port.to_owned(),
+                embodiment: embodiment.to_owned(),
+                port: port.to_owned(),
             });
         }
         Ok(self

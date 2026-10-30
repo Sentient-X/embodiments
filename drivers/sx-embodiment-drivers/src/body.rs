@@ -13,9 +13,9 @@
 //!
 //! A body no driver crate composes (a composition that repeats a part, the bimanual SO-101's
 //! two arms) names, for each joint, its twin (`of`): the same part's same joint, on the same
-//! drive, in a body a crate does compose. [`BodyBindings::twin_bus`] answers which body and
-//! port one of its buses repeats, and [`BodyBindings::as_twin`] names that bus's axes as the
-//! twin's, so the crate opens it with the twin's own controller configuration.
+//! drive, in a body a crate does compose. [`BodyBindings::configured_by`] answers, for each
+//! bus, the body whose controller configuration drives it (the twin, or the body itself) with
+//! the bus's axes named as that body's, so every body opens one way.
 
 use std::collections::BTreeMap;
 
@@ -413,6 +413,34 @@ impl BodyBindings {
             approach: BTreeMap::new(),
             ..self
         })
+    }
+
+    /// The bus on `port` as the body whose controller configuration drives it: its twin's
+    /// (`as_twin`) when its joints name one, else this body's own, keeping only that bus's
+    /// axes. Answers that body's registry name and port with the bus.
+    ///
+    /// # Errors
+    ///
+    /// What [`BodyBindings::twin_bus`] refuses.
+    pub fn configured_by(self, port: &str) -> Result<(String, String, Self), BodyError> {
+        if let Some((body, twin_port)) = self.twin_bus(port)? {
+            return Ok((body, twin_port, self.as_twin(port)?));
+        }
+        let axes = self
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .cloned()
+            .collect();
+        Ok((
+            self.embodiment.clone(),
+            port.to_owned(),
+            Self {
+                axes,
+                twins: BTreeMap::new(),
+                ..self
+            },
+        ))
     }
 
     /// The axes on buses of `kind` alone, in native state order: what a crate driving only

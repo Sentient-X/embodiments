@@ -61,6 +61,11 @@ def driven_axes(body: Embodiment) -> tuple[DrivenAxis, ...]:
     split_ports = {axis.port for axis in axes if axis.port != axis.binding.bus_port}
     if clash := split_ports & kept:
         raise EmbodimentError(f"{body.name}: a split bus's port {sorted(clash)} is already named")
+    kinds: dict[BusPort, set[ActuatorBus]] = {}
+    for axis in axes:
+        kinds.setdefault(axis.port, set()).add(axis.binding.bus)
+    if mixed := sorted(port for port, held in kinds.items() if len(held) > 1):
+        raise EmbodimentError(f"{body.name}: ports {mixed} would carry two kinds of bus")
     return tuple(axes)
 
 

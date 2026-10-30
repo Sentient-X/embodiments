@@ -3,6 +3,9 @@
 from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.buses import driven_axes
 
+#: The bodies that repeat a part with its addresses on one bus kind, which alone are split.
+SPLIT = {"bimanual-so101", "bimanual-b601-dm", "b601-dm-station"}
+
 
 def _bodies():
     for registry in (embodiments, development_embodiments):
@@ -17,14 +20,17 @@ def test_a_part_repeated_on_one_bus_kind_gets_a_bus_per_chain() -> None:
     assert len({axis.joint for axis in axes}) == len(axes)
 
 
-def test_a_body_that_reuses_no_address_keeps_its_bindings_ports_and_joint_names() -> None:
+def test_only_bodies_that_repeat_an_address_are_split_and_the_rest_read_as_bound() -> None:
+    split = set()
     for body in _bodies():
         axes = driven_axes(body)
+        coordinates = [c for c in body.state.coordinates if c.axis.actuator is not None]
         if any(axis.port != axis.binding.bus_port for axis in axes):
+            split.add(str(body.name))
             continue
-        names = [c.joint_name for c in body.state.coordinates if c.axis.actuator is not None]
-        if len(set(names)) == len(names):  # a part repeated with its own names is renamed
-            assert [axis.joint for axis in axes] == names, body.name
+        assert [axis.port for axis in axes] == [axis.binding.bus_port for axis in axes]
+        assert [axis.joint for axis in axes] == [c.joint_name for c in coordinates], body.name
+    assert split == SPLIT
 
 
 def test_every_driven_bus_address_is_unique_once_split() -> None:

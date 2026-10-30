@@ -37,6 +37,9 @@ impl JointGains {
 /// One Damiao body on one bus.
 #[derive(Clone, Copy, Debug)]
 pub struct DamiaoBody {
+    /// The registry name of the body whose bus this is: what the opener finds this bus's
+    /// controller configuration by, for that body and any body whose bus repeats it.
+    pub embodiment: &'static str,
     /// The registry's rendered bindings (`bindings/<body>.json`).
     pub bindings: &'static str,
     /// Each motor answers on its send id plus this.
@@ -94,19 +97,13 @@ impl DamiaoBody {
         Ok(body)
     }
 
-    /// The body among [`BODIES`] the registry names `body`: the twin a composed body's bus
-    /// repeats (`BodyBindings::twin_bus`).
-    ///
-    /// # Errors
-    ///
-    /// Returns why a body's bindings do not parse.
-    pub fn named(body: &str) -> Result<Option<&'static Self>, BodyError> {
-        for candidate in BODIES {
-            if BodyBindings::parse(candidate.bindings)?.embodiment == body {
-                return Ok(Some(candidate));
-            }
-        }
-        Ok(None)
+    /// The body among [`BODIES`] the registry names `body`: the configuration its bus, or the
+    /// bus of a body that repeats it, is opened with.
+    #[must_use]
+    pub fn named(body: &str) -> Option<&'static Self> {
+        BODIES
+            .into_iter()
+            .find(|candidate| candidate.embodiment == body)
     }
 
     /// Every motor of `twin`, a composed body's bus named as this body

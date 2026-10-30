@@ -36,6 +36,7 @@ pub const MASTER_ID_OFFSET: u16 = 0x20;
 
 /// The torso yaw and both arms on `can0`.
 pub const HUMANOID_UPPER_BODY: DamiaoBody = DamiaoBody {
+    embodiment: "sentient-humanoid-upper-body",
     bindings: BINDINGS,
     master_id_offset: MASTER_ID_OFFSET,
     // `sentient_can` leaves the motors' TIMEOUT register as it finds it.
