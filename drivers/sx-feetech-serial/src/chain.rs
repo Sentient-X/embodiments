@@ -422,6 +422,17 @@ impl FeetechServo {
 }
 
 impl FeetechServo {
+    /// The joint's units per radian of this servo's shaft, through its calibrated map
+    /// ([`sx_embodiment_drivers::lerobot::joint_per_shaft_radian`]).
+    #[must_use]
+    pub fn joint_per_shaft_radian(&self) -> Option<f64> {
+        sx_embodiment_drivers::lerobot::joint_per_shaft_radian(
+            &self.calibration,
+            RESOLUTION,
+            |raw| self.joint_from_raw(raw),
+        )
+    }
+
     /// Whether `joint` lies within the unit's calibrated limit registers
     /// (`range_min..=range_max` through [`FeetechServo::joint_from_raw`]), where the firmware
     /// holds any goal: a servo resting there is no longer being pulled in.
@@ -1393,6 +1404,43 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     /// the servos that reported them are fit to move.
     fn clear_faults(&mut self) {
         self.faults.clear();
+    }
+
+    /// Each servo no faster or harder than its own registers move its joint: its approach's
+    /// `Goal_Speed` and `Acceleration` where it declares one, else its rated motion at the
+    /// shaft (the binding's speed and acceleration times its reduction), each in the joint's
+    /// units through the servo's calibrated map ([`FeetechServo::joint_per_shaft_radian`]).
+    /// For a Degrees servo that is the rated motion again; for a percent servo (a gripper
+    /// finger) whose calibrated span is wider than its declared range it is slower, and the
+    /// governor ramping it at the rated speed instead tripped its tracking stop (act-sim,
+    /// 2026-10-30: "sent 0.153 but observed at 0.533").
+    fn tracking_ceilings(&self) -> Vec<(usize, sx_embodiment_drivers::TrackingCeiling)> {
+        self.servos
+            .iter()
+            .enumerate()
+            .filter_map(|(index, servo)| {
+                let joint_per_shaft = servo.joint_per_shaft_radian()?;
+                let reduction = servo.axis.binding.reduction;
+                let (speed, acceleration) = match self.approach_registers(index).ok().flatten() {
+                    Some((speed, acceleration)) => (
+                        f64::from(speed) * SPEED_STEP_RAD_PER_S,
+                        f64::from(acceleration) * ACCELERATION_STEP_RAD_PER_S2,
+                    ),
+                    None => (
+                        servo.axis.motion.speed * reduction,
+                        servo.axis.motion.acceleration * reduction,
+                    ),
+                };
+                Some((
+                    index,
+                    sx_embodiment_drivers::TrackingCeiling::of_shaft(
+                        speed,
+                        acceleration,
+                        joint_per_shaft,
+                    ),
+                ))
+            })
+            .collect()
     }
 }
 
