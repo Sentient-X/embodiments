@@ -54,6 +54,7 @@ const fn finger(joint: &'static str) -> ServoSetup {
 
 /// The neck's six servos on their own bus.
 pub const NECK: FeetechBody = FeetechBody {
+    embodiment: "sentient-static-upper-body",
     bindings: BINDINGS,
     port: "neck",
     baud: LEROBOT_BAUD,
@@ -70,6 +71,7 @@ pub const NECK: FeetechBody = FeetechBody {
 
 /// The right gripper's two fingers on their own bus. Provisional, as the module says.
 pub const RIGHT_GRIPPER: FeetechBody = FeetechBody {
+    embodiment: "sentient-static-upper-body",
     bindings: BINDINGS,
     port: "right_gripper",
     baud: LEROBOT_BAUD,
@@ -82,6 +84,7 @@ pub const RIGHT_GRIPPER: FeetechBody = FeetechBody {
 
 /// The left gripper's two fingers on their own bus. Provisional, as the module says.
 pub const LEFT_GRIPPER: FeetechBody = FeetechBody {
+    embodiment: "sentient-static-upper-body",
     bindings: BINDINGS,
     port: "left_gripper",
     baud: LEROBOT_BAUD,

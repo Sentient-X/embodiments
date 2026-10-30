@@ -37,6 +37,9 @@ impl JointGains {
 /// One Damiao body on one bus.
 #[derive(Clone, Copy, Debug)]
 pub struct DamiaoBody {
+    /// The registry name of the body whose bus this is: what the opener finds this bus's
+    /// controller configuration by, for that body and any body whose bus repeats it.
+    pub embodiment: &'static str,
     /// The registry's rendered bindings (`bindings/<body>.json`).
     pub bindings: &'static str,
     /// Each motor answers on its send id plus this.
@@ -80,13 +83,43 @@ impl DamiaoBody {
     ///
     /// Refuses other joints, Damiao axes on more than one port, and a drive of another body.
     pub fn body(&self, drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
-        let body = BodyBindings::parse(self.bindings)?
-            .calibrated(drive)?
-            .on(DAMIAO_CAN);
+        self.configured(BodyBindings::parse(self.bindings)?.calibrated(drive)?)
+    }
+
+    /// `body`'s Damiao axes, refused unless they are on one bus and are the joints configured
+    /// here: this body's own, or a composed body's bus named as its twin here
+    /// (`BodyBindings::as_twin`).
+    fn configured(&self, body: BodyBindings) -> Result<BodyBindings, BodyError> {
+        let body = body.on(DAMIAO_CAN);
         let joints: Vec<&str> = self.joints.iter().map(|gains| gains.joint).collect();
         body.require_joints(&joints)?;
         body.one_bus()?;
         Ok(body)
+    }
+
+    /// The body among [`BODIES`] the registry names `body`: the configuration its bus, or the
+    /// bus of a body that repeats it, is opened with.
+    #[must_use]
+    pub fn named(body: &str) -> Option<&'static Self> {
+        BODIES
+            .into_iter()
+            .find(|candidate| candidate.embodiment == body)
+    }
+
+    /// Every motor of `twin`, a composed body's bus named as this body
+    /// (`BodyBindings::as_twin`), configured as this body's, in its order.
+    ///
+    /// # Errors
+    ///
+    /// Refuses joints that are not the ones configured here.
+    pub fn axes_of(&self, twin: BodyBindings) -> Result<Vec<DamiaoAxis>, BodyError> {
+        Ok(self
+            .configured(twin)?
+            .axes
+            .into_iter()
+            .zip(self.joints)
+            .map(|(axis, gains)| self.axis(axis, gains))
+            .collect())
     }
 
     /// Every motor, in native state order, as `drive`'s robot drives it.

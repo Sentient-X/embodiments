@@ -53,6 +53,7 @@ const fn arm(joint: &'static str) -> ServoSetup {
 
 /// `SOFollower`'s motor table, in native state order.
 pub const SO101: FeetechBody = FeetechBody {
+    embodiment: "so101",
     bindings: BINDINGS,
     port: "serial",
     baud: LEROBOT_BAUD,

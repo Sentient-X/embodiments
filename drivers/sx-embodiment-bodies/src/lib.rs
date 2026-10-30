@@ -76,9 +76,9 @@ use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::rail::{AxisDerate, RailCheck, Rails, derates};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
-    ActuatorBus, ActuatorChain, Axes, AxisReading, BodyBindings, BodyError, BoundAxis, ChainError,
-    ChainFailure, Chains, ChainsError, CommandRange, Feedforward, FeedforwardLimit, InstanceDrive,
-    Masked, Observe, Receipt, StopReport,
+    ActuatorBus, ActuatorChain, ApproachLimit, Axes, AxisReading, BodyBindings, BodyError,
+    BoundAxis, ChainError, ChainFailure, Chains, ChainsError, CommandRange, Feedforward,
+    FeedforwardLimit, InstanceDrive, Masked, Observe, Receipt, StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::body::{FeetechBody, ServoSetup as FeetechSetup};
@@ -404,11 +404,67 @@ pub fn calibration_file(port: &str) -> String {
     format!("{port}.calibration.json")
 }
 
+/// Every driven body's rendered bindings (`tools/render_driver_bindings.py`): a body no driver
+/// crate composes is opened from here, each bus as the twin it repeats (`of`).
+const REGISTRY: &str = include_str!("../bindings/registry.json");
+
+/// [`REGISTRY`]'s documents, each as its own text, parsed once.
+fn registry() -> Result<&'static [String], OpenError> {
+    static DOCUMENTS: std::sync::OnceLock<Result<Vec<String>, String>> = std::sync::OnceLock::new();
+    DOCUMENTS
+        .get_or_init(|| {
+            serde_json::from_str::<Vec<serde_json::Value>>(REGISTRY)
+                .map(|documents| documents.iter().map(ToString::to_string).collect())
+                .map_err(|error| error.to_string())
+        })
+        .as_deref()
+        .map_err(|error| OpenError::from(BodyError::Document(error.clone())))
+}
+
+/// One bus of a body as the body whose controller configuration drives it
+/// (`BodyBindings::configured_by`): the twin it repeats, or the body itself.
+struct ConfiguredBus {
+    /// The registry name of the body whose configuration drives it, and that body's port.
+    body: String,
+    port: String,
+    /// The bus's axes, calibrated for the drive, named as that body's.
+    bindings: BodyBindings,
+    /// Each axis's joint and port in the opened body, in order, which the axes take back.
+    names: Vec<(String, String)>,
+    /// The registry's servo approach limit for the bus's port in the opened body.
+    approach: Option<ApproachLimit>,
+}
+
+impl ConfiguredBus {
+    /// `axes`, configured as `body`'s, named again as the opened body's.
+    ///
+    /// # Errors
+    ///
+    /// Refuses axes that are not one for each of the bus's joints.
+    fn renamed<'a>(
+        &self,
+        axes: impl ExactSizeIterator<Item = &'a mut BoundAxis>,
+    ) -> Result<(), OpenError> {
+        if axes.len() != self.names.len() {
+            return Err(OpenError::from(BodyError::Twins {
+                embodiment: self.bindings.embodiment.clone(),
+                port: self.port.clone(),
+            }));
+        }
+        for (axis, (joint, port)) in axes.zip(&self.names) {
+            axis.joint.clone_from(joint);
+            axis.port.clone_from(port);
+        }
+        Ok(())
+    }
+}
+
 /// A body this crate composes, by the content id its bindings carry.
 #[derive(Clone, Copy, Debug)]
 enum Opener {
-    /// The reBot B601-DM: its arm and its gripper, each a Damiao chain on its own port.
-    B601,
+    /// The reBot B601-DM, by its registry bindings: its arm and its gripper, each a Damiao
+    /// chain on its own port, which its opener (not the registry) places.
+    B601(&'static str),
     /// Any other registered body, opened bus by bus from its rendered bindings.
     Buses(&'static str),
 }
@@ -653,17 +709,44 @@ fn in_service<T>(
 }
 
 impl Opener {
+    /// The body `drive` names, from the registry's bindings (every driven body's): the one
+    /// source a body opens from. The B601-DM's arm and gripper bridges are its own opener's,
+    /// which the registry does not carry yet.
     fn of(drive: &InstanceDrive) -> Result<Self, OpenError> {
-        if BodyBindings::parse(b601::BINDINGS)?.is(&drive.embodiment) {
-            return Ok(Self::B601);
+        for document in registry()? {
+            let body = BodyBindings::parse(document)?;
+            if body.is(&drive.embodiment) {
+                return Ok(if body.embodiment == b601::EMBODIMENT {
+                    Self::B601(document.as_str())
+                } else {
+                    Self::Buses(document.as_str())
+                });
+            }
         }
-        let embodiment = drive.embodiment.as_str();
-        DamiaoBody::of(embodiment)?
-            .map(|body| body.bindings)
-            .or(FeetechBody::bindings_of(embodiment)?)
-            .or(DynamixelBody::of(embodiment)?.map(|body| body.bindings))
-            .map(Self::Buses)
-            .ok_or_else(|| OpenError::Body(drive.embodiment.clone()))
+        Err(OpenError::Body(drive.embodiment.clone()))
+    }
+
+    /// The bus on `port`, calibrated for `drive`, as the body whose configuration drives it.
+    fn configured(self, drive: &InstanceDrive, port: &str) -> Result<ConfiguredBus, OpenError> {
+        let Self::Buses(bindings) = self else {
+            return Err(OpenError::Body(drive.embodiment.clone()));
+        };
+        let body = BodyBindings::parse(bindings)?.calibrated(drive)?;
+        let approach = body.approach.get(port).copied();
+        let names = body
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .map(|axis| (axis.joint.clone(), axis.port.clone()))
+            .collect();
+        let (by, by_port, bindings) = body.configured_by(port)?;
+        Ok(ConfiguredBus {
+            body: by,
+            port: by_port,
+            bindings,
+            names,
+            approach,
+        })
     }
 
     /// Each port in the order its chain is composed, with the bus its bindings put on it and
@@ -672,7 +755,7 @@ impl Opener {
         match self {
             // Seeed's controller puts the arm and the gripper behind their own bridge; one
             // bridge carrying both is commissioned as the same serial under both names.
-            Self::B601 => Ok(["arm", "gripper"]
+            Self::B601(_) => Ok(["arm", "gripper"]
                 .into_iter()
                 .map(|port| (port.to_owned(), DAMIAO_CAN, false))
                 .collect()),
@@ -687,10 +770,7 @@ impl Opener {
 
     /// Every joint of the body.
     fn joints(self, drive: &InstanceDrive) -> Result<Vec<String>, OpenError> {
-        let bindings = match self {
-            Self::B601 => b601::BINDINGS,
-            Self::Buses(bindings) => bindings,
-        };
+        let (Self::B601(bindings) | Self::Buses(bindings)) = self;
         Ok(BodyBindings::parse(bindings)?
             .calibrated(drive)?
             .axes
@@ -722,11 +802,16 @@ impl Opener {
     /// The Damiao motors on `port`, as `drive`'s robot drives them.
     fn damiao(self, drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis>, OpenError> {
         Ok(match self {
-            Self::B601 if port == "arm" => b601::b601_arm(drive)?,
-            Self::B601 => vec![b601::b601_gripper(drive)?],
-            Self::Buses(_) => DamiaoBody::of(&drive.embodiment)?
-                .ok_or_else(|| unopened(port, DAMIAO_CAN))?
-                .axes(drive)?,
+            Self::B601(_) if port == "arm" => b601::b601_arm(drive)?,
+            Self::B601(_) => vec![b601::b601_gripper(drive)?],
+            Self::Buses(_) => {
+                let bus = self.configured(drive, port)?;
+                let mut motors = DamiaoBody::named(&bus.body)
+                    .ok_or_else(|| unopened(port, DAMIAO_CAN))?
+                    .axes_of(bus.bindings.clone())?;
+                bus.renamed(motors.iter_mut().map(|motor| &mut motor.axis))?;
+                motors
+            }
         })
     }
 
@@ -745,7 +830,6 @@ impl Opener {
         if let Some(unknown) = out_of_service.iter().find(|joint| !joints.contains(joint)) {
             return Err(OpenError::OutOfService(unknown.clone()));
         }
-        let embodiment = drive.embodiment.as_str();
         let mut parts = Vec::new();
         for (port, kind, _) in self.buses(drive)? {
             if closed.contains(&port) {
@@ -766,12 +850,14 @@ impl Opener {
                     .collect();
                 (!motors.is_empty()).then_some(Part::Damiao(motors))
             } else if kind == FEETECH_SERIAL {
-                let body =
-                    FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
-                let calibrated = body.calibrated(drive)?;
+                let bus = self.configured(drive, &port)?;
+                let body = FeetechBody::named(&bus.body, &bus.port)
+                    .ok_or_else(|| unopened(&port, kind))?;
+                let mut calibrated = body.axes(bus.bindings.clone())?;
+                bus.renamed(calibrated.iter_mut())?;
+                let setups = body.setups_with(bus.approach, &drive.embodiment, &port)?;
                 whole = calibrated.clone();
-                let (axes, setups) =
-                    in_service(calibrated.into_iter().zip(body.setups()?), out_of_service);
+                let (axes, setups) = in_service(calibrated.into_iter().zip(setups), out_of_service);
                 (!axes.is_empty()).then(|| Part::Feetech {
                     baud: body.baud,
                     calibrations: supplied(&axes),
@@ -779,8 +865,10 @@ impl Opener {
                     setups,
                 })
             } else if kind == DYNAMIXEL_SERIAL {
-                let body = DynamixelBody::of(embodiment)?.ok_or_else(|| unopened(&port, kind))?;
-                let calibrated = body.calibrated(drive)?;
+                let bus = self.configured(drive, &port)?;
+                let body = DynamixelBody::named(&bus.body).ok_or_else(|| unopened(&port, kind))?;
+                let mut calibrated = body.axes(bus.bindings.clone())?;
+                bus.renamed(calibrated.iter_mut())?;
                 whole = calibrated.clone();
                 let (axes, setups) = in_service(
                     calibrated.into_iter().zip(body.servos.iter().copied()),
@@ -827,6 +915,27 @@ pub fn ports(drive: &InstanceDrive) -> Result<Vec<String>, OpenError> {
         .into_iter()
         .map(|(port, _, _)| port)
         .collect())
+}
+
+/// Each port the opener for `drive`'s body declares, in the order it opens them, with the
+/// kind of bus on it and whether the registry marks it provisional: what a station, or a
+/// simulation of one, attaches to each port.
+///
+/// # Errors
+///
+/// What [`ports`] refuses.
+pub fn port_buses(drive: &InstanceDrive) -> Result<Vec<(String, ActuatorBus, bool)>, OpenError> {
+    Opener::of(drive)?.buses(drive)
+}
+
+/// The Damiao motors on `port` of `drive`'s body, each as the opener drives it: what a bridge
+/// on that port, or a simulation of one, must answer for.
+///
+/// # Errors
+///
+/// What [`ports`] refuses, and a port no Damiao driver composes for this body.
+pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis>, OpenError> {
+    Opener::of(drive)?.damiao(drive, port)
 }
 
 /// How a body is opened beyond its drive, commissioning and calibrations.
@@ -1870,4 +1979,85 @@ pub fn serial_bridge_host_needs(
             priority: u8::try_from(sx_realtime::CONTROL_LOOP_PRIORITY).unwrap_or(u8::MAX),
         },
     ]
+}
+
+#[cfg(test)]
+mod registry_is_the_one_source {
+    //! The vendor crates' per-body constants are not a way to open a body; they are the golden
+    //! the registry path must equal: the same bindings, and for every bus the same axes, servo
+    //! setups and motor configuration as the constant's own path gives.
+
+    use super::*;
+
+    fn nominal(bindings: &str) -> InstanceDrive {
+        let body = BodyBindings::parse(bindings).expect("bindings");
+        let document = serde_json::json!({
+            "schema": "sx.instance-drive/v1",
+            "embodiment": body.id,
+            "instance": "unit",
+            "joints": body.axes.iter().enumerate().map(|(index, axis)| serde_json::json!({
+                // Distinct zeros and directions, so an axis that lands on another joint shows.
+                "joint": axis.joint, "zero": 0.001 * f64::from(u32::try_from(index).unwrap()),
+                "direction": if index % 2 == 0 { 1 } else { -1 }, "calibration": null,
+            })).collect::<Vec<_>>(),
+        });
+        InstanceDrive::parse(&document.to_string(), "unit").expect("drive")
+    }
+
+    fn registered(name: &str) -> serde_json::Value {
+        serde_json::from_str::<Vec<serde_json::Value>>(REGISTRY)
+            .expect("registry")
+            .into_iter()
+            .find(|document| document["embodiment"] == name)
+            .unwrap_or_else(|| panic!("{name} is in the registry"))
+    }
+
+    #[test]
+    fn every_constants_bindings_are_its_registry_document() {
+        let feetech = sx_feetech_serial::body::BODIES.map(|body| (body.embodiment, body.bindings));
+        let damiao = sx_damiao_can::body::BODIES.map(|body| (body.embodiment, body.bindings));
+        let b601 = [(b601::EMBODIMENT, b601::BINDINGS)];
+        for (name, bindings) in feetech.into_iter().chain(damiao).chain(b601) {
+            let constant: serde_json::Value = serde_json::from_str(bindings).expect("bindings");
+            assert_eq!(constant, registered(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn every_feetech_bus_opens_as_its_constant_configures_it() {
+        for body in sx_feetech_serial::body::BODIES {
+            let drive = nominal(body.bindings);
+            let opener = Opener::of(&drive).expect("opener");
+            let bus = opener.configured(&drive, body.port).expect("configured");
+            let configured = FeetechBody::named(&bus.body, &bus.port).expect("configuration");
+            assert_eq!(
+                (configured.embodiment, configured.port),
+                (body.embodiment, body.port)
+            );
+            let mut axes = configured.axes(bus.bindings.clone()).expect("axes");
+            bus.renamed(axes.iter_mut()).expect("renamed");
+            assert_eq!(axes, body.calibrated(&drive).expect("constant's axes"));
+            let setups = configured
+                .setups_with(bus.approach, &drive.embodiment, body.port)
+                .expect("setups");
+            assert_eq!(setups, body.setups().expect("constant's setups"));
+        }
+    }
+
+    #[test]
+    fn every_damiao_bus_opens_as_its_constant_configures_it() {
+        for body in sx_damiao_can::body::BODIES {
+            let drive = nominal(body.bindings);
+            let opener = Opener::of(&drive).expect("opener");
+            let motors = opener.damiao(&drive, "can").expect("motors");
+            assert_eq!(motors, body.axes(&drive).expect("constant's motors"));
+        }
+        let drive = nominal(b601::BINDINGS);
+        let opener = Opener::of(&drive).expect("opener");
+        assert!(matches!(opener, Opener::B601(_)));
+        assert_eq!(
+            opener.damiao(&drive, "arm").expect("arm"),
+            b601::b601_arm(&drive).expect("constant's arm")
+        );
+    }
 }

@@ -33,6 +33,9 @@ pub struct ServoSetup {
 /// One Dynamixel body on one bus.
 #[derive(Clone, Copy, Debug)]
 pub struct DynamixelBody {
+    /// The registry name of the body whose bus this is: what the opener finds this bus's
+    /// configuration by.
+    pub embodiment: &'static str,
     /// The registry's rendered bindings (`bindings/<body>.json`).
     pub bindings: &'static str,
     /// The bus's rate, in baud.
@@ -45,6 +48,14 @@ pub struct DynamixelBody {
 pub const BODIES: [&DynamixelBody; 0] = [];
 
 impl DynamixelBody {
+    /// The body among [`BODIES`] the registry names `body`.
+    #[must_use]
+    pub fn named(body: &str) -> Option<&'static Self> {
+        BODIES
+            .into_iter()
+            .find(|candidate| candidate.embodiment == body)
+    }
+
     /// The body among [`BODIES`] whose bindings carry `embodiment`'s content id.
     ///
     /// # Errors

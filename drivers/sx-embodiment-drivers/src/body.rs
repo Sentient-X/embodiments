@@ -10,6 +10,12 @@
 //! port by port: [`BodyBindings::buses`] splits the native state order into one [`Bus`] per
 //! port, each a contiguous run of one bus kind, and [`BodyBindings::on`] keeps one kind's axes
 //! for a crate that drives only that kind.
+//!
+//! A body no driver crate composes (a composition that repeats a part, the bimanual SO-101's
+//! two arms) names, for each joint, its twin (`of`): the same part's same joint, on the same
+//! drive, in a body a crate does compose. [`BodyBindings::configured_by`] answers, for each
+//! bus, the body whose controller configuration drives it (the twin, or the body itself) with
+//! the bus's axes named as that body's, so every body opens one way.
 
 use std::collections::BTreeMap;
 
@@ -36,10 +42,22 @@ pub struct BodyBindings {
     /// The ports whose bindings the registry marks provisional (`ActuatorBinding.provisional`):
     /// not yet verified on the robot, so not driven unless a supervised bring-up opts in.
     pub provisional: Vec<String>,
+    /// Each joint's twin in a body a driver crate composes (`of`), by joint; empty for a body a
+    /// driver crate composes itself.
+    pub twins: BTreeMap<String, Twin>,
     /// Per serial-servo port, the speed its servos approach any goal at on the servo itself
     /// (the registry's `ServoApproach`, a driver setting outside the body's identity); a port
     /// without one keeps the servo's own default.
     pub approach: BTreeMap<String, ApproachLimit>,
+}
+
+/// A joint's twin: `joint` on `port` of the body named `body`, driven exactly as this joint is.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Twin {
+    pub body: String,
+    pub port: String,
+    pub joint: String,
 }
 
 /// The fastest servo approach limit a registry may declare, rad/s: one turn a second. An
@@ -82,6 +100,8 @@ struct Axis {
     /// The chain's declared home for this joint; absent where its part declares none.
     #[serde(default)]
     home: Option<f64>,
+    #[serde(default)]
+    of: Option<Twin>,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -129,6 +149,11 @@ pub enum BodyError {
     NoApproach { embodiment: String, port: String },
     #[error("{embodiment}'s port {port} has both provisional and verified bindings")]
     MixedProvisional { embodiment: String, port: String },
+    #[error(
+        "{embodiment}'s port {port} is not one run of joints that all repeat one port of one \
+         body a driver composes"
+    )]
+    Twins { embodiment: String, port: String },
     #[error("{embodiment}'s joints {found:?} are not the {expected:?} this driver composes")]
     Joints {
         embodiment: String,
@@ -182,6 +207,10 @@ impl BodyBindings {
                 marks.push(axis.port.clone());
             }
         }
+        let twins: BTreeMap<String, Twin> = axes
+            .iter()
+            .filter_map(|axis| Some((axis.joint.clone(), axis.of.clone()?)))
+            .collect();
         let axes = axes
             .into_iter()
             .map(|axis| {
@@ -243,6 +272,7 @@ impl BodyBindings {
             supersedes,
             axes,
             provisional,
+            twins,
             approach,
         })
     }
@@ -306,6 +336,111 @@ impl BodyBindings {
                 ports: buses.into_iter().map(|bus| bus.port).collect(),
             })
         }
+    }
+
+    /// The body and port the bus on `port` repeats: `None` when none of its joints has a twin.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a bus some of whose joints have no twin, or whose twins are not all on one port
+    /// of one body.
+    pub fn twin_bus(&self, port: &str) -> Result<Option<(String, String)>, BodyError> {
+        let on: Vec<Option<&Twin>> = self
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .map(|axis| self.twins.get(&axis.joint))
+            .collect();
+        let refused = || BodyError::Twins {
+            embodiment: self.embodiment.clone(),
+            port: port.to_owned(),
+        };
+        let Some(Some(first)) = on.first().copied() else {
+            return if on.iter().all(Option::is_none) {
+                Ok(None)
+            } else {
+                Err(refused())
+            };
+        };
+        let same = |twin: Option<&Twin>| {
+            twin.is_some_and(|twin| twin.body == first.body && twin.port == first.port)
+        };
+        if on.iter().copied().all(same) {
+            Ok(Some((first.body.clone(), first.port.clone())))
+        } else {
+            Err(refused())
+        }
+    }
+
+    /// The bus on `port` as its twin: only that bus's axes, each named by its twin's joint and
+    /// port and keeping this body's bounds, calibration, binding and provisional mark, so the
+    /// crate composing the twin configures it. Its axes are in this body's order, which the crate checks against
+    /// its own; [`BodyBindings::twin_bus`] has refused a bus that is not one twin's.
+    ///
+    /// # Errors
+    ///
+    /// What [`BodyBindings::twin_bus`] refuses, and a bus with no twin.
+    pub fn as_twin(self, port: &str) -> Result<Self, BodyError> {
+        let Some((_, twin_port)) = self.twin_bus(port)? else {
+            return Err(BodyError::Twins {
+                embodiment: self.embodiment,
+                port: port.to_owned(),
+            });
+        };
+        let provisional = if self.provisional.iter().any(|name| name == port) {
+            vec![twin_port]
+        } else {
+            Vec::new()
+        };
+        let axes = self
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .map(|axis| {
+                let twin = &self.twins[&axis.joint];
+                BoundAxis {
+                    joint: twin.joint.clone(),
+                    port: twin.port.clone(),
+                    ..axis.clone()
+                }
+            })
+            .collect();
+        Ok(Self {
+            axes,
+            provisional,
+            twins: BTreeMap::new(),
+            // A servo approach is the twin crate's, read from its own bindings.
+            approach: BTreeMap::new(),
+            ..self
+        })
+    }
+
+    /// The bus on `port` as the body whose controller configuration drives it: its twin's
+    /// (`as_twin`) when its joints name one, else this body's own, keeping only that bus's
+    /// axes. Answers that body's registry name and port with the bus.
+    ///
+    /// # Errors
+    ///
+    /// What [`BodyBindings::twin_bus`] refuses.
+    pub fn configured_by(self, port: &str) -> Result<(String, String, Self), BodyError> {
+        if let Some((body, twin_port)) = self.twin_bus(port)? {
+            return Ok((body, twin_port, self.as_twin(port)?));
+        }
+        let axes = self
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .cloned()
+            .collect();
+        Ok((
+            self.embodiment.clone(),
+            port.to_owned(),
+            Self {
+                axes,
+                twins: BTreeMap::new(),
+                ..self
+            },
+        ))
     }
 
     /// The axes on buses of `kind` alone, in native state order: what a crate driving only
