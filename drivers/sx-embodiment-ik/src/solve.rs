@@ -592,6 +592,7 @@ impl Ik {
     ///
     /// [`IkError`] when `q`, `targets` or `dt` is malformed. A target the body cannot reach is
     /// not an error: it is reported in the step.
+    #[allow(clippy::too_many_lines)] // one match arm per task and target
     pub fn step(
         &mut self,
         q: &[f64],
@@ -633,6 +634,22 @@ impl Ik {
                 }
                 (Task::LookAt { .. }, Some(Target::LookAt { point_m })) => {
                     point_m.iter().all(|v| v.is_finite())
+                }
+                (
+                    Task::Pose,
+                    Some(Target::Axis {
+                        translation_m,
+                        axis,
+                        toward,
+                    }),
+                ) => {
+                    translation_m
+                        .iter()
+                        .chain(axis)
+                        .chain(toward)
+                        .all(|v| v.is_finite())
+                        && norm(*axis) > 1e-6
+                        && norm(*toward) > 1e-6
                 }
                 _ => false,
             };
@@ -691,6 +708,7 @@ impl Ik {
 
     /// `1/2 dq' H dq + g' dq`: tool position, orientation (or pointing), the step itself
     /// (damping), then posture toward the anchor.
+    #[allow(clippy::too_many_lines)] // one match arm per task and target
     fn cost(&mut self, q: &[f64], targets: &[Option<Target>], dt: f64) {
         let body = &self.body;
         let s = &self.settings;
@@ -735,6 +753,32 @@ impl Ik {
                         least_squares(&mut w.h, &mut w.g, &w.task, e_r[k], rho2);
                     }
                 }
+                (
+                    Task::Pose,
+                    Target::Axis {
+                        translation_m,
+                        axis,
+                        toward,
+                    },
+                ) => {
+                    // The axis's pointing error, closed as a pose's is; the roll about the
+                    // axis is left out of the rows altogether, so it floats.
+                    let a = mat_vec(&pose.r, scale(*axis, 1.0 / norm(*axis)));
+                    let u = scale(*toward, 1.0 / norm(*toward));
+                    let e_p = sub(*translation_m, pose.t);
+                    let e_r = pointing_error(a, u);
+                    let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
+                    let e_p = clamp_norm(scale(e_p, share), s.max_error_m);
+                    let e_r = clamp_norm(scale(e_r, share), s.max_error_rad);
+                    for k in 0..3 {
+                        fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
+                        least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
+                    }
+                    for across in across(a) {
+                        fill(&mut w.task, &body.solved, |axis| dot(across, w.jw[axis]));
+                        least_squares(&mut w.h, &mut w.g, &w.task, dot(across, e_r), rho2);
+                    }
+                }
                 (Task::LookAt { forward }, Target::LookAt { point_m }) => {
                     let mask = &self.look_columns[index];
                     let f = mat_vec(&pose.r, forward);
@@ -744,26 +788,7 @@ impl Ik {
                         continue;
                     }
                     let u = scale(d, 1.0 / distance);
-                    // The pointing error as a rotation: about f x u, by the whole angle between
-                    // f and u. The bare cross product vanishes at 180 degrees too, so a camera
-                    // facing straight away from its target never turned (a neck folded behind
-                    // the hands on the bench); there, any axis across f turns it.
-                    let sine = cross(f, u);
-                    let (s_norm, cosine) = (norm(sine), dot(f, u));
-                    let angle = s_norm.atan2(cosine);
-                    let e = if s_norm > 1e-9 {
-                        scale(sine, angle / s_norm)
-                    } else if cosine < 0.0 {
-                        let across = if f[0].abs() < 0.9 {
-                            [1.0, 0.0, 0.0]
-                        } else {
-                            [0.0, 1.0, 0.0]
-                        };
-                        let axis = cross(f, across);
-                        scale(axis, angle / norm(axis))
-                    } else {
-                        [0.0; 3]
-                    };
+                    let e = pointing_error(f, u);
                     // Turn f toward u relative to u's own turn as the camera moves: the
                     // direction to the point turns at -(u x v) / distance, so the relative
                     // angular rate is w + (u x v) / distance; ask it for the error's rotation
@@ -1081,6 +1106,7 @@ impl Ik {
     }
 
     /// Residuals, binding constraints and reach per limb, at the new positions.
+    #[allow(clippy::too_many_lines)] // one match arm per task and target
     fn report(&mut self, targets: &[Option<Target>]) {
         let body = &self.body;
         let s = &self.settings;
@@ -1133,6 +1159,21 @@ impl Ik {
                     let d = sub(*point_m, pose.t);
                     let cos = dot(f, d) / norm(d).max(1e-12);
                     (0.0, cos.clamp(-1.0, 1.0).acos())
+                }
+                (
+                    _,
+                    Some(Target::Axis {
+                        translation_m,
+                        axis,
+                        toward,
+                    }),
+                ) => {
+                    let a = mat_vec(&pose.r, *axis);
+                    let cos = dot(a, *toward) / (norm(a) * norm(*toward)).max(1e-12);
+                    (
+                        norm(sub(*translation_m, pose.t)),
+                        cos.clamp(-1.0, 1.0).acos(),
+                    )
                 }
                 _ => (0.0, 0.0),
             };
@@ -1307,6 +1348,36 @@ fn least_squares(h: &mut [f64], g: &mut [f64], row: &[f64], target: f64, weight:
             h[i * n + j] += 2.0 * weight * row[i] * row[j];
         }
     }
+}
+
+/// The rotation turning unit `f` onto unit `u`: about `f x u`, by the whole angle between
+/// them. The bare cross product vanishes at 180 degrees too, so a frame facing straight away
+/// from its target never turned (a neck folded behind the hands on the bench); there, any
+/// axis across `f` turns it.
+fn pointing_error(f: V3, u: V3) -> V3 {
+    let sine = cross(f, u);
+    let (s_norm, cosine) = (norm(sine), dot(f, u));
+    let angle = s_norm.atan2(cosine);
+    if s_norm > 1e-9 {
+        scale(sine, angle / s_norm)
+    } else if cosine < 0.0 {
+        let [axis, _] = across(f);
+        scale(axis, angle)
+    } else {
+        [0.0; 3]
+    }
+}
+
+/// Two unit vectors across unit `a` and across each other.
+fn across(a: V3) -> [V3; 2] {
+    let other = if a[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let first = cross(a, other);
+    let first = scale(first, 1.0 / norm(first));
+    [first, cross(a, first)]
 }
 
 /// The share of a pose error one tick closes, along the error's own straight line: no more

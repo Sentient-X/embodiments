@@ -68,6 +68,11 @@ pub struct LimbConfig {
     /// a target (a camera).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look_forward: Option<[f64; 3]>,
+    /// A pose limb's approach axis, a unit vector in its frame (out between a gripper's
+    /// fingers): a target may hold only it and let the roll about it float
+    /// ([`Targets::free_roll`]). `None`: the limb is only ever asked for whole poses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approach: Option<[f64; 3]>,
 }
 
 /// Everything the solve is built from besides the description, so a station and a headset
@@ -100,7 +105,8 @@ pub struct TeleopConfig {
 }
 
 impl TeleopConfig {
-    /// The static upper body's limbs: both grippers' tool frames, and the ZED looking out of
+    /// The static upper body's limbs: both grippers' tool frames, approaching along their +x
+    /// (the tool point sits 15 cm out along the gripper base's +x), and the ZED looking out of
     /// its lenses (`ZED_camera` +x) from the SO-101 neck.
     #[must_use]
     pub fn static_upper_body_limbs() -> Vec<LimbConfig> {
@@ -109,16 +115,19 @@ impl TeleopConfig {
                 name: "left".into(),
                 frame: "left_gripper_tcp".into(),
                 look_forward: None,
+                approach: Some([1.0, 0.0, 0.0]),
             },
             LimbConfig {
                 name: "right".into(),
                 frame: "right_gripper_tcp".into(),
                 look_forward: None,
+                approach: Some([1.0, 0.0, 0.0]),
             },
             LimbConfig {
                 name: "head".into(),
                 frame: "ZED_camera".into(),
                 look_forward: Some([1.0, 0.0, 0.0]),
+                approach: None,
             },
         ]
     }
@@ -165,6 +174,10 @@ pub struct Targets {
     pub tcp: [Option<Pose>; 2],
     /// Per hand: the gripper opening in metres.
     pub gripper_width_m: [Option<f64>; 2],
+    /// Per hand: hold only `tcp`'s approach axis (the limb's [`LimbConfig::approach`] turned
+    /// by `tcp`'s rotation) and let the roll about it float: a grasp or a press whose roll
+    /// does not matter.
+    pub free_roll: [bool; 2],
     /// The operator's head when they look through the robot (remote): its local +x is the
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
@@ -301,6 +314,8 @@ pub struct Teleop {
     limbs_of: Vec<u64>,
     /// Per limb, its index in [`HANDS`] (`None` for the head).
     hand_of: Vec<Option<usize>>,
+    /// Per limb, its approach axis in its frame ([`LimbConfig::approach`]).
+    approach: Vec<Option<[f64; 3]>>,
     head: Option<usize>,
     /// Axes the config holds.
     held: Vec<bool>,
@@ -404,6 +419,23 @@ impl Teleop {
             .map(|name| HANDS.iter().position(|hand| hand == name))
             .collect();
         let head = limb_names.iter().position(|name| *name == "head");
+        let mut approach = Vec::with_capacity(limb_names.len());
+        for name in &limb_names {
+            let axis = config
+                .limbs
+                .iter()
+                .find(|limb| limb.name == *name)
+                .and_then(|limb| limb.approach);
+            if let Some(axis) = axis {
+                let length = axis.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if !(length.is_finite() && (length - 1.0).abs() < 1e-6) {
+                    return Err(IkError::Caps(format!(
+                        "limb {name:?}'s approach axis is not a unit vector"
+                    )));
+                }
+            }
+            approach.push(axis);
+        }
         let held_axes = names
             .iter()
             .map(|name| config.held.contains(name))
@@ -445,6 +477,7 @@ impl Teleop {
             config: config.clone(),
             limbs_of,
             hand_of,
+            approach,
             head,
             held: held_axes,
             grippers,
@@ -517,13 +550,42 @@ impl Teleop {
         self.seed = true;
     }
 
+    /// Each hand's target as the solve takes it: its whole pose, or with its roll free only
+    /// its approach axis.
+    fn want_hands(&mut self, targets: &Targets) -> Result<(), IkError> {
+        for (limb, (slot, hand)) in self.wanted.iter_mut().zip(&self.hand_of).enumerate() {
+            let Some(hand) = *hand else {
+                *slot = None;
+                continue;
+            };
+            *slot = match (targets.tcp[hand], targets.free_roll[hand]) {
+                (None, _) => None,
+                (Some(p), false) => Some(Target::Pose {
+                    translation_m: p.translation_m,
+                    rotation_xyzw: p.rotation_xyzw,
+                }),
+                (Some(p), true) => {
+                    let axis = self.approach[limb]
+                        .ok_or_else(|| IkError::Target(HANDS[hand].to_owned()))?;
+                    Some(Target::Axis {
+                        translation_m: p.translation_m,
+                        axis,
+                        toward: rotate(p.rotation_xyzw, axis),
+                    })
+                }
+            };
+        }
+        Ok(())
+    }
+
     /// One tick. `reference` is what the solve last commanded (the page's ghost: its own last
     /// answer); `measured` each axis's fresh reading, `None` where it did not answer or there
     /// is none (a ghost); `available[i]` false for an axis that must stay where it is.
     ///
     /// # Errors
     ///
-    /// [`IkError`] for vectors of the wrong length, a non-finite position or `dt`.
+    /// [`IkError`] for vectors of the wrong length, a non-finite position or `dt`, and a free
+    /// roll asked of a limb that declares no approach axis.
     pub fn step(
         &mut self,
         reference: &[f64],
@@ -557,14 +619,7 @@ impl Teleop {
         {
             *slot = *available && !held;
         }
-        for (slot, hand) in self.wanted.iter_mut().zip(&self.hand_of) {
-            *slot = hand
-                .and_then(|hand| targets.tcp[hand])
-                .map(|p| Target::Pose {
-                    translation_m: p.translation_m,
-                    rotation_xyzw: p.rotation_xyzw,
-                });
-        }
+        self.want_hands(targets)?;
         if let Some(head) = self.head {
             self.wanted[head] = if let Some(gaze) = targets.head {
                 self.ik.body().model().poses_into(&self.q, &mut self.frames);

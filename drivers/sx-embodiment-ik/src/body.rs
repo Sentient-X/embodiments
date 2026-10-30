@@ -34,6 +34,14 @@ pub enum Target {
     LookAt {
         point_m: [f64; 3],
     },
+    /// Reach a point with the tool's `axis` (in the limb's frame, its approach axis) along
+    /// `toward` (in the root frame); the roll about it floats. A grasp or a press whose roll
+    /// does not matter, so the arm never spends its wrist turning to a roll nobody needs.
+    Axis {
+        translation_m: [f64; 3],
+        axis: [f64; 3],
+        toward: [f64; 3],
+    },
 }
 
 #[derive(Clone, Debug)]
