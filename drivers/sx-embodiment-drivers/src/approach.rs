@@ -10,7 +10,10 @@
 //! (`sx_embodiments.layout.ServoApproach`, rendered as the bindings' `approach`);
 //! [`BRING_UP_APPROACH`] is the slow one a servo resting outside its position limits is pulled
 //! in at when torque comes on: a move no governor bounds, so it stays slow. Every governed
-//! motion's limits are the joint's rated ones (`AxisLimits::rated`), never this.
+//! motion's limits are the joint's rated ones (`AxisLimits::rated`), held to what these
+//! registers move the joint at (`ActuatorChain::tracking_ceilings`, through the servo's
+//! calibrated map, `lerobot::joint_per_shaft_radian`): the governor never plans faster than the
+//! servo it commands will move.
 
 /// The fastest a servo moves toward any goal, in the joint's units: rad/s and rad/s².
 #[derive(Clone, Copy, Debug, PartialEq)]

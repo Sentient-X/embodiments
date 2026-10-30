@@ -1059,6 +1059,32 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
     fn clear_faults(&mut self) {
         self.faults.clear();
     }
+
+    /// Each servo no faster or harder than its `Profile Velocity` and `Profile Acceleration`
+    /// move its joint, through its calibrated map (a percent servo's calibrated span is not its
+    /// binding's reduction): as `sx_feetech_serial`'s chain bounds its servos.
+    fn tracking_ceilings(&self) -> Vec<(usize, sx_embodiment_drivers::TrackingCeiling)> {
+        self.servos
+            .iter()
+            .enumerate()
+            .filter_map(|(index, servo)| {
+                let (velocity, acceleration) = servo.profile()?;
+                let joint_per_shaft = sx_embodiment_drivers::lerobot::joint_per_shaft_radian(
+                    &servo.calibration,
+                    RESOLUTION,
+                    |raw| servo.joint_from_raw(raw),
+                )?;
+                Some((
+                    index,
+                    sx_embodiment_drivers::TrackingCeiling::of_shaft(
+                        f64::from(velocity) * PROFILE_VELOCITY_STEP_RAD_PER_S,
+                        f64::from(acceleration) * PROFILE_ACCELERATION_STEP_RAD_PER_S2,
+                        joint_per_shaft,
+                    ),
+                ))
+            })
+            .collect()
+    }
 }
 
 impl ChainError for DynamixelChainError {

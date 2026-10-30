@@ -110,6 +110,29 @@ pub fn normalize(
     }
 }
 
+/// A servo's joint units per radian of its shaft: how far the joint moves while the shaft turns
+/// one radian, read from `joint_from_raw` (the driver's [`normalize`] through the drive map)
+/// across the calibrated range. For a [`MotorNormMode::Degrees`] servo it is about one over the
+/// binding's reduction. For a [`MotorNormMode::Range0100`] servo (a gripper) it is the declared
+/// range over the calibrated tick span, which no reduction carries: a finger whose calibrated
+/// span is four times its declared range moves a quarter as fast as its shaft (act-sim's
+/// 1024..3072 over 0.788 rad, 2026-10-30, where the governor ramped it at the shaft's speed and
+/// its tracking stop fired). `None` for an empty calibrated range.
+#[must_use]
+pub fn joint_per_shaft_radian(
+    calibration: &MotorCalibration,
+    resolution: f64,
+    joint_from_raw: impl Fn(i32) -> f64,
+) -> Option<f64> {
+    let (min, max) = (
+        i32::from(calibration.range_min),
+        i32::from(calibration.range_max),
+    );
+    let shaft = f64::from((max - min).abs()) * std::f64::consts::TAU / resolution;
+    let joint = (joint_from_raw(max) - joint_from_raw(min)).abs();
+    Some(joint / shaft).filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +143,26 @@ mod tests {
         range_min: 1000,
         range_max: 3000,
     };
+
+    #[test]
+    fn a_percent_servo_moves_its_joint_at_its_declared_range_over_its_calibrated_span() {
+        let ratio = |mode: MotorNormMode, range: (f64, f64)| {
+            joint_per_shaft_radian(&CALIBRATION, 4096.0, |raw| {
+                normalize(mode, &CALIBRATION, true, 4096.0, f64::from(raw), range)
+            })
+            .expect("a calibrated range")
+        };
+        // Degrees: one joint radian per shaft radian, to LeRobot's 4095-over-4096.
+        assert!((ratio(MotorNormMode::Degrees, (-1.0, 1.0)) - 4096.0 / 4095.0).abs() < 1e-12);
+        // 2000 ticks (3.07 rad of shaft) spread over a declared 0.5 rad.
+        let shaft = 2000.0 * std::f64::consts::TAU / 4096.0;
+        assert!((ratio(MotorNormMode::Range0100, (0.0, 0.5)) - 0.5 / shaft).abs() < 1e-12);
+        let empty = MotorCalibration {
+            range_max: 1000,
+            ..CALIBRATION
+        };
+        assert_eq!(joint_per_shaft_radian(&empty, 4096.0, f64::from), None);
+    }
 
     #[test]
     fn degrees_are_about_the_middle_and_percent_spans_the_range() {

@@ -346,6 +346,20 @@ pub struct TrackingCeiling {
     pub acceleration: Option<f64>,
 }
 
+impl TrackingCeiling {
+    /// A servo's own limit at its shaft (`speed` rad/s, `acceleration` rad/s²: what its speed
+    /// registers hold it to), in the joint's units through `joint_per_shaft_radian`
+    /// ([`crate::lerobot::joint_per_shaft_radian`]). A position servo moves its joint no faster
+    /// than this, whatever the governor plans, so the governor plans no faster either.
+    #[must_use]
+    pub fn of_shaft(speed: f64, acceleration: f64, joint_per_shaft_radian: f64) -> Self {
+        Self {
+            speed: speed * joint_per_shaft_radian,
+            acceleration: Some(acceleration * joint_per_shaft_radian),
+        }
+    }
+}
+
 /// A chain's error, classified once by the crate that knows its vendor's failure modes.
 pub trait ChainError: std::error::Error + Send + Sync + 'static {
     fn failure(&self) -> ChainFailure;
