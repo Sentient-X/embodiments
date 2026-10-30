@@ -41,6 +41,7 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
+from ..recorded_streams import RecordedCoordinate, RecordedPose, RecordedStreams
 from ..sites import BodySite
 from ..viewing import TrackedDevice, Viewing
 from ._authoring import bounded_layout
@@ -305,4 +306,16 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     ),
     # Both hands are in every frame beside the robot, so each is drawn lighter.
     viewing=Viewing(tracking=YUBI_TRACKING, triangle_budget=60_000),
+    # A YUBI pod records each Quest controller's pose under the controller's own name, and each
+    # jaw's magnetic encoder under its hand's (sx-seal's process/hardware.rs writes both).
+    recorded_streams=RecordedStreams(
+        poses=(
+            RecordedPose(site="left_hand", frame="quest3s_left_controller"),
+            RecordedPose(site="right_hand", frame="quest3s_right_controller"),
+        ),
+        coordinates=(
+            RecordedCoordinate(component="left_jaw", frame="yubi_left_hand"),
+            RecordedCoordinate(component="right_jaw", frame="yubi_right_hand"),
+        ),
+    ),
 )

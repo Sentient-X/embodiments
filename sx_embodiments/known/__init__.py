@@ -14,6 +14,7 @@ from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
 from ..errors import CompositionError, UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
 from ..mechanical import Module
+from ..recorded_streams import RecordedStreams
 from ..viewing import Viewing
 from ._previews import PREVIEWS
 from .aloha import ALOHA_SPEC
@@ -180,6 +181,18 @@ def viewing_of(name: str) -> Viewing:
     if definition is None:
         raise UnknownEmbodimentError(name)
     return definition.viewing
+
+
+def recorded_streams_of(name: str) -> RecordedStreams:
+    """What a capture rig's recording names ``name``'s devices and measured coordinates; none
+    for a body no rig records. Raises `UnknownEmbodimentError` for a name no registry holds."""
+    key = EmbodimentName(name)
+    definition = _DEFINITIONS.get(key)
+    if definition is None and key in DEVELOPMENT_EMBODIMENTS:
+        definition = DEVELOPMENT_EMBODIMENTS[key].spec
+    if definition is None:
+        raise UnknownEmbodimentError(name)
+    return definition.recorded_streams
 
 
 def collection_definitions() -> tuple[EmbodimentDefinition, ...]:
