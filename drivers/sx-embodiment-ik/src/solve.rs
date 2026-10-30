@@ -70,6 +70,13 @@ pub struct Settings {
     pub posture_weight: f64,
     /// Posture weight for an axis that moves more than one limb (a torso).
     pub shared_posture_weight: f64,
+    /// Posture weight toward a preferred posture ([`Ik::prefer_posture`]: a robot's
+    /// commissioned Ready pose, elbows down): ten times the engage posture's, so the arms'
+    /// redundancy leans toward it along a move, still far below the tool's own error. It is a
+    /// weight, not a priority: where the posture and the goal disagree the tool sits off by it
+    /// (on the static body under a millimetre and half a degree; settling is 5 mm and 3
+    /// degrees), and twice it pushed far poses past their settle.
+    pub preferred_posture_weight: f64,
     /// Kept clear of each joint limit.
     pub limit_margin_rad: f64,
     /// Kept between proxies, and between a proxy and an obstacle.
@@ -107,6 +114,7 @@ impl Default for Settings {
             damping: 1e-4,
             posture_weight: 1e-6,
             shared_posture_weight: 1e-5,
+            preferred_posture_weight: 1e-5,
             limit_margin_rad: 0.01,
             collision_margin_m: 0.01,
             influence_m: 0.2,
@@ -290,6 +298,8 @@ pub struct Ik {
     /// after [`Ik::reset`].
     anchor: Vec<f64>,
     anchored: bool,
+    /// The posture preferred over the one measured at engage, when one is ([`Ik::prefer_posture`]).
+    preferred: Option<Vec<f64>>,
     /// (capsule, obstacle) pairs checked: on a moving link, and apart at rest.
     scene_pairs: Vec<(usize, usize)>,
     /// Per solved column: moves more than one limb.
@@ -460,6 +470,7 @@ impl Ik {
             scene,
             anchor: rest.clone(),
             anchored: false,
+            preferred: None,
             rest,
             scene_pairs,
             shared,
@@ -507,10 +518,26 @@ impl Ik {
     }
 
     /// Engage: forget the last commanded velocity, so the next step starts from standing
-    /// still, and anchor posture at the next step's measured positions.
+    /// still, and anchor posture at the next step's measured positions, or at the preferred
+    /// posture when one is set.
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
-        self.anchored = false;
+        self.anchored = self.preferred.is_some();
+    }
+
+    /// Draw the free direction toward `posture` (every axis) from now on, at
+    /// [`Settings::preferred_posture_weight`], instead of toward the posture at engage: the
+    /// arm moves as from its natural pose, whatever posture it engaged in.
+    ///
+    /// # Errors
+    ///
+    /// [`IkError::Positions`] for a posture of the wrong length or not finite.
+    pub fn prefer_posture(&mut self, posture: &[f64]) -> Result<(), IkError> {
+        self.check_positions(posture)?;
+        self.anchor.copy_from_slice(posture);
+        self.anchored = true;
+        self.preferred = Some(posture.to_vec());
+        Ok(())
     }
 
     fn check_positions(&self, q: &[f64]) -> Result<(), IkError> {
@@ -763,7 +790,9 @@ impl Ik {
             }
         }
         for (column, &axis) in body.solved.iter().enumerate() {
-            let weight = if self.shared[column] {
+            let weight = if self.preferred.is_some() {
+                s.preferred_posture_weight
+            } else if self.shared[column] {
                 s.shared_posture_weight
             } else {
                 s.posture_weight

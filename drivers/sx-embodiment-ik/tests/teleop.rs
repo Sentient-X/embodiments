@@ -30,6 +30,7 @@ fn config() -> TeleopConfig {
         max_step_rad: 0.03,
         held: Vec::new(),
         obstacles: Vec::new(),
+        posture: std::collections::BTreeMap::new(),
     }
 }
 
