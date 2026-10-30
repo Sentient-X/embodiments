@@ -10,8 +10,11 @@ A pack is a directory of three files, generated from the body's composed descrip
   every visual origin baked in, in the link frame, in metres. A viewer places a link by setting
   its node's local transform to the link's pose in the root link's frame, in URDF coordinates.
   Primitives carry positions and flat normals (not indexed), one primitive per material; a
-  material is the visual's URDF colour, or one neutral grey. Box, cylinder and sphere visuals
-  are tessellated. Meshes are decimated so the pack fits a headset's triangle budget.
+  material is the visual's URDF colour, else a COLLADA mesh's own material colours, else one
+  neutral grey. Box, cylinder and sphere visuals are tessellated; STL, OBJ and COLLADA meshes
+  are read (COLLADA's node transforms, unit and up axis applied, so it lands in the link frame
+  as the others do). A description with no visual at all is drawn from its collision
+  geometry. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
   count, and the body's gripper tool frames by side; and, when the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
@@ -32,6 +35,7 @@ NumPy is this module's only dependency beyond the registry (the ``render`` extra
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import math
 import struct
@@ -72,6 +76,7 @@ _SMALLEST_SHARE: Final = 12
 
 Floats = npt.NDArray[np.float64]
 Faces = npt.NDArray[np.int64]
+RGBA = tuple[float, float, float, float]
 
 
 class RenderPackError(EmbodimentError):
@@ -189,143 +194,220 @@ def _read_obj(data: bytes, what: str) -> Floats:
     return np.asarray(corners, dtype=np.float64)
 
 
-def _collada_matrix(node: ET.Element, ns: str) -> Floats:
-    """A COLLADA node's own transform, its ``matrix``, ``translate``, ``rotate`` and ``scale``
-    children composed in document order."""
-    matrix = np.eye(4)
-    for child in node:
-        tag = child.tag.removeprefix(ns)
-        values = [float(v) for v in (child.text or "").split()]
-        step = np.eye(4)
-        if tag == "matrix" and len(values) == 16:
-            step = np.asarray(values, dtype=np.float64).reshape(4, 4)  # row-major
-        elif tag == "translate" and len(values) == 3:
-            step[:3, 3] = values
-        elif tag == "scale" and len(values) == 3:
-            step[:3, :3] = np.diag(values)
-        elif tag == "rotate" and len(values) == 4:
-            axis = np.asarray(values[:3], dtype=np.float64)
-            norm = float(np.linalg.norm(axis))
-            if norm > 0.0:
-                x, y, z = axis / norm
-                angle = math.radians(values[3])
-                c, s, t = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
-                step[:3, :3] = [
-                    [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
-                    [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
-                    [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
-                ]
-        else:
-            continue
-        matrix = matrix @ step
-    return matrix
+_DAE_UP: Final = {
+    # Where a file's x, y and z axes land in URDF Z-up coordinates, by its up axis (COLLADA
+    # 1.4: X_UP is right -y, up +x; Y_UP is right +x, up +y; both toward the viewer +z).
+    "X_UP": ((0.0, 0.0, 1.0), (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
+    "Y_UP": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
+    "Z_UP": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+}
+
+Matrix = tuple[tuple[float, ...], ...]  # 4x4, row-major
+_IDENTITY: Final[Matrix] = tuple(
+    tuple(1.0 if row == column else 0.0 for column in range(4)) for row in range(4)
+)
 
 
-def _collada_geometry(geometry: ET.Element, ns: str, what: str) -> Floats:
-    """One COLLADA geometry's triangle corners (polygons fanned), in its own frame."""
-    mesh = geometry.find(f"{ns}mesh")
-    if mesh is None:
-        return np.zeros((0, 3))
-    arrays: dict[str, Floats] = {}
-    for source in mesh.findall(f"{ns}source"):
-        floats = source.find(f"{ns}float_array")
-        accessor = source.find(f"{ns}technique_common/{ns}accessor")
-        if floats is None or accessor is None:
-            continue
-        stride = int(accessor.get("stride", "3"))
-        values = np.asarray((floats.text or "").split(), dtype=np.float64)
-        arrays[source.get("id", "")] = values.reshape(-1, stride)[:, :3]
-    vertices = mesh.find(f"{ns}vertices")
-    if vertices is not None:
-        for item in vertices.findall(f"{ns}input"):
-            if item.get("semantic") == "POSITION":
-                arrays[vertices.get("id", "")] = arrays[item.get("source", "").lstrip("#")]
-    corners: list[Floats] = []
-    for primitive in mesh:
-        kind = primitive.tag.removeprefix(ns)
-        if kind not in ("triangles", "polylist", "polygons"):
-            continue
-        inputs = primitive.findall(f"{ns}input")
-        stride = max(int(item.get("offset", "0")) for item in inputs) + 1
-        vertex = next((item for item in inputs if item.get("semantic") == "VERTEX"), None)
-        if vertex is None:
-            continue
-        positions = arrays.get(vertex.get("source", "").lstrip("#"))
-        if positions is None:
-            raise RenderPackError(f"{what}: a primitive names no positions")
-        offset = int(vertex.get("offset", "0"))
-        lists = primitive.findall(f"{ns}p")
-        indices = [
-            np.asarray((p.text or "").split(), dtype=np.int64)[offset::stride] for p in lists
-        ]
-        if kind == "triangles":
-            corners.append(positions[np.concatenate(indices) if indices else []])
-            continue
-        if kind == "polylist":
-            counts_node = primitive.find(f"{ns}vcount")
-            counts = (
-                [int(v) for v in (counts_node.text or "").split()]
-                if counts_node is not None
-                else []
-            )
-            flat = np.concatenate(indices) if indices else np.zeros(0, np.int64)
-            polygons: list[npt.NDArray[np.int64]] = []
-            at = 0
-            for count in counts:
-                polygons.append(flat[at : at + count])
-                at += count
-        else:
-            polygons = indices
-        for polygon in polygons:
-            for k in range(1, len(polygon) - 1):
-                corners.append(positions[[polygon[0], polygon[k], polygon[k + 1]]])
-    return np.concatenate(corners) if corners else np.zeros((0, 3))
+def _product(a: Matrix, b: Matrix) -> Matrix:
+    return tuple(
+        tuple(sum(a[row][k] * b[k][column] for k in range(4)) for column in range(4))
+        for row in range(4)
+    )
 
 
-def _read_dae(data: bytes, what: str) -> Floats:
-    """A COLLADA document's triangle corners in metres, Z up, each geometry placed by the
-    visual scene's node transforms (every geometry as written when it has no scene)."""
+def _dae_transform(element: ET.Element, tag: str, what: str) -> Matrix:
+    """A COLLADA transform element (``matrix``, ``translate``, ``rotate``, ``scale``) as 4x4."""
+    values = urdf_floats(element.text, {"matrix": 16, "rotate": 4}.get(tag, 3), "", what)
+    if tag == "matrix":
+        return tuple(tuple(values[4 * row : 4 * row + 4]) for row in range(4))
+    if tag == "translate":
+        x, y, z = values
+        return ((1.0, 0.0, 0.0, x), (0.0, 1.0, 0.0, y), (0.0, 0.0, 1.0, z), _IDENTITY[3])
+    if tag == "scale":
+        x, y, z = values
+        return ((x, 0.0, 0.0, 0.0), (0.0, y, 0.0, 0.0), (0.0, 0.0, z, 0.0), _IDENTITY[3])
+    ax, ay, az, degrees = values
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
+    if norm == 0.0:
+        return _IDENTITY
+    x, y, z = ax / norm, ay / norm, az / norm
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    t = 1.0 - c
+    return (
+        (t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0),
+        (t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0),
+        (t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0),
+        _IDENTITY[3],
+    )
+
+
+def _transform(r: npt.NDArray[np.float64], v: Floats) -> Floats:
+    """``v`` (n, 3) moved by the 4x4 ``r``, elementwise rather than a BLAS product, so the
+    bytes do not depend on the machine."""
+    return np.stack(
+        [
+            r[row, 0] * v[:, 0] + r[row, 1] * v[:, 1] + r[row, 2] * v[:, 2] + r[row, 3]
+            for row in range(3)
+        ],
+        axis=1,
+    )
+
+
+def _read_dae(data: bytes, what: str) -> list[tuple[RGBA | None, Floats]]:
+    """A COLLADA file's triangle corners in metres, Z up, by material colour, (3m, 3) each.
+
+    The visual scene's nodes are walked with their transforms applied (every geometry at
+    identity when the file has no visual scene); triangles, polylists and polygons are fanned; lines
+    are not surfaces and are skipped. A material's colour is its effect's diffuse colour, and
+    ``None`` when it has none (a texture) or the geometry binds no material.
+    """
     try:
-        root = ET.fromstring(data)
+        root = ET.fromstring(data)  # nosec B314 - registry-owned description assets
     except ET.ParseError as error:
         raise RenderPackError(f"{what} is not COLLADA: {error}") from error
     ns = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else ""
-    unit = root.find(f"{ns}asset/{ns}unit")
-    metres = float(unit.get("meter", "1")) if unit is not None else 1.0
-    up = root.find(f"{ns}asset/{ns}up_axis")
-    to_z_up = np.eye(4)
-    if up is not None and (up.text or "").strip() == "Y_UP":
-        to_z_up[:3, :3] = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
-    elif up is not None and (up.text or "").strip() == "X_UP":
-        to_z_up[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
-    geometries = {geometry.get("id", ""): geometry for geometry in root.iter(f"{ns}geometry")}
-    placed: list[Floats] = []
 
-    def visit(node: ET.Element, parent: Floats) -> None:
-        here = parent @ _collada_matrix(node, ns)
-        for instance in node.findall(f"{ns}instance_geometry"):
-            geometry = geometries.get(instance.get("url", "").lstrip("#"))
-            if geometry is not None:
-                corners = _collada_geometry(geometry, ns, what)
-                if len(corners):
-                    homogeneous = np.hstack([corners, np.ones((len(corners), 1))])
-                    placed.append((homogeneous @ here.T)[:, :3])
-        for child in node.findall(f"{ns}node"):
-            visit(child, here)
+    def q(path: str) -> str:
+        return "/".join(
+            f"{ns}{part}" if part not in (".", "..", "*") else part for part in path.split("/")
+        )
 
-    scenes = list(root.iter(f"{ns}visual_scene"))
-    if scenes:
-        for node in scenes[0].findall(f"{ns}node"):
-            visit(node, to_z_up)
+    by_id = {element.get("id"): element for element in root.iter() if element.get("id")}
+
+    def target(url: str | None) -> ET.Element | None:
+        return by_id.get((url or "").removeprefix("#"))
+
+    unit = root.find(q("asset/unit"))
+    meter = urdf_floats(None if unit is None else unit.get("meter"), 1, "1", f"{what} unit")[0]
+    up_text = root.findtext(q("asset/up_axis"), "Y_UP").strip()
+    if up_text not in _DAE_UP:
+        raise RenderPackError(f"{what}: up_axis {up_text!r} is not X_UP, Y_UP or Z_UP")
+    axes = _DAE_UP[up_text]
+    # Columns are where the file's x, y, z land in URDF coordinates, scaled to metres.
+    convention: Matrix = (
+        *((*(meter * axes[column][row] for column in range(3)), 0.0) for row in range(3)),
+        _IDENTITY[3],
+    )
+
+    def colour(material: ET.Element | None) -> RGBA | None:
+        effect = None if material is None else material.find(q("instance_effect"))
+        effect = None if effect is None else target(effect.get("url"))
+        if effect is None:
+            return None
+        for technique in ("lambert", "phong", "blinn", "constant"):
+            found = effect.find(q(f"profile_COMMON/technique/{technique}/diffuse/color"))
+            if found is not None:
+                r, g, b, a = urdf_floats(found.text, 4, "", f"{what} diffuse")
+                return (r, g, b, a)
+        return None
+
+    def corners(geometry: ET.Element) -> list[tuple[str, Floats]]:
+        """Each primitive's material symbol and its triangle corners in geometry space."""
+        mesh = geometry.find(q("mesh"))
+        if mesh is None:
+            return []
+        out: list[tuple[str, Floats]] = []
+        for primitive in mesh:
+            kind = primitive.tag.removeprefix(ns)
+            if kind not in ("triangles", "polylist", "polygons"):
+                continue
+            inputs = primitive.findall(q("input"))
+            stride = 1 + max((int(i.get("offset", "0")) for i in inputs), default=0)
+            vertex = next((i for i in inputs if i.get("semantic") == "VERTEX"), None)
+            if vertex is None:
+                raise RenderPackError(f"{what}: a {kind} has no VERTEX input")
+            source = target(vertex.get("source"))
+            if source is not None and source.tag == f"{ns}vertices":
+                position = next(
+                    (i for i in source.findall(q("input")) if i.get("semantic") == "POSITION"),
+                    None,
+                )
+                source = None if position is None else target(position.get("source"))
+            array = None if source is None else source.find(q("float_array"))
+            accessor = None if source is None else source.find(q("technique_common/accessor"))
+            if array is None:
+                raise RenderPackError(f"{what}: a {kind}'s positions are missing")
+            step = int("3" if accessor is None else accessor.get("stride", "3"))
+            flat = np.asarray([float(x) for x in (array.text or "").split()], dtype=np.float64)
+            positions = flat[: len(flat) // step * step].reshape(-1, step)[:, :3]
+            offset = int(vertex.get("offset", "0"))
+            if kind == "polylist":
+                vcount = [int(x) for x in (primitive.findtext(q("vcount")) or "").split()]
+                lists = [primitive.findtext(q("p")) or ""]
+            elif kind == "polygons":
+                lists = [p.text or "" for p in primitive.findall(q("p"))]
+                vcount = []
+            else:
+                lists = [primitive.findtext(q("p")) or ""]
+                vcount = []
+            polygons: list[list[int]] = []
+            for text in lists:
+                indices = [int(x) for x in text.split()][offset::stride]
+                if kind == "triangles":
+                    polygons += [indices[k : k + 3] for k in range(0, len(indices) - 2, 3)]
+                elif kind == "polygons":
+                    polygons.append(indices)
+                else:
+                    start = 0
+                    for n in vcount:
+                        polygons.append(indices[start : start + n])
+                        start += n
+            fan = [
+                [polygon[0], polygon[k], polygon[k + 1]]
+                for polygon in polygons
+                for k in range(1, len(polygon) - 1)
+            ]
+            if not fan:
+                continue
+            faces = np.asarray(fan, dtype=np.int64)
+            if faces.max() >= len(positions):
+                raise RenderPackError(f"{what}: a {kind} indexes past its positions")
+            out.append((primitive.get("material", ""), positions[faces].reshape(-1, 3)))
+        return out
+
+    parts: dict[RGBA | None, list[Floats]] = {}
+
+    def place(geometry: ET.Element, at: Matrix, bound: Mapping[str, ET.Element | None]) -> None:
+        for symbol, soup in corners(geometry):
+            moved = _transform(np.asarray(at, dtype=np.float64), soup)
+            parts.setdefault(colour(bound.get(symbol)), []).append(moved)
+
+    def walk(node: ET.Element, above: Matrix, depth: int) -> None:
+        if depth > 64:
+            raise RenderPackError(f"{what}: its node tree is cyclic or too deep")
+        at = above
+        for child in node:
+            tag = child.tag.removeprefix(ns)
+            if tag in ("matrix", "translate", "rotate", "scale"):
+                at = _product(at, _dae_transform(child, tag, what))
+        for child in node:
+            tag = child.tag.removeprefix(ns)
+            if tag == "instance_geometry":
+                geometry = target(child.get("url"))
+                if geometry is not None:
+                    bound = {
+                        m.get("symbol", ""): target(m.get("target"))
+                        for m in child.iter(f"{ns}instance_material")
+                    }
+                    place(geometry, at, bound)
+            elif tag == "node":
+                walk(child, at, depth + 1)
+            elif tag == "instance_node" and (linked := target(child.get("url"))) is not None:
+                walk(linked, at, depth + 1)
+
+    scene = root.find(q("scene/instance_visual_scene"))
+    visual_scene = None if scene is None else target(scene.get("url"))
+    if visual_scene is None:  # no <scene>: the first visual scene, as viewers read it
+        visual_scene = next(root.iter(f"{ns}visual_scene"), None)
+    if visual_scene is not None:
+        for node in visual_scene.findall(q("node")):
+            walk(node, convention, 0)
     else:
-        for geometry in geometries.values():
-            corners = _collada_geometry(geometry, ns, what)
-            if len(corners):
-                homogeneous = np.hstack([corners, np.ones((len(corners), 1))])
-                placed.append((homogeneous @ to_z_up.T)[:, :3])
-    if not placed:
-        raise RenderPackError(f"{what} has no faces")
-    return np.concatenate(placed) * metres
+        for geometry in root.iter(f"{ns}geometry"):
+            place(geometry, convention, {})
+    if not parts:
+        raise RenderPackError(f"{what} has no triangles")
+    return [(rgba, np.concatenate(soups)) for rgba, soups in parts.items()]
 
 
 def _weld(corners: Floats) -> _Mesh:
@@ -438,25 +520,27 @@ def sphere_mesh(radius: float) -> _Mesh:
     return _Mesh(np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64))
 
 
-def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visual]]:
-    root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
+@dataclass(frozen=True, slots=True)
+class Shape:
+    """One URDF ``visual`` or ``collision`` element, read: its link, its origin, its URDF
+    material (``None`` when it declares none) and its geometry's parts, each with what
+    decimates identically and the mesh file's own colour."""
+
+    link: str
+    origin: Transform
+    material: ET.Element | None
+    parts: tuple[tuple[str, RGBA | None, _Mesh], ...]
+
+
+def shapes(embodiment: Embodiment, root: ET.Element, tag: str) -> list[Shape]:
+    """Every ``tag`` (``visual`` or ``collision``) element of the description, in order."""
     directory = materialize(embodiment)
     description = embodiment.urdf.asset.uri
-    named = {
-        name: _rgba(material, {})
-        for material in root.findall("material")
-        if (name := material.get("name")) is not None
-    }
-    links: list[str] = []
-    visuals: list[_Visual] = []
-    meshes: dict[tuple[str, tuple[float, ...]], _Mesh] = {}
+    found: list[Shape] = []
     for link in root.findall("link"):
-        name = link.get("name")
-        if name is None:
-            raise RenderPackError("a link has no name")
-        links.append(name)
-        for visual in link.findall("visual"):
-            origin = visual.find("origin")
+        name = link.get("name", "")
+        for element in link.findall(tag):
+            origin = element.find("origin")
             transform = from_xyz_rpy(
                 xyz_triple(
                     urdf_floats(None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz")
@@ -465,11 +549,11 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
                     urdf_floats(None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy")
                 ),
             )
-            geometry = visual.find("geometry")
+            geometry = element.find("geometry")
             shape = geometry[0] if geometry is not None and len(geometry) else None
             if shape is None:
-                raise RenderPackError(f"link {name!r} has a visual with no geometry")
-            rgba = _rgba(visual.find("material"), named)
+                raise RenderPackError(f"link {name!r} has a {tag} with no geometry")
+            parts: list[tuple[str, RGBA | None, _Mesh]]
             match shape.tag:
                 case "mesh":
                     filename = shape.get("filename", "")
@@ -478,26 +562,54 @@ def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visu
                     if not uri.startswith(PACKAGE_URI_PREFIX):
                         raise RenderPackError(f"link {name!r}: {filename!r} is not packaged")
                     relpath = uri.removeprefix(PACKAGE_URI_PREFIX)
-                    cached = meshes.get((relpath, scale))
-                    if cached is None:
-                        cached = load_mesh(directory / relpath, relpath, scale)
-                        meshes[(relpath, scale)] = cached
-                    visuals.append(_Visual(name, transform, cached, f"{relpath}@{scale}", rgba))
+                    loaded = load_mesh(directory / relpath, relpath, scale)
+                    parts = [
+                        (f"{relpath}@{scale}" + (f"#{index}" if index else ""), rgba, mesh)
+                        for index, (rgba, mesh) in enumerate(loaded)
+                    ]
                 case "box":
                     size = urdf_floats(shape.get("size"), 3, "", "box size")
-                    visuals.append(_Visual(name, transform, box_mesh(size), f"box{size}", rgba))
+                    parts = [(f"box{size}", None, box_mesh(size))]
                 case "cylinder":
                     radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
                     length = urdf_floats(shape.get("length"), 1, "", "length")[0]
-                    mesh = cylinder_mesh(radius, length)
-                    visuals.append(_Visual(name, transform, mesh, f"cyl{radius},{length}", rgba))
+                    parts = [(f"cyl{radius},{length}", None, cylinder_mesh(radius, length))]
+                case "capsule":
+                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
+                    parts = [(f"cap{radius},{length}", None, capsule_mesh(radius, length))]
                 case "sphere":
                     radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
-                    visuals.append(
-                        _Visual(name, transform, sphere_mesh(radius), f"sph{radius}", rgba)
-                    )
+                    parts = [(f"sph{radius}", None, sphere_mesh(radius))]
                 case other:
-                    raise RenderPackError(f"link {name!r} has a {other!r} visual")
+                    raise RenderPackError(f"link {name!r} has a {other!r} {tag}")
+            found.append(Shape(name, transform, element.find("material"), tuple(parts)))
+    return found
+
+
+def _visuals(embodiment: Embodiment, urdf: bytes) -> tuple[list[str], list[_Visual]]:
+    """Every link, and what draws them: their visuals, or their collision geometry when the
+    description has no visual at all (a description imported without its visual meshes)."""
+    root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
+    links: list[str] = []
+    for link in root.findall("link"):
+        name = link.get("name")
+        if name is None:
+            raise RenderPackError("a link has no name")
+        links.append(name)
+    named = {
+        name: _rgba(material, {})
+        for material in root.findall("material")
+        if (name := material.get("name")) is not None
+    }
+    tag = "visual" if root.find("link/visual") is not None else "collision"
+    visuals: list[_Visual] = []
+    for shape in shapes(embodiment, root, tag):
+        rgba = _rgba(shape.material, named)
+        for key, own, mesh in shape.parts:
+            # The URDF's material wins; else the mesh file's own colour.
+            drawn = rgba if shape.material is not None or own is None else own
+            visuals.append(_Visual(shape.link, shape.origin, mesh, key, drawn))
     return links, visuals
 
 
@@ -505,18 +617,26 @@ def xyz_triple(values: tuple[float, ...]) -> tuple[float, float, float]:
     return (values[0], values[1], values[2])
 
 
-def load_mesh(path: Path, relpath: str, scale: tuple[float, ...]) -> _Mesh:
+@functools.lru_cache(maxsize=256)
+def load_mesh(
+    path: Path, relpath: str, scale: tuple[float, ...]
+) -> tuple[tuple[RGBA | None, _Mesh], ...]:
+    """A mesh file's parts in metres, by its own colour (``None``: it names none).
+
+    Registry asset files do not change under a process, so a file read for a body's visuals
+    is not read again for its collision proxies or its next pack."""
     data = path.read_bytes()
     match PurePosixPath(relpath).suffix.lower():
         case ".stl":
-            corners = _read_stl(data, relpath)
+            parts = [(None, _read_stl(data, relpath))]
         case ".obj":
-            corners = _read_obj(data, relpath)
+            parts = [(None, _read_obj(data, relpath))]
         case ".dae":
-            corners = _read_dae(data, relpath)
+            parts = _read_dae(data, relpath)
         case suffix:
-            raise RenderPackError(f"{relpath}: {suffix} meshes are not drawn yet")
-    return _weld(corners * np.asarray(scale, dtype=np.float64))
+            raise RenderPackError(f"{relpath}: {suffix} meshes are not drawn")
+    factor = np.asarray(scale, dtype=np.float64)
+    return tuple((rgba, _weld(corners * factor)) for rgba, corners in parts)
 
 
 # --- decimation ---------------------------------------------------------------------------
@@ -578,16 +698,7 @@ def _decimate(mesh: _Mesh, target: int) -> _Mesh:
 
 def _flat(mesh: _Mesh, origin: Transform) -> tuple[Floats, Floats]:
     """Positions with the visual origin baked in, and each corner's face normal, (3m, 3) each."""
-    r = np.asarray(origin, dtype=np.float64).reshape(4, 4)
-    v = mesh.vertices
-    # Elementwise, not a BLAS product, so the bytes do not depend on the machine.
-    moved = np.stack(
-        [
-            r[row, 0] * v[:, 0] + r[row, 1] * v[:, 1] + r[row, 2] * v[:, 2] + r[row, 3]
-            for row in range(3)
-        ],
-        axis=1,
-    )
+    moved = _transform(np.asarray(origin, dtype=np.float64).reshape(4, 4), mesh.vertices)
     corners = moved[mesh.faces].astype(np.float32).astype(np.float64)  # (m, 3, 3)
     a = corners[:, 1] - corners[:, 0]
     b = corners[:, 2] - corners[:, 0]
@@ -787,7 +898,7 @@ def build(
     links, visuals = _visuals(embodiment, urdf)
     source_total = sum(len(visual.source.faces) for visual in visuals)
     if source_total == 0:
-        raise RenderPackError(f"{embodiment.name} has no visual geometry")
+        raise RenderPackError(f"{embodiment.name} has no visual or collision geometry")
     decimated: dict[tuple[str, int], _Mesh] = {}
     parts: dict[str, list[tuple[tuple[float, ...], Floats, Floats]]] = {}
     for visual in visuals:

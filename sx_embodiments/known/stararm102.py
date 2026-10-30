@@ -1,9 +1,10 @@
 """Development StarArm102-LD model; LD geometry is not yet qualified.
 
-The generic upstream URDF retains its joint frames, limits and inertials, but
-has no visual/collision geometry. Its bounds differ from the manufacturer's LD
-specification; see docs/STARARM102.md for evidence and the promotion gate.
-Encoder-to-model calibration remains recording/session input.
+The generic upstream URDF retains its joint frames, limits, inertials and its
+visual meshes (drawn, not qualified as LD geometry), but no collision geometry.
+Its bounds differ from the manufacturer's LD specification; see docs/STARARM102.md
+for evidence and the promotion gate. Encoder-to-model calibration remains
+recording/session input.
 """
 
 from typing import Final
@@ -20,8 +21,8 @@ from ._authoring import bounded_layout
 
 STARARM102_URDF: Final = packaged_asset(
     relpath="stararm102/kinematics.urdf",
-    sha256="2316cbdd6f1ac529ef329888452cd9f8c6e36220dbae88cac3c258e20cf1d280",
-    size_bytes=7431,
+    sha256="f7f77e43bb60a519a3b3616ec063e2f28cbbf8ccec19d54cab1a6c506851e025",
+    size_bytes=10182,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -29,7 +30,7 @@ STARARM102_URDF: Final = packaged_asset(
         revision="0896306e40891c3ee4c97228e85dd708d61326de",
         path="ROS2_HUMBLE/src/stararm102_description/urdf/stararm102_description.urdf",
         license_id="MIT",
-        generator="remove visual/collision elements; normalize CRLF to LF",
+        generator="remove collision elements; meshes under stararm102/meshes; normalize CRLF to LF",
     ),
     media_type="application/xml",
 )

@@ -18,8 +18,9 @@ All upstream references below are pinned to
   Unlocking during this example is runtime behavior, not evidence that the
   hardware is intrinsically passive. Actuation remains explicitly undocumented.
 - [Generic URDF](https://github.com/servodevelop/Star-Arm-102/blob/0896306e40891c3ee4c97228e85dd708d61326de/ROS2_HUMBLE/src/stararm102_description/urdf/stararm102_description.urdf)
-  is the source of the packaged model. The asset strips visual/collision elements
-  and preserves the upstream kinematics and inertials. The parity test verifies
+  is the source of the packaged model. The asset strips collision elements and
+  preserves the upstream kinematics, inertials and visual meshes (the generic arm,
+  drawn in a viewer; not a claim about LD geometry, so no collision is derived from it). The parity test verifies
   these packaged bounds and the mimic relation, not LD hardware equivalence.
 - [LD CAD inventory](https://github.com/servodevelop/Star-Arm-102/blob/0896306e40891c3ee4c97228e85dd708d61326de/Hardware/cad/README.md)
   identifies separate LD drawings. The generic URDF has not been qualified

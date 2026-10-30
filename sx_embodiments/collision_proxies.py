@@ -53,11 +53,9 @@ from scipy.spatial import (
 )
 from sx_contracts.identity import JsonValue, canonical_bytes
 
-from .assets import PACKAGE_URI_PREFIX, description_asset_uri
 from .compose import BaseMount
 from .embodiment import Embodiment
-from .kinematics import JointType, Kinematics, Transform, from_xyz_rpy
-from .materialize import materialize
+from .kinematics import JointType, Kinematics, Transform
 
 SCHEMA: Final = "sx.collision-proxies/v4"
 GENERATOR: Final = "sx_embodiments.collision_proxies/v4"
@@ -103,71 +101,15 @@ def _collision_meshes(
 ) -> dict[str, list[tuple[Floats, Floats]]]:
     """Each link's collision meshes in the link frame: vertices ``(n, 3)`` and triangles
     ``(m, 3, 3)``."""
-    from .render_pack import (
-        RenderPackError,
-        box_mesh,
-        capsule_mesh,
-        cylinder_mesh,
-        load_mesh,
-        sphere_mesh,
-        urdf_floats,
-        xyz_triple,
-    )
+    from .render_pack import shapes
 
     root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
-    directory = materialize(embodiment)
-    description = embodiment.urdf.asset.uri
     meshes: dict[str, list[tuple[Floats, Floats]]] = {}
-    for link in root.findall("link"):
-        name = link.get("name", "")
-        parts: list[tuple[Floats, Floats]] = []
-        for collision in link.findall("collision"):
-            origin = collision.find("origin")
-            transform = _matrix(
-                from_xyz_rpy(
-                    xyz_triple(
-                        urdf_floats(
-                            None if origin is None else origin.get("xyz"), 3, "0 0 0", "xyz"
-                        )
-                    ),
-                    xyz_triple(
-                        urdf_floats(
-                            None if origin is None else origin.get("rpy"), 3, "0 0 0", "rpy"
-                        )
-                    ),
-                )
-            )
-            geometry = collision.find("geometry")
-            shape = geometry[0] if geometry is not None and len(geometry) else None
-            if shape is None:
-                raise RenderPackError(f"link {name!r} has a collision with no geometry")
-            match shape.tag:
-                case "mesh":
-                    filename = shape.get("filename", "")
-                    scale = urdf_floats(shape.get("scale"), 3, "1 1 1", "scale")
-                    uri = description_asset_uri(description, filename)
-                    if not uri.startswith(PACKAGE_URI_PREFIX):
-                        raise RenderPackError(f"link {name!r}: {filename!r} is not packaged")
-                    relpath = uri.removeprefix(PACKAGE_URI_PREFIX)
-                    mesh = load_mesh(directory / relpath, relpath, scale)
-                case "box":
-                    mesh = box_mesh(urdf_floats(shape.get("size"), 3, "", "box size"))
-                case "cylinder":
-                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
-                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
-                    mesh = cylinder_mesh(radius, length)
-                case "sphere":
-                    mesh = sphere_mesh(urdf_floats(shape.get("radius"), 1, "", "radius")[0])
-                case "capsule":
-                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
-                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
-                    mesh = capsule_mesh(radius, length)
-                case other:
-                    raise RenderPackError(f"link {name!r} has a {other!r} collision")
+    for shape in shapes(embodiment, root, "collision"):
+        transform = _matrix(shape.origin)
+        for _, _, mesh in shape.parts:
             vertices = mesh.vertices @ transform[:3, :3].T + transform[:3, 3]
-            parts.append((vertices, vertices[np.asarray(mesh.faces)]))
-        if parts:
-            meshes[name] = parts
+            meshes.setdefault(shape.link, []).append((vertices, vertices[np.asarray(mesh.faces)]))
     return meshes
 
 
