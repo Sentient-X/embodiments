@@ -1,8 +1,8 @@
 {
   "static-upper-body-head": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
-    "instance": "8ef23cec5acf5fb519575174cfde58396ceeed09f3808f0380a1758cd37c3026",
+    "embodiment": "6184036b4ddb9d4068cfb18954c0a945f64d9a5e2840566083f1951def43e65f",
+    "instance": "d1fcb90a60ccaa291d5cdb148eabad03aa2abc304eea1b6adb53dea8c2ec98de",
     "tracks": [
       {
         "track": "head",
