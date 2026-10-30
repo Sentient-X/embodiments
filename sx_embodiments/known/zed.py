@@ -15,10 +15,14 @@ track (:class:`~sx_embodiments.media.StereoPair`).
   eye's at -60 mm, each turned to the optical convention (z along the view, x right, y down).
   The static upper body's ``ZED_camera`` frame is that convention: its meshes put the body
   175 mm along y and the lens barrels at y = +/-60 mm, standing out along +x.
-* **Optics.** The nominal intrinsics are the datasheet's maximum field of view, 110 x 70 degrees,
-  over the HD720 raster, rounded to a micro-pixel as the RealSense imagers' are. A unit's own
-  intrinsics are the factory calibration Stereolabs publishes per serial
-  (:func:`sx_embodiments.factory_intrinsics.zed_factory_calibration`).
+* **Optics.** The nominal focal length is the lens's over the pixel: the datasheet's 2.1 mm lens
+  on its 2 um pixels is 1050 px at the full-resolution modes, and an HD720 eye reads the sensor
+  binned two by two, so 525 px, the same along both axes because the pixels are square; the
+  principal point is the raster's centre. The datasheet's field of view (110 x 70 degrees) is the
+  lens's maximum, not the HD720 raster's, and taken per axis it gave fx/fy = 0.87, pixels no
+  imager has. The static upper body's unit (``30371653``) bears this out: its factory HD record
+  is fx 531.47, fy 531.54, exactly half its FHD record's. A unit's own intrinsics are that
+  factory calibration (:func:`sx_embodiments.factory_intrinsics.zed_factory_calibration`).
 
 * **Inertial unit.** The ZED 2i's sensor module (its own USB HID interface, ``2b03:f881``) reports
   an accelerometer and gyroscope at 400 Hz, a magnetometer, a barometer and temperatures, on what
@@ -68,8 +72,13 @@ _DATASHEET: Final = FactSource(
     repository="https://cdn.sanity.io/files/s18ewfw4/staging/"
     "c059860f8fe49f3856f6b8da770eb13cc543ac2c.pdf/ZED%202i%20Datasheet%20v1.2.pdf",
     revision="ZED 2i Datasheet v1.2",
-    path="Lens: field of view 110 (H) x 70 (V) x 120 (D) max., 2.1 mm",
+    path="Lens: 2.1 mm focal length; Sensor: 4M pixels per sensor with 2-micron pixels",
 )
+#: The lens's focal length and the sensor's (square) pixel pitch, millimetres.
+ZED_2I_FOCAL_MM: Final = 2.1
+ZED_2I_PIXEL_MM: Final = 0.002
+#: An HD720 eye is the sensor read binned two by two.
+ZED_2I_HD720_BINNING: Final = 2
 
 
 #: The description frame a body names its ZED by, Stereolabs' ROS convention.
@@ -96,6 +105,7 @@ def eye_offset(eye: Eye) -> float:
 def zed_2i_eye(eye: Eye) -> CameraSpec:
     """One ZED 2i eye at HD720 and 30 fps with the datasheet's nominal optics."""
     width, height = ZED_2I_EYE_WIDTH, ZED_2I_EYE_HEIGHT
+    focal_px = round(ZED_2I_FOCAL_MM / (ZED_2I_PIXEL_MM * ZED_2I_HD720_BINNING), 6)
     return CameraSpec(
         part_id=PartId(f"zed-2i-{eye}"),
         model=ZED_2I,
@@ -105,11 +115,11 @@ def zed_2i_eye(eye: Eye) -> CameraSpec:
             width=width,
             height=height,
             image_from_camera=(
-                round(width / 2 / math.tan(math.radians(110.0) / 2), 6),
+                focal_px,
                 0.0,
                 width / 2,
                 0.0,
-                round(height / 2 / math.tan(math.radians(70.0) / 2), 6),
+                focal_px,
                 height / 2,
                 0.0,
                 0.0,

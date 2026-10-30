@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
+  "id": "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
   "axes": [
     {
       "joint": "torso_joint",
@@ -327,6 +327,7 @@
   "supersedes": [
     "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
     "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
+    "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
     "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
   ],
   "approach": {

@@ -22,3 +22,11 @@ def test_a_rewired_or_unknown_id_has_no_successor() -> None:
     assert successor(REWIRED) is None
     assert successor("0" * 64) is None
     assert successor(str(current(STATIC).id)) is None  # the current id is no earlier one
+
+
+def test_the_body_before_its_square_pixel_optics_is_the_same_robot() -> None:
+    """The ZED's corrected nominal optics changed the id, not how the body drives."""
+    before_optics = "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a"
+    assert before_optics in superseded_ids(STATIC)
+    found = successor(before_optics)
+    assert found is not None and found.id == current(STATIC).id
