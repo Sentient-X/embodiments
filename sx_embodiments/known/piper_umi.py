@@ -13,8 +13,10 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
+from ..recorded_streams import RecordedStreams
 from ._authoring import bounded_layout
 from ._piper_umi_assets import ASSET_IDENTITIES
+from .yubi import POD_CAMERAS
 
 PIPER_UMI_ASSETS = tuple(
     packaged_asset(
@@ -67,4 +69,6 @@ PIPER_UMI_SPEC = EmbodimentDefinition(
     lineage=Lineage(family="piper-umi", revision="supplied-cad-v6-holder-tracking"),
     build=Build.of(PIPER_UMI_MODULE),
     extra_assets=PIPER_UMI_ASSETS,
+    # The same pod records it, so its cameras are named as a YUBI's are.
+    recorded_streams=RecordedStreams(cameras=POD_CAMERAS),
 )

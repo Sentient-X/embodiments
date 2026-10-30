@@ -5,6 +5,7 @@ import pytest
 from sx_embodiments import development_embodiments, recorded_streams_of
 from sx_embodiments.errors import UnknownEmbodimentError
 from sx_embodiments.recorded_streams import (
+    RecordedCamera,
     RecordedCoordinate,
     RecordedPose,
     RecordedStreams,
@@ -36,4 +37,22 @@ def test_one_frame_names_one_device() -> None:
         RecordedStreams(
             poses=(RecordedPose(site="left_hand", frame="a"),),
             coordinates=(RecordedCoordinate(component="left_jaw", frame="a"),),
+        )
+
+
+def test_a_pods_cameras_are_named_as_reviewers_read_them() -> None:
+    for body in ("yubi", "piper-umi"):
+        names = {camera.frame: camera.name for camera in recorded_streams_of(body).cameras}
+        assert names == {
+            "quest3s_left_camera_optical": "head_left",
+            "quest3s_right_camera_optical": "head_right",
+            "left_hand_cam_optical": "left_wrist",
+            "right_hand_cam_optical": "right_wrist",
+        }
+
+
+def test_two_cameras_never_share_a_name() -> None:
+    with pytest.raises(RecordedStreamsError):
+        RecordedStreams(
+            cameras=(RecordedCamera(frame="a", name="head"), RecordedCamera(frame="b", name="head"))
         )

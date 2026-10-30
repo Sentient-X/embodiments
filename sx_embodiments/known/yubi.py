@@ -41,7 +41,12 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
-from ..recorded_streams import RecordedCoordinate, RecordedPose, RecordedStreams
+from ..recorded_streams import (
+    RecordedCamera,
+    RecordedCoordinate,
+    RecordedPose,
+    RecordedStreams,
+)
 from ..sites import BodySite
 from ..viewing import TrackedDevice, Viewing
 from ._authoring import bounded_layout
@@ -250,6 +255,15 @@ YUBI_TRACKING: Final = (
     ),
 )
 
+#: A pod's cameras by the optical frame its seal records them in (sx-seal: the Quest's head
+#: pair, each hand's ``<side>_hand_cam_optical``), named as floor reviewers read them.
+POD_CAMERAS: Final = (
+    RecordedCamera(frame="quest3s_left_camera_optical", name="head_left"),
+    RecordedCamera(frame="quest3s_right_camera_optical", name="head_right"),
+    RecordedCamera(frame="left_hand_cam_optical", name="left_wrist"),
+    RecordedCamera(frame="right_hand_cam_optical", name="right_wrist"),
+)
+
 YUBI_SPEC: Final = EmbodimentDefinition(
     collection=CollectionSetup(
         method=CollectionMethod.UMI,
@@ -317,5 +331,6 @@ YUBI_SPEC: Final = EmbodimentDefinition(
             RecordedCoordinate(component="left_jaw", frame="yubi_left_hand"),
             RecordedCoordinate(component="right_jaw", frame="yubi_right_hand"),
         ),
+        cameras=POD_CAMERAS,
     ),
 )
