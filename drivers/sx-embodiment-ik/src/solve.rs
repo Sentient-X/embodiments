@@ -71,10 +71,11 @@ pub struct Settings {
     /// Posture weight for an axis that moves more than one limb (a torso).
     pub shared_posture_weight: f64,
     /// Posture weight toward a preferred posture ([`Ik::prefer_posture`]: a robot's
-    /// commissioned Ready pose, elbows down): twenty times the engage posture's, so the arms'
-    /// redundancy resolves toward it along a move instead of drifting, still far below the
-    /// tool's own error (on the static body, a tool held a millimetre or two and a degree off
-    /// where the posture and the goal disagree; settling is 5 mm and 3 degrees).
+    /// commissioned Ready pose, elbows down): ten times the engage posture's, so the arms'
+    /// redundancy leans toward it along a move, still far below the tool's own error. It is a
+    /// weight, not a priority: where the posture and the goal disagree the tool sits off by it
+    /// (on the static body under a millimetre and half a degree; settling is 5 mm and 3
+    /// degrees), and twice it pushed far poses past their settle.
     pub preferred_posture_weight: f64,
     /// Kept clear of each joint limit.
     pub limit_margin_rad: f64,
@@ -113,7 +114,7 @@ impl Default for Settings {
             damping: 1e-4,
             posture_weight: 1e-6,
             shared_posture_weight: 1e-5,
-            preferred_posture_weight: 2e-5,
+            preferred_posture_weight: 1e-5,
             limit_margin_rad: 0.01,
             collision_margin_m: 0.01,
             influence_m: 0.2,

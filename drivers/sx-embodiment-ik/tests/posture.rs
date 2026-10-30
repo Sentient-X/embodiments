@@ -185,10 +185,10 @@ fn the_cup_grasp_keeps_the_elbow_down_and_its_joints_calm_with_the_ready_posture
     // The arm travels less in joint space for the same tool travel, and its forearm and wrist
     // counter-spin less: a lower peak joint speed per metre of tool travel (measured where the
     // solve meets its 4 ms deadline every tick: an unoptimised build misses it, holding steps).
-    assert!(preferred.travel_rad_per_m < 0.97 * anchored_at_engage.travel_rad_per_m);
+    assert!(preferred.travel_rad_per_m < anchored_at_engage.travel_rad_per_m);
     if cfg!(not(debug_assertions)) {
-        assert!(preferred.peak_rad_per_m < 0.85 * anchored_at_engage.peak_rad_per_m);
+        assert!(preferred.peak_rad_per_m < 0.9 * anchored_at_engage.peak_rad_per_m);
     }
     // ...and the tool still arrives, well inside a goal's 5 mm and 3 degrees.
-    assert!(preferred.residual_m < 0.003 && preferred.residual_rad < 0.03);
+    assert!(preferred.residual_m < 0.002 && preferred.residual_rad < 0.02);
 }
