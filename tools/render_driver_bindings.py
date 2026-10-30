@@ -73,6 +73,7 @@ from sx_embodiments.known.static_upper_body import (
 from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
 from sx_embodiments.layout import (
     ACTUATOR_RATINGS,
+    COMMAND_ANSWERS,
     ActuatorBus,
     ActuatorModel,
     BusPort,
@@ -143,6 +144,13 @@ def vocabulary() -> str:
     document = {
         "models": [model.value for model in ActuatorModel],
         "buses": [bus.value for bus in ActuatorBus],
+        "command_answers": {
+            bus.value: {
+                "command_answer_reports_motion": COMMAND_ANSWERS[bus].reports_motion,
+                "command_answer_reports_temperature": COMMAND_ANSWERS[bus].reports_temperature,
+            }
+            for bus in ActuatorBus
+        },
         "ratings": {
             model.value: {
                 "peak_torque_nm": rating.peak_torque_nm,

@@ -514,6 +514,17 @@ mod tests {
         }
     }
 
+    /// A fake answer reports nothing beyond position.
+    impl crate::chain::Reports for u16 {
+        fn motion(&self) -> Option<(f64, f64)> {
+            None
+        }
+
+        fn temperature(&self) -> Option<(u16, crate::chain::MotorTemperature)> {
+            None
+        }
+    }
+
     impl ActuatorChain for Fake {
         type Error = Failed;
         type Feedback = u16;
