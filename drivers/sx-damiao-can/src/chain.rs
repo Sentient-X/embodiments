@@ -1096,11 +1096,12 @@ impl<P: CanPort> DamiaoChain<P> {
     /// reduction`, so velocity scales by `g` and torque, by power, by `1 / g`.
     ///
     /// Feed-forward moves where the motor settles: unloaded, `(kd dq + tau) / kp` past the
-    /// target. Both parts are scaled down together so that excursion stays inside the axis'
-    /// commandable range from `target` (actuator coordinates), widened by [`MAX_COAST`]; with
-    /// `kp` zero nothing is sent.
-    /// A load the feed-forward balances (gravity held near a limit) makes this conservative:
-    /// the joint may sag, away from the push, never past the range.
+    /// target. The planned velocity's part is scaled so it stays inside the axis' commandable
+    /// range from `target` (actuator coordinates); the torque may take the unloaded settling
+    /// point at most [`MAX_COAST`] past the range end, so a joint near its end can be held up
+    /// against gravity; with `kp` zero nothing is sent. A load the feed-forward balances is what
+    /// keeps a held joint at its target; with the load gone (a dropped cup, a wrong model) it
+    /// settles within [`MAX_COAST`] past the end, never further.
     fn actuator_feedforward(
         &self,
         index: usize,
@@ -1128,21 +1129,37 @@ impl<P: CanPort> DamiaoChain<P> {
             axis.actuator_from_joint(range.lower),
             axis.actuator_from_joint(range.upper),
         ];
-        let push = kd.mul_add(dq, tau);
-        let margin = if push > 0.0 {
-            (ends[0].max(ends[1]) - target).max(0.0)
-        } else {
-            (target - ends[0].min(ends[1])).max(0.0)
+        // How far the settling point may lie from `target` toward `push`'s side: to the range
+        // end on that side.
+        let room = |push: f64| {
+            if push > 0.0 {
+                (ends[0].max(ends[1]) - target).max(0.0)
+            } else {
+                (target - ends[0].min(ends[1])).max(0.0)
+            }
         };
-        // Up to MAX_COAST past the range end: the most a stalled host lets a joint coast past
-        // its last position anyway. Held to the end itself, a joint near it on its gravity side
-        // could not be held up at all (it sagged kp-share of its load, 8 mm at the coffee
-        // machine's retreat in act-sim).
-        let allowed = kp * (margin + MAX_COAST * gain.abs());
+        // The planned velocity's part stays inside the range, as it always has: a stalled host
+        // never settles a moving joint past its end.
+        let velocity_push = kd * dq;
+        let velocity_allowed = kp * room(velocity_push);
+        if velocity_push.abs() > velocity_allowed {
+            dq *= velocity_allowed / velocity_push.abs();
+        }
+        // The torque may take the settling point up to MAX_COAST past the end (what a stalled
+        // host lets a joint coast anyway): held to the end itself, a joint near it on its
+        // gravity side could not be held up at all (it sagged its load over kp, 8 mm at the
+        // coffee machine's retreat in act-sim).
+        let push = kd.mul_add(dq, tau);
+        let allowed = kp * (room(push) + MAX_COAST * gain.abs());
         if push.abs() > allowed {
-            let scale = allowed / push.abs();
-            dq *= scale;
-            tau *= scale;
+            // Only the torque gives way: the velocity part is already inside the range.
+            let velocity_part = kd * dq;
+            let limit = allowed.copysign(push);
+            tau = if (limit - velocity_part).signum() == tau.signum() {
+                limit - velocity_part
+            } else {
+                0.0
+            };
         }
         (
             (dq, tau),

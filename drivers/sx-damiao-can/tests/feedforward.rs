@@ -215,7 +215,10 @@ fn feedforward_never_pushes_a_joint_past_its_range() {
         torque: 4.0,
     };
     chain.command_with(&targets, &wanted).expect("command");
-    let at_edge = excursion(chain.applied_feedforward()[elbow]);
+    let applied = chain.applied_feedforward()[elbow];
+    // The planned velocity never aims past the end; only the torque (gravity support) may.
+    assert!(applied.velocity.abs() < 1e-12, "{applied:?}");
+    let at_edge = excursion(applied);
     assert!(at_edge > 0.0 && at_edge <= MAX_COAST + 1e-9, "{at_edge}");
     // 0.05 rad inside it, within 0.05 rad more.
     targets[elbow] = range.upper - 0.05;
