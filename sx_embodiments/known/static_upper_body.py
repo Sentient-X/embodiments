@@ -45,8 +45,9 @@ The rendering changes the source only where simulation and the registry need it:
   limits are negated as above, and the Gazebo ``<sensor>`` element is dropped (the registry
   declares the camera).
 
-Still open with the hardware owner: every arm joint declares 54 Nm and 0.5 rad/s, too slow to
-replay human motion, and the superseded driver configuration capped speed at 0.25 rad/s; left
+Each Damiao joint declares its motor's rated speed and peak torque, and moves as fast as
+:mod:`sx_embodiments.calibrate.motion` derives from them and the arm's mass (the superseded driver
+configuration's 0.25 rad/s bring-up cap is not kept). Still open with the hardware owner: left
 and right do not mirror one sign convention; the right arm's first id is 0x09 where the rest of
 that arm runs 0x10..0x15; the gains (kp 20..61, kd 1..5) are that driver's, not a
 qualification. The feedback table flagged the right forearm yaw's direction confirmed while its
@@ -430,6 +431,24 @@ STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
     STATIC_UPPER_BODY_NECK_PORT: _SERVO_APPROACH,
     **{port: _SERVO_APPROACH for port, _ in STATIC_UPPER_BODY_GRIPPER_BUSES.values()},
 }
+
+#: How many times the description's mass the Damiao arm joints are planned to carry
+#: (:func:`sx_embodiments.calibrate.motion.joint_motion`): in-place identification on
+#: 2026-10-26 put the forearm subtree at 2.61 times the description, whose arm masses are a
+#: uniform-density hull estimate (see the module notes); every arm link is taken that heavy,
+#: the slower side. The
+#: neck's inertials are TheRobotStudio's, so its port keeps the description's.
+STATIC_UPPER_BODY_MASS_MARGIN: Final[dict[BusPort, float]] = {BusPort("can"): 2.61}
+
+#: Joints held below their motors' speed, rad/s, until their controller can carry more
+#: (:func:`sx_embodiments.calibrate.motion.joint_motion`). The torso keeps the 0.25 rad/s it
+#: was brought up at: its prototype gains (kp 40, kd 1) damp the arms it carries at a damping
+#: ratio near 0.06, so at full rated speed it rings, 0.28 rad off half a second after a stop
+#: (``docs/evidence/speed-ceiling``), and it is unidentified (the teleop solve holds it). To
+#: lift it: identify the torso in place (its inertia, friction and the +0.9 N m bias seen on
+#: 10-26), then raise kd to a damping ratio near 0.7, ``kd = 1.4 sqrt(kp J)``: about 8 N m s/rad
+#: at kp 40 if J is the description's 0.77 kg m^2, 12.5 if it is 2.61 times that.
+STATIC_UPPER_BODY_SPEED_CAP: Final[dict[str, float]] = {"torso_joint": 0.25}
 
 #: The ZED's two eyes as one side-by-side track.
 STATIC_UPPER_BODY_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))

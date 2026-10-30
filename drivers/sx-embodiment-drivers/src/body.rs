@@ -24,8 +24,8 @@ use thiserror::Error;
 
 use crate::approach::ApproachLimit;
 use crate::binding::{
-    ActuatorBinding, ActuatorBus, ActuatorModel, BindingError, BoundAxis, UNCALIBRATED_DIRECTION,
-    UNCALIBRATED_ZERO, validate_chain,
+    ActuatorBinding, ActuatorBus, ActuatorModel, AxisMotion, BindingError, BoundAxis,
+    UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO, validate_chain,
 };
 
 /// One registered body's bound axes, in native state order, uncalibrated.
@@ -102,6 +102,34 @@ struct Axis {
     home: Option<f64>,
     #[serde(default)]
     of: Option<Twin>,
+    /// The fastest the hardware moves this joint (`sx_embodiments.calibrate.motion`), and the
+    /// most inertia it moves.
+    speed: f64,
+    acceleration: f64,
+    #[serde(default)]
+    inertia: f64,
+}
+
+impl Axis {
+    /// The joint's rendered motion, refused unless both are positive and finite.
+    fn motion(&self) -> Result<AxisMotion, BodyError> {
+        let positive = |value: f64| value.is_finite() && value > 0.0;
+        if positive(self.speed)
+            && positive(self.acceleration)
+            && self.inertia.is_finite()
+            && self.inertia >= 0.0
+        {
+            Ok(AxisMotion {
+                speed: self.speed,
+                acceleration: self.acceleration,
+                inertia: self.inertia,
+            })
+        } else {
+            Err(BodyError::Motion {
+                joint: self.joint.clone(),
+            })
+        }
+    }
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -147,6 +175,8 @@ pub enum BodyError {
          opened at their full speed"
     )]
     NoApproach { embodiment: String, port: String },
+    #[error("joint {joint}'s speed and acceleration must be positive and finite")]
+    Motion { joint: String },
     #[error("{embodiment}'s port {port} has both provisional and verified bindings")]
     MixedProvisional { embodiment: String, port: String },
     #[error(
@@ -222,6 +252,7 @@ impl BodyBindings {
                     joint: axis.joint.clone(),
                     bus: axis.bus.clone(),
                 })?;
+                let motion = axis.motion()?;
                 Ok(BoundAxis {
                     joint: axis.joint,
                     port: axis.port,
@@ -237,6 +268,7 @@ impl BodyBindings {
                     zero: UNCALIBRATED_ZERO,
                     direction: UNCALIBRATED_DIRECTION,
                     home: axis.home,
+                    motion,
                 })
             })
             .collect::<Result<Vec<_>, BodyError>>()?;
@@ -502,7 +534,27 @@ mod tests {
 
     const DOCUMENT: &str = r#"{"embodiment": "b", "id": "0", "axes": [
         {"joint": "j1", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
-         "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": -1, "reduction": 2.0}]}"#;
+         "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": -1, "reduction": 2.0, "speed": 1.0, "acceleration": 10.0}]}"#;
+
+    #[test]
+    fn a_joint_without_a_positive_finite_motion_is_refused() {
+        let body = BodyBindings::parse(DOCUMENT).expect("parses");
+        assert_eq!(
+            body.axes[0].motion,
+            AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            }
+        );
+        for wrong in ["\"speed\": 0.0", "\"speed\": -1.0"] {
+            assert!(matches!(
+                BodyBindings::parse(&DOCUMENT.replace("\"speed\": 1.0", wrong)),
+                Err(BodyError::Motion { .. })
+            ));
+        }
+        assert!(BodyBindings::parse(&DOCUMENT.replace(", \"speed\": 1.0", "")).is_err());
+    }
 
     #[test]
     fn a_ports_servo_approach_is_read_and_a_wrong_one_refused() {
@@ -512,8 +564,8 @@ mod tests {
             .replace("\"can\"", "\"neck\"");
         let with = |approach: &str| {
             serial.replacen(
-                "\"reduction\": 2.0}]}",
-                &format!("\"reduction\": 2.0}}], \"approach\": {approach}}}"),
+                "\"acceleration\": 10.0}]}",
+                &format!("\"acceleration\": 10.0}}], \"approach\": {approach}}}"),
                 1,
             )
         };
@@ -542,8 +594,8 @@ mod tests {
         }
         // A CAN bus has no servo approach.
         let can = DOCUMENT.replacen(
-            "\"reduction\": 2.0}]}",
-            "\"reduction\": 2.0}], \"approach\": {\"can\": {\"speed\": 4.0, \"acceleration\": 16.0}}}",
+            "\"acceleration\": 10.0}]}",
+            "\"acceleration\": 10.0}], \"approach\": {\"can\": {\"speed\": 4.0, \"acceleration\": 16.0}}}",
             1,
         );
         assert!(BodyBindings::parse(&can).is_err());
@@ -571,7 +623,7 @@ mod tests {
         format!(
             r#"{{"joint": "{joint}", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
                 "bus": "{bus}", "port": "{port}", "bus_id": {bus_id}, "sign": 1,
-                "reduction": 1.0}}"#
+                "reduction": 1.0, "speed": 1.0, "acceleration": 10.0}}"#
         )
     }
 

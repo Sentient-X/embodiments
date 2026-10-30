@@ -7,12 +7,14 @@
 //! station's bench work. The torso has no entry there; its id and gains, and the timeouts below,
 //! are the superseded `allisa_feedback` description's motor table (`source/received.urdf`
 //! before 2026-10-26, in git history), which agrees with the profile on every arm motor. That
-//! table's driver also caps speed at 0.25 rad/s and tracking error at 0.2 rad, with a
+//! table's driver also capped speed at 0.25 rad/s and tracking error at 0.2 rad, with a
 //! 0.5 s feedback and a 0.75 s heartbeat timeout. The heartbeat is enforced here: every motor's
 //! `TIMEOUT` register is written to 0.75 s at open ([`crate::chain`]), so an enabled motor that
-//! hears no command for that long disables itself. Speed and tracking error are not enforced by
-//! this chain: they are `sx_embodiment_drivers::Governor`'s, which bounds them only when the
-//! caller wraps the chain in it with those limits. Nothing applies the 0.5 s feedback timeout.
+//! hears no command for that long disables itself. The 0.25 rad/s was that driver's bring-up
+//! choice, not the hardware's, and is not kept: speed, acceleration and tracking error are
+//! `sx_embodiment_drivers::Governor`'s, from each joint's rated motion in the bindings
+//! (`AxisLimits::rated`: the motor's rated speed, the acceleration its torque leaves over the
+//! arm). Nothing applies the 0.5 s feedback timeout.
 //! Both forearm yaws span more than one turn, so each is commanded only within one turn of its
 //! motor's zero (`DamiaoAxis::motor_window`).
 //!

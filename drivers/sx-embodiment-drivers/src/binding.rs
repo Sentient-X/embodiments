@@ -169,6 +169,19 @@ impl ActuatorBinding {
     }
 }
 
+/// The fastest one joint moves, in its own unit per second and per second squared: what its
+/// actuator is rated for and the arm it carries allows (`sx_embodiments.calibrate.motion.JointMotion`,
+/// rendered into the bindings). Every motion path's governor limits come from it
+/// ([`crate::AxisLimits::rated`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxisMotion {
+    pub speed: f64,
+    pub acceleration: f64,
+    /// The most inertia the joint moves, kg m² at the joint (the registry's estimate, at its
+    /// body's mass margin); 0 where none is known.
+    pub inertia: f64,
+}
+
 /// One coordinate of the native state order with the actuator that drives it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundAxis {
@@ -192,6 +205,8 @@ pub struct BoundAxis {
     /// chain's declared `home` (`ChainSpec.home`); `None` where its part declares none (a
     /// gripper's finger), and such a joint stays where it is.
     pub home: Option<f64>,
+    /// How fast the hardware moves this joint.
+    pub motion: AxisMotion,
 }
 
 impl BoundAxis {
@@ -347,6 +362,11 @@ mod tests {
             zero: 0.25,
             direction: UNCALIBRATED_DIRECTION,
             home: Some(0.0),
+            motion: AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            },
         }
     }
 

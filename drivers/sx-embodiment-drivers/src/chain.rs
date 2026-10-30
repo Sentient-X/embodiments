@@ -333,6 +333,15 @@ pub struct FeedforwardLimit {
     pub torque: Option<f64>,
 }
 
+/// How fast, and how hard, an axis's own controller can be made to follow
+/// ([`ActuatorChain::tracking_ceilings`]), in the joint's units per second and per second².
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrackingCeiling {
+    pub speed: f64,
+    /// `None` where the controller bounds no acceleration (no inertia is known).
+    pub acceleration: Option<f64>,
+}
+
 /// A chain's error, classified once by the crate that knows its vendor's failure modes.
 pub trait ChainError: std::error::Error + Send + Sync + 'static {
     fn failure(&self) -> ChainFailure;
@@ -434,6 +443,14 @@ pub trait ActuatorChain {
     /// supported supply, each with what it is held to: a [`crate::Governor`] applies them.
     /// Fixed once the chain is open.
     fn derated(&self) -> Vec<crate::rail::AxisDerate> {
+        Vec::new()
+    }
+
+    /// The axes whose own controller follows no faster, or no harder, than a ceiling without
+    /// lagging or coasting past what the governor's tracking bound allows, each with that
+    /// ceiling: a [`crate::Governor`] holds each axis to it. A vendor chain derives it from its
+    /// controller's gains and the inertia its axis moves; a chain with none limits nothing.
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
         Vec::new()
     }
 
@@ -549,6 +566,11 @@ mod tests {
             zero: crate::binding::UNCALIBRATED_ZERO,
             direction: crate::binding::UNCALIBRATED_DIRECTION,
             home: None,
+            motion: crate::binding::AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            },
         }];
         assert_eq!(check_targets(&axes, &[0.5]), Ok(()));
         assert_eq!(
@@ -583,6 +605,11 @@ mod tests {
             zero: crate::binding::UNCALIBRATED_ZERO,
             direction: crate::binding::UNCALIBRATED_DIRECTION,
             home: None,
+            motion: crate::binding::AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            },
         }];
         let ranges = [CommandRange {
             lower: -0.9,

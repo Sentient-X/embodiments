@@ -13,7 +13,10 @@
       "bus_id": 1,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 27.972419154642164,
+      "inertia": 0.3217455004604564
     },
     {
       "joint": "joint2",
@@ -26,7 +29,10 @@
       "bus_id": 2,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 6.649655402258591,
+      "inertia": 0.3393101240424663
     },
     {
       "joint": "joint3",
@@ -39,7 +45,10 @@
       "bus_id": 3,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.09332469543525201
     },
     {
       "joint": "joint4",
@@ -52,7 +61,10 @@
       "bus_id": 4,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 12.56637061435917,
+      "acceleration": 125.6637061435917,
+      "inertia": 0.010248302588980795
     },
     {
       "joint": "joint5",
@@ -65,7 +77,10 @@
       "bus_id": 5,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 12.56637061435917,
+      "acceleration": 125.6637061435917,
+      "inertia": 0.0029414929181119515
     },
     {
       "joint": "joint6",
@@ -78,7 +93,10 @@
       "bus_id": 6,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 12.56637061435917,
+      "acceleration": 125.6637061435917,
+      "inertia": 0.0007675148885133004
     },
     {
       "joint": "gripper_joint1",
@@ -90,7 +108,10 @@
       "provisional": false,
       "bus_id": 7,
       "sign": -1,
-      "reduction": 111.11111111111111
+      "reduction": 111.11111111111111,
+      "speed": 0.11309733552923253,
+      "acceleration": 1.1309733552923251,
+      "inertia": 0.08465579019774325
     }
   ],
   "supersedes": [

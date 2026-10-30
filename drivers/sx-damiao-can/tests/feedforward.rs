@@ -7,7 +7,7 @@
 //! is packed with that same encoder from what the chain should have sent.
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError};
+use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, MAX_COAST};
 use sx_damiao_can::dm_can::float_to_uint;
 use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
@@ -203,21 +203,28 @@ fn feedforward_never_pushes_a_joint_past_its_range() {
     let range = chain.commandable()[elbow];
     let mut targets = rest.clone();
     let mut wanted = vec![Feedforward::default(); rest.len()];
-    // At the upper edge, a push upwards has no room: nothing is sent.
+    // At the upper edge, a push upwards has only MAX_COAST of room past it (what a stalled
+    // host may coast anyway): the unloaded settling point (kd v + tau) / kp stays within it.
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let excursion = |applied: Feedforward| {
+        axes[elbow].kd.mul_add(applied.velocity, applied.torque) / axes[elbow].kp
+    };
     targets[elbow] = range.upper;
     wanted[elbow] = Feedforward {
         velocity: 0.4,
         torque: 4.0,
     };
     chain.command_with(&targets, &wanted).expect("command");
-    assert_eq!(chain.applied_feedforward()[elbow], Feedforward::default());
-    // 0.05 rad inside it, the unloaded settling point (kd v + tau) / kp stays within 0.05 rad.
+    let at_edge = excursion(chain.applied_feedforward()[elbow]);
+    assert!(at_edge > 0.0 && at_edge <= MAX_COAST + 1e-9, "{at_edge}");
+    // 0.05 rad inside it, within 0.05 rad more.
     targets[elbow] = range.upper - 0.05;
     chain.command_with(&targets, &wanted).expect("command");
-    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
-    let applied = chain.applied_feedforward()[elbow];
-    let excursion = axes[elbow].kd.mul_add(applied.velocity, applied.torque) / axes[elbow].kp;
-    assert!(excursion > 0.0 && excursion <= 0.05 + 1e-9, "{excursion}");
+    let inside = excursion(chain.applied_feedforward()[elbow]);
+    assert!(
+        inside > 0.0 && inside <= 0.05 + MAX_COAST + 1e-9,
+        "{inside}"
+    );
     // Pushing away from the edge it is whole.
     wanted[elbow] = Feedforward {
         velocity: -0.4,

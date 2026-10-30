@@ -3,15 +3,17 @@
 //! ```text
 //! sx-jog --drive <drive.json> --commissioning <commissioning.json>
 //!        [--calibration <port>=<lerobot.json>]... [--allow-provisional <port>]...
-//!        [--exclude <joint,...>] [--speed 0.2] [--log <ticks.jsonl>]
+//!        [--exclude <joint,...>] --share <0..1> [--speed <rad/s>] [--log <ticks.jsonl>]
 //!        [--at-end home|start|release]
 //!        (--joint <joint> --delta-deg <deg> [--hold-seconds <s>]
 //!         | --sequence <joint:deg|pause:s,...>)
 //! ```
 //!
 //! The body is opened as a station opens it (`sx_embodiment_bodies::open_with` on the bridges
-//! the commissioning names), inside the `Governor`: each command slewed at `--speed` (at most
-//! 0.5 rad/s) from where the body rests, a 0.2 rad tracking-error stop. A joint in the
+//! the commissioning names), inside the `Governor` under the hardware's own limits
+//! (`AxisLimits::rated`: each joint's rated speed and acceleration, at `--share` of them, which
+//! the person at the robot must give: a first run on a robot ramps 0.25, 0.5, 1), `--speed` capping every joint lower
+//! still, from where the body rests, with the tracking stop that grows with the speed. A joint in the
 //! commissioning's `out_of_service`, or in `--exclude` for this run, keeps its place in the
 //! vector and is never addressed. Relative moves need no zero calibration. When the moves are
 //! done, `--at-end` decides (`sx_embodiment_drivers::AtEnd`): `home`, the default, returns every
@@ -35,7 +37,6 @@ use sx_embodiment_commission::jog::{self, Step, TickLog};
 use sx_embodiment_drivers::{ActuatorChain, AtEnd, AxisLimits, Governor};
 
 const PERIOD: Duration = Duration::from_millis(20);
-const TRACKING: f64 = 0.2;
 /// Ten seconds of ticks queued for the log writer.
 const LOG_CAPACITY: usize = 500;
 
@@ -53,6 +54,7 @@ fn main() -> ExitCode {
 struct Args {
     body: BodyFlags,
     speed: Option<f64>,
+    share: Option<f64>,
     log: Option<String>,
     joint: Option<String>,
     delta_deg: Option<f64>,
@@ -71,6 +73,7 @@ fn parse() -> Result<Args, String> {
         }
         match arg.as_str() {
             "--speed" => parsed.speed = Some(value()?.parse().map_err(|_| "bad --speed")?),
+            "--share" => parsed.share = Some(value()?.parse().map_err(|_| "bad --share")?),
             "--log" => parsed.log = Some(value()?),
             "--joint" => parsed.joint = Some(value()?),
             "--delta-deg" => {
@@ -107,26 +110,26 @@ fn steps(args: &Args, joints: &[String]) -> Result<Vec<Step>, String> {
 
 fn run() -> Result<(), String> {
     let args = parse()?;
-    let speed = args.speed.unwrap_or(0.2);
-    if !(speed > 0.0 && speed <= 0.5) {
-        return Err("--speed is above 0 and at most 0.5 rad/s".into());
+    if args
+        .speed
+        .is_some_and(|speed| !(speed.is_finite() && speed > 0.0))
+    {
+        return Err("--speed is above 0".into());
     }
+    let share = args.share.ok_or(
+        "give --share: the share of the robot's rated speed this run moves at (0.25 first)",
+    )?;
     let body = args.body.open()?;
     let joints: Vec<String> = body.axes().iter().map(|axis| axis.joint.clone()).collect();
     let steps = steps(&args, &joints)?;
-    let width = body.axes().len();
-    let mut governor = Governor::new(
-        body,
-        vec![
-            AxisLimits {
-                max_speed: speed,
-                max_tracking_error: TRACKING,
-                max_acceleration: None,
-            };
-            width
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    let mut limits =
+        AxisLimits::rated_all(body.axes(), share).map_err(|error| error.to_string())?;
+    if let Some(speed) = args.speed {
+        for limit in &mut limits {
+            limit.max_speed = limit.max_speed.min(speed);
+        }
+    }
+    let mut governor = Governor::new(body, limits).map_err(|error| error.to_string())?;
     let log = match &args.log {
         Some(path) => Some(TickLog::spawn(
             Box::new(File::create(path).map_err(|error| format!("{path}: {error}"))?),

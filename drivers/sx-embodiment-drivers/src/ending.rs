@@ -676,6 +676,11 @@ mod tests {
             zero: 0.0,
             direction: 1,
             home: Some(home),
+            motion: crate::binding::AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            },
         }
     }
 
@@ -1191,9 +1196,11 @@ mod tests {
         assert!(matches!(ending, Ending::Returned { .. }), "{ending}");
         let chain = governor.chain();
         // Every return command carried it, matching the pose it was computed for.
+        // Every command carries feed-forward now (the governor's planned velocity), the first
+        // one before the return included.
         let returned = &chain.sent[1..];
-        assert_eq!(chain.feedforward.len(), returned.len());
-        for (sent, feedforward) in returned.iter().zip(&chain.feedforward) {
+        assert_eq!(chain.feedforward.len(), chain.sent.len());
+        for (sent, feedforward) in returned.iter().zip(&chain.feedforward[1..]) {
             for (q, ff) in sent.iter().zip(feedforward) {
                 assert!((ff.torque - 2.0 * q).abs() < 0.25 * 0.02 * 2.0 + 1e-9);
             }

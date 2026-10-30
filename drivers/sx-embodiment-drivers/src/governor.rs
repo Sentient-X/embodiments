@@ -2,12 +2,19 @@
 //!
 //! A chain drives each axis to whatever target it is given, as fast as its gains pull. The
 //! [`Governor`] stands in front of it as the same [`ActuatorChain`], and owns two bounds per axis
-//! ([`AxisLimits`]), set by whoever operates the body (the static upper body's received driver
-//! ran 0.25 rad/s and 0.2 rad at bring-up):
+//! ([`AxisLimits`]). [`AxisLimits::rated`] gives them from what the hardware can do, the one
+//! source every motion path's limits come from: the joint's [`crate::AxisMotion`] (its
+//! actuator's rated speed, and the acceleration its torque leaves over the arm it carries,
+//! rendered from the registry), times the share of it a session runs at, and a tracking bound
+//! that grows with that speed ([`AxisLimits::rated`]):
 //!
 //! - **Speed.** Each command moves every axis from the position last sent toward its target by
 //!   at most `max_speed` times the time since the last accepted command, that time capped at
-//!   [`MAX_STEP_INTERVAL`] so a caller that stalls earns no larger step. The first command after the chain was opened,
+//!   [`MAX_STEP_INTERVAL`] so a caller that stalls earns no larger step. The speed each axis
+//!   was stepped at is sent with it as its planned velocity (`command_with`), so a motor whose
+//!   law damps toward a planned velocity (Damiao's MIT `kd (v_des - v)`) follows the step
+//!   instead of braking against it: with `v_des = 0` the elbow lags `kd / kp` seconds of travel,
+//!   0.58 rad at its rated 3.77 rad/s (`tools/sim_speed_ceiling.py`). The first command after the chain was opened,
 //!   stopped or failed starts from where the body rests: a position given with
 //!   [`Governor::start_at`], else the chain's own [`ActuatorChain::last_observed`]. With
 //!   neither, the command is refused.
@@ -93,15 +100,68 @@ pub const OUTSIDE_TOLERANCE: f64 = 0.01;
 /// pushing it in and holds it where it is.
 pub const OUTSIDE_STALL: Duration = Duration::from_secs(2);
 
+/// The farthest a joint may lie from the position just sent while it is not moving: what PD
+/// alone leaves a heavy joint short of its target against gravity its model lacks (the static
+/// upper body's left elbow, 2026-10-26). `sx_embodiments.calibrate.motion.SETTLED_TRACKING_RAD`.
+pub const SETTLED_TRACKING: f64 = 0.2;
+
+/// How many [`MAX_STEP_INTERVAL`]s of travel at the speed an axis is moving the tracking bound
+/// allows on top of its `max_tracking_error`: the step just sent leads the joint by one, the
+/// motor's own loop lags it by about another, and one more covers a late answer.
+/// `sx_embodiments.calibrate.motion.TRACKING_PERIODS`.
+pub const TRACKING_PERIODS: f64 = 3.0;
+
+/// How long a speed an axis was stepped at keeps widening its tracking bound after the step
+/// slows: the time the motor's loop takes to close the lag it built up (about `kd / kp`, 0.15 s
+/// on the static upper body's elbow). Each tick the remembered speed decays by
+/// `exp(-dt / TRACKING_MEMORY)` unless the step is faster, so the bound is the at-rest one again
+/// a few tenths of a second after the axis stops, and a blocked joint creeping slowly is
+/// stopped at it.
+pub const TRACKING_MEMORY: Duration = Duration::from_millis(100);
+
 /// One axis's bounds, in the joint's own unit (rad or m) and per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisLimits {
     /// The fastest a command moves the axis, unit/s.
     pub max_speed: f64,
-    /// The farthest an observed position may lie from the position just sent, unit.
+    /// The farthest an observed position may lie from the position just sent while the axis
+    /// is at rest, unit; the governor widens it by the speed the axis is moving at
+    /// ([`TRACKING_PERIODS`], [`TRACKING_MEMORY`]).
     pub max_tracking_error: f64,
     /// The fastest the commanded speed changes, unit/s², or `None` for no bound.
     pub max_acceleration: Option<f64>,
+}
+
+impl AxisLimits {
+    /// What the hardware can do for `axis` (its [`crate::AxisMotion`]), at `share` of it: the
+    /// speed and acceleration scaled by `share`, and a tracking bound of [`SETTLED_TRACKING`] at
+    /// rest, which the governor widens by [`TRACKING_PERIODS`] steps of travel at the speed the
+    /// axis is actually stepped at (so a slow or blocked joint is held to 0.2 rad). A share
+    /// is the person's runtime choice (a first run on a robot ramps 0.25, 0.5, 1); the hardware's
+    /// own figures change only in the registry.
+    ///
+    /// # Errors
+    ///
+    /// [`LimitsError::Share`] for a share outside `(0, 1]`.
+    pub fn rated(axis: &BoundAxis, share: f64) -> Result<Self, LimitsError> {
+        if !(share.is_finite() && share > 0.0 && share <= 1.0) {
+            return Err(LimitsError::Share(share));
+        }
+        Ok(Self {
+            max_speed: axis.motion.speed * share,
+            max_tracking_error: SETTLED_TRACKING,
+            max_acceleration: Some(axis.motion.acceleration * share),
+        })
+    }
+
+    /// [`AxisLimits::rated`] for every one of `axes`, in their order.
+    ///
+    /// # Errors
+    ///
+    /// As [`AxisLimits::rated`].
+    pub fn rated_all(axes: &[BoundAxis], share: f64) -> Result<Vec<Self>, LimitsError> {
+        axes.iter().map(|axis| Self::rated(axis, share)).collect()
+    }
 }
 
 /// The time the governor measures steps by.
@@ -132,6 +192,12 @@ pub enum LimitsError {
     /// taken as asked it would lift the derate (NaN) or stall or crash the step.
     #[error("a chosen derate needs a finite, positive speed and acceleration")]
     Derate,
+    /// A share of the hardware's speed outside `(0, 1]`.
+    #[error("the share of the hardware's speed must be above 0 and at most 1, not {0}")]
+    Share(f64),
+    /// The chain refused the governor's velocity bounds.
+    #[error("the chain refused its planned-velocity bounds: {0}")]
+    Feedforward(String),
 }
 
 /// A command the governor refused, or a fault it stopped the chain for.
@@ -231,6 +297,9 @@ pub struct Governor<C, K = MonotonicClock> {
     latched: bool,
     /// The chain's unavailable axes, neither stepped nor tracked.
     unavailable: Vec<usize>,
+    /// Per axis, the recent speed its tracking bound is widened by ([`TRACKING_MEMORY`]); zero
+    /// whenever the governor takes the body up.
+    recent: Vec<f64>,
     /// Per axis, the commands in a row whose receipt did not observe it.
     missed: Vec<u8>,
     /// Per axis, how many times it was approached again outside its range since the chain
@@ -326,6 +395,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .filter(|observed| observed.len() == width)
             .map(|observed| observed.to_vec());
         let mut limits = limits;
+        hold_to_ceilings(&mut limits, chain.tracking_ceilings());
         let mut torque_caps = vec![None; limits.len()];
         let mut derated = chain.derated();
         if let Some(chosen) = derate {
@@ -360,6 +430,19 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                     .unwrap_or(derate.limits.max_acceleration);
             }
         }
+        let mut chain = chain;
+        // The planned velocity is the governor's own step speed, bounded by each axis's cap;
+        // feed-forward torque stays off until the caller bounds it.
+        let velocity: Vec<FeedforwardLimit> = limits
+            .iter()
+            .map(|limit| FeedforwardLimit {
+                velocity: Some(limit.max_speed),
+                torque: None,
+            })
+            .collect();
+        chain
+            .set_feedforward_limits(&velocity)
+            .map_err(|error| LimitsError::Feedforward(error.to_string()))?;
         Ok(Self {
             chain,
             limits,
@@ -368,6 +451,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             start: None,
             latched: false,
             unavailable: chain_unavailable,
+            recent: vec![0.0; width],
             missed: vec![0; width],
             reapproached: vec![0; width],
             derated,
@@ -485,6 +569,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     /// Where the next command starts: the operator's start, else the chain's observation.
     fn seed(&mut self) -> Result<Held, GovernorError<C::Error>> {
         let width = self.chain.axes().len();
+        self.recent.fill(0.0);
         let position = match self.start.take() {
             Some(start) => start,
             None => self
@@ -529,6 +614,31 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.missed.fill(0);
         let stop = self.chain.stop();
         make(stop)
+    }
+}
+
+/// Each axis no faster or harder than its own controller follows
+/// ([`ActuatorChain::tracking_ceilings`]): the Damiao MIT gains' lag and coast, where its motor
+/// could go faster still.
+fn hold_to_ceilings(
+    limits: &mut [AxisLimits],
+    ceilings: Vec<(usize, crate::chain::TrackingCeiling)>,
+) {
+    let positive = |value: f64| value.is_finite() && value > 0.0;
+    for (axis, ceiling) in ceilings {
+        let Some(limit) = limits.get_mut(axis) else {
+            continue;
+        };
+        if positive(ceiling.speed) {
+            limit.max_speed = limit.max_speed.min(ceiling.speed);
+        }
+        if let Some(acceleration) = ceiling.acceleration.filter(|a| positive(*a)) {
+            limit.max_acceleration = Some(
+                limit
+                    .max_acceleration
+                    .map_or(acceleration, |own| own.min(acceleration)),
+            );
+        }
     }
 }
 
@@ -662,21 +772,36 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         (positions, speeds, (lowers, uppers), brought_in)
     }
 
-    /// The feed-forward each axis is sent: its planned velocity held to its speed, its torque to
-    /// its derate's cap, and none for an axis given up on outside its range, which rests on its
-    /// stop with neither planned motion nor torque lifting it.
-    fn held_feedforward(&self, wanted: &[Feedforward]) -> Axes<Feedforward> {
-        wanted
+    /// The feed-forward each axis is sent: as planned velocity, the speed the governor stepped
+    /// it at (the velocity of the very positions it sends, whatever the caller planned), held
+    /// to its speed; the caller's torque, held to its derate's cap; and none for an axis given
+    /// up on outside its range, which rests on its stop with neither planned motion nor torque
+    /// lifting it.
+    fn held_feedforward(
+        &self,
+        stepped: &[f64],
+        wanted: Option<&[Feedforward]>,
+    ) -> Axes<Feedforward> {
+        stepped
             .iter()
+            .enumerate()
             .zip(self.limits.iter().zip(&self.torque_caps))
             .zip(&self.outside)
-            .map(|((wanted, (limit, cap)), outside)| {
+            .map(|(((index, speed), (limit, cap)), outside)| {
                 if outside.is_some_and(|outside| outside.given_up) {
                     Feedforward::default()
                 } else {
+                    let torque = wanted.map_or(0.0, |wanted| wanted[index].torque);
                     Feedforward {
-                        velocity: wanted.velocity.clamp(-limit.max_speed, limit.max_speed),
-                        torque: cap.map_or(wanted.torque, |cap| wanted.torque.clamp(-cap, cap)),
+                        // A joint being brought in from outside its range is led by position
+                        // alone: a planned velocity would ramp against a joint that is not
+                        // moving (a resting elbow on its gravity stop) and kick it in.
+                        velocity: if outside.is_some() {
+                            0.0
+                        } else {
+                            speed.clamp(-limit.max_speed, limit.max_speed)
+                        },
+                        torque: cap.map_or(torque, |cap| torque.clamp(-cap, cap)),
                     }
                 }
             })
@@ -861,13 +986,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             self.step(&held, joints, elapsed.as_secs_f64());
         self.brought_in = brought_in;
         self.interval = Some((lower, upper));
-        let receipt = match feedforward {
-            Some(wanted) => {
-                let held = self.held_feedforward(wanted);
-                self.chain.command_with(&next, &held)
-            }
-            None => self.chain.command(&next),
-        };
+        let held_feedforward = self.held_feedforward(&velocity, feedforward);
+        let receipt = self.chain.command_with(&next, &held_feedforward);
         let receipt = match receipt {
             Ok(receipt) => receipt,
             // Refused before any frame: nothing was applied, and the next command starts again
@@ -892,27 +1012,30 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             let ticks = self.missed[index] + 1;
             return Err(self.fault(|stop| GovernorError::Unanswered { joint, ticks, stop }));
         }
+        let fade = (-elapsed.as_secs_f64() / TRACKING_MEMORY.as_secs_f64()).exp();
+        for (recent, speed) in self.recent.iter_mut().zip(velocity.iter()) {
+            *recent = speed.abs().max(*recent * fade);
+        }
+        let step = MAX_STEP_INTERVAL.as_secs_f64();
         let strayed = receipt
             .observed
             .iter()
             .zip(&next)
-            .zip(self.limits.iter().zip(self.chain.axes()))
+            .zip(self.limits.iter().zip(self.chain.axes()).zip(&self.recent))
             .enumerate()
             .filter(|(index, ((observed, _), _))| {
                 !(self.unavailable.contains(index) || observed.is_nan())
             })
-            .map(|(_, pair)| pair)
-            .find(|((observed, sent), (limit, _))| {
-                !within(**observed, **sent, limit.max_tracking_error)
-            })
-            .map(|((observed, sent), (limit, axis))| {
+            .map(|(_, ((observed, sent), ((limit, axis), recent)))| {
                 (
-                    axis.joint.clone(),
-                    *sent,
-                    *observed,
-                    limit.max_tracking_error,
+                    observed,
+                    sent,
+                    axis,
+                    limit.max_tracking_error + TRACKING_PERIODS * recent * step,
                 )
-            });
+            })
+            .find(|(observed, sent, _, bound)| !within(**observed, **sent, *bound))
+            .map(|(observed, sent, axis, bound)| (axis.joint.clone(), *sent, *observed, bound));
         if let Some((joint, commanded, observed, limit)) = strayed {
             return Err(self.fault(|stop| GovernorError::Tracking {
                 joint,
@@ -960,21 +1083,22 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.drive(joints, Some(feedforward))
     }
 
-    /// The bounds given, each derated axis's torque bound no more than its derate's cap.
+    /// The torque bounds given, each derated axis's no more than its derate's cap; the planned
+    /// velocity is always the governor's step speed, bounded by each axis's speed cap,
+    /// whatever is asked.
     fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
         let bounded: Vec<FeedforwardLimit> = limits
             .iter()
+            .zip(&self.limits)
             .enumerate()
-            .map(
-                |(index, limit)| match self.torque_caps.get(index).copied().flatten() {
-                    Some(cap) => FeedforwardLimit {
-                        // Off stays off; a bound is held to the cap.
-                        torque: limit.torque.map(|torque| torque.min(cap)),
-                        ..*limit
-                    },
-                    None => *limit,
+            .map(|(index, (limit, own))| FeedforwardLimit {
+                velocity: Some(own.max_speed),
+                // Off stays off; a bound is held to the derate's cap.
+                torque: match self.torque_caps.get(index).copied().flatten() {
+                    Some(cap) => limit.torque.map(|torque| torque.min(cap)),
+                    None => limit.torque,
                 },
-            )
+            })
             .collect();
         self.chain
             .set_feedforward_limits(&bounded)
@@ -1014,6 +1138,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn derated(&self) -> Vec<AxisDerate> {
         self.derated.clone()
+    }
+
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+        self.chain.tracking_ceilings()
     }
 
     fn bus_timing(&self) -> Vec<crate::BusTiming> {
@@ -1080,6 +1208,8 @@ mod tests {
         feedforward_limits: Vec<Vec<FeedforwardLimit>>,
         /// An axis that never moves: it observes this whatever it is sent.
         pinned: Option<(usize, f64)>,
+        /// What the chain's own controller follows at most.
+        ceilings: Vec<(usize, crate::chain::TrackingCeiling)>,
     }
 
     fn axis(joint: &str, bus_id: u16) -> BoundAxis {
@@ -1098,6 +1228,11 @@ mod tests {
             zero: 0.0,
             direction: 1,
             home: None,
+            motion: crate::binding::AxisMotion {
+                speed: 1.0,
+                acceleration: 10.0,
+                inertia: 0.0,
+            },
         }
     }
 
@@ -1124,6 +1259,7 @@ mod tests {
             feedforward: Vec::new(),
             feedforward_limits: Vec::new(),
             pinned: None,
+            ceilings: Vec::new(),
         }
     }
 
@@ -1189,6 +1325,10 @@ mod tests {
             self.derated.clone()
         }
 
+        fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+            self.ceilings.clone()
+        }
+
         fn stop(&mut self) -> StopReport {
             self.stops += 1;
             self.at = None;
@@ -1242,6 +1382,158 @@ mod tests {
 
     fn close(left: &[f64], right: &[f64]) -> bool {
         left.iter().zip(right).all(|(a, b)| (a - b).abs() < 1e-12)
+    }
+
+    #[test]
+    fn rated_limits_are_the_hardwares_at_the_share_asked() {
+        let axis = axis("a", 1);
+        let full = AxisLimits::rated(&axis, 1.0).expect("full");
+        assert!((full.max_speed - 1.0).abs() < 1e-12);
+        assert_eq!(full.max_acceleration, Some(10.0));
+        assert!((full.max_tracking_error - SETTLED_TRACKING).abs() < 1e-12);
+        let quarter = AxisLimits::rated(&axis, 0.25).expect("a quarter");
+        assert!((quarter.max_speed - 0.25).abs() < 1e-12);
+        assert_eq!(quarter.max_acceleration, Some(2.5));
+        for share in [0.0, -0.5, 1.5, f64::NAN, f64::INFINITY] {
+            assert!(
+                matches!(AxisLimits::rated(&axis, share), Err(LimitsError::Share(_))),
+                "{share}"
+            );
+        }
+    }
+
+    /// REFUTE H2 (10-30): the bound grows with the speed the axis is stepped at, not its cap. A
+    /// joint blocked while moving slowly (a hand, the coffee machine) is stopped by about
+    /// 0.2 rad, however fast the joint could go; at full speed the bound is wide enough for
+    /// the step's lead.
+    #[test]
+    fn a_slow_joint_that_is_blocked_trips_at_the_at_rest_bound() {
+        let fast = AxisLimits {
+            max_speed: 10.0,
+            max_tracking_error: SETTLED_TRACKING,
+            max_acceleration: None,
+        };
+        let mut chain = fake(true);
+        chain.pinned = Some((0, 0.0));
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let mut governor =
+            Governor::with_clock(chain, vec![fast; 2], clock.clone()).expect("limits");
+        governor.command(&[0.0, 0.5]).expect("held");
+        let mut target = 0.0;
+        let tripped = loop {
+            clock.advance(MAX_STEP_INTERVAL);
+            target += 0.1 * MAX_STEP_INTERVAL.as_secs_f64();
+            match governor.command(&[target, 0.5]) {
+                Ok(_) => assert!(target < 0.3, "never stopped"),
+                Err(GovernorError::Tracking { limit, .. }) => break limit,
+                Err(other) => panic!("{other:?}"),
+            }
+        };
+        assert!(
+            tripped < 0.21,
+            "a joint creeping at 0.1 rad/s tripped only at {tripped}"
+        );
+        // Stepping at 10 rad/s, the same axis may lead by three steps of it.
+        let mut chain = fake(true);
+        chain.pinned = Some((0, 0.0));
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let mut governor =
+            Governor::with_clock(chain, vec![fast; 2], clock.clone()).expect("limits");
+        governor.command(&[0.0, 0.5]).expect("held");
+        for _ in 0..3 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor
+                .command(&[2.0, 0.5])
+                .expect("up to 0.6 behind at 10 rad/s is inside 0.8");
+        }
+    }
+
+    /// Each axis is held to what its chain's own controller follows: the slower of its limit
+    /// and its ceiling, and the gentler acceleration.
+    #[test]
+    fn an_axis_is_held_to_its_controllers_tracking_ceiling() {
+        let mut chain = fake(true);
+        chain.ceilings = vec![(
+            1,
+            crate::chain::TrackingCeiling {
+                speed: 0.1,
+                acceleration: Some(0.5),
+            },
+        )];
+        let (governor, _) = governed(chain);
+        assert_eq!(governor.limits()[0], LIMITS);
+        assert!((governor.limits()[1].max_speed - 0.1).abs() < 1e-12);
+        assert_eq!(governor.limits()[1].max_acceleration, Some(0.5));
+    }
+
+    /// REFUTE M1 (10-30): a joint resting outside its range is brought in by position alone,
+    /// never with a planned velocity ramping against a joint that is not moving.
+    #[test]
+    fn a_joint_brought_in_from_outside_gets_no_planned_velocity() {
+        let mut chain = fake(true);
+        chain.rest = vec![1.2, 0.0];
+        chain.pinned = Some((0, 1.2));
+        let (mut governor, clock) = governed(chain);
+        governor.command(&[0.0, 0.0]).expect("held");
+        for _ in 0..6 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.0, 0.0]).expect("brought in");
+        }
+        assert!(
+            governor.chain().feedforward[1..]
+                .iter()
+                .all(|ff| ff[0].velocity == 0.0),
+            "{:?}",
+            governor.chain().feedforward
+        );
+    }
+
+    /// Every command carries, as planned velocity, the speed the governor stepped it at: the
+    /// derivative of the positions it sends, whatever the caller planned; the chain's velocity
+    /// bound is the speed cap from the moment the governor is built.
+    #[test]
+    fn every_command_carries_the_step_speed_as_planned_velocity() {
+        let (mut governor, clock) = governed(fake(true));
+        assert_eq!(
+            governor.chain().feedforward_limits[0],
+            vec![
+                FeedforwardLimit {
+                    velocity: Some(LIMITS.max_speed),
+                    torque: None,
+                };
+                2
+            ]
+        );
+        governor.command(&[0.0, 0.5]).expect("held");
+        for _ in 0..3 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.5, 0.5]).expect("steps");
+        }
+        let planned = &governor.chain().feedforward;
+        assert_eq!(planned.len(), 4, "position-only commands carry it too");
+        assert!(
+            planned[0]
+                .iter()
+                .all(|ff| ff.velocity == 0.0 && ff.torque == 0.0)
+        );
+        for step in &planned[1..] {
+            assert!(
+                (step[0].velocity - LIMITS.max_speed).abs() < 1e-9,
+                "{step:?}"
+            );
+            assert!(step[1].velocity.abs() < 1e-12, "{step:?}");
+        }
+        // A caller's planned velocity is replaced by the step's; its torque is kept.
+        clock.advance(MAX_STEP_INTERVAL);
+        let asked = [Feedforward {
+            velocity: 9.0,
+            torque: 1.5,
+        }; 2];
+        governor.command_with(&[0.5, 0.5], &asked).expect("steps");
+        let last = governor.chain().feedforward.last().expect("sent");
+        assert!((last[0].velocity - LIMITS.max_speed).abs() < 1e-9);
+        assert!(last[1].velocity.abs() < 1e-12);
+        assert!((last[0].torque - 1.5).abs() < 1e-12);
     }
 
     /// Refute pass on #123: a chosen derate's NaN speed lifted the over-rail derate, and a
@@ -1347,7 +1639,8 @@ mod tests {
         match governor.command(&[0.1, 0.5]) {
             Err(GovernorError::Tracking { joint, limit, .. }) => {
                 assert_eq!(joint, "a");
-                assert!((limit - 0.2).abs() < 1e-12);
+                // 0.2 at rest, widened by three steps at the 0.25 rad/s it was stepped at.
+                assert!((limit - (0.2 + 3.0 * 0.25 * 0.02)).abs() < 1e-12, "{limit}");
             }
             other => panic!("expected a tracking fault, got {other:?}"),
         }
@@ -1810,11 +2103,19 @@ mod tests {
         governor
             .set_feedforward_limits(&[FeedforwardLimit::default(); 2])
             .expect("off");
+        // The first bounds are the governor's own, set when it was built: velocity only.
         let bounds = &governor.chain().feedforward_limits;
-        assert_eq!(bounds[0][0].torque, Some(20.0));
-        assert_eq!(bounds[0][1].torque, Some(30.0));
+        assert_eq!(bounds[0][0].torque, None);
+        assert_eq!(bounds[0][0].velocity, Some(governor.limits()[0].max_speed));
+        assert_eq!(bounds[1][0].torque, Some(20.0));
+        assert_eq!(bounds[1][1].torque, Some(30.0));
         assert_eq!(
-            bounds[1][0].torque, None,
+            bounds[1][0].velocity,
+            Some(governor.limits()[0].max_speed),
+            "the planned velocity is the governor's, whatever is asked"
+        );
+        assert_eq!(
+            bounds[2][0].torque, None,
             "feed-forward switched off stays off"
         );
         let asked = Feedforward {

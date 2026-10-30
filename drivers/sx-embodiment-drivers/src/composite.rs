@@ -223,6 +223,18 @@ where
         readings
     }
 
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+        let first = self.first.axes().len();
+        let mut ceilings = self.first.tracking_ceilings();
+        ceilings.extend(
+            self.second
+                .tracking_ceilings()
+                .into_iter()
+                .map(|(axis, speed)| (first + axis, speed)),
+        );
+        ceilings
+    }
+
     fn derated(&self) -> Vec<AxisDerate> {
         let first = self.first.axes().len();
         let mut derated = self.first.derated();
@@ -314,6 +326,11 @@ mod tests {
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
                 home: None,
+                motion: crate::binding::AxisMotion {
+                    speed: 1.0,
+                    acceleration: 10.0,
+                    inertia: 0.0,
+                },
             }],
             commandable: vec![CommandRange {
                 lower: -1.0,

@@ -1942,6 +1942,10 @@ where
         self.1.clone()
     }
 
+    fn tracking_ceilings(&self) -> Vec<(usize, sx_embodiment_drivers::TrackingCeiling)> {
+        self.0.tracking_ceilings()
+    }
+
     fn clear_faults(&mut self) {
         self.0.clear_faults();
     }
