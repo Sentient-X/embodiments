@@ -29,6 +29,20 @@
         iyz="3.2421968022911E-08"
         izz="0.000295757258206271" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <link
     name="link1">
@@ -46,6 +60,20 @@
         iyz="-3.37080406447148E-09"
         izz="1.2039407998213E-05" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint1"
@@ -81,6 +109,20 @@
         iyz="5.01460295474944E-11"
         izz="5.48857485408553E-05" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint2"
@@ -116,6 +158,20 @@
         iyz="-1.05927086495088E-08"
         izz="4.79411867478519E-05" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint3"
@@ -151,6 +207,20 @@
         iyz="1.58418299959233E-09"
         izz="5.57726165351631E-06" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint4"
@@ -186,6 +256,20 @@
         iyz="1.11466543450896E-10"
         izz="1.22790054604825E-05" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint5"
@@ -221,6 +305,20 @@
         iyz="9.82075534976282E-09"
         izz="7.98591452298848E-06" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint6"
@@ -256,6 +354,20 @@
         iyz="1.63150501633264E-10"
         izz="9.06820649030484E-06" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link7_left.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint7_left"
@@ -291,6 +403,20 @@
         iyz="-4.8393E-13"
         izz="8.1517E-06" />
     </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sx-embodiments/stararm102/meshes/link7_right.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint
     name="joint7_right"
