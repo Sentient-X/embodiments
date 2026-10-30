@@ -207,7 +207,20 @@ STATIC_UPPER_BODY_TORSO: Final = ChainSpec(
         observations=(ActuatorFeedback(),),
     ),
     home=(0.0,),
+    ready=(0.0,),
 )
+
+
+#: Each arm's work-ready configuration, ``_ARM_JOINTS`` order: the elbow 0.3 rad off its stop
+#: at zero (where the forearm points forward at the limit), the wrist pitched back to keep the
+#: tool pointing forward, the shoulder rolled 0.15 rad outward. Forward kinematics of the
+#: description put the tool points at (0.454, +/-0.244, 0.188) m in ``base_link``, pointing
+#: +x within 0.15 rad, clear of the coffee cell's cup and counter (agent-as-policy plan, sx
+#: fleet/act/cells/coffee.json). The zero home stays the driver's calibrated zero.
+_ARM_READY: Final = {
+    "left": (-0.1, 0.15, 0.0, -0.3, 0.0, 0.2, 0.0),
+    "right": (0.1, -0.15, 0.0, 0.3, 0.0, -0.2, 0.0),
+}
 
 
 def _arm(side: str, lower: tuple[float, ...], upper: tuple[float, ...]) -> ChainSpec:
@@ -225,6 +238,7 @@ def _arm(side: str, lower: tuple[float, ...], upper: tuple[float, ...]) -> Chain
             observations=(ActuatorFeedback(),) * 7,
         ),
         home=(0.0,) * 7,
+        ready=_ARM_READY[side],
     )
 
 
@@ -319,6 +333,11 @@ STATIC_UPPER_BODY_NECK: Final = ChainSpec(
     # Zero but the camera tilt, which faces the camera straight forward with the rest of the
     # neck at zero (the composer's CAMERA_RECALIBRATION).
     home=(0.0, 0.0, 0.0, 0.0, 0.0, 0.4135),
+    # Work-ready: the camera tilted 1.3 rad down from facing forward, so the coffee cell's
+    # button, spout, drip tray, cup and both tool points at their ready poses are all in the
+    # left eye's view. Every other neck joint stays at zero; shoulder lift must, as it is out
+    # of service on the robot until its calibration is re-swept (sx docs/HARNESS-GAPS.md).
+    ready=(0.0, 0.0, 0.0, 0.0, 0.0, -0.8865),
 )
 
 
