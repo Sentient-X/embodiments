@@ -12,6 +12,8 @@ body here, so no reader matches topics or name prefixes.
 * :class:`RecordedCoordinate`: the recorded frame that measures one component's single
   coordinate. A jaw's encoder measures its gap in metres, which the component's gap curve maps
   to the joint position.
+* :class:`RecordedCamera`: the name a person reads for the camera whose pictures are recorded
+  in one optical frame (a pod's head and wrist cameras are not declared cameras of the body).
 
 Like viewing facts, these are outside an embodiment's content identity: declaring or correcting
 one moves no id.
@@ -53,16 +55,32 @@ class RecordedCoordinate:
 
 
 @dataclass(frozen=True, slots=True)
+class RecordedCamera:
+    """``name`` is what a person reads for the camera recorded in optical ``frame``."""
+
+    frame: str
+    name: str
+
+    def __post_init__(self) -> None:
+        if not (self.frame.strip() and self.name.strip()) or "/" in self.name:
+            raise RecordedStreamsError("a recorded camera names its frame and a plain name")
+
+
+@dataclass(frozen=True, slots=True)
 class RecordedStreams:
     """One body's recorded-stream facts; a body a rig does not record declares none."""
 
     poses: tuple[RecordedPose, ...] = ()
     coordinates: tuple[RecordedCoordinate, ...] = ()
+    cameras: tuple[RecordedCamera, ...] = ()
 
     def __post_init__(self) -> None:
-        frames = [item.frame for item in (*self.poses, *self.coordinates)]
+        frames = [item.frame for item in (*self.poses, *self.coordinates, *self.cameras)]
         if len(set(frames)) != len(frames):
             raise RecordedStreamsError("each recorded frame names one device")
         sites = [pose.site for pose in self.poses]
         if len(set(sites)) != len(sites):
             raise RecordedStreamsError("one recorded pose per site")
+        names = [camera.name for camera in self.cameras]
+        if len(set(names)) != len(names):
+            raise RecordedStreamsError("each recorded camera has its own name")
