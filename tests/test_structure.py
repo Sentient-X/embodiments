@@ -100,6 +100,7 @@ PUBLIC_SURFACE = frozenset(
         "UnknownEmbodimentError",
         "embodiments",
         "preview_asset",
+        "recorded_streams_of",
         "resolve_asset",
         "viewing_of",
     }
