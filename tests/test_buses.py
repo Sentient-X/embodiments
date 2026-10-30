@@ -21,7 +21,7 @@ def test_a_part_repeated_on_one_bus_kind_gets_a_bus_per_chain() -> None:
 
 
 def test_only_bodies_that_repeat_an_address_are_split_and_the_rest_read_as_bound() -> None:
-    split = set()
+    split: set[str] = set()
     for body in _bodies():
         axes = driven_axes(body)
         coordinates = [c for c in body.state.coordinates if c.axis.actuator is not None]

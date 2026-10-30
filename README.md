@@ -327,8 +327,11 @@ port, each bus by its vendor's crate. A serial servo's `LeRobot` calibration is 
 (`sx_embodiment_drivers::lerobot`), shared by the Feetech and Dynamixel crates.
 
 Every body opens one way, from `drivers/sx-embodiment-bodies/bindings/registry.json`: every
-driven body's bindings in one file, the only bindings the station's opener reads. A crate's own
-bindings file is its standalone API's and a golden the registry's document must equal
+driven body's bindings in one file, the only bindings `sx-embodiment-bodies`' opener (what the
+station opens through) reads; only the B601's own opener still places its arm and gripper from
+its crate. A crate's own bindings file serves its standalone functions (`so101::open_so101`,
+the humanoid's), which nothing opens a station body through, and is a golden the registry's
+document must equal
 (`registry_is_the_one_source` in `sx-embodiment-bodies`); its constant contributes only its
 vendor's controller configuration (servo setups, motor gains), found by the body's registry
 name and port. A composition that repeats a part on one bus kind (the bimanual SO-101's two
