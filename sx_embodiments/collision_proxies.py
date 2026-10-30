@@ -106,6 +106,7 @@ def _collision_meshes(
     from .render_pack import (
         RenderPackError,
         box_mesh,
+        capsule_mesh,
         cylinder_mesh,
         load_mesh,
         sphere_mesh,
@@ -157,6 +158,10 @@ def _collision_meshes(
                     mesh = cylinder_mesh(radius, length)
                 case "sphere":
                     mesh = sphere_mesh(urdf_floats(shape.get("radius"), 1, "", "radius")[0])
+                case "capsule":
+                    radius = urdf_floats(shape.get("radius"), 1, "", "radius")[0]
+                    length = urdf_floats(shape.get("length"), 1, "", "length")[0]
+                    mesh = capsule_mesh(radius, length)
                 case other:
                     raise RenderPackError(f"link {name!r} has a {other!r} collision")
             vertices = mesh.vertices @ transform[:3, :3].T + transform[:3, 3]
