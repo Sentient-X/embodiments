@@ -150,6 +150,19 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
             self._cache[name] = cached
         return cached
 
+    def __contains__(self, key: object) -> bool:
+        """Whether ``key`` names, or is the id of, a body here: the lookup's answer, without
+        its refusal (an `UnknownEmbodimentError` is not a `KeyError`)."""
+        if not isinstance(key, str):
+            return False
+        if EmbodimentName(key) in self._definitions:
+            return True
+        try:
+            self[key]
+        except UnknownEmbodimentError:
+            return False
+        return True
+
     def __iter__(self) -> Iterator[str]:
         return (str(name) for name in self._definitions)
 
@@ -187,8 +200,15 @@ def collection_definitions() -> tuple[EmbodimentDefinition, ...]:
 
 embodiments: Final = EmbodimentRegistry(_DEFINITIONS)
 
+
+def _described(definition: EmbodimentDefinition) -> bool:
+    """Whether any module of ``definition`` has a description: an embodiment is built from
+    one, so a definition with none (a rig whose parts are unmeasured) is listed, not built."""
+    return any(placed.module.description is not None for placed in definition.build.placed)
+
+
 development_embodiments: Final = EmbodimentRegistry(
-    {name: entry.spec for name, entry in DEVELOPMENT_EMBODIMENTS.items()}
+    {name: entry.spec for name, entry in DEVELOPMENT_EMBODIMENTS.items() if _described(entry.spec)}
 )
 """The same objects, from the registry that says they are not conformant yet.
 

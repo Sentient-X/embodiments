@@ -115,3 +115,20 @@ def test_stararm102_requires_authoritative_ld_geometry_before_promotion() -> Non
     body = development_embodiments["stararm102-ld"]
     assert body.state.width == 7
     assert Embodiment.from_json(body.to_json()) == body
+
+
+def test_membership_answers_without_raising_for_an_unknown_name() -> None:
+    assert "so101" in embodiments and "yubi" in development_embodiments
+    assert "yubi" not in embodiments and "so101" not in development_embodiments
+    assert "no-such-body" not in development_embodiments and 3 not in embodiments
+    assert str(embodiments["so101"].id) in embodiments
+
+
+def test_a_definition_with_no_description_is_held_back_but_not_built() -> None:
+    from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS, collection_definitions
+
+    assert "insta360-umi" in DEVELOPMENT_EMBODIMENTS
+    assert "insta360-umi" in {str(row.name) for row in collection_definitions()}
+    assert "insta360-umi" not in development_embodiments
+    for name in development_embodiments:
+        development_embodiments[name]  # every listed body builds
