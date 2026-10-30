@@ -344,7 +344,11 @@ model, bus, port, id, sign, reduction) in a body a crate configures, and its bus
 that configuration and given back its own names (`BodyBindings::configured_by`). That is the
 bimanual SO-101 (its arms are SO-101s) and also any body built on another's module whose drives
 match it exactly: the full humanoid and the upper body with grippers open with the humanoid
-upper body's gains. `tests/every_body.rs` opens every body in the file on simulated buses and
+upper body's gains. A matching registry is not proof that a robot's payload, wiring or
+firmware match: no body moves without the same gate every body passes. The station opens a
+real robot only from its commissioning (its ports and serial-servo calibrations, written by a
+person commissioning that unit), at the bring-up speed cap until a person raises it; a twin
+skips none of that. `tests/every_body.rs` opens every body in the file on simulated buses and
 holds each axis to its own joint, port and calibration. The B601-DM compositions are refused:
 the B601's arm and gripper bridges are its opener's, not the registry's, until the registry
 carries them.
