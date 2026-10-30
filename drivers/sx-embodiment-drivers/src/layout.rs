@@ -51,6 +51,28 @@ pub struct RobotLayout {
     pub action_interface: serde_json::Value,
     /// The state interface document itself.
     pub state_interface: serde_json::Value,
+    /// Further action interfaces of this body the robot serves beside `action_interface` (a
+    /// tool pose for each gripper, bounded by its cell's workspace), each an `sx_actions`
+    /// document rendered by `robot_layout_document`; never derived here.
+    #[serde(default)]
+    pub served_interfaces: Vec<ServedInterface>,
+}
+
+/// One further action interface a robot serves: its discovery name and its document.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServedInterface {
+    /// Discovery only, e.g. `ee_pose:left_gripper`; the content id is the document's.
+    pub name: String,
+    pub action_interface: serde_json::Value,
+}
+
+impl ServedInterface {
+    /// The document's content id.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        self.action_interface["id"].as_str().unwrap_or_default()
+    }
 }
 
 /// A rendering that is not this robot's layout.
@@ -110,6 +132,16 @@ impl RobotLayout {
             return refuse("a layout has a period and at least one coordinate");
         }
         layout.check_documents().map_err(LayoutError::Document)?;
+        for served in &layout.served_interfaces {
+            let document = &served.action_interface;
+            if !content_id(served.id())
+                || document["embodiment_id"] != layout.embodiment.as_str()
+                || document["groups"].as_array().is_none_or(Vec::is_empty)
+                || served.name.is_empty()
+            {
+                return refuse("a served interface is a named document of this body with an id");
+            }
+        }
         let blank = |value: &str| value.is_empty() || value.chars().any(char::is_whitespace);
         if layout.controls.iter().any(|control| {
             blank(&control.joint)
@@ -253,6 +285,18 @@ mod tests {
         let mut rate = document("unit");
         rate["action_interface"]["control_hz"] = serde_json::json!(30.0);
         assert!(RobotLayout::parse(&rate.to_string(), "unit").is_err());
+        let mut served = document("unit");
+        served["served_interfaces"] = serde_json::json!([{"name": "ee_pose:hand",
+            "action_interface": {"id": "e".repeat(64), "embodiment_id": "f".repeat(64),
+                "groups": [{"kind": "cartesian"}]}}]);
+        assert!(
+            RobotLayout::parse(&served.to_string(), "unit").is_err(),
+            "another body's"
+        );
+        served["served_interfaces"][0]["action_interface"]["embodiment_id"] =
+            serde_json::json!("b".repeat(64));
+        let layout = RobotLayout::parse(&served.to_string(), "unit").expect("served");
+        assert_eq!(layout.served_interfaces[0].id(), "e".repeat(64));
         let mut unknown = document("unit");
         unknown["extra"] = serde_json::json!(1);
         assert!(RobotLayout::parse(&unknown.to_string(), "unit").is_err());

@@ -286,6 +286,15 @@ struct Workspace {
     column_active: Vec<Option<Active>>,
 }
 
+/// The smallest signed distances of one configuration ([`Ik::clearance_into`]), metres: between
+/// the body's own checked proxies, and between the body and its scene (its support and the
+/// site's obstacles, such as a cell's keep-out boxes). Negative is a penetration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clearance {
+    pub body_m: f64,
+    pub scene_m: f64,
+}
+
 /// The per-tick solver: a [`Body`], its caps, a scene, the last commanded velocity, and every
 /// buffer a tick needs: a steady-state [`Ik::step`] allocates nothing.
 pub struct Ik {
@@ -579,6 +588,32 @@ impl Ik {
             }
         }
         best
+    }
+
+    /// [`Ik::clearance`] without the names, split by what it is between, into `frames` (made by
+    /// [`crate::Model::poses`] for this body: the caller's scratch). Never allocates, so a
+    /// control thread may check each configuration it commands. `q` holds one finite position
+    /// per axis.
+    pub fn clearance_into(&self, q: &[f64], frames: &mut Frames) -> Clearance {
+        let body = &self.body;
+        body.model.poses_into(q, frames);
+        let mut clearance = Clearance {
+            body_m: f64::INFINITY,
+            scene_m: f64::INFINITY,
+        };
+        for &(i, j) in &body.proxies.pairs {
+            clearance.body_m = clearance
+                .body_m
+                .min(capsule_distance(body, frames, i, j, 0.0).0);
+        }
+        for &(index, k) in &self.scene_pairs {
+            let capsule = &body.proxies.capsules[index];
+            let (a, b) = world(frames, capsule);
+            clearance.scene_m = clearance
+                .scene_m
+                .min(segment_box(&self.scene[k], a, b).1 - capsule.radius);
+        }
+        clearance
     }
 
     /// One tick: the next positions from `q` toward `targets` (one per limb, in

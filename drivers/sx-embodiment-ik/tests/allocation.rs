@@ -60,3 +60,29 @@ fn a_steady_state_tick_allocates_nothing() {
     }
     assert_eq!(worst, 0, "a tick allocated {worst} times");
 }
+
+/// The clearance a control thread checks each commanded configuration with allocates nothing,
+/// and agrees with the allocating one.
+#[test]
+fn a_clearance_check_allocates_nothing_and_agrees() {
+    let body = Body::static_upper_body();
+    let caps = Caps::declared(&body, 0.25).expect("caps");
+    let scene = vec![sx_embodiment_ik::Obstacle {
+        min: [0.3, -0.5, -0.3],
+        max: [1.0, 0.5, -0.1],
+    }];
+    let ik = Ik::new(body, caps, settings(), scene).expect("ik");
+    let q = ik.rest().to_vec();
+    let mut frames = ik.body().model().poses(&q);
+    let mut answer = None;
+    let counted = allocation_counter::measure(|| {
+        answer = Some(ik.clearance_into(&q, &mut frames));
+    });
+    assert_eq!(counted.count_total, 0);
+    let answer = answer.expect("answer");
+    let (least, _, _) = ik.clearance(&q);
+    assert!(
+        (answer.body_m.min(answer.scene_m) - least).abs() < 1e-12,
+        "{answer:?} {least}"
+    );
+}

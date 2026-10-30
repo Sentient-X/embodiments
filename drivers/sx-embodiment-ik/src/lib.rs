@@ -74,7 +74,7 @@ pub use geometry::{
 };
 pub use math::Iso;
 pub use model::{Frames, Model};
-pub use solve::{Active, Caps, Ik, LimbReport, Reach, Settings, Solve, Step};
+pub use solve::{Active, Caps, Clearance, Ik, LimbReport, Reach, Settings, Solve, Step};
 
 /// The static upper body's render pack, as committed.
 pub const STATIC_UPPER_BODY_URDF: &str =
