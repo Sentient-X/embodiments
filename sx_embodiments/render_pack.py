@@ -39,7 +39,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final, cast
+from typing import Final
 
 import numpy as np
 import numpy.typing as npt
@@ -189,6 +189,145 @@ def _read_obj(data: bytes, what: str) -> Floats:
     return np.asarray(corners, dtype=np.float64)
 
 
+def _collada_matrix(node: ET.Element, ns: str) -> Floats:
+    """A COLLADA node's own transform, its ``matrix``, ``translate``, ``rotate`` and ``scale``
+    children composed in document order."""
+    matrix = np.eye(4)
+    for child in node:
+        tag = child.tag.removeprefix(ns)
+        values = [float(v) for v in (child.text or "").split()]
+        step = np.eye(4)
+        if tag == "matrix" and len(values) == 16:
+            step = np.asarray(values, dtype=np.float64).reshape(4, 4)  # row-major
+        elif tag == "translate" and len(values) == 3:
+            step[:3, 3] = values
+        elif tag == "scale" and len(values) == 3:
+            step[:3, :3] = np.diag(values)
+        elif tag == "rotate" and len(values) == 4:
+            axis = np.asarray(values[:3], dtype=np.float64)
+            norm = float(np.linalg.norm(axis))
+            if norm > 0.0:
+                x, y, z = axis / norm
+                angle = math.radians(values[3])
+                c, s, t = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
+                step[:3, :3] = [
+                    [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+                    [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+                    [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
+                ]
+        else:
+            continue
+        matrix = matrix @ step
+    return matrix
+
+
+def _collada_geometry(geometry: ET.Element, ns: str, what: str) -> Floats:
+    """One COLLADA geometry's triangle corners (polygons fanned), in its own frame."""
+    mesh = geometry.find(f"{ns}mesh")
+    if mesh is None:
+        return np.zeros((0, 3))
+    arrays: dict[str, Floats] = {}
+    for source in mesh.findall(f"{ns}source"):
+        floats = source.find(f"{ns}float_array")
+        accessor = source.find(f"{ns}technique_common/{ns}accessor")
+        if floats is None or accessor is None:
+            continue
+        stride = int(accessor.get("stride", "3"))
+        values = np.asarray((floats.text or "").split(), dtype=np.float64)
+        arrays[source.get("id", "")] = values.reshape(-1, stride)[:, :3]
+    vertices = mesh.find(f"{ns}vertices")
+    if vertices is not None:
+        for item in vertices.findall(f"{ns}input"):
+            if item.get("semantic") == "POSITION":
+                arrays[vertices.get("id", "")] = arrays[item.get("source", "").lstrip("#")]
+    corners: list[Floats] = []
+    for primitive in mesh:
+        kind = primitive.tag.removeprefix(ns)
+        if kind not in ("triangles", "polylist", "polygons"):
+            continue
+        inputs = primitive.findall(f"{ns}input")
+        stride = max(int(item.get("offset", "0")) for item in inputs) + 1
+        vertex = next((item for item in inputs if item.get("semantic") == "VERTEX"), None)
+        if vertex is None:
+            continue
+        positions = arrays.get(vertex.get("source", "").lstrip("#"))
+        if positions is None:
+            raise RenderPackError(f"{what}: a primitive names no positions")
+        offset = int(vertex.get("offset", "0"))
+        lists = primitive.findall(f"{ns}p")
+        indices = [
+            np.asarray((p.text or "").split(), dtype=np.int64)[offset::stride] for p in lists
+        ]
+        if kind == "triangles":
+            corners.append(positions[np.concatenate(indices) if indices else []])
+            continue
+        if kind == "polylist":
+            counts_node = primitive.find(f"{ns}vcount")
+            counts = (
+                [int(v) for v in (counts_node.text or "").split()]
+                if counts_node is not None
+                else []
+            )
+            flat = np.concatenate(indices) if indices else np.zeros(0, np.int64)
+            polygons: list[npt.NDArray[np.int64]] = []
+            at = 0
+            for count in counts:
+                polygons.append(flat[at : at + count])
+                at += count
+        else:
+            polygons = indices
+        for polygon in polygons:
+            for k in range(1, len(polygon) - 1):
+                corners.append(positions[[polygon[0], polygon[k], polygon[k + 1]]])
+    return np.concatenate(corners) if corners else np.zeros((0, 3))
+
+
+def _read_dae(data: bytes, what: str) -> Floats:
+    """A COLLADA document's triangle corners in metres, Z up, each geometry placed by the
+    visual scene's node transforms (every geometry as written when it has no scene)."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as error:
+        raise RenderPackError(f"{what} is not COLLADA: {error}") from error
+    ns = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else ""
+    unit = root.find(f"{ns}asset/{ns}unit")
+    metres = float(unit.get("meter", "1")) if unit is not None else 1.0
+    up = root.find(f"{ns}asset/{ns}up_axis")
+    to_z_up = np.eye(4)
+    if up is not None and (up.text or "").strip() == "Y_UP":
+        to_z_up[:3, :3] = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    elif up is not None and (up.text or "").strip() == "X_UP":
+        to_z_up[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    geometries = {geometry.get("id", ""): geometry for geometry in root.iter(f"{ns}geometry")}
+    placed: list[Floats] = []
+
+    def visit(node: ET.Element, parent: Floats) -> None:
+        here = parent @ _collada_matrix(node, ns)
+        for instance in node.findall(f"{ns}instance_geometry"):
+            geometry = geometries.get(instance.get("url", "").lstrip("#"))
+            if geometry is not None:
+                corners = _collada_geometry(geometry, ns, what)
+                if len(corners):
+                    homogeneous = np.hstack([corners, np.ones((len(corners), 1))])
+                    placed.append((homogeneous @ here.T)[:, :3])
+        for child in node.findall(f"{ns}node"):
+            visit(child, here)
+
+    scenes = list(root.iter(f"{ns}visual_scene"))
+    if scenes:
+        for node in scenes[0].findall(f"{ns}node"):
+            visit(node, to_z_up)
+    else:
+        for geometry in geometries.values():
+            corners = _collada_geometry(geometry, ns, what)
+            if len(corners):
+                homogeneous = np.hstack([corners, np.ones((len(corners), 1))])
+                placed.append((homogeneous @ to_z_up.T)[:, :3])
+    if not placed:
+        raise RenderPackError(f"{what} has no faces")
+    return np.concatenate(placed) * metres
+
+
 def _weld(corners: Floats) -> _Mesh:
     """A triangle soup as an indexed mesh, joining corners with equal coordinates."""
     vertices, inverse = np.unique(corners, axis=0, return_inverse=True)
@@ -202,7 +341,12 @@ def _clean(vertices: Floats, faces: Faces) -> _Mesh:
     )
     faces = faces[keep]
     if len(faces):
-        _, first = np.unique(np.sort(faces, axis=1), axis=0, return_index=True)
+        # One integer per vertex triple, so finding repeats is a 1-D unique: the same first
+        # occurrences as a row-wise unique, without its lexicographic sort of rows.
+        ordered = np.sort(faces, axis=1)
+        width = np.int64(len(vertices))
+        keys = (ordered[:, 0] * width + ordered[:, 1]) * width + ordered[:, 2]
+        _, first = np.unique(keys, return_index=True)
         faces = faces[np.sort(first)]
     used, remapped = np.unique(faces, return_inverse=True)
     return _Mesh(vertices[used], remapped.reshape(-1, 3).astype(np.int64))
@@ -238,6 +382,28 @@ def cylinder_mesh(radius: float, length: float) -> _Mesh:
         j = (k + 1) % n
         faces += [[k, j, n + j], [k, n + j, n + k], [2 * n, j, k], [2 * n + 1, n + k, n + j]]
     return _Mesh(np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64))
+
+
+def capsule_mesh(radius: float, length: float) -> _Mesh:
+    """A capsule along z (the ``<capsule>`` some descriptions write): a cylinder of
+    ``length`` capped by two hemispheres of ``radius``, as one mesh."""
+    body = cylinder_mesh(radius, length)
+    cap = sphere_mesh(radius)
+    parts = [
+        body,
+        *(
+            _Mesh(cap.vertices + np.asarray([0.0, 0.0, z]), cap.faces)
+            for z in (-length / 2, length / 2)
+        ),
+    ]
+    vertices: list[Floats] = []
+    faces: list[Faces] = []
+    count = 0
+    for part in parts:
+        vertices.append(part.vertices)
+        faces.append(part.faces + count)
+        count += len(part.vertices)
+    return _Mesh(np.concatenate(vertices), np.concatenate(faces))
 
 
 def sphere_mesh(radius: float) -> _Mesh:
@@ -346,6 +512,8 @@ def load_mesh(path: Path, relpath: str, scale: tuple[float, ...]) -> _Mesh:
             corners = _read_stl(data, relpath)
         case ".obj":
             corners = _read_obj(data, relpath)
+        case ".dae":
+            corners = _read_dae(data, relpath)
         case suffix:
             raise RenderPackError(f"{relpath}: {suffix} meshes are not drawn yet")
     return _weld(corners * np.asarray(scale, dtype=np.float64))
@@ -360,18 +528,27 @@ def _cluster(mesh: _Mesh, cell: float) -> _Mesh:
     grid = np.floor((v - v.min(axis=0)) / cell).astype(np.int64)
     span = grid.max(axis=0) + 1
     keys = (grid[:, 0] * span[1] + grid[:, 1]) * span[2] + grid[:, 2]
-    # Each vertex's cluster index; this numpy's stubs leave unique's inverse unknown.
-    cluster = cast(Faces, np.unique(keys, return_inverse=True)[1])
+    # One stable sort by cell: clusters are numbered in cell order, each a run of vertices
+    # in index order, so every later step is a pass over runs rather than another sort.
+    order = np.argsort(keys, kind="stable")
+    sorted_keys = keys[order]
+    starts_run = np.ones(len(order), dtype=bool)
+    starts_run[1:] = sorted_keys[1:] != sorted_keys[:-1]
+    run_cluster = np.cumsum(starts_run) - 1
+    cluster = np.empty(len(order), dtype=np.int64)
+    cluster[order] = run_cluster
     count = np.bincount(cluster).astype(np.float64)
     centroid = np.stack(
         [np.bincount(cluster, weights=v[:, axis]) / count for axis in range(3)], axis=1
     )
     distance = np.sum((v - centroid[cluster]) ** 2, axis=1)
-    # Per cluster the nearest vertex, ties to the lowest index: sort by (cluster, distance, index).
-    order = np.lexsort((np.arange(len(v)), distance, cluster))
-    first = np.ones(len(order), dtype=bool)
-    first[1:] = cluster[order][1:] != cluster[order][:-1]
-    representative = order[first]
+    # Per cluster the nearest vertex, ties to the lowest index (the first in its run).
+    run_distance = distance[order]
+    nearest = np.minimum.reduceat(run_distance, np.flatnonzero(starts_run))
+    candidates = np.flatnonzero(run_distance == nearest[run_cluster])
+    first = np.ones(len(candidates), dtype=bool)
+    first[1:] = run_cluster[candidates][1:] != run_cluster[candidates][:-1]
+    representative = order[candidates[first]]
     return _clean(v[representative], cluster[mesh.faces].astype(np.int64))
 
 
