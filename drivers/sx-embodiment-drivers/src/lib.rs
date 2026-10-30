@@ -90,7 +90,7 @@ pub use inertial::{
     Tilt,
 };
 pub use kinematics::{Axis, Chain, ChainStep, PlacementError, Tree, TreeError, TreeJoint};
-pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout};
+pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout, ServedInterface};
 pub use masked::{Masked, check_available};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
