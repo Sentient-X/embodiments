@@ -144,11 +144,15 @@ class ActuatorRating:
     vendor range is recorded yet, never a guess. ``rated_speed_rad_s`` is the vendor's rated
     (continuous) output speed at its rated supply, the joint speed a description declares for
     an axis it drives (``<limit velocity>``); ``None`` where none is recorded.
+    ``rated_torque_nm`` is the vendor's rated (continuous) torque, what the motor gives across
+    its rated speed, so what a planned acceleration may spend
+    (:mod:`sx_embodiments.calibrate.motion`); ``None`` where none is recorded.
     """
 
     peak_torque_nm: float
     supply: SupplyRange | None = None
     rated_speed_rad_s: float | None = None
+    rated_torque_nm: float | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
@@ -156,6 +160,9 @@ class ActuatorRating:
         speed = self.rated_speed_rad_s
         if speed is not None and not (math.isfinite(speed) and speed > 0.0):
             raise LayoutError("actuator", "rated speed must be a positive finite rad/s")
+        rated = self.rated_torque_nm
+        if rated is not None and not (math.isfinite(rated) and 0.0 < rated <= self.peak_torque_nm):
+            raise LayoutError("actuator", "rated torque must be positive and at most the peak")
 
 
 def rpm(revolutions_per_minute: float) -> float:
@@ -166,13 +173,20 @@ def rpm(revolutions_per_minute: float) -> float:
 #: Every :class:`ActuatorModel`'s rating. Drivers receive it rendered into
 #: ``drivers/sx-embodiment-drivers/bindings/vocabulary.json``.
 ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
-    # 30 kg·cm stall at 12 V.
-    ActuatorModel.FEETECH_STS3215: ActuatorRating(2.94),
+    # 30 kg·cm stall at 12 V; 0.222 s per 60 deg unloaded (Feetech STS3215 datasheet), 4.72
+    # rad/s. Feetech publishes no speed at rated load, so this is the unloaded figure: every
+    # STS3215 port's servo approach (ServoApproach, 4 rad/s on the static upper body) is
+    # below it and is what binds (sx_embodiments.calibrate.motion).
+    ActuatorModel.FEETECH_STS3215: ActuatorRating(2.94, rated_speed_rad_s=math.pi / 3.0 / 0.222),
     # DM-J4310-2EC V1.1 manual (files.seeedstudio.com/products/Damiao/DM-J4310-en.pdf): rated
     # 24 V, 3/7 N·m rated/peak, rated speed 120 rpm, 200 rpm unloaded.
-    ActuatorModel.DAMIAO_DM4310: ActuatorRating(7.0, rated_speed_rad_s=rpm(120.0)),
+    ActuatorModel.DAMIAO_DM4310: ActuatorRating(
+        7.0, rated_speed_rad_s=rpm(120.0), rated_torque_nm=3.0
+    ),
     # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded.
-    ActuatorModel.DAMIAO_DM4340: ActuatorRating(27.0, rated_speed_rad_s=rpm(36.0)),
+    ActuatorModel.DAMIAO_DM4340: ActuatorRating(
+        27.0, rated_speed_rad_s=rpm(36.0), rated_torque_nm=9.0
+    ),
     # DM-J8009-2EC manual (manuals.plus/damiao/dm-j8009-2ec-servo-motor-manual): 100 rpm at
     # 24 V, 160 rpm unloaded.
     ActuatorModel.DAMIAO_DM8009: ActuatorRating(40.0, rated_speed_rad_s=rpm(100.0)),
@@ -180,7 +194,7 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
     # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
     # output), supports 24-48 V (200 rpm at 48 V), 20/40 N·m nominal/peak, 40-50 A peak.
     ActuatorModel.DAMIAO_DM8009P: ActuatorRating(
-        40.0, SupplyRange(24.0, 48.0), rated_speed_rad_s=rpm(100.0)
+        40.0, SupplyRange(24.0, 48.0), rated_speed_rad_s=rpm(100.0), rated_torque_nm=20.0
     ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
     ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),

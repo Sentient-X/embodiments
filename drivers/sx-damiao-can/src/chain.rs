@@ -128,6 +128,18 @@ const MAX_MOTOR_ID: u16 = 0x7FE;
 pub(crate) const FEEDBACK_WAIT: Duration = Duration::from_millis(20);
 /// How many disable phases a stop sends before it reports the motors still unanswered.
 const STOP_ATTEMPTS: usize = 3;
+/// The longest a stop brakes a moving body before it disables the motors: each motor held at
+/// where it was when the stop began, under its own gains, until every joint is nearly still.
+/// A disabled motor has no torque, so disabling a joint at speed lets it coast on friction
+/// alone (the refute of 2026-10-30: a shoulder stopped at 2.5 rad/s swung 2 rad limp in the
+/// MIT simulation).
+pub const BRAKE_TIME: Duration = Duration::from_millis(300);
+/// How often the brake re-sends its hold and reads the motors: it sends
+/// `BRAKE_TIME / BRAKE_PERIOD` phases at most, the waits between them adding up to less than
+/// [`BRAKE_TIME`], all inside the stop's budget.
+const BRAKE_PERIOD: Duration = Duration::from_millis(10);
+/// A joint slower than this, rad/s at the joint, is still: the brake ends when every one is.
+pub const BRAKE_STILL: f64 = 0.05;
 /// One classic CAN data frame of 8 bytes on an 11-bit id at the Damiao bus's 1 Mbit/s, at
 /// worst-case bit stuffing with its interframe space: 135 bits. The static upper body measured
 /// about 245 µs per motor for a refresh and its answer (2026-10-26).
@@ -181,6 +193,20 @@ fn accepted_vmax(model: DmMotorType) -> Vec<f64> {
         other => vec![other.limit_param()[1]],
     }
 }
+
+/// The farthest a motor may settle past the position last sent if commands stop mid-move, rad
+/// at the joint. A Damiao motor holds its last MIT frame until its `TIMEOUT` (0.75 s on the
+/// static upper body): with planned velocity `v` it settles `kd v / kp` past the position, so
+/// the planned velocity sent is capped at `MAX_COAST kp / kd` (refute of 2026-10-30: uncapped,
+/// the elbow coasted 0.58 rad and the left upper-arm yaw 0.79 rad at full speed).
+pub const MAX_COAST: f64 = 0.1;
+
+/// The farthest the capped planned velocity may let a joint lag the position sent at its
+/// speed ceiling, rad: half the governor's at-rest tracking bound, so the stop still has room
+/// for the error gravity and friction leave. With [`MAX_COAST`] it sets each axis's speed
+/// ceiling ([`ActuatorChain::tracking_ceilings`]): `(MAX_COAST + MAX_LAG) kp / kd`, above which
+/// the MIT law's `kd (v_des - v)` lags the joint further than its tracking bound allows.
+pub const MAX_LAG: f64 = 0.1;
 
 /// One bound axis with what its Damiao motor needs beyond the registry's binding.
 #[derive(Clone, Debug, PartialEq)]
@@ -1070,10 +1096,13 @@ impl<P: CanPort> DamiaoChain<P> {
     /// reduction`, so velocity scales by `g` and torque, by power, by `1 / g`.
     ///
     /// Feed-forward moves where the motor settles: unloaded, `(kd dq + tau) / kp` past the
-    /// target. Both parts are scaled down together so that excursion stays inside the axis'
-    /// commandable range from `target` (actuator coordinates); with `kp` zero nothing is sent.
-    /// A load the feed-forward balances (gravity held near a limit) makes this conservative:
-    /// the joint may sag, away from the push, never past the range.
+    /// target. The planned velocity and the torque other than gravity's
+    /// ([`Feedforward::gravity`]) are scaled together so they stay inside the axis' commandable
+    /// range from `target` (actuator coordinates); gravity's torque alone may take the unloaded
+    /// settling point at most [`MAX_COAST`] past the range end, so a joint near its end can be
+    /// held up against gravity; with `kp` zero nothing is sent. With the load gone (a dropped
+    /// cup, a wrong model) such a joint settles within [`MAX_COAST`] past the end, never
+    /// further.
     fn actuator_feedforward(
         &self,
         index: usize,
@@ -1088,30 +1117,68 @@ impl<P: CanPort> DamiaoChain<P> {
         let (v_max, t_max) = (f64::from(v_max), f64::from(t_max));
         let speed = velocity.map_or(0.0, |bound| wanted.velocity.clamp(-bound, bound));
         let effort = torque.map_or(0.0, |bound| wanted.torque.clamp(-bound, bound));
-        let mut dq = (gain * speed).clamp(-v_max, v_max);
-        let mut tau = (effort / gain).clamp(-t_max, t_max);
+        // Of the torque, the part holding the joint against gravity (never more than the whole).
+        let gravity = if effort == 0.0 {
+            0.0
+        } else {
+            wanted.gravity.clamp(-effort.abs(), effort.abs())
+        };
+        // The coast past the last position if commands stop: `kd dq / kp`, at most MAX_COAST.
+        let coast = if kd > 0.0 {
+            MAX_COAST * gain.abs() * kp / kd
+        } else {
+            v_max
+        };
+        let mut dq = (gain * speed).clamp(-v_max, v_max).clamp(-coast, coast);
+        let tau_all = (effort / gain).clamp(-t_max, t_max);
+        let mut held = (gravity / gain).clamp(-t_max, t_max);
+        let mut rest = tau_all - held;
         let range = self.commandable[index];
         let ends = [
             axis.actuator_from_joint(range.lower),
             axis.actuator_from_joint(range.upper),
         ];
-        let push = kd.mul_add(dq, tau);
-        let margin = if push > 0.0 {
-            (ends[0].max(ends[1]) - target).max(0.0)
-        } else {
-            (target - ends[0].min(ends[1])).max(0.0)
+        // How far the settling point may lie from `target` toward `push`'s side: to the range
+        // end on that side.
+        let room = |push: f64| {
+            if push > 0.0 {
+                (ends[0].max(ends[1]) - target).max(0.0)
+            } else {
+                (target - ends[0].min(ends[1])).max(0.0)
+            }
         };
-        let allowed = kp * margin;
-        if push.abs() > allowed {
-            let scale = allowed / push.abs();
+        // The planned velocity and every torque but gravity's stay inside the range, as they
+        // always have: unloaded (a stalled host, a dropped load, a wrong model) they never settle
+        // a joint past its end.
+        let inside = kd.mul_add(dq, rest);
+        let inside_allowed = kp * room(inside);
+        if inside.abs() > inside_allowed {
+            let scale = inside_allowed / inside.abs();
             dq *= scale;
-            tau *= scale;
+            rest *= scale;
         }
+        // Gravity's torque may take the unloaded settling point up to MAX_COAST past the end
+        // (what a stalled host lets a joint coast anyway): held to the end itself, a joint near
+        // it on its gravity side could not be held up at all (it sagged its load over kp, 8 mm
+        // at the coffee machine's retreat in act-sim).
+        let inside = kd.mul_add(dq, rest);
+        let push = inside + held;
+        let allowed = kp * (room(push) + MAX_COAST * gain.abs());
+        if push.abs() > allowed {
+            let limit = allowed.copysign(push) - inside;
+            held = if limit.signum() == held.signum() {
+                limit
+            } else {
+                0.0
+            };
+        }
+        let tau = rest + held;
         (
             (dq, tau),
             Feedforward {
                 velocity: dq / gain,
                 torque: tau * gain,
+                gravity: held * gain,
             },
         )
     }
@@ -1208,6 +1275,95 @@ impl<P: CanPort> DamiaoChain<P> {
             observed,
             feedback,
         })
+    }
+
+    /// Brake a body that may be moving before a stop disables it: each motor is sent an MIT
+    /// frame holding where it last answered, at its own `kp` and `kd`, with no planned velocity
+    /// and the feed-forward torque it was last sent (the gravity it carries), every
+    /// [`BRAKE_PERIOD`] until every joint that answers is slower than [`BRAKE_STILL`], for at
+    /// most `BRAKE_TIME / BRAKE_PERIOD` phases. A held position stops a joint within its
+    /// momentum ceiling ([`ActuatorChain::tracking_ceilings`]). A motor that does not answer
+    /// is not waited for, and the others are still braked; a link that fails, or a body with no
+    /// motor answering, ends the brake at once: the stop disables as it always did, and a dead
+    /// link ends limp by the motors' own watchdog.
+    fn brake(&mut self) {
+        let Ok(feedback) = self.feedback() else {
+            return;
+        };
+        // A body every motor last reported still needs no brake: the stop is the vendor's.
+        let all = vec![true; self.ids.len()];
+        if self.still(&feedback, &all) {
+            return;
+        }
+        let mut frames: Axes<CanFrame> = Axes::new();
+        for (index, ((motor, answer), id)) in self
+            .motors
+            .iter()
+            .zip(feedback.iter())
+            .zip(&self.ids)
+            .enumerate()
+        {
+            let hold = f64::from(answer.position);
+            if !hold.is_finite() {
+                return;
+            }
+            // The gravity torque the joint was last sent, kept: a brake that dropped it would let a
+            // loaded joint sag while it brakes. The rest of the feed-forward (inertia, friction
+            // in the direction of motion) is not: it would push a stopping joint on.
+            let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
+            let tau = self.applied[index].gravity / gain;
+            match self
+                .control
+                .mit_frame(*id, motor.kp, motor.kd, hold, 0.0, tau)
+            {
+                Ok(frame) => frames.push(frame),
+                Err(_) => return,
+            }
+        }
+        let group_size = self.control.port().batch_capacity().get();
+        let phases = BRAKE_TIME.as_millis() / BRAKE_PERIOD.as_millis();
+        for phase in 0..phases {
+            phase_groups_into(
+                &mut self.control,
+                &self.every_feedback,
+                Wait::Tick,
+                group_size,
+                |control, start, end| Ok(control.port_mut().send_batch(&frames[start..end])?),
+                &mut self.tick,
+            );
+            // A failing link ends the brake: the stop disables at once.
+            if self.tick.failure.take().is_some() {
+                return;
+            }
+            // A motor that does not answer is not waited for: the others are still braked, and
+            // the brake ends when every one that answers is still.
+            let answering: Vec<bool> = (0..self.ids.len())
+                .map(|index| self.tick.answered(index))
+                .collect();
+            if !answering.iter().any(|answered| *answered) {
+                return;
+            }
+            let Ok(feedback) = self.feedback() else {
+                return;
+            };
+            if self.still(&feedback, &answering) || phase + 1 == phases {
+                return;
+            }
+            self.control.port_mut().sleep(BRAKE_PERIOD);
+        }
+    }
+
+    /// Whether every motor `counted` answers reports its joint slower than [`BRAKE_STILL`].
+    fn still(&self, feedback: &[MotorFeedback], counted: &[bool]) -> bool {
+        self.motors
+            .iter()
+            .zip(feedback)
+            .zip(counted)
+            .filter(|(_, counted)| **counted)
+            .all(|((motor, answer), _)| {
+                let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0).abs();
+                f64::from(answer.velocity).abs() / gain < BRAKE_STILL
+            })
     }
 
     /// The limit row each motor reported at open, in native state order.
@@ -1340,6 +1496,54 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     type Error = DamiaoChainError;
     type Feedback = MotorFeedback;
 
+    /// Each axis's ceiling from its MIT gains, at the joint (`kp` and `kd` scale by the drive's
+    /// gain `g` squared):
+    ///
+    /// - the speed `(MAX_COAST + MAX_LAG) kp / kd` above which the capped planned velocity
+    ///   lags the joint more than [`MAX_LAG`];
+    /// - where the bindings carry the inertia `J` the joint moves, the speed
+    ///   `MAX_COAST sqrt(kp / J)`: a stalled host leaves the motor holding its last position,
+    ///   a spring that stops a joint moving at `v` within `v sqrt(J / kp)`, so its momentum
+    ///   carries it at most [`MAX_COAST`] past (the shoulders at kp 61 on about 0.4 kg m^2
+    ///   coasted 0.58 rad from their rated 10.47 rad/s in the MIT simulation; refute
+    ///   2026-10-30), and no faster than the motor's peak torque decelerates it within
+    ///   [`MAX_COAST`], `sqrt(2 MAX_COAST peak / J)`, where a stiffer spring would saturate;
+    /// - and the acceleration `kp MAX_LAG / J`, whose inertial torque the position term gives
+    ///   within [`MAX_LAG`]: braking harder overshoots and rings (the shoulders' kd 1.09 damps
+    ///   their arm at a damping ratio near 0.1).
+    ///
+    /// Re-tuned gains lift every one of these. An axis with no damping limits nothing.
+    fn tracking_ceilings(&self) -> Vec<(usize, sx_embodiment_drivers::TrackingCeiling)> {
+        self.motors
+            .iter()
+            .enumerate()
+            .filter(|(_, motor)| motor.kd > 0.0)
+            .map(|(index, motor)| {
+                let axis = &motor.axis;
+                let gain = axis.actuator_from_joint(axis.zero + 1.0);
+                let kp = motor.kp * gain * gain;
+                let inertia = axis.motion.inertia;
+                let lag = (MAX_COAST + MAX_LAG) * motor.kp / motor.kd;
+                // The held position stops the joint like a spring, until its torque saturates at
+                // the motor's peak: then no faster than the peak decelerates within MAX_COAST.
+                let peak = axis.binding.model.rating().peak_torque_nm * gain.abs();
+                let momentum = if inertia > 0.0 {
+                    (MAX_COAST * (kp / inertia).sqrt())
+                        .min((2.0 * MAX_COAST * peak / inertia).sqrt())
+                } else {
+                    f64::INFINITY
+                };
+                (
+                    index,
+                    sx_embodiment_drivers::TrackingCeiling {
+                        speed: lag.min(momentum),
+                        acceleration: (inertia > 0.0).then(|| kp * MAX_LAG / inertia),
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn axes(&self) -> &[BoundAxis] {
         &self.axes
     }
@@ -1429,6 +1633,9 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     /// proven disabled.
     fn stop(&mut self) -> StopReport {
         self.command_readings = None;
+        if self.enabled {
+            self.brake();
+        }
         self.applied.fill(Feedforward::default());
         self.enabled = false;
         let mut answered = vec![false; self.ids.len()];
@@ -1492,14 +1699,18 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         report
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants:
-    /// [`STOP_ATTEMPTS`] disable phases and a refresh phase, each a frame per motor that may
-    /// wait the link's own allowance for queue room
-    /// (`CanPort::frame_allowance`), then the answer wait and one more allowance.
+    /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: the
+    /// brake ([`BRAKE_TIME`], and a phase per [`BRAKE_PERIOD`]), then [`STOP_ATTEMPTS`]
+    /// disable phases and a refresh phase, each a frame per motor that may wait the link's own
+    /// allowance for queue room (`CanPort::frame_allowance`), then the answer wait and one more
+    /// allowance.
     fn stop_budget(&self) -> Duration {
         let motors = u32::try_from(self.motors.len()).unwrap_or(u32::MAX);
         let frame = self.control.port().frame_allowance();
-        (frame * motors + FEEDBACK_WAIT + frame) * u32::try_from(STOP_ATTEMPTS + 1).unwrap_or(4)
+        let one = frame * motors + FEEDBACK_WAIT + frame;
+        // The brake's phases, each its frames and answer wait, and the waits between them.
+        let brakes = u32::try_from(BRAKE_TIME.as_millis() / BRAKE_PERIOD.as_millis()).unwrap_or(30);
+        BRAKE_TIME + one * brakes + one * u32::try_from(STOP_ATTEMPTS + 1).unwrap_or(4)
     }
 
     /// Every motor's latest answered position, in joint coordinates: from open, each stop and

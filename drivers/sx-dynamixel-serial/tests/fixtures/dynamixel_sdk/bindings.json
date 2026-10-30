@@ -11,7 +11,9 @@
       "port": "dynamixel",
       "bus_id": 1,
       "sign": 1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "speed": 10.8,
+      "acceleration": 50.0
     },
     {
       "joint": "wrist",
@@ -22,7 +24,9 @@
       "port": "dynamixel",
       "bus_id": 2,
       "sign": -1,
-      "reduction": 1.0
+      "reduction": 1.0,
+      "speed": 4.8,
+      "acceleration": 20.0
     }
   ]
 }

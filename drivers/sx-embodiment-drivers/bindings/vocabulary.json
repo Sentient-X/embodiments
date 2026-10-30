@@ -17,7 +17,7 @@
     "feetech_sts3215": {
       "peak_torque_nm": 2.94,
       "supply_volts": null,
-      "rated_speed_rad_s": null
+      "rated_speed_rad_s": 4.71710608647116
     },
     "damiao_dm4310": {
       "peak_torque_nm": 7.0,

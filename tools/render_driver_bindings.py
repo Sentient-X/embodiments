@@ -41,6 +41,7 @@ from pathlib import Path
 
 from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.buses import DrivenAxis, driven_axes
+from sx_embodiments.calibrate.motion import joint_motion
 from sx_embodiments.calibration import (
     CalibrationMethod,
     JointUnitCalibration,
@@ -64,8 +65,10 @@ from sx_embodiments.known.humanoid import (
     SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
 )
 from sx_embodiments.known.static_upper_body import (
+    STATIC_UPPER_BODY_MASS_MARGIN,
     STATIC_UPPER_BODY_RIG,
     STATIC_UPPER_BODY_SERVO_APPROACH,
+    STATIC_UPPER_BODY_SPEED_CAP,
 )
 from sx_embodiments.known.zed import EYES, ZED_2I_EYE_HEIGHT, ZED_2I_EYE_WIDTH, optical_frame
 from sx_embodiments.layout import (
@@ -320,6 +323,14 @@ def declared_homes(robot: Embodiment) -> tuple[dict[tuple[str, str], float], set
 SERVO_APPROACH: dict[str, dict[BusPort, ServoApproach]] = {
     "sentient-static-upper-body": STATIC_UPPER_BODY_SERVO_APPROACH,
 }
+#: Each body's measured-over-description mass, by port, its joints' accelerations plan for.
+MASS_MARGIN: dict[str, dict[BusPort, float]] = {
+    "sentient-static-upper-body": STATIC_UPPER_BODY_MASS_MARGIN,
+}
+#: Each body's joints held below their motors' motion until their controllers carry it.
+SPEED_CAP: dict[str, dict[str, float]] = {
+    "sentient-static-upper-body": STATIC_UPPER_BODY_SPEED_CAP,
+}
 
 
 def driven_bodies() -> list[str]:
@@ -370,6 +381,9 @@ def document(name: str) -> dict[str, object]:
     robot = registered(name)
     homes, chains = declared_homes(robot)
     twins = bases(name)
+    motions = joint_motion(
+        robot, SERVO_APPROACH.get(name), MASS_MARGIN.get(name), SPEED_CAP.get(name)
+    )
     axes: list[dict[str, object]] = []
     for driven in driven_axes(robot):
         coordinate, binding = driven.coordinate, driven.binding
@@ -394,6 +408,12 @@ def document(name: str) -> dict[str, object]:
             entry["home"] = home
         if driven.joint in twins:
             entry["of"] = twins[driven.joint]
+        motion = motions[driven.joint]
+        entry |= {
+            "speed": motion.speed,
+            "acceleration": motion.acceleration,
+            "inertia": motion.inertia,
+        }
         axes.append(entry)
     approach = SERVO_APPROACH.get(name, {})
     ports = {axis["port"] for axis in axes}

@@ -93,9 +93,16 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   the DM8009 and the humanoid's whole chain are owed the station's bench qualification.
   The static upper body's are its hardware profile's
   (`assets/sentient_static_upper_body/source/humanoid_allisa_bot_hardware.json`, `mit_gains`;
-  the torso's from the superseded description's motor table), not a qualification either. That driver's 0.25 rad/s speed cap and 0.2 rad tracking bound are not
-  this chain's: `sx_embodiment_drivers::Governor` enforces them only when a caller wraps the
-  chain in it with those limits.
+  the torso's from the superseded description's motor table), not a qualification either. That driver's 0.25 rad/s speed cap and 0.2 rad tracking bound were its
+  bring-up choice and are not kept: `sx_embodiment_drivers::Governor` bounds each joint at its
+  rated motion (`AxisLimits::rated`), and sends the speed it steps each axis at as the MIT
+  frame's planned velocity.
+- **Brake before disable.** A stop of a chain whose motors last answered moving holds each
+  motor where it was, at its own `kp` and `kd` with no planned velocity, every 10 ms for up to
+  `BRAKE_TIME` (0.3 s) until every joint is slower than `BRAKE_STILL` (0.05 rad/s), then
+  disables: a disabled motor gives no torque, so a joint disabled at speed coasted limp (refute
+  2026-10-30). A failing link or a motor that does not answer ends the brake at once. A body
+  already still gets the vendor's stop, frame for frame (`tests/transcripts.rs`).
 - **Stop proof.** A stop drains what is already on the link, then counts only answers to its
   disable frames. Where firmware does not report its enable state (the static upper body's
   answers state 1 enabled or not), a fault-free answer proves the stop weakly and the motor is

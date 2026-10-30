@@ -304,6 +304,22 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     /// Every chain's, shifted to the chain's place in the vector.
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+        let mut first = 0;
+        let mut ceilings = Vec::new();
+        for chain in &self.members {
+            ceilings.extend(
+                chain
+                    .tracking_ceilings()
+                    .into_iter()
+                    .map(|(axis, speed)| (first + axis, speed)),
+            );
+            first += chain.axes().len();
+        }
+        ceilings
+    }
+
+    /// Every chain's, shifted to the chain's place in the vector.
     fn derated(&self) -> Vec<AxisDerate> {
         let mut first = 0;
         let mut derated = Vec::new();
@@ -408,6 +424,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
         (**self).derated()
     }
 
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+        (**self).tracking_ceilings()
+    }
+
     fn bus_timing(&self) -> Vec<crate::BusTiming> {
         (**self).bus_timing()
     }
@@ -468,6 +488,11 @@ mod tests {
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
                 home: None,
+                motion: crate::binding::AxisMotion {
+                    speed: 1.0,
+                    acceleration: 10.0,
+                    inertia: 0.0,
+                },
             })
             .collect();
         let commandable = axes

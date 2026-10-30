@@ -8,7 +8,9 @@
 //! torque comes on, which no governor bounds. Each driver converts the joint's limit to its
 //! vendor's register steps. A body's limits are registry data per port
 //! (`sx_embodiments.layout.ServoApproach`, rendered as the bindings' `approach`);
-//! [`BRING_UP_APPROACH`] is the slow one a bring-up tool uses.
+//! [`BRING_UP_APPROACH`] is the slow one a servo resting outside its position limits is pulled
+//! in at when torque comes on: a move no governor bounds, so it stays slow. Every governed
+//! motion's limits are the joint's rated ones (`AxisLimits::rated`), never this.
 
 /// The fastest a servo moves toward any goal, in the joint's units: rad/s and rad/s².
 #[derive(Clone, Copy, Debug, PartialEq)]

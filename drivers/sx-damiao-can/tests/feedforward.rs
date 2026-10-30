@@ -7,7 +7,7 @@
 //! is packed with that same encoder from what the chain should have sent.
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError};
+use sx_damiao_can::chain::{DamiaoChain, DamiaoChainError, MAX_COAST};
 use sx_damiao_can::dm_can::float_to_uint;
 use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
@@ -82,7 +82,8 @@ fn feedforward_is_off_until_bounded() {
     let wanted = vec![
         Feedforward {
             velocity: 0.3,
-            torque: 4.0
+            torque: 4.0,
+            gravity: 0.0,
         };
         rest.len()
     ];
@@ -119,10 +120,12 @@ fn feedforward_maps_through_sign_and_clamps_to_the_bound_and_tmax() {
     wanted[wrist] = Feedforward {
         velocity: 0.3,
         torque: 40.0,
+        gravity: 0.0,
     };
     wanted[elbow] = Feedforward {
         velocity: -0.9,
         torque: 2.5,
+        gravity: 0.0,
     };
     // Mid-range targets, so the excursion bound leaves the feed-forward whole.
     let mut targets = rest.clone();
@@ -155,14 +158,16 @@ fn feedforward_maps_through_sign_and_clamps_to_the_bound_and_tmax() {
         applied[wrist],
         Feedforward {
             velocity: 0.3,
-            torque: 10.0
+            torque: 10.0,
+            gravity: 0.0,
         }
     );
     assert_eq!(
         applied[elbow],
         Feedforward {
             velocity: -0.5,
-            torque: 2.5
+            torque: 2.5,
+            gravity: 0.0,
         }
     );
 }
@@ -203,25 +208,42 @@ fn feedforward_never_pushes_a_joint_past_its_range() {
     let range = chain.commandable()[elbow];
     let mut targets = rest.clone();
     let mut wanted = vec![Feedforward::default(); rest.len()];
-    // At the upper edge, a push upwards has no room: nothing is sent.
+    // At the upper edge, a push upwards has no room for the planned velocity or for torque
+    // other than gravity's; gravity's torque alone may put the unloaded settling point
+    // (kd v + tau) / kp up to MAX_COAST past it (what a stalled host may coast anyway).
+    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let excursion = |applied: Feedforward| {
+        axes[elbow].kd.mul_add(applied.velocity, applied.torque) / axes[elbow].kp
+    };
     targets[elbow] = range.upper;
     wanted[elbow] = Feedforward {
         velocity: 0.4,
         torque: 4.0,
+        gravity: 0.0,
     };
     chain.command_with(&targets, &wanted).expect("command");
     assert_eq!(chain.applied_feedforward()[elbow], Feedforward::default());
-    // 0.05 rad inside it, the unloaded settling point (kd v + tau) / kp stays within 0.05 rad.
-    targets[elbow] = range.upper - 0.05;
+    wanted[elbow].gravity = 4.0;
     chain.command_with(&targets, &wanted).expect("command");
-    let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
     let applied = chain.applied_feedforward()[elbow];
-    let excursion = axes[elbow].kd.mul_add(applied.velocity, applied.torque) / axes[elbow].kp;
-    assert!(excursion > 0.0 && excursion <= 0.05 + 1e-9, "{excursion}");
+    assert!(applied.velocity.abs() < 1e-12, "{applied:?}");
+    assert!(
+        (applied.gravity - applied.torque).abs() < 1e-9,
+        "{applied:?}"
+    );
+    let at_edge = excursion(applied);
+    assert!(at_edge > 0.0 && at_edge <= MAX_COAST + 1e-9, "{at_edge}");
+    // 0.05 rad inside it, with no gravity: within those 0.05 rad.
+    targets[elbow] = range.upper - 0.05;
+    wanted[elbow].gravity = 0.0;
+    chain.command_with(&targets, &wanted).expect("command");
+    let inside = excursion(chain.applied_feedforward()[elbow]);
+    assert!(inside > 0.0 && inside <= 0.05 + 1e-9, "{inside}");
     // Pushing away from the edge it is whole.
     wanted[elbow] = Feedforward {
         velocity: -0.4,
         torque: -4.0,
+        gravity: 0.0,
     };
     chain.command_with(&targets, &wanted).expect("command");
     assert_eq!(chain.applied_feedforward()[elbow], wanted[elbow]);
@@ -270,6 +292,7 @@ fn a_geared_axis_scales_velocity_by_its_reduction_and_torque_by_its_inverse() {
     wanted[gripper] = Feedforward {
         velocity: 0.01,
         torque: 0.5,
+        gravity: 0.0,
     };
     chain.command_with(&targets, &wanted).expect("command");
     let reported = chain.limits()[gripper];

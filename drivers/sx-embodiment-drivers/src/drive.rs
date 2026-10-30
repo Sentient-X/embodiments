@@ -118,9 +118,9 @@ mod tests {
 
     const BODY: &str = r#"{"embodiment": "b", "id": "0", "axes": [
         {"joint": "j1", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
-         "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": 1, "reduction": 1.0},
+         "bus": "damiao_can", "port": "can", "bus_id": 1, "sign": 1, "reduction": 1.0, "speed": 1.0, "acceleration": 10.0},
         {"joint": "j2", "lower": -1.0, "upper": 1.0, "model": "damiao_dm4310",
-         "bus": "damiao_can", "port": "can", "bus_id": 2, "sign": 1, "reduction": 1.0}]}"#;
+         "bus": "damiao_can", "port": "can", "bus_id": 2, "sign": 1, "reduction": 1.0, "speed": 1.0, "acceleration": 10.0}]}"#;
     const DRIVE: &str = r#"{"schema": "sx.instance-drive/v1", "embodiment": "0",
         "instance": "i", "joints": [
         {"joint": "j1", "zero": 0.1, "direction": -1, "calibration": "c"},

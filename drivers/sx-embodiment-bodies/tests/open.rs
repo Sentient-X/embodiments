@@ -1635,8 +1635,15 @@ fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
     assert_eq!(derated.len(), 5);
     let governed = Governor::new(body, limits).expect("limits");
     for index in derated {
-        assert!((governed.limits()[index].max_speed - 0.6).abs() < 1e-12);
-        assert_eq!(governed.limits()[index].max_acceleration, Some(3.0));
+        // The declared 0.6 rad/s, or the joint's gains' ceiling where that is lower (the
+        // torso's, about 0.51).
+        assert!(governed.limits()[index].max_speed <= 0.6 + 1e-12);
+        // The declared 3.0 rad/s², or the joint's gains' ceiling where that is lower.
+        assert!(
+            governed.limits()[index]
+                .max_acceleration
+                .is_some_and(|a| a <= 3.0 + 1e-12)
+        );
     }
     // A derate that is not a speed is refused with the commissioning.
     let mut bad = document.clone();
@@ -1652,9 +1659,11 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
         buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
         ..Bridges::default()
     };
+    // Below every axis's own speed ceiling (the slowest, the left upper-arm yaw's kp 24 and
+    // kd 5, is 0.96 rad/s), so only the derate changes a limit.
     let limits = vec![
         AxisLimits {
-            max_speed: 1.0,
+            max_speed: 0.5,
             max_tracking_error: 0.2,
             max_acceleration: None,
         };
@@ -1692,7 +1701,12 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
             assert!((limit.max_speed - 0.3).abs() < 1e-12, "{}", axis.joint);
             assert_eq!(limit.max_acceleration, Some(1.5), "{}", axis.joint);
         } else {
-            assert_eq!(*limit, limits[0], "{} keeps its limits", axis.joint);
+            // Its speed is kept; its acceleration is its gains' ceiling over its inertia.
+            assert!(
+                (limit.max_speed - limits[0].max_speed).abs() < 1e-12,
+                "{} keeps its speed",
+                axis.joint
+            );
         }
     }
     // The 48 V converter fitted and recorded: the derate lifts.
@@ -1704,7 +1718,14 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
     let body = open(&drive, &converted, &mut bridges()).expect("opens in range");
     assert!(body.derated().is_empty());
     let governed = Governor::new(body, limits.clone()).expect("limits");
-    assert_eq!(governed.limits(), &limits[..]);
+    // Every axis at the speed asked; no derate's 1.5 rad/s² (each its gains' ceiling).
+    assert!(
+        governed
+            .limits()
+            .iter()
+            .all(|limit| (limit.max_speed - 0.5).abs() < 1e-12
+                && limit.max_acceleration.is_some_and(|a| a > 1.5))
+    );
 }
 
 #[test]

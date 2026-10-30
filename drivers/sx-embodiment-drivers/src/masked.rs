@@ -239,6 +239,15 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
     }
 
     /// `inner`'s, placed in the full vector.
+    fn tracking_ceilings(&self) -> Vec<(usize, crate::chain::TrackingCeiling)> {
+        self.inner
+            .tracking_ceilings()
+            .into_iter()
+            .map(|(axis, speed)| (self.present[axis], speed))
+            .collect()
+    }
+
+    /// `inner`'s, placed in the full vector.
     fn derated(&self) -> Vec<AxisDerate> {
         self.inner
             .derated()

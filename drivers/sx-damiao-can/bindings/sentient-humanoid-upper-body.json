@@ -13,7 +13,10 @@
       "bus_id": 15,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 10.471975511965978,
+      "acceleration": 39.2956497276854,
+      "inertia": 0.81433950632593
     },
     {
       "joint": "right_shoulder_pitch_joint",
@@ -26,7 +29,10 @@
       "bus_id": 16,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 10.471975511965978,
+      "acceleration": 104.71975511965977,
+      "inertia": 0.05259152698919917
     },
     {
       "joint": "right_shoulder_roll_joint",
@@ -39,7 +45,10 @@
       "bus_id": 17,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 10.471975511965978,
+      "acceleration": 104.71975511965977,
+      "inertia": 0.054671421509963805
     },
     {
       "joint": "right_elbow_yaw_joint",
@@ -52,7 +61,10 @@
       "bus_id": 18,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.006544415173383167
     },
     {
       "joint": "right_elbow_forearm_yaw_joint",
@@ -65,7 +77,10 @@
       "bus_id": 19,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.0065348735140110525
     },
     {
       "joint": "right_wrist_yaw_joint",
@@ -78,7 +93,10 @@
       "bus_id": 20,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.00010495951843992289
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -91,7 +109,10 @@
       "bus_id": 24,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 10.471975511965978,
+      "acceleration": 104.71975511965977,
+      "inertia": 0.05278379934157938
     },
     {
       "joint": "left_shoulder_roll_joint",
@@ -104,7 +125,10 @@
       "bus_id": 25,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 10.471975511965978,
+      "acceleration": 104.71975511965977,
+      "inertia": 0.054711001160259176
     },
     {
       "joint": "left_elbow_yaw_joint",
@@ -117,7 +141,10 @@
       "bus_id": 26,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.006628496735252287
     },
     {
       "joint": "left_elbow_forearm_yaw_joint",
@@ -130,7 +157,10 @@
       "bus_id": 27,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.006536687934717511
     },
     {
       "joint": "left_wrist_yaw_joint",
@@ -143,7 +173,10 @@
       "bus_id": 28,
       "sign": 1,
       "reduction": 1.0,
-      "home": 0.0
+      "home": 0.0,
+      "speed": 3.7699111843077517,
+      "acceleration": 37.69911184307752,
+      "inertia": 0.00010533243859991862
     }
   ],
   "supersedes": [
