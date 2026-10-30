@@ -92,6 +92,11 @@ pub struct TeleopConfig {
     /// Boxes beside the body's own support, `[min x, y, z, max x, y, z]` in the root frame.
     #[serde(default)]
     pub obstacles: Vec<[f64; 6]>,
+    /// The posture the arms' redundancy resolves toward, by joint (a robot's commissioned Ready
+    /// pose, elbows down; [`crate::Ik::prefer_posture`]); empty: the posture at engage. A
+    /// joint it does not name stays at its own value at engage.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub posture: BTreeMap<String, f64>,
 }
 
 impl TeleopConfig {
@@ -345,6 +350,7 @@ impl Teleop {
             .keys()
             .chain(config.accel.keys())
             .chain(&config.held)
+            .chain(config.posture.keys())
         {
             if !names.contains(joint) {
                 return Err(IkError::Caps(format!(
@@ -411,7 +417,15 @@ impl Teleop {
         }
         let frames = body.model().poses(&q);
         let limb_count = limb_names.len();
-        let ik = Ik::new(body, Caps { speed, accel }, settings, scene)?;
+        let mut ik = Ik::new(body, Caps { speed, accel }, settings, scene)?;
+        if !config.posture.is_empty() {
+            let posture: Vec<f64> = names
+                .iter()
+                .zip(ik.rest())
+                .map(|(name, rest)| config.posture.get(name).copied().unwrap_or(*rest))
+                .collect();
+            ik.prefer_posture(&posture)?;
+        }
         let step = TeleopStep {
             q: q.clone(),
             qdot: vec![0.0; width],
