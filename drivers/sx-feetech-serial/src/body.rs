@@ -68,6 +68,22 @@ impl FeetechBody {
         Ok(None)
     }
 
+    /// The bus among [`BODIES`] on `port` of the body the registry names `body`: the twin a
+    /// composed body's bus repeats (`BodyBindings::twin_bus`).
+    ///
+    /// # Errors
+    ///
+    /// Returns why a body's bindings do not parse.
+    pub fn named(body: &str, port: &str) -> Result<Option<&'static Self>, BodyError> {
+        for candidate in BODIES {
+            if candidate.port == port && BodyBindings::parse(candidate.bindings)?.embodiment == body
+            {
+                return Ok(Some(candidate));
+            }
+        }
+        Ok(None)
+    }
+
     /// The rendered bindings of `embodiment`, when any bus among [`BODIES`] is one of its.
     ///
     /// # Errors

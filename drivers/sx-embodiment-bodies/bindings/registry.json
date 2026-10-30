@@ -1,0 +1,1847 @@
+[
+  {
+    "embodiment": "b601-dm",
+    "id": "c89d7c0245b01fc1449c4d6e6018ddffa3f2982e30d84b8b2a5f552ecae6cd04",
+    "axes": [
+      {
+        "joint": "joint1",
+        "lower": -2.8,
+        "upper": 2.8,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "joint2",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "joint3",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "joint4",
+        "lower": -1.87,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "joint5",
+        "lower": -1.57,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "joint6",
+        "lower": -3.14,
+        "upper": 3.14,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "gripper_joint1",
+        "lower": 0.0,
+        "upper": 0.0715,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 7,
+        "sign": -1,
+        "reduction": 111.11111111111111
+      }
+    ],
+    "supersedes": [
+      "6de9059eefb2049d7e91c6ab12af48ec1c7b52c4a4fe43f5fec7c785283768fa",
+      "f47c7cdea9fe10da1ddb43397df6f3e7a748e1f153b375960174a18e93dfd1f9"
+    ]
+  },
+  {
+    "embodiment": "b601-dm-station",
+    "id": "1414e2d85d67d3e7281442cd11bd9cf83ecaa56534fccabfc945f05154eaf400",
+    "axes": [
+      {
+        "joint": "left_joint1",
+        "lower": -2.8,
+        "upper": 2.8,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint1"
+        }
+      },
+      {
+        "joint": "left_joint2",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint2"
+        }
+      },
+      {
+        "joint": "left_joint3",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint3"
+        }
+      },
+      {
+        "joint": "left_joint4",
+        "lower": -1.87,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint4"
+        }
+      },
+      {
+        "joint": "left_joint5",
+        "lower": -1.57,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint5"
+        }
+      },
+      {
+        "joint": "left_joint6",
+        "lower": -3.14,
+        "upper": 3.14,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint6"
+        }
+      },
+      {
+        "joint": "left_gripper_joint1",
+        "lower": 0.0,
+        "upper": 0.0715,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 7,
+        "sign": -1,
+        "reduction": 111.11111111111111,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "gripper_joint1"
+        }
+      },
+      {
+        "joint": "right_joint1",
+        "lower": -2.8,
+        "upper": 2.8,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint1"
+        }
+      },
+      {
+        "joint": "right_joint2",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint2"
+        }
+      },
+      {
+        "joint": "right_joint3",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint3"
+        }
+      },
+      {
+        "joint": "right_joint4",
+        "lower": -1.87,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint4"
+        }
+      },
+      {
+        "joint": "right_joint5",
+        "lower": -1.57,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint5"
+        }
+      },
+      {
+        "joint": "right_joint6",
+        "lower": -3.14,
+        "upper": 3.14,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint6"
+        }
+      },
+      {
+        "joint": "right_gripper_joint1",
+        "lower": 0.0,
+        "upper": 0.0715,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 7,
+        "sign": -1,
+        "reduction": 111.11111111111111,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "gripper_joint1"
+        }
+      }
+    ],
+    "supersedes": [
+      "489575efc4f083f869e05f427eafaf6a94a559ef488b294e6632f74cead4285c",
+      "680de5b114dcb45d17b4eafaf804dd1398e01722dbefbbc07cd6bb84222f7ff7"
+    ]
+  },
+  {
+    "embodiment": "bimanual-b601-dm",
+    "id": "02c1d900f114c14a64bcb97b8efc5ddb10f3771c6429456888f8eaf96b262804",
+    "axes": [
+      {
+        "joint": "left_joint1",
+        "lower": -2.8,
+        "upper": 2.8,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint1"
+        }
+      },
+      {
+        "joint": "left_joint2",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint2"
+        }
+      },
+      {
+        "joint": "left_joint3",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint3"
+        }
+      },
+      {
+        "joint": "left_joint4",
+        "lower": -1.87,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint4"
+        }
+      },
+      {
+        "joint": "left_joint5",
+        "lower": -1.57,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint5"
+        }
+      },
+      {
+        "joint": "left_joint6",
+        "lower": -3.14,
+        "upper": 3.14,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint6"
+        }
+      },
+      {
+        "joint": "left_gripper_joint1",
+        "lower": 0.0,
+        "upper": 0.0715,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "left_arm_can",
+        "provisional": false,
+        "bus_id": 7,
+        "sign": -1,
+        "reduction": 111.11111111111111,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "gripper_joint1"
+        }
+      },
+      {
+        "joint": "right_joint1",
+        "lower": -2.8,
+        "upper": 2.8,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint1"
+        }
+      },
+      {
+        "joint": "right_joint2",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint2"
+        }
+      },
+      {
+        "joint": "right_joint3",
+        "lower": -3.14,
+        "upper": 0.0,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint3"
+        }
+      },
+      {
+        "joint": "right_joint4",
+        "lower": -1.87,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint4"
+        }
+      },
+      {
+        "joint": "right_joint5",
+        "lower": -1.57,
+        "upper": 1.57,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint5"
+        }
+      },
+      {
+        "joint": "right_joint6",
+        "lower": -3.14,
+        "upper": 3.14,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "joint6"
+        }
+      },
+      {
+        "joint": "right_gripper_joint1",
+        "lower": 0.0,
+        "upper": 0.0715,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "right_arm_can",
+        "provisional": false,
+        "bus_id": 7,
+        "sign": -1,
+        "reduction": 111.11111111111111,
+        "of": {
+          "body": "b601-dm",
+          "port": "can",
+          "joint": "gripper_joint1"
+        }
+      }
+    ],
+    "supersedes": [
+      "2c6d382021ddd6e4812fe4efa7b4258d59316cc27ac6f9a7ecc4958a482c1cc5",
+      "36a277038730304bfb6d940cf3c4ca3b59ce0889836371a5e2bf7cc866ae89db"
+    ]
+  },
+  {
+    "embodiment": "bimanual-so101",
+    "id": "0627e3ff516bfce1e7a36f79b70d88f9d15dfa0dfcd37e75db719f61af8650dd",
+    "axes": [
+      {
+        "joint": "left_shoulder_pan",
+        "lower": -1.91986,
+        "upper": 1.91986,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "shoulder_pan"
+        }
+      },
+      {
+        "joint": "left_shoulder_lift",
+        "lower": -1.74533,
+        "upper": 1.74533,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "shoulder_lift"
+        }
+      },
+      {
+        "joint": "left_elbow_flex",
+        "lower": -1.69,
+        "upper": 1.69,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "elbow_flex"
+        }
+      },
+      {
+        "joint": "left_wrist_flex",
+        "lower": -1.65806,
+        "upper": 1.65806,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "wrist_flex"
+        }
+      },
+      {
+        "joint": "left_wrist_roll",
+        "lower": -2.74385,
+        "upper": 2.84121,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "wrist_roll"
+        }
+      },
+      {
+        "joint": "left_gripper",
+        "lower": -0.174533,
+        "upper": 2.0944,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_arm_serial",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "gripper"
+        }
+      },
+      {
+        "joint": "right_shoulder_pan",
+        "lower": -1.91986,
+        "upper": 1.91986,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "shoulder_pan"
+        }
+      },
+      {
+        "joint": "right_shoulder_lift",
+        "lower": -1.74533,
+        "upper": 1.74533,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "shoulder_lift"
+        }
+      },
+      {
+        "joint": "right_elbow_flex",
+        "lower": -1.69,
+        "upper": 1.69,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "elbow_flex"
+        }
+      },
+      {
+        "joint": "right_wrist_flex",
+        "lower": -1.65806,
+        "upper": 1.65806,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "wrist_flex"
+        }
+      },
+      {
+        "joint": "right_wrist_roll",
+        "lower": -2.74385,
+        "upper": 2.84121,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "wrist_roll"
+        }
+      },
+      {
+        "joint": "right_gripper",
+        "lower": -0.174533,
+        "upper": 2.0944,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_arm_serial",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "of": {
+          "body": "so101",
+          "port": "serial",
+          "joint": "gripper"
+        }
+      }
+    ],
+    "supersedes": [
+      "0bb3d38347369d5df72d28f0646528e07cfc3accf1da274b931cbbbb1d0e40d9",
+      "8309129b63fa861722882a9b8ea3af27817a5599c932f376eb62e570ac93a784"
+    ]
+  },
+  {
+    "embodiment": "sentient-humanoid",
+    "id": "d5f2aad80bcb7bb4ff1eabfdf401b7f4910a89f4d12a731a8c8e24c177090bc5",
+    "axes": [
+      {
+        "joint": "torso_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 15,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "torso_joint"
+        }
+      },
+      {
+        "joint": "right_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 16,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_shoulder_pitch_joint"
+        }
+      },
+      {
+        "joint": "right_shoulder_roll_joint",
+        "lower": -3.14159265359,
+        "upper": 0.356919832033,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 17,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_shoulder_roll_joint"
+        }
+      },
+      {
+        "joint": "right_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 18,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_elbow_yaw_joint"
+        }
+      },
+      {
+        "joint": "right_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 19,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_elbow_forearm_yaw_joint"
+        }
+      },
+      {
+        "joint": "right_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 20,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_wrist_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 24,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_shoulder_pitch_joint"
+        }
+      },
+      {
+        "joint": "left_shoulder_roll_joint",
+        "lower": -0.356919832033,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 25,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_shoulder_roll_joint"
+        }
+      },
+      {
+        "joint": "left_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 26,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_elbow_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 27,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_elbow_forearm_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 28,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_wrist_yaw_joint"
+        }
+      }
+    ],
+    "supersedes": [
+      "4c63b409d2b192e8a1deecab1f607fe76a8be15568943de8e97ade4ef5f05583"
+    ]
+  },
+  {
+    "embodiment": "sentient-humanoid-upper-body",
+    "id": "36a0ef645a3b6881d2126714ec6a556e3942bba8242c59614d2c626de1c0a1b7",
+    "axes": [
+      {
+        "joint": "torso_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 15,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 16,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_shoulder_roll_joint",
+        "lower": -3.14159265359,
+        "upper": 0.356919832033,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 17,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 18,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 19,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 20,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 24,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_shoulder_roll_joint",
+        "lower": -0.356919832033,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 25,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 26,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 27,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 28,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      }
+    ],
+    "supersedes": [
+      "24b2f7a96ec0c7270cf8278bac3d882d9bfc35f8bd2a5e5468fac2b95720bedc"
+    ]
+  },
+  {
+    "embodiment": "sentient-humanoid-upper-body-grippers",
+    "id": "a15663f4e92cdd9ee75057e4f0392f3e2df64a2c1ba86caa39247b67da7eb4e8",
+    "axes": [
+      {
+        "joint": "torso_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 15,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "torso_joint"
+        }
+      },
+      {
+        "joint": "right_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 16,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_shoulder_pitch_joint"
+        }
+      },
+      {
+        "joint": "right_shoulder_roll_joint",
+        "lower": -3.14159265359,
+        "upper": 0.356919832033,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 17,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_shoulder_roll_joint"
+        }
+      },
+      {
+        "joint": "right_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 18,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_elbow_yaw_joint"
+        }
+      },
+      {
+        "joint": "right_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 19,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_elbow_forearm_yaw_joint"
+        }
+      },
+      {
+        "joint": "right_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 20,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "right_wrist_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_shoulder_pitch_joint",
+        "lower": -3.14159265359,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 24,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_shoulder_pitch_joint"
+        }
+      },
+      {
+        "joint": "left_shoulder_roll_joint",
+        "lower": -0.356919832033,
+        "upper": 3.14159265359,
+        "model": "damiao_dm8009",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 25,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_shoulder_roll_joint"
+        }
+      },
+      {
+        "joint": "left_elbow_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 26,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_elbow_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_elbow_forearm_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 27,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_elbow_forearm_yaw_joint"
+        }
+      },
+      {
+        "joint": "left_wrist_yaw_joint",
+        "lower": -1.570796326795,
+        "upper": 1.570796326795,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 28,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0,
+        "of": {
+          "body": "sentient-humanoid-upper-body",
+          "port": "can",
+          "joint": "left_wrist_yaw_joint"
+        }
+      }
+    ],
+    "supersedes": [
+      "3ff42e92777d55330b4d53335c0a828d7dd8c9c61a5241a32812775068a8e7ab"
+    ]
+  },
+  {
+    "embodiment": "sentient-static-upper-body",
+    "id": "6184036b4ddb9d4068cfb18954c0a945f64d9a5e2840566083f1951def43e65f",
+    "axes": [
+      {
+        "joint": "torso_joint",
+        "lower": -1.221293965056839,
+        "upper": 1.1499580376897836,
+        "model": "damiao_dm8009p",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 31,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_shoulder_pitch_joint",
+        "lower": -2.642671854734111,
+        "upper": 2.889868009460594,
+        "model": "damiao_dm8009p",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 24,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_shoulder_roll_joint",
+        "lower": -0.3873884184023808,
+        "upper": 1.2018387121385512,
+        "model": "damiao_dm8009p",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 25,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_upper_arm_yaw_joint",
+        "lower": -5.1230258640421145,
+        "upper": 0.8070115205615327,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 26,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_elbow_pitch_joint",
+        "lower": -2.9753185320820936,
+        "upper": 0.000953688868543523,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 27,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_forearm_yaw_joint",
+        "lower": -6.82669565880827,
+        "upper": 1.8839169909208824,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 28,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_wrist_pitch_joint",
+        "lower": -2.4408712901503016,
+        "upper": 2.1280613412680243,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 29,
+        "sign": -1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_wrist_roll_joint",
+        "lower": -2.0967803463797967,
+        "upper": 2.096017395284962,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 30,
+        "sign": -1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_shoulder_pitch_joint",
+        "lower": -2.9139009689478907,
+        "upper": 3.1225680933852136,
+        "model": "damiao_dm8009p",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 9,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_shoulder_roll_joint",
+        "lower": -1.2101034267894413,
+        "upper": 0.35464911018127765,
+        "model": "damiao_dm8009p",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 16,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_upper_arm_yaw_joint",
+        "lower": -2.4210345616845963,
+        "upper": 2.7597848477912574,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 17,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_elbow_pitch_joint",
+        "lower": -0.029182879377431803,
+        "upper": 2.966544594491493,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 18,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_forearm_yaw_joint",
+        "lower": -6.009575036240177,
+        "upper": 1.4261463340199896,
+        "model": "damiao_dm4340",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 19,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_wrist_pitch_joint",
+        "lower": -2.255855649652858,
+        "upper": 2.308880750743878,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 20,
+        "sign": -1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "right_wrist_roll_joint",
+        "lower": -2.0986877241168838,
+        "upper": 2.112039368276493,
+        "model": "damiao_dm4310",
+        "bus": "damiao_can",
+        "port": "can",
+        "provisional": false,
+        "bus_id": 21,
+        "sign": -1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "left_gripper_left_finger_joint",
+        "lower": -0.823747683095,
+        "upper": 0.0,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_gripper",
+        "provisional": true,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0
+      },
+      {
+        "joint": "left_gripper_right_finger_joint",
+        "lower": 0.0,
+        "upper": 0.929592357459,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "left_gripper",
+        "provisional": true,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0
+      },
+      {
+        "joint": "right_gripper_left_finger_joint",
+        "lower": -0.952602069277,
+        "upper": 0.0,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_gripper",
+        "provisional": true,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0
+      },
+      {
+        "joint": "right_gripper_right_finger_joint",
+        "lower": 0.0,
+        "upper": 0.788466124973,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "right_gripper",
+        "provisional": true,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0
+      },
+      {
+        "joint": "so101_shoulder_pan_joint",
+        "lower": -1.91986,
+        "upper": 1.91986,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "so101_shoulder_lift_joint",
+        "lower": -1.74533,
+        "upper": 1.74533,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "so101_elbow_flex_joint",
+        "lower": -1.74,
+        "upper": 1.74,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "so101_wrist_flex_joint",
+        "lower": -1.8,
+        "upper": 1.8,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "so101_wrist_roll_joint",
+        "lower": -2.74385,
+        "upper": 2.84121,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "so101_camera_tilt_joint",
+        "lower": -1.993966704,
+        "upper": 0.885826562,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "neck",
+        "provisional": true,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.4135
+      }
+    ],
+    "supersedes": [
+      "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
+      "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
+      "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
+      "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
+      "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
+    ],
+    "approach": {
+      "left_gripper": {
+        "speed": 4.0,
+        "acceleration": 16.0
+      },
+      "neck": {
+        "speed": 4.0,
+        "acceleration": 16.0
+      },
+      "right_gripper": {
+        "speed": 4.0,
+        "acceleration": 16.0
+      }
+    }
+  },
+  {
+    "embodiment": "so101",
+    "id": "1b34a6078aa4626682feff6fe90387fb843d72e02406932ca7478362a82e5def",
+    "axes": [
+      {
+        "joint": "shoulder_pan",
+        "lower": -1.91986,
+        "upper": 1.91986,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 1,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "shoulder_lift",
+        "lower": -1.74533,
+        "upper": 1.74533,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 2,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "elbow_flex",
+        "lower": -1.69,
+        "upper": 1.69,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 3,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "wrist_flex",
+        "lower": -1.65806,
+        "upper": 1.65806,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 4,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "wrist_roll",
+        "lower": -2.74385,
+        "upper": 2.84121,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 5,
+        "sign": 1,
+        "reduction": 1.0,
+        "home": 0.0
+      },
+      {
+        "joint": "gripper",
+        "lower": -0.174533,
+        "upper": 2.0944,
+        "model": "feetech_sts3215",
+        "bus": "feetech_serial",
+        "port": "serial",
+        "provisional": false,
+        "bus_id": 6,
+        "sign": 1,
+        "reduction": 1.0
+      }
+    ],
+    "supersedes": [
+      "89727a3d6c8cb40fd8b34b847b64de1531027a63774ffcc97dac3c869bf4e05c",
+      "e5523f6fe586138742b107ea674b7d4c63fdcb27ce1c210a4e58becb3dcfa1c8"
+    ]
+  }
+]

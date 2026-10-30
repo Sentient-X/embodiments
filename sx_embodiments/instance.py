@@ -349,7 +349,10 @@ def drive_document(embodiment: Embodiment, resolved: ResolvedInstance) -> dict[s
     if resolved.instance.embodiment != embodiment.id:
         raise InstanceError("the instance is of a different embodiment")
     joints: list[JsonValue] = []
-    for coordinate in embodiment.state.coordinates:
+    # Named as the description names them, as the rendered bindings do: unique across a body
+    # that repeats a part (``sx_embodiments.buses``).
+    names = embodiment.joint_names
+    for coordinate, name in zip(embodiment.state.coordinates, names, strict=True):
         if coordinate.axis.actuator is None:
             continue
         joint = resolved.joint(
@@ -357,7 +360,7 @@ def drive_document(embodiment: Embodiment, resolved: ResolvedInstance) -> dict[s
         )
         joints.append(
             {
-                "joint": coordinate.joint_name,
+                "joint": name,
                 "zero": joint.zero_offset,
                 "direction": joint.direction,
                 "calibration": None if joint.measured is None else str(joint.measured),

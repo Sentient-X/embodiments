@@ -404,6 +404,44 @@ pub fn calibration_file(port: &str) -> String {
     format!("{port}.calibration.json")
 }
 
+/// Every driven body's rendered bindings (`tools/render_driver_bindings.py`): a body no driver
+/// crate composes is opened from here, each bus as the twin it repeats (`of`).
+const REGISTRY: &str = include_str!("../bindings/registry.json");
+
+/// [`REGISTRY`]'s documents, each as its own text, parsed once.
+fn registry() -> Result<&'static [String], OpenError> {
+    static DOCUMENTS: std::sync::OnceLock<Result<Vec<String>, String>> = std::sync::OnceLock::new();
+    DOCUMENTS
+        .get_or_init(|| {
+            serde_json::from_str::<Vec<serde_json::Value>>(REGISTRY)
+                .map(|documents| documents.iter().map(ToString::to_string).collect())
+                .map_err(|error| error.to_string())
+        })
+        .as_deref()
+        .map_err(|error| OpenError::from(BodyError::Document(error.clone())))
+}
+
+/// A bus of a composed body as the twin it repeats (`BodyBindings::as_twin`).
+struct TwinBus {
+    /// The registry name of the body whose bus it repeats, and that bus's port.
+    body: String,
+    port: String,
+    /// The bus's axes, named as the twin's.
+    bindings: BodyBindings,
+    /// Each axis's joint and port in this body, in order, which the opened axes take back.
+    names: Vec<(String, String)>,
+}
+
+impl TwinBus {
+    /// `axes`, opened as the twin's, named again as this body's.
+    fn renamed<'a>(&self, axes: impl Iterator<Item = &'a mut BoundAxis>) {
+        for (axis, (joint, port)) in axes.zip(&self.names) {
+            axis.joint.clone_from(joint);
+            axis.port.clone_from(port);
+        }
+    }
+}
+
 /// A body this crate composes, by the content id its bindings carry.
 #[derive(Clone, Copy, Debug)]
 enum Opener {
@@ -658,12 +696,45 @@ impl Opener {
             return Ok(Self::B601);
         }
         let embodiment = drive.embodiment.as_str();
-        DamiaoBody::of(embodiment)?
+        let composed = DamiaoBody::of(embodiment)?
             .map(|body| body.bindings)
             .or(FeetechBody::bindings_of(embodiment)?)
-            .or(DynamixelBody::of(embodiment)?.map(|body| body.bindings))
-            .map(Self::Buses)
-            .ok_or_else(|| OpenError::Body(drive.embodiment.clone()))
+            .or(DynamixelBody::of(embodiment)?.map(|body| body.bindings));
+        if let Some(bindings) = composed {
+            return Ok(Self::Buses(bindings));
+        }
+        // No crate composes the body: its registry bindings, each bus opened as its twin.
+        for document in registry()? {
+            if BodyBindings::parse(document)?.is(embodiment) {
+                return Ok(Self::Buses(document.as_str()));
+            }
+        }
+        Err(OpenError::Body(drive.embodiment.clone()))
+    }
+
+    /// The bindings of the twin the bus on `port` repeats, with that bus's axes named as the
+    /// twin's (`BodyBindings::as_twin`) and the names they had here, in order; `None` for a bus
+    /// with no twin, which a crate composes as this body's own.
+    fn twin(self, drive: &InstanceDrive, port: &str) -> Result<Option<TwinBus>, OpenError> {
+        let Self::Buses(bindings) = self else {
+            return Ok(None);
+        };
+        let body = BodyBindings::parse(bindings)?.calibrated(drive)?;
+        let Some((twin_body, twin_port)) = body.twin_bus(port)? else {
+            return Ok(None);
+        };
+        let names = body
+            .axes
+            .iter()
+            .filter(|axis| axis.port == port)
+            .map(|axis| (axis.joint.clone(), axis.port.clone()))
+            .collect();
+        Ok(Some(TwinBus {
+            body: twin_body,
+            port: twin_port,
+            bindings: body.as_twin(port)?,
+            names,
+        }))
     }
 
     /// Each port in the order its chain is composed, with the bus its bindings put on it and
@@ -724,9 +795,19 @@ impl Opener {
         Ok(match self {
             Self::B601 if port == "arm" => b601::b601_arm(drive)?,
             Self::B601 => vec![b601::b601_gripper(drive)?],
-            Self::Buses(_) => DamiaoBody::of(&drive.embodiment)?
-                .ok_or_else(|| unopened(port, DAMIAO_CAN))?
-                .axes(drive)?,
+            Self::Buses(_) => {
+                if let Some(twin) = self.twin(drive, port)? {
+                    let mut motors = DamiaoBody::named(&twin.body)?
+                        .ok_or_else(|| unopened(port, DAMIAO_CAN))?
+                        .axes_of(twin.bindings.clone())?;
+                    twin.renamed(motors.iter_mut().map(|motor| &mut motor.axis));
+                    motors
+                } else {
+                    DamiaoBody::of(&drive.embodiment)?
+                        .ok_or_else(|| unopened(port, DAMIAO_CAN))?
+                        .axes(drive)?
+                }
+            }
         })
     }
 
@@ -766,9 +847,17 @@ impl Opener {
                     .collect();
                 (!motors.is_empty()).then_some(Part::Damiao(motors))
             } else if kind == FEETECH_SERIAL {
-                let body =
-                    FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
-                let calibrated = body.calibrated(drive)?;
+                let (body, calibrated) = if let Some(twin) = self.twin(drive, &port)? {
+                    let body = FeetechBody::named(&twin.body, &twin.port)?
+                        .ok_or_else(|| unopened(&port, kind))?;
+                    let mut axes = body.axes(twin.bindings.clone())?;
+                    twin.renamed(axes.iter_mut());
+                    (body, axes)
+                } else {
+                    let body =
+                        FeetechBody::of(embodiment, &port)?.ok_or_else(|| unopened(&port, kind))?;
+                    (body, body.calibrated(drive)?)
+                };
                 whole = calibrated.clone();
                 let (axes, setups) =
                     in_service(calibrated.into_iter().zip(body.setups()?), out_of_service);
@@ -827,6 +916,27 @@ pub fn ports(drive: &InstanceDrive) -> Result<Vec<String>, OpenError> {
         .into_iter()
         .map(|(port, _, _)| port)
         .collect())
+}
+
+/// Each port the opener for `drive`'s body declares, in the order it opens them, with the
+/// kind of bus on it and whether the registry marks it provisional: what a station, or a
+/// simulation of one, attaches to each port.
+///
+/// # Errors
+///
+/// What [`ports`] refuses.
+pub fn port_buses(drive: &InstanceDrive) -> Result<Vec<(String, ActuatorBus, bool)>, OpenError> {
+    Opener::of(drive)?.buses(drive)
+}
+
+/// The Damiao motors on `port` of `drive`'s body, each as the opener drives it: what a bridge
+/// on that port, or a simulation of one, must answer for.
+///
+/// # Errors
+///
+/// What [`ports`] refuses, and a port no Damiao driver composes for this body.
+pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis>, OpenError> {
+    Opener::of(drive)?.damiao(drive, port)
 }
 
 /// How a body is opened beyond its drive, commissioning and calibrations.

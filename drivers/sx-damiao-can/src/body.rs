@@ -80,13 +80,49 @@ impl DamiaoBody {
     ///
     /// Refuses other joints, Damiao axes on more than one port, and a drive of another body.
     pub fn body(&self, drive: &InstanceDrive) -> Result<BodyBindings, BodyError> {
-        let body = BodyBindings::parse(self.bindings)?
-            .calibrated(drive)?
-            .on(DAMIAO_CAN);
+        self.configured(BodyBindings::parse(self.bindings)?.calibrated(drive)?)
+    }
+
+    /// `body`'s Damiao axes, refused unless they are on one bus and are the joints configured
+    /// here: this body's own, or a composed body's bus named as its twin here
+    /// (`BodyBindings::as_twin`).
+    fn configured(&self, body: BodyBindings) -> Result<BodyBindings, BodyError> {
+        let body = body.on(DAMIAO_CAN);
         let joints: Vec<&str> = self.joints.iter().map(|gains| gains.joint).collect();
         body.require_joints(&joints)?;
         body.one_bus()?;
         Ok(body)
+    }
+
+    /// The body among [`BODIES`] the registry names `body`: the twin a composed body's bus
+    /// repeats (`BodyBindings::twin_bus`).
+    ///
+    /// # Errors
+    ///
+    /// Returns why a body's bindings do not parse.
+    pub fn named(body: &str) -> Result<Option<&'static Self>, BodyError> {
+        for candidate in BODIES {
+            if BodyBindings::parse(candidate.bindings)?.embodiment == body {
+                return Ok(Some(candidate));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Every motor of `twin`, a composed body's bus named as this body
+    /// (`BodyBindings::as_twin`), configured as this body's, in its order.
+    ///
+    /// # Errors
+    ///
+    /// Refuses joints that are not the ones configured here.
+    pub fn axes_of(&self, twin: BodyBindings) -> Result<Vec<DamiaoAxis>, BodyError> {
+        Ok(self
+            .configured(twin)?
+            .axes
+            .into_iter()
+            .zip(self.joints)
+            .map(|(axis, gains)| self.axis(axis, gains))
+            .collect())
     }
 
     /// Every motor, in native state order, as `drive`'s robot drives it.

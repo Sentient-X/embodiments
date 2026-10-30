@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 from sx_embodiments import development_embodiments, embodiments
+from sx_embodiments.buses import DrivenAxis, driven_axes
 from sx_embodiments.calibration import (
     CalibrationMethod,
     JointUnitCalibration,
@@ -103,6 +104,9 @@ BINDINGS: dict[Path, str] = {
     ),
 }
 VOCABULARY = ROOT / "drivers/sx-embodiment-drivers/bindings/vocabulary.json"
+#: Every driven body's bindings, which ``sx-embodiment-bodies`` opens a body from when no
+#: driver crate composes it (each joint driven as its twin, ``of``, in one that does).
+REGISTRY = ROOT / "drivers/sx-embodiment-bodies/bindings/registry.json"
 DRIVES = ROOT / "drivers/sx-damiao-can/tests/fixtures/drives.json"
 MEDIA = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/media-plans.json"
 REALSENSE_MEDIA = ROOT / "drivers/sx-realsense/tests/fixtures/media-plans.json"
@@ -288,6 +292,7 @@ def poses() -> str:
 def rendered() -> dict[Path, str]:
     files = {path: render(name) for path, name in BINDINGS.items()}
     files[VOCABULARY] = vocabulary()
+    files[REGISTRY] = registry()
     files[DRIVES] = drives()
     files[MEDIA] = media()
     files[REALSENSE_MEDIA] = realsense_media()
@@ -317,48 +322,102 @@ SERVO_APPROACH: dict[str, dict[BusPort, ServoApproach]] = {
 }
 
 
-def render(name: str) -> str:
+def driven_bodies() -> list[str]:
+    """Every registered body, released or in development, with a driven joint, by name."""
+    names = [*embodiments, *development_embodiments]
+    return sorted(name for name in names if driven_axes(registered(name)))
+
+
+def _wire(axis: DrivenAxis) -> tuple[object, ...]:
+    """What makes two driven joints the same drive of the same part."""
+    b = axis.binding
+    return (
+        axis.coordinate.part_id,
+        axis.coordinate.axis.name,
+        b.model,
+        b.bus,
+        b.bus_port,
+        b.bus_id,
+        b.sign,
+        b.reduction,
+        b.provisional,
+    )
+
+
+def bases(name: str) -> dict[str, dict[str, str]]:
+    """For a body no driver crate composes, each driven joint's twin in one that does: the same
+    part's same joint on the same drive, by joint (``of``: that body, its port and its joint),
+    which the opener drives this joint as. Empty for a body a driver crate composes."""
+    deployed = sorted(set(BINDINGS.values()))
+    if name in deployed:
+        return {}
+    twins: dict[tuple[object, ...], list[tuple[str, DrivenAxis]]] = {}
+    for base in deployed:
+        for axis in driven_axes(registered(base)):
+            twins.setdefault(_wire(axis), []).append((base, axis))
+    found: dict[str, dict[str, str]] = {}
+    for axis in driven_axes(registered(name)):
+        matches = twins.get(_wire(axis), [])
+        if len({base for base, _ in matches}) > 1:
+            raise ValueError(f"{name}/{axis.joint} drives as a joint of several bodies: {matches}")
+        if matches:
+            base, twin = matches[0]
+            found[axis.joint] = {"body": base, "port": twin.port, "joint": twin.joint}
+    return found
+
+
+def document(name: str) -> dict[str, object]:
     robot = registered(name)
     homes, chains = declared_homes(robot)
+    twins = bases(name)
     axes: list[dict[str, object]] = []
-    for coordinate in robot.state.coordinates:
-        binding = coordinate.axis.actuator
-        if binding is None:
-            continue
+    for driven in driven_axes(robot):
+        coordinate, binding = driven.coordinate, driven.binding
         if coordinate.lower is None or coordinate.upper is None:
-            raise ValueError(f"{name}/{coordinate.joint_name} is driven without bounds")
+            raise ValueError(f"{name}/{driven.joint} is driven without bounds")
         home = homes.get((str(coordinate.instance), coordinate.axis.name))
         if home is None and str(coordinate.instance) in chains:
-            raise ValueError(f"{name}/{coordinate.joint_name} is a chain joint with no home")
+            raise ValueError(f"{name}/{driven.joint} is a chain joint with no home")
         axes.append(
             {
-                "joint": coordinate.joint_name,
+                "joint": driven.joint,
                 "lower": coordinate.lower,
                 "upper": coordinate.upper,
                 "model": binding.model.value,
                 "bus": binding.bus.value,
-                "port": binding.bus_port,
+                "port": driven.port,
                 "provisional": binding.provisional,
                 "bus_id": binding.bus_id,
                 "sign": binding.sign,
                 "reduction": binding.reduction,
             }
             | ({} if home is None else {"home": home})
+            | ({"of": twins[driven.joint]} if driven.joint in twins else {})
         )
     approach = SERVO_APPROACH.get(name, {})
     ports = {axis["port"] for axis in axes}
     if unknown := set(approach) - ports:
         raise ValueError(f"{name}: servo approach for ports {sorted(unknown)} it has no axes on")
-    document: dict[str, object] = {"embodiment": name, "id": str(robot.id), "axes": axes}
+    rendered: dict[str, object] = {"embodiment": name, "id": str(robot.id), "axes": axes}
     # Earlier ids of this body that drive as it does: a robot still assigned one opens it.
     if supersedes := superseded_ids(robot.name):
-        document["supersedes"] = list(supersedes)
+        rendered["supersedes"] = list(supersedes)
     if approach:
-        document["approach"] = {
+        rendered["approach"] = {
             port: {"speed": limit.speed, "acceleration": limit.acceleration}
             for port, limit in sorted(approach.items())
         }
-    return json.dumps(document, indent=2) + "\n"
+    return rendered
+
+
+def render(name: str) -> str:
+    return json.dumps(document(name), indent=2) + "\n"
+
+
+def registry() -> str:
+    """Every driven body's bindings, one document each, by name: what the station opens any
+    body from when no driver crate composes it."""
+    return json.dumps([document(name) for name in driven_bodies()], indent=2) + "\n"
 
 
 def stale() -> list[Path]:

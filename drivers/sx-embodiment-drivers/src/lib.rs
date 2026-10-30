@@ -61,7 +61,7 @@ pub use binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, ActuatorRating, BindingError, BoundAxis,
     UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO, is_port_name, validate_chain,
 };
-pub use body::{BodyBindings, BodyError, Bus};
+pub use body::{BodyBindings, BodyError, Bus, Twin};
 pub use bus_timing::BusTiming;
 pub use chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
