@@ -185,6 +185,7 @@ impl Model {
                 velocity: speed[axis],
                 torque: share
                     * (self.planned[joint] - self.held_plan[joint] + self.held_now[joint]),
+                gravity: 0.0,
             };
         }
         Ok(&self.out)

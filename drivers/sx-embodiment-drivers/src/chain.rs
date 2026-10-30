@@ -320,6 +320,10 @@ pub enum ChainFailure {
 pub struct Feedforward {
     pub velocity: f64,
     pub torque: f64,
+    /// Of `torque`, the part that holds the joint against gravity at its pose (N·m): what a
+    /// chain may still send where the rest of the feed-forward would push the joint past its
+    /// range, and what a stop's brake keeps holding. 0 where the caller models none.
+    pub gravity: f64,
 }
 
 /// How much [`Feedforward`] one axis accepts, at the joint. `None` switches that part off: the

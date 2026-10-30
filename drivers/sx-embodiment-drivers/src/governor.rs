@@ -792,6 +792,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                     Feedforward::default()
                 } else {
                     let torque = wanted.map_or(0.0, |wanted| wanted[index].torque);
+                    let gravity = wanted.map_or(0.0, |wanted| wanted[index].gravity);
+                    let held = |value: f64| cap.map_or(value, |cap| value.clamp(-cap, cap));
                     Feedforward {
                         // A joint being brought in from outside its range is led by position
                         // alone: a planned velocity would ramp against a joint that is not
@@ -801,7 +803,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                         } else {
                             speed.clamp(-limit.max_speed, limit.max_speed)
                         },
-                        torque: cap.map_or(torque, |cap| torque.clamp(-cap, cap)),
+                        torque: held(torque),
+                        gravity: held(gravity),
                     }
                 }
             })
@@ -1528,6 +1531,7 @@ mod tests {
         let asked = [Feedforward {
             velocity: 9.0,
             torque: 1.5,
+            gravity: 0.0,
         }; 2];
         governor.command_with(&[0.5, 0.5], &asked).expect("steps");
         let last = governor.chain().feedforward.last().expect("sent");
@@ -2121,6 +2125,7 @@ mod tests {
         let asked = Feedforward {
             velocity: 0.0,
             torque: -30.0,
+            gravity: 0.0,
         };
         governor
             .command_with(&[0.0, 0.5], &[asked; 2])
@@ -2311,6 +2316,7 @@ mod tests {
         let ff = [Feedforward {
             velocity: 0.2,
             torque: 1.0,
+            gravity: 0.0,
         }; 2];
         for _ in 0..500 {
             clock.advance(MAX_STEP_INTERVAL);

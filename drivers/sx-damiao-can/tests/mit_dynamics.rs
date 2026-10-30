@@ -332,10 +332,10 @@ fn a_stop_on_a_failing_link_does_not_brake() {
     assert!(holds <= 1, "{holds} hold frames on a failing link");
 }
 
-/// The brake keeps the feed-forward torque each joint was last sent: a loaded joint is held up
-/// while it brakes, not dropped onto its position term.
+/// The brake keeps the gravity part of the feed-forward torque each joint was last sent: a
+/// loaded joint is held up while it brakes, not dropped onto its position term.
 #[test]
-fn the_brake_keeps_each_joints_feed_forward_torque() {
+fn the_brake_keeps_each_joints_gravity_torque_only() {
     use sx_embodiment_drivers::{Feedforward, FeedforwardLimit};
     let mut rig = Rig::new_at(0.25);
     let shoulder = rig.index(SHOULDER);
@@ -352,7 +352,10 @@ fn the_brake_keeps_each_joints_feed_forward_torque() {
     let mut target = rig.governor.last_observed().expect("rest").to_vec();
     target[shoulder] = rig.governor.commandable()[shoulder].upper;
     let mut ff = vec![Feedforward::default(); width];
-    ff[shoulder].torque = 3.0;
+    // 5 N m sent, 3 of it gravity: the brake keeps the 3 and drops the rest (inertia,
+    // friction in the direction of motion), which would push a stopping joint on.
+    ff[shoulder].torque = 5.0;
+    ff[shoulder].gravity = 3.0;
     for _ in 0..40 {
         rig.governor.command_with(&target, &ff).expect("moving");
         rig.pass(MAX_STEP_INTERVAL);
@@ -370,6 +373,6 @@ fn the_brake_keeps_each_joints_feed_forward_torque() {
     let tau = f64::from(tau) / 4095.0 * 2.0 * tmax - tmax;
     assert!(
         (tau - 3.0).abs() < 0.05,
-        "the hold sent {tau} N m, not the 3 N m it carried"
+        "the hold sent {tau} N m, not the 3 N m of gravity it carried"
     );
 }

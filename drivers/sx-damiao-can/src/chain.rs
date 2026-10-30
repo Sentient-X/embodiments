@@ -1096,12 +1096,13 @@ impl<P: CanPort> DamiaoChain<P> {
     /// reduction`, so velocity scales by `g` and torque, by power, by `1 / g`.
     ///
     /// Feed-forward moves where the motor settles: unloaded, `(kd dq + tau) / kp` past the
-    /// target. The planned velocity's part is scaled so it stays inside the axis' commandable
-    /// range from `target` (actuator coordinates); the torque may take the unloaded settling
-    /// point at most [`MAX_COAST`] past the range end, so a joint near its end can be held up
-    /// against gravity; with `kp` zero nothing is sent. A load the feed-forward balances is what
-    /// keeps a held joint at its target; with the load gone (a dropped cup, a wrong model) it
-    /// settles within [`MAX_COAST`] past the end, never further.
+    /// target. The planned velocity and the torque other than gravity's
+    /// ([`Feedforward::gravity`]) are scaled together so they stay inside the axis' commandable
+    /// range from `target` (actuator coordinates); gravity's torque alone may take the unloaded
+    /// settling point at most [`MAX_COAST`] past the range end, so a joint near its end can be
+    /// held up against gravity; with `kp` zero nothing is sent. With the load gone (a dropped
+    /// cup, a wrong model) such a joint settles within [`MAX_COAST`] past the end, never
+    /// further.
     fn actuator_feedforward(
         &self,
         index: usize,
@@ -1116,6 +1117,12 @@ impl<P: CanPort> DamiaoChain<P> {
         let (v_max, t_max) = (f64::from(v_max), f64::from(t_max));
         let speed = velocity.map_or(0.0, |bound| wanted.velocity.clamp(-bound, bound));
         let effort = torque.map_or(0.0, |bound| wanted.torque.clamp(-bound, bound));
+        // Of the torque, the part holding the joint against gravity (never more than the whole).
+        let gravity = if effort == 0.0 {
+            0.0
+        } else {
+            wanted.gravity.clamp(-effort.abs(), effort.abs())
+        };
         // The coast past the last position if commands stop: `kd dq / kp`, at most MAX_COAST.
         let coast = if kd > 0.0 {
             MAX_COAST * gain.abs() * kp / kd
@@ -1123,7 +1130,9 @@ impl<P: CanPort> DamiaoChain<P> {
             v_max
         };
         let mut dq = (gain * speed).clamp(-v_max, v_max).clamp(-coast, coast);
-        let mut tau = (effort / gain).clamp(-t_max, t_max);
+        let tau_all = (effort / gain).clamp(-t_max, t_max);
+        let mut held = (gravity / gain).clamp(-t_max, t_max);
+        let mut rest = tau_all - held;
         let range = self.commandable[index];
         let ends = [
             axis.actuator_from_joint(range.lower),
@@ -1138,34 +1147,38 @@ impl<P: CanPort> DamiaoChain<P> {
                 (target - ends[0].min(ends[1])).max(0.0)
             }
         };
-        // The planned velocity's part stays inside the range, as it always has: a stalled host
-        // never settles a moving joint past its end.
-        let velocity_push = kd * dq;
-        let velocity_allowed = kp * room(velocity_push);
-        if velocity_push.abs() > velocity_allowed {
-            dq *= velocity_allowed / velocity_push.abs();
+        // The planned velocity and every torque but gravity's stay inside the range, as they
+        // always have: unloaded (a stalled host, a dropped load, a wrong model) they never settle
+        // a joint past its end.
+        let inside = kd.mul_add(dq, rest);
+        let inside_allowed = kp * room(inside);
+        if inside.abs() > inside_allowed {
+            let scale = inside_allowed / inside.abs();
+            dq *= scale;
+            rest *= scale;
         }
-        // The torque may take the settling point up to MAX_COAST past the end (what a stalled
-        // host lets a joint coast anyway): held to the end itself, a joint near it on its
-        // gravity side could not be held up at all (it sagged its load over kp, 8 mm at the
-        // coffee machine's retreat in act-sim).
-        let push = kd.mul_add(dq, tau);
+        // Gravity's torque may take the unloaded settling point up to MAX_COAST past the end
+        // (what a stalled host lets a joint coast anyway): held to the end itself, a joint near
+        // it on its gravity side could not be held up at all (it sagged its load over kp, 8 mm
+        // at the coffee machine's retreat in act-sim).
+        let inside = kd.mul_add(dq, rest);
+        let push = inside + held;
         let allowed = kp * (room(push) + MAX_COAST * gain.abs());
         if push.abs() > allowed {
-            // Only the torque gives way: the velocity part is already inside the range.
-            let velocity_part = kd * dq;
-            let limit = allowed.copysign(push);
-            tau = if (limit - velocity_part).signum() == tau.signum() {
-                limit - velocity_part
+            let limit = allowed.copysign(push) - inside;
+            held = if limit.signum() == held.signum() {
+                limit
             } else {
                 0.0
             };
         }
+        let tau = rest + held;
         (
             (dq, tau),
             Feedforward {
                 velocity: dq / gain,
                 torque: tau * gain,
+                gravity: held * gain,
             },
         )
     }
@@ -1294,10 +1307,11 @@ impl<P: CanPort> DamiaoChain<P> {
             if !hold.is_finite() {
                 return;
             }
-            // The feed-forward torque the joint was last sent (gravity it carries), kept: a
-            // brake that dropped it would let a loaded joint sag while it brakes.
+            // The gravity torque the joint was last sent, kept: a brake that dropped it would let a
+            // loaded joint sag while it brakes. The rest of the feed-forward (inertia, friction
+            // in the direction of motion) is not: it would push a stopping joint on.
             let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
-            let tau = self.applied[index].torque / gain;
+            let tau = self.applied[index].gravity / gain;
             match self
                 .control
                 .mit_frame(*id, motor.kp, motor.kd, hold, 0.0, tau)
