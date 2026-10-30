@@ -129,7 +129,7 @@ from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ..sites import BodySite
-from ..viewing import VirtualGripper, Workcell
+from ..viewing import Viewing, VirtualGripper, Workcell
 from ._authoring import bounded_layout
 from .zed import EYES, ZED_FRAME, optical_frame, zed_2i_eye, zed_2i_imu
 
@@ -415,6 +415,16 @@ STATIC_UPPER_BODY_SERVO_APPROACH: Final[dict[BusPort, ServoApproach]] = {
 #: The ZED's two eyes as one side-by-side track.
 STATIC_UPPER_BODY_RIG: Final = MediaRig(stereo=(StereoPair("head", "head_left", "head_right"),))
 
+#: The table top (base_link, the base mount's surface) above the floor, from the received
+#: CAD's ``world_to_base`` joint.
+STATIC_UPPER_BODY_WORKCELL: Final = Workcell(
+    floor_to_frame_m=0.797200208452,
+    provenance="humanoid_pkg allisa_feedback.urdf joint world_to_base",
+)
+
+#: The operator's empty controllers drive this body's own grippers, 9 cm ahead of the grip.
+STATIC_UPPER_BODY_VIRTUAL_GRIPPER: Final = VirtualGripper(ahead_m=0.09)
+
 STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-static-upper-body"),
     label="Sentient static upper body",
@@ -435,14 +445,8 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     # The received file stays in the asset tree as provenance only: its package:// mesh
     # paths are the received folder's, so it is not a loadable asset of this body.
     extra_assets=(STATIC_UPPER_BODY_URDF,),
+    # Drawn at the headset's full budget: the operator works inside it.
+    viewing=Viewing(
+        mount=STATIC_UPPER_BODY_WORKCELL, virtual_gripper=STATIC_UPPER_BODY_VIRTUAL_GRIPPER
+    ),
 )
-
-#: The table top (base_link, the base mount's surface) above the floor, from the received
-#: CAD's ``world_to_base`` joint.
-STATIC_UPPER_BODY_WORKCELL: Final = Workcell(
-    floor_to_frame_m=0.797200208452,
-    provenance="humanoid_pkg allisa_feedback.urdf joint world_to_base",
-)
-
-#: The operator's empty controllers drive this body's own grippers, 9 cm ahead of the grip.
-STATIC_UPPER_BODY_VIRTUAL_GRIPPER: Final = VirtualGripper(ahead_m=0.09)

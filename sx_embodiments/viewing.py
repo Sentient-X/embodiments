@@ -4,8 +4,9 @@ These are facts about a body's surroundings and how an operator's XR controllers
 not its morphology: they are not part of :class:`~sx_embodiments.embodiment.Embodiment`'s
 content identity, so declaring or correcting one never changes an embodiment id, an
 episode seal or a description digest. Each body's module in ``known/`` declares its own;
-``tools/render_packs.py`` hands them to :func:`sx_embodiments.render_pack.build`, which
-writes them into ``pack.json`` (``tracking``, ``mount``, ``virtual_gripper``).
+:func:`sx_embodiments.known.viewing_of` answers them by name (the default for a body that
+declares none), and :func:`sx_embodiments.render_pack.build` writes them into ``pack.json``
+(``tracking``, ``mount``, ``virtual_gripper``).
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ from typing import Literal
 from sx_contracts.identity import JsonValue
 
 from .errors import EmbodimentError
+
+#: Triangles a body's render pack may hold when its viewing declares no budget: what a
+#: headset draws beside a passthrough view at frame rate.
+DEFAULT_TRIANGLE_BUDGET = 150_000
 
 Vector3 = tuple[float, float, float]
 Quaternion = tuple[float, float, float, float]
@@ -121,13 +126,17 @@ class VirtualGripper:
 
 @dataclass(frozen=True, slots=True)
 class Viewing:
-    """One body's viewing facts; every one optional."""
+    """One body's viewing facts; every one optional, and a body that declares none gets these
+    defaults. ``triangle_budget`` bounds its render pack and is not written into it."""
 
     tracking: tuple[TrackedDevice, ...] = ()
     mount: Workcell | None = None
     virtual_gripper: VirtualGripper | None = None
+    triangle_budget: int = DEFAULT_TRIANGLE_BUDGET
 
     def __post_init__(self) -> None:
         sides = [device.side for device in self.tracking]
         if len(set(sides)) != len(sides):
             raise ViewingError("one tracked device per side")
+        if self.triangle_budget <= 0:
+            raise ViewingError("a triangle budget is positive")

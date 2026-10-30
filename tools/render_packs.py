@@ -5,12 +5,13 @@
     python tools/render_packs.py --check   # exit 1 when one disagrees
 
 ``render_packs/<body>/`` holds :func:`sx_embodiments.render_pack.build`'s pack for each body
-below (``robot.urdf``, ``pack.glb``, ``pack.json``), within its triangle budget: the static
-upper body at the headset's 150k, the YUBI hands at 60k because the operator sees both in
-every frame beside the robot. ``drivers/sx-embodiment-drivers/tests/fixtures/tree-poses.json``
-holds, for each pack's ``robot.urdf``, every link's pose in the root frame at seeded joint
-positions as :class:`sx_embodiments.kinematics.Kinematics` answers (a floating joint holds its
-origin), which ``sx_embodiment_drivers::kinematics::Tree::link_poses`` is held equal to.
+below (``robot.urdf``, ``pack.glb``, ``pack.json``), with the viewing facts and triangle budget
+its registry module declares (:func:`sx_embodiments.known.viewing_of`); any other body's pack
+is built on demand from the same declaration.
+``drivers/sx-embodiment-drivers/tests/fixtures/tree-poses.json`` holds, for each pack's
+``robot.urdf``, every link's pose in the root frame at seeded joint positions as
+:class:`sx_embodiments.kinematics.Kinematics` answers (a floating joint holds its origin), which
+``sx_embodiment_drivers::kinematics::Tree::link_poses`` is held equal to.
 ``tests/test_render_packs.py`` runs the same check. Needs the ``render`` extra (NumPy).
 """
 
@@ -22,32 +23,19 @@ import random
 import sys
 from pathlib import Path
 
-from sx_embodiments import development_embodiments, embodiments
+from sx_embodiments import development_embodiments, embodiments, viewing_of
 from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.errors import UnknownEmbodimentError
 from sx_embodiments.kinematics import JointType, Kinematics, Transform, compose
-from sx_embodiments.known.static_upper_body import (
-    STATIC_UPPER_BODY_VIRTUAL_GRIPPER,
-    STATIC_UPPER_BODY_WORKCELL,
-)
-from sx_embodiments.known.yubi import YUBI_TRACKING
 from sx_embodiments.render_pack import RenderPack, build
 from sx_embodiments.rendered import same_rendering
-from sx_embodiments.viewing import Viewing
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ROOT / "render_packs"
 POSES = ROOT / "drivers/sx-embodiment-drivers/tests/fixtures/tree-poses.json"
 
-#: Each body drawn, with its triangle budget.
-BODIES: dict[str, int] = {"sentient-static-upper-body": 150_000, "yubi": 60_000}
-#: Each body's viewing facts, as its registry module declares them.
-VIEWING: dict[str, Viewing] = {
-    "sentient-static-upper-body": Viewing(
-        mount=STATIC_UPPER_BODY_WORKCELL, virtual_gripper=STATIC_UPPER_BODY_VIRTUAL_GRIPPER
-    ),
-    "yubi": Viewing(tracking=YUBI_TRACKING),
-}
+#: The bodies whose packs are committed: the ones a station or headset build compiles in.
+BODIES: tuple[str, ...] = ("sentient-static-upper-body", "yubi")
 SAMPLES = 4
 _HELD = (JointType.FLOATING, JointType.PLANAR)
 
@@ -92,10 +80,7 @@ def _relevant(kinematics: Kinematics, joint: str, positions: dict[str, float]) -
 
 
 def packs() -> dict[str, RenderPack]:
-    return {
-        name: build(body(name), name=name, triangle_budget=budget, viewing=VIEWING.get(name))
-        for name, budget in BODIES.items()
-    }
+    return {name: build(body(name), name=name, viewing=viewing_of(name)) for name in BODIES}
 
 
 def fixture(rendered: dict[str, RenderPack]) -> str:

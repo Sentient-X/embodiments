@@ -34,6 +34,7 @@ from .parts import (
     MobileBaseSpec,
     Part,
 )
+from .viewing import Viewing
 
 if TYPE_CHECKING:
     from .mechanical import Build
@@ -327,6 +328,9 @@ class EmbodimentDefinition:
     #: recording that names one reads as this revision: the registry answers it with this
     #: body, and Catalog keeps it as an earlier identity of the revision it publishes.
     earlier_revisions: tuple[EmbodimentId, ...] = ()
+    #: What a viewer needs beside the description (`sx_embodiments.viewing`): like
+    #: ``collection``, outside the revision's identity, so correcting it moves no id.
+    viewing: Viewing = field(default_factory=Viewing)
     attachments: tuple[Component, ...] = field(init=False)
 
     def __post_init__(self) -> None:

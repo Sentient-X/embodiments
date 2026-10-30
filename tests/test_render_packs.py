@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from sx_embodiments import viewing_of
 from sx_embodiments.rendered import same_rendering
 
 pytest.importorskip("numpy")
@@ -47,7 +48,7 @@ def test_a_pack_draws_every_link_within_its_budget(name: str) -> None:
     from sx_embodiments.kinematics import Kinematics
     from sx_embodiments.render_pack import SCHEMA, URDF_TO_GLTF
 
-    budget = _tool().BODIES[name]
+    budget = viewing_of(name).triangle_budget
     directory = ROOT / "render_packs" / name
     urdf = (directory / "robot.urdf").read_bytes()
     glb = (directory / "pack.glb").read_bytes()
