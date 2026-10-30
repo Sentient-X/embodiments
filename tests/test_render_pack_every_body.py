@@ -1,8 +1,8 @@
 """Every body the registry can describe draws: any robot operated shows in a viewer.
 
 No hand list: the bodies come from both registries, the budget and viewing from each body's
-own declaration. A body is left out only when its definition carries no description at all
-(nothing exists to draw), and that list is pinned so a new one is a decision, not a skip.
+own declaration. A held-back definition with no description at all is not a body (nothing
+exists to draw), and that list is pinned so a new one is a decision, not a skip.
 """
 
 import json
@@ -11,22 +11,10 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from sx_embodiments import development_embodiments, embodiments, viewing_of
-from sx_embodiments.identity import EmbodimentName
 from sx_embodiments.known import DEVELOPMENT_EMBODIMENTS
 
 pytest.importorskip("numpy")
 pytest.importorskip("scipy")
-
-#: Definitions with no description of any module: a capture rig whose jaw is unmeasured.
-UNDESCRIBED = {"insta360-umi"}
-
-
-def _described(name: str) -> bool:
-    entry = DEVELOPMENT_EMBODIMENTS.get(EmbodimentName(name))
-    if entry is None:
-        return True  # a registered body always resolves its description
-    return any(placed.module.description is not None for placed in entry.spec.build.placed)
-
 
 BODIES = {
     **dict.fromkeys(embodiments, embodiments),
@@ -34,11 +22,13 @@ BODIES = {
 }
 
 
-def test_only_bodies_without_a_description_are_not_drawn() -> None:
-    assert {name for name in BODIES if not _described(name)} == UNDESCRIBED
+def test_only_definitions_without_a_description_are_not_bodies() -> None:
+    """A held-back definition with no description (a rig whose parts are unmeasured) is
+    listed, not built, so it is the one kind of body a viewer cannot draw."""
+    assert set(DEVELOPMENT_EMBODIMENTS) - set(development_embodiments) == {"insta360-umi"}
 
 
-@pytest.mark.parametrize("name", [name for name in BODIES if _described(name)])
+@pytest.mark.parametrize("name", list(BODIES))
 def test_every_body_draws_every_link_with_geometry_within_its_budget(name: str) -> None:
     from sx_embodiments.render_pack import build
 
