@@ -225,6 +225,26 @@ DEFAULT_PORTS: Final[dict[ActuatorBus, BusPort]] = {
 
 
 @dataclass(frozen=True, slots=True)
+class CommandAnswer:
+    """What a bus's answer to a position command reports beyond position, declared once per
+    bus and rendered into the drivers' vocabulary (``tools/render_driver_bindings.py``), whose
+    ``Reports`` each driver's answer is held to: whether it measures the motor's velocity and
+    torque (``reports_motion``) and carries its temperatures (``reports_temperature``)."""
+
+    reports_motion: bool
+    reports_temperature: bool
+
+
+#: Each bus's command answer: a Damiao motor answers every MIT command with its position,
+#: velocity, torque and both temperatures; a Feetech or Dynamixel sync write answers nothing.
+COMMAND_ANSWERS: Final[dict[ActuatorBus, CommandAnswer]] = {
+    ActuatorBus.FEETECH_SERIAL: CommandAnswer(reports_motion=False, reports_temperature=False),
+    ActuatorBus.DAMIAO_CAN: CommandAnswer(reports_motion=True, reports_temperature=True),
+    ActuatorBus.DYNAMIXEL_SERIAL: CommandAnswer(reports_motion=False, reports_temperature=False),
+}
+
+
+@dataclass(frozen=True, slots=True)
 class ActuatorBinding:
     """How one joint axis is physically driven: a tested product on a shared bus.
 

@@ -59,14 +59,15 @@ pub use approach::{ApproachLimit, BRING_UP_APPROACH};
 pub use axes::{Axes, MAX_AXES};
 pub use binding::{
     ActuatorBinding, ActuatorBus, ActuatorModel, ActuatorRating, AxisMotion, BindingError,
-    BoundAxis, UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO, is_port_name, validate_chain,
+    BoundAxis, CommandAnswer, UNCALIBRATED_DIRECTION, UNCALIBRATED_ZERO, is_port_name,
+    validate_chain,
 };
 pub use body::{BodyBindings, BodyError, Bus, Twin};
 pub use bus_timing::BusTiming;
 pub use chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
-    FeedforwardLimit, MissingReason, Observe, ProvenStop, Receipt, StopReport, TargetError,
-    TrackingCeiling, check_reach, check_targets, fresh_positions,
+    FeedforwardLimit, MissingReason, MotorTemperature, Observe, ProvenStop, Receipt, Reports,
+    StopReport, TargetError, TrackingCeiling, check_reach, check_targets, fresh_positions,
 };
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};

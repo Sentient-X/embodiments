@@ -13,6 +13,20 @@
     "damiao_can",
     "dynamixel_serial"
   ],
+  "command_answers": {
+    "feetech_serial": {
+      "command_answer_reports_motion": false,
+      "command_answer_reports_temperature": false
+    },
+    "damiao_can": {
+      "command_answer_reports_motion": true,
+      "command_answer_reports_temperature": true
+    },
+    "dynamixel_serial": {
+      "command_answer_reports_motion": false,
+      "command_answer_reports_temperature": false
+    }
+  },
   "ratings": {
     "feetech_sts3215": {
       "peak_torque_nm": 2.94,

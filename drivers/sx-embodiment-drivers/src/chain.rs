@@ -351,11 +351,51 @@ pub trait ChainError: std::error::Error + Send + Sync + 'static {
     fn failure(&self) -> ChainFailure;
 }
 
+/// A motor's two temperatures, as its answer reports them, in degrees Celsius.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MotorTemperature {
+    pub mos_celsius: u8,
+    pub rotor_celsius: u8,
+}
+
+impl MotorTemperature {
+    /// The hotter of the two.
+    #[must_use]
+    pub fn hottest(self) -> u8 {
+        self.mos_celsius.max(self.rotor_celsius)
+    }
+}
+
+/// What one actuator's answer to a command reports beyond its position, read the same way
+/// for every bus: the registry declares, per bus, which of these its answer carries
+/// (`ActuatorBus::command_answer`), and each driver's [`ActuatorChain::Feedback`] reports
+/// exactly that. A caller reads motion and temperature from here, never from a vendor type.
+pub trait Reports {
+    /// The motor's `(velocity, torque)` in its own coordinates (rad/s, N·m at the motor), when
+    /// its answer measures them and it answered.
+    fn motion(&self) -> Option<(f64, f64)>;
+    /// The motor's bus id and temperatures, when its answer reports them and it answered.
+    fn temperature(&self) -> Option<(u16, MotorTemperature)>;
+}
+
+/// An answer that reports nothing beyond position: the serial servos', whose command
+/// exchange returns no status.
+impl Reports for () {
+    fn motion(&self) -> Option<(f64, f64)> {
+        None
+    }
+
+    fn temperature(&self) -> Option<(u16, MotorTemperature)> {
+        None
+    }
+}
+
 /// A chain of bound actuators, in the embodiment's native state order.
 pub trait ActuatorChain {
     type Error: ChainError;
-    /// One actuator's answer as the bus reports it.
-    type Feedback: Copy + Default + std::fmt::Debug + PartialEq;
+    /// One actuator's answer as the bus reports it; what it measures beyond position is read
+    /// through [`Reports`].
+    type Feedback: Copy + Default + std::fmt::Debug + PartialEq + Reports;
 
     /// The bound axes, in native state order: index `i` of every vector is `axes()[i]`.
     fn axes(&self) -> &[BoundAxis];

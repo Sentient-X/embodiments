@@ -330,6 +330,28 @@ pub struct MotorFeedback {
     pub rotor_celsius: u8,
 }
 
+/// A Damiao motor's MIT answer measures its velocity and torque and carries both temperatures,
+/// as the registry declares for `damiao_can` (`command_answer`); a motor that was never asked
+/// (out of service) reports neither, and a non-finite reading is no measurement.
+impl sx_embodiment_drivers::Reports for MotorFeedback {
+    fn motion(&self) -> Option<(f64, f64)> {
+        (self.state != MotorState::Unavailable
+            && self.velocity.is_finite()
+            && self.torque.is_finite())
+        .then_some((f64::from(self.velocity), f64::from(self.torque)))
+    }
+
+    fn temperature(&self) -> Option<(u16, sx_embodiment_drivers::MotorTemperature)> {
+        (self.state != MotorState::Unavailable).then_some((
+            self.bus_id,
+            sx_embodiment_drivers::MotorTemperature {
+                mos_celsius: self.mos_celsius,
+                rotor_celsius: self.rotor_celsius,
+            },
+        ))
+    }
+}
+
 /// The limit row a motor reported at open, and its frames are scaled by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MotorLimits {

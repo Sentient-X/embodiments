@@ -130,6 +130,40 @@ impl ActuatorBus {
     pub const fn wire(self) -> &'static str {
         self.0
     }
+
+    /// What this bus's answer to a command reports beyond position, as the registry declares
+    /// it (`COMMAND_ANSWERS`, rendered into the vocabulary); `None` for a bus the registry
+    /// declares none for. Every driver's `ActuatorChain::Feedback` reports exactly this through
+    /// `Reports`, so a caller asks the bus, not the vendor type.
+    #[must_use]
+    pub fn command_answer(self) -> Option<CommandAnswer> {
+        command_answers().get(self.0).copied()
+    }
+}
+
+/// What a bus's command answer reports beyond position (the registry's `CommandAnswer`).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CommandAnswer {
+    /// The motor's velocity and torque (`Reports::motion`).
+    #[serde(rename = "command_answer_reports_motion")]
+    pub reports_motion: bool,
+    /// The motor's temperatures (`Reports::temperature`).
+    #[serde(rename = "command_answer_reports_temperature")]
+    pub reports_temperature: bool,
+}
+
+fn command_answers() -> &'static HashMap<String, CommandAnswer> {
+    #[derive(Deserialize)]
+    struct Vocabulary {
+        command_answers: HashMap<String, CommandAnswer>,
+    }
+    static ANSWERS: OnceLock<HashMap<String, CommandAnswer>> = OnceLock::new();
+    ANSWERS.get_or_init(|| {
+        serde_json::from_str::<Vocabulary>(include_str!("../bindings/vocabulary.json"))
+            .expect("the rendered vocabulary parses")
+            .command_answers
+    })
 }
 
 /// How one joint axis is physically driven: a qualified product at an address on a bus.
