@@ -707,8 +707,8 @@
   },
   "sentient-static-upper-body": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
-    "instance": "592d68f56fca063c1636422b8e025df1e4e981ee8df6dae4c2d2594ddad6865b",
+    "embodiment": "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
+    "instance": "c7d7bf3e598bf1d1ff89ff0662443444899eee091ca9566fbb82a82ca6764d9f",
     "tracks": [
       {
         "track": "head",
@@ -722,11 +722,11 @@
             "height": 720,
             "fps": 30.0,
             "image_from_camera": [
-              448.132824,
+              525.0,
               0.0,
               640.0,
               0.0,
-              514.133282,
+              525.0,
               360.0,
               0.0,
               0.0,
@@ -1095,11 +1095,11 @@
             "height": 720,
             "fps": 30.0,
             "image_from_camera": [
-              448.132824,
+              525.0,
               0.0,
               640.0,
               0.0,
-              514.133282,
+              525.0,
               360.0,
               0.0,
               0.0,

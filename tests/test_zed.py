@@ -156,3 +156,14 @@ def test_the_sources_left_optical_frame_is_an_upside_down_cameras_left_eye() -> 
     }
     pose = kinematics.pose("zed2i_left_optical_frame", FRAMES[1], zero)
     assert pose == pytest.approx((-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1), abs=1e-8)
+
+
+def test_the_nominal_eye_is_the_lens_over_the_binned_pixel_and_close_to_the_unit() -> None:
+    """2.1 mm over 2 um pixels read two by two: 525 px both ways, centred; the neck's own unit's
+    factory record is within 1.5 % of it."""
+    left = next(c for c in _body().cameras if c.name == "head_left").camera.optics
+    fx, _, cx, _, fy, cy, *_ = left.image_from_camera
+    assert (fx, fy, cx, cy) == (525.0, 525.0, 640.0, 360.0)
+    factory = zed_factory_calibration(FIXTURE.read_bytes(), "30371653", 1280, 720, FRAMES)
+    unit_fx, _, _, _, unit_fy, *_ = factory.left.image_from_camera
+    assert abs(unit_fx / fx - 1) < 0.015 and abs(unit_fy / fy - 1) < 0.015
