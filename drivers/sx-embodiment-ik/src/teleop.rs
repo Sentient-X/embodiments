@@ -577,6 +577,12 @@ impl Teleop {
         gaps.iter().any(Option::is_some) && gaps.iter().flatten().all(|gap| *gap <= ENGAGE_RADIUS_M)
     }
 
+    /// The longest one step may take ([`crate::Ik::set_deadline`]): for an evaluation that
+    /// scores answers, not the clock of a loaded host.
+    pub fn set_deadline(&mut self, budget: std::time::Duration) {
+        self.ik.set_deadline(budget);
+    }
+
     /// Engage: the next step seeds from the measured joints, starts from standing still and
     /// anchors posture there.
     pub fn reset(&mut self) {
