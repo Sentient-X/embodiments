@@ -537,6 +537,12 @@ impl Ik {
         &self.caps
     }
 
+    /// The longest one step may take from now on ([`Settings::deadline`]): an evaluation that
+    /// scores answers, not a loaded host's clock, gives it room.
+    pub fn set_deadline(&mut self, budget: Duration) {
+        self.settings.deadline = budget;
+    }
+
     #[must_use]
     pub fn settings(&self) -> &Settings {
         &self.settings
