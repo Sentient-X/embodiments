@@ -13,8 +13,11 @@
 //!   is measured every tick asks it to move one tick's step at a time, which its PD never
 //!   lifts against friction and gravity (the first bench run: commands dithered by 3 mrad and
 //!   the arm stayed put). It seeds from the measured joints at the first step after
-//!   [`Teleop::reset`] (engage), and re-seeds an axis whose reference strays past
-//!   [`REFERENCE_GAP`] from its measurement. A ghost with no measurement integrates freely.
+//!   [`Teleop::reset`] (engage), and holds each axis's reference within [`REFERENCE_GAP`] of
+//!   its measurement: one that strays further is brought back to the gap, never snapped onto
+//!   the measurement (a snap is a one-tick jump of the whole gap: act-sim's yaw joints, lagging
+//!   0.1 rad at speed, jumped 0.08 rad back in a tick, 1.9 m/s at the tool, 2026-10-31). A
+//!   ghost with no measurement integrates freely.
 //! - **holds**: an axis is held where it is while any limb it moves has no target: an idle
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
@@ -45,14 +48,26 @@ pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
 /// The hands an operator's intent names, in the order [`Targets`] carries them.
 pub const HANDS: [&str; 2] = ["left", "right"];
 
-/// How far a joint's reference may lead its measurement before the solve re-seeds it where it
-/// is measured: well inside the governor's tracking stop.
+/// How far a joint's reference may lead its measurement: one that strays further is held at
+/// this far; well inside the governor's tracking stop.
 pub const REFERENCE_GAP: f64 = 0.1;
 
 /// How far ahead of the camera the gaze is turned into a look-at point: far enough that the
 /// camera's offset from the operator's eyes does not bend the gaze, near enough to stay a
 /// well-conditioned pointing task.
 pub const GAZE_DISTANCE_M: f64 = 1.0;
+
+/// The stall rule, the one a gripper closing on something uses too: a joint whose reference
+/// stands at [`REFERENCE_GAP`] from its measurement for this long, with its measurement come no
+/// nearer the reference than [`STALL_STILL`], is pushing on something that does not give. Only
+/// a driven arm's solved joints stall (not a finger written from a width, a held joint or an
+/// idle arm), and a stalled one is held stiff where it stopped. Something soft that keeps
+/// giving faster than [`STALL_STILL`] a stall time is not a stall: the joint goes on pushing at
+/// most the gap, as a gripper closing on something soft goes on closing.
+pub const STALL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Movement under this (metres of a gripper's opening, radians of a joint) is no progress.
+pub const STALL_STILL: f64 = 0.0005;
 
 /// How close each driven hand's target must be to its gripper's tool point, as the robot
 /// stands, before following starts: control starts from the robot's own pose, never by jumping
@@ -178,6 +193,10 @@ pub struct Targets {
     /// by `tcp`'s rotation) and let the roll about it float: a grasp or a press whose roll
     /// does not matter.
     pub free_roll: [bool; 2],
+    /// Per hand: the most its tool point may move, m/s ([`crate::Ik::set_tool_speed`]): a
+    /// program's goal at its linear speed. `None`: as fast as the joints' caps allow (an
+    /// operator's hands, whose own motion is the speed).
+    pub tool_speed_m_s: [Option<f64>; 2],
     /// The operator's head when they look through the robot (remote): its local +x is the
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
@@ -304,6 +323,9 @@ pub struct TeleopStep {
     /// Per limb in the config's order.
     pub limbs: Vec<LimbReport>,
     pub solve: Solve,
+    /// Per axis: stalled ([`STALL`]): its reference is at its measurement and it stands
+    /// rather than push on, free to move back. The caller may end what it was doing.
+    pub stalled: Vec<bool>,
 }
 
 /// The shared teleoperation solve; see the module docs.
@@ -327,6 +349,14 @@ pub struct Teleop {
     wanted: Vec<Option<Target>>,
     frames: Frames,
     step: TeleopStep,
+    /// Per axis: where it was measured when its reference first stood at the gap, and the
+    /// seconds since, while it comes no nearer ([`STALL`]).
+    leashed: Vec<Option<(f64, f64)>>,
+    /// Per axis: the way it pushed when it stalled (+1, -1), until a step moves it back.
+    stall: Vec<f64>,
+    /// Per axis: where it stood when it stalled, the reference it is held at: stiff there, so
+    /// it neither pushes on what stopped it nor sags away from it under a load.
+    hold: Vec<f64>,
 }
 
 impl Teleop {
@@ -471,6 +501,7 @@ impl Teleop {
                 })
                 .collect(),
             solve: Solve::Solved,
+            stalled: vec![false; width],
         };
         Ok(Self {
             ik,
@@ -487,6 +518,9 @@ impl Teleop {
             wanted: vec![None; limb_count],
             frames,
             step,
+            leashed: vec![None; width],
+            stall: vec![0.0; width],
+            hold: vec![0.0; width],
         })
     }
 
@@ -578,6 +612,110 @@ impl Teleop {
         Ok(())
     }
 
+    /// Each hand's tool speed for this step, held from where `reference` (the last command)
+    /// puts the tool, not from where the reference was held back to; at engage (`seeded`)
+    /// there is no last command, only the measurement.
+    fn bound_tools(&mut self, reference: &[f64], targets: &Targets, seeded: bool) {
+        let from_last = !seeded && targets.tool_speed_m_s.iter().any(Option::is_some);
+        if from_last {
+            self.ik
+                .body()
+                .model()
+                .poses_into(reference, &mut self.frames);
+        }
+        for (limb, hand) in self.hand_of.iter().enumerate() {
+            let speed = hand.and_then(|hand| targets.tool_speed_m_s[hand]);
+            let from = speed
+                .filter(|_| from_last)
+                .map(|_| self.ik.body().frame(&self.frames, limb).t);
+            self.ik.set_tool_speed(limb, speed, from);
+        }
+    }
+
+    /// The reference the step integrates from: seeded from the measurement at engage, held
+    /// within [`REFERENCE_GAP`] of it, and at the measurement for a joint that stalled there
+    /// ([`STALL`]).
+    fn take_reference(
+        &mut self,
+        reference: &[f64],
+        measured: &[Option<f64>],
+        available: &[bool],
+        targets: &Targets,
+        seeded: bool,
+        dt: f64,
+    ) {
+        // The limbs driven this tick: only their solved joints can stall (a finger is written
+        // from a width, a held or unavailable joint is not moved, an idle arm is held).
+        let mut driven = 0_u64;
+        for (index, hand) in self.hand_of.iter().enumerate().take(64) {
+            let asked = match hand {
+                Some(hand) => targets.tcp[*hand].is_some(),
+                // The camera turns while a hand is driven or the operator's head is given.
+                None => {
+                    Some(index) == self.head
+                        && (targets.head.is_some() || targets.tcp.iter().any(Option::is_some))
+                }
+            };
+            if asked {
+                driven |= 1 << index;
+            }
+        }
+        if seeded {
+            self.leashed.fill(None);
+            self.stall.fill(0.0);
+        }
+        let stall_s = STALL.as_secs_f64();
+        for (axis, (slot, (sent, reading))) in self
+            .q
+            .iter_mut()
+            .zip(reference.iter().zip(measured))
+            .enumerate()
+        {
+            *slot = match reading {
+                Some(at) if seeded => *at,
+                // A reading that is not a number leaves the reference (as the old rule did,
+                // and f64::clamp would panic on it).
+                Some(at) if at.is_finite() => {
+                    let lead = sent - at;
+                    let solved = available[axis]
+                        && !self.held[axis]
+                        && self.limbs_of[axis] != 0
+                        && self.limbs_of[axis] & !driven == 0;
+                    if !solved {
+                        self.stall[axis] = 0.0;
+                        self.leashed[axis] = None;
+                    } else if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - 1e-9 {
+                        // At the gap: pushing on something, or only lagging? It stalls when
+                        // the measurement comes no nearer for the gripper's stall time.
+                        let push = lead.signum();
+                        self.leashed[axis] = match self.leashed[axis] {
+                            Some((from, since)) if (at - from) * push <= STALL_STILL => {
+                                let since = since + dt;
+                                if since >= stall_s {
+                                    self.stall[axis] = push;
+                                    self.hold[axis] = *at;
+                                    None
+                                } else {
+                                    Some((from, since))
+                                }
+                            }
+                            _ => Some((*at, 0.0)),
+                        };
+                    } else {
+                        self.leashed[axis] = None;
+                    }
+                    if self.stall[axis] == 0.0 {
+                        sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP)
+                    } else {
+                        // Stalled: held stiff where it stood, pushing no further.
+                        self.hold[axis]
+                    }
+                }
+                Some(_) | None => *sent,
+            };
+        }
+    }
+
     /// One tick. `reference` is what the solve last commanded (the page's ghost: its own last
     /// answer); `measured` each axis's fresh reading, `None` where it did not answer or there
     /// is none (a ghost); `available[i]` false for an axis that must stay where it is.
@@ -604,13 +742,9 @@ impl Teleop {
                 return Err(IkError::Positions { expected, given });
             }
         }
-        // The reference, seeded from the measurement at engage and where it strays.
-        for (slot, (sent, reading)) in self.q.iter_mut().zip(reference.iter().zip(measured)) {
-            *slot = match reading {
-                Some(at) if self.seed || (sent - at).abs() > REFERENCE_GAP => *at,
-                Some(_) | None => *sent,
-            };
-        }
+        // The reference, seeded from the measurement at engage and held within the gap of it.
+        let seeded = self.seed;
+        self.take_reference(reference, measured, available, targets, seeded, dt);
         self.seed = false;
         for (slot, (available, held)) in self
             .available
@@ -668,7 +802,18 @@ impl Teleop {
                 *avail = false;
             }
         }
+        self.bound_tools(reference, targets, seeded);
+        for (axis, push) in self.stall.iter().enumerate() {
+            self.ik.set_blocked(axis, *push);
+        }
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
+        // A stalled joint stays held until a step moves it back, away from what stopped it.
+        for (axis, push) in self.stall.iter_mut().enumerate() {
+            if *push != 0.0 && (solved.q[axis] - self.q[axis]) * *push < -1e-9 {
+                *push = 0.0;
+            }
+            self.step.stalled[axis] = *push != 0.0;
+        }
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);
         self.step.limbs.clone_from(&solved.limbs);

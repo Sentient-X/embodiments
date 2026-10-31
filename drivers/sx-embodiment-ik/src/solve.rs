@@ -154,9 +154,22 @@ pub enum Active {
         link: usize,
         obstacle: usize,
     },
+    /// A limb's tool point at the speed its target allows ([`Ik::set_tool_speed`]).
+    ToolSpeed {
+        limb: usize,
+    },
 }
 
 impl Active {
+    /// A cap that only slows the limb (it will arrive), never one that stops it short.
+    #[must_use]
+    pub const fn slows(&self) -> bool {
+        matches!(
+            self,
+            Self::Speed { .. } | Self::Accel { .. } | Self::ToolSpeed { .. }
+        )
+    }
+
     /// What binds, in words (off the tick: this allocates).
     #[must_use]
     pub fn describe(&self, body: &Body) -> String {
@@ -170,6 +183,10 @@ impl Active {
             Self::Obstacle { link: l, obstacle } => {
                 format!("{} kept off obstacle {obstacle}", link(l))
             }
+            Self::ToolSpeed { limb } => format!(
+                "{} at its tool speed cap",
+                body.limbs.get(limb).map_or("a limb", |l| l.name.as_str())
+            ),
         }
     }
 }
@@ -323,6 +340,12 @@ pub struct Ik {
     sight_skip: Vec<bool>,
     /// Last commanded velocity per solved column.
     velocity: Vec<f64>,
+    /// Per limb, the most its tool point may move, m/s, and from where ([`Ik::set_tool_speed`]).
+    tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
+    /// Per limb, whether its tool speed bound this tick.
+    tool_capped: Vec<bool>,
+    /// Per axis, the way it may not move ([`Ik::set_blocked`]): +1 not up, -1 not down, 0 free.
+    blocked: Vec<f64>,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -465,13 +488,16 @@ impl Ik {
                     residual_m: 0.0,
                     residual_rad: 0.0,
                     reach: Reach::Idle,
-                    active: Vec::with_capacity(n + k),
+                    // Every column, every row and the tool's speed.
+                    active: Vec::with_capacity(n + k + 1),
                     hidden_by: None,
                 })
                 .collect(),
             solve: Solve::Solved,
             iterations: 0,
         };
+        let limbs = body.limbs.len();
+        let axes_count = rest.len();
         Ok(Self {
             body,
             caps,
@@ -487,6 +513,9 @@ impl Ik {
             look_columns,
             sight_skip,
             velocity: vec![0.0; n],
+            tool_speed: vec![None; limbs],
+            tool_capped: vec![false; limbs],
+            blocked: vec![0.0; axes_count],
             work,
             qp,
             step,
@@ -532,6 +561,38 @@ impl Ik {
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.anchored = self.preferred.is_some();
+    }
+
+    /// Hold `axis` from moving toward `push` (its sign: something stops it that way) while it
+    /// stays free to move back; 0 frees it. A step that would move it on is answered with the
+    /// axis standing; an axis out of range is ignored.
+    pub fn set_blocked(&mut self, axis: usize, push: f64) {
+        if let Some(slot) = self.blocked.get_mut(axis) {
+            *slot = if push.is_finite() && push != 0.0 {
+                push.signum()
+            } else {
+                0.0
+            };
+        }
+    }
+
+    /// The most `limb`'s tool point (a pose limb's frame origin) may move from now on, m/s;
+    /// `None`: as fast as its joints' caps allow. A step asks the tool no further than this in
+    /// a tick, its turn counted in (weighed by [`Settings::orientation_m_per_rad`]), and an
+    /// answer whose tool point would move further by forward kinematics is shortened, the
+    /// whole step at once, so a goal at a linear speed lags its target rather than catching up
+    /// faster (act-sim 2026-10-31: 0.55 m/s against a 0.288 m/s goal, catching up to a tipped
+    /// grasp). It gives way only where holding it would need a joint to slow past its
+    /// acceleration cap, which the governor would not do either. `from` is where the tool was
+    /// last commanded, when the step's positions are not (a teleoperation reference held back
+    /// toward a lagging joint): the bound holds from there. A limb out of range or a speed not
+    /// positive and finite clears it.
+    pub fn set_tool_speed(&mut self, limb: usize, speed_m_s: Option<f64>, from: Option<[f64; 3]>) {
+        if let Some(slot) = self.tool_speed.get_mut(limb) {
+            *slot = speed_m_s
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .map(|speed| (speed, from.filter(|p| p.iter().all(|v| v.is_finite()))));
+        }
     }
 
     /// Draw the free direction toward `posture` (every axis) from now on, at
@@ -727,6 +788,8 @@ impl Ik {
         if !solved {
             solve = Solve::Held;
         }
+        self.bound_tool_speed(q, dt);
+        let w = &mut self.work;
         let dq = &w.still;
         self.step.q.copy_from_slice(q);
         self.step.qdot.iter_mut().for_each(|v| *v = 0.0);
@@ -754,6 +817,9 @@ impl Ik {
         let rho2 = s.orientation_m_per_rad * s.orientation_m_per_rad;
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let Some(target) = target else { continue };
+            // No more of the error than the tool may move this tick: its point and its turn
+            // together, the turn weighed as the solve weighs it (orientation_m_per_rad).
+            let most = self.tool_speed[index].map(|(speed, _)| speed * dt);
             let pose = w.frames.links[limb.frame];
             for &axis in &body.solved {
                 w.jv[axis] = [0.0; 3];
@@ -779,8 +845,8 @@ impl Ik {
                     let goal = from_quaternion(*rotation_xyzw);
                     let e_r = log(&mat_mul(&goal, &transpose(&pose.r)));
                     let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
-                    let e_p = clamp_norm(scale(e_p, share), s.max_error_m);
-                    let e_r = clamp_norm(scale(e_r, share), s.max_error_rad);
+                    let (e_p, e_r) =
+                        within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
@@ -803,8 +869,8 @@ impl Ik {
                     let e_p = sub(*translation_m, pose.t);
                     let e_r = pointing_error(a, u);
                     let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
-                    let e_p = clamp_norm(scale(e_p, share), s.max_error_m);
-                    let e_r = clamp_norm(scale(e_r, share), s.max_error_rad);
+                    let (e_p, e_r) =
+                        within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
@@ -903,6 +969,19 @@ impl Ik {
                 (hi, hi_by) = (lo, Bound::Accel);
             } else {
                 (lo, lo_by) = (hi, Bound::Accel);
+            }
+            // An axis blocked one way stands rather than move on that way.
+            let push = self.blocked[axis];
+            if push > 0.0 {
+                hi = hi.min(0.0);
+                lo = lo.min(hi);
+                w.safe_upper[column] = w.safe_upper[column].min(0.0);
+                w.safe_lower[column] = w.safe_lower[column].min(w.safe_upper[column]);
+            } else if push < 0.0 {
+                lo = lo.max(0.0);
+                hi = hi.max(lo);
+                w.safe_lower[column] = w.safe_lower[column].max(0.0);
+                w.safe_upper[column] = w.safe_upper[column].max(w.safe_lower[column]);
             }
             w.lower[column] = lo;
             w.upper[column] = hi;
@@ -1140,8 +1219,79 @@ impl Ik {
         Some(iterations)
     }
 
+    /// Shorten the whole step until every speed-bound tool point moves no further than its
+    /// speed allows this tick, by forward kinematics of the answer (not the linearisation),
+    /// from where the tool was last commanded; or from where the step starts, when the
+    /// reference was held back further than a tick's motion from there (that pull is the
+    /// reference's, toward the measured arm, not the step's). The whole step is scaled, every
+    /// limb and the torso alike: scaled toward zero it stays inside every speed, limit and
+    /// collision bound that standing still satisfies, which one limb's columns scaled alone do
+    /// not (a row its other columns hold breaks, and a shared torso rescales the other hand).
+    /// Never below the scale at which a joint would slow past its acceleration cap: the
+    /// governor would only slew such a step back, unchecked. The cost already asks no tool for
+    /// more than its speed, so that floor binds only for a tick of a sharp slow-down.
+    fn bound_tool_speed(&mut self, q: &[f64], dt: f64) {
+        self.tool_capped.fill(false);
+        if self.tool_speed.iter().all(Option::is_none) {
+            return;
+        }
+        let n = self.body.solved.len();
+        let w = &mut self.work;
+        // The least scale each column's box (speed, limit, acceleration) still holds: any
+        // scale down to zero where the box holds standing still, else up to its edge.
+        let mut floor = 0.0_f64;
+        for column in 0..n {
+            let (x, lower, upper) = (w.still[column], w.lower[column], w.upper[column]);
+            if x > 0.0 && lower > 0.0 {
+                floor = floor.max(lower / x);
+            } else if x < 0.0 && upper < 0.0 {
+                floor = floor.max(upper / x);
+            }
+        }
+        let floor = floor.min(1.0);
+        let mut scale = 1.0_f64;
+        self.step.q.copy_from_slice(q);
+        // FK is nearly linear over one tick's step: a second shortening lands within a hair of
+        // the bound, and a third (rare) takes the rest.
+        for _ in 0..3 {
+            for (column, &axis) in self.body.solved.iter().enumerate() {
+                self.step.q[axis] = scale.mul_add(w.still[column], q[axis]);
+            }
+            self.body.model.poses_into(&self.step.q, &mut w.after);
+            let mut factor = 1.0_f64;
+            for (index, limb) in self.body.limbs.iter().enumerate() {
+                let Some((speed, from)) = self.tool_speed[index] else {
+                    continue;
+                };
+                if !matches!(limb.task, Task::Pose) {
+                    continue;
+                }
+                let most = speed * dt;
+                let start = w.frames.links[limb.frame].t;
+                let from = from
+                    .filter(|from| norm(sub(*from, start)) <= most)
+                    .unwrap_or(start);
+                let moved = norm(sub(w.after.links[limb.frame].t, from));
+                if moved > most * (1.0 + 1e-6) {
+                    factor = factor.min(most / moved);
+                    self.tool_capped[index] = true;
+                }
+            }
+            let next = (scale * factor).max(floor);
+            if factor >= 1.0 || next >= scale {
+                break;
+            }
+            scale = next;
+        }
+        if scale < 1.0 {
+            for value in &mut w.still[..n] {
+                *value *= scale;
+            }
+        }
+    }
+
     /// Residuals, binding constraints and reach per limb, at the new positions.
-    #[allow(clippy::too_many_lines)] // one match arm per task and target
+    #[allow(clippy::too_many_lines)] // one residual per task and target, then what binds
     fn report(&mut self, targets: &[Option<Target>]) {
         let body = &self.body;
         let s = &self.settings;
@@ -1226,16 +1376,16 @@ impl Ik {
                     report.active.push(w.row_active[slot]);
                 }
             }
+            if self.tool_capped[index] {
+                report.active.push(Active::ToolSpeed { limb: index });
+            }
             let blocked = report.active.iter().any(|a| {
                 matches!(
                     a,
                     Active::Limit { .. } | Active::SelfCollision { .. } | Active::Obstacle { .. }
                 )
             });
-            let capped = report
-                .active
-                .iter()
-                .any(|a| matches!(a, Active::Speed { .. } | Active::Accel { .. }));
+            let capped = report.active.iter().any(Active::slows);
             report.residual_m = residual_m;
             report.residual_rad = residual_rad;
             report.hidden_by = match (limb.task, target) {
@@ -1516,6 +1666,26 @@ fn pointing_approach(
         return 1.0;
     }
     length.min(braking(length, s.braking_share * accel, dt)) / length
+}
+
+/// One tick's position and orientation error, each held to the most one tick closes
+/// (`max_error_m`, `max_error_rad`), and together, weighed as the solve weighs them, to `most`
+/// metres when the tool has a speed ([`Ik::set_tool_speed`]): a turn left behind is not caught
+/// up faster than the tool may move, nor dragging the tool point with it.
+fn within_tool_speed(e_p: V3, e_r: V3, most: Option<f64>, s: &Settings) -> (V3, V3) {
+    let (e_p, e_r) = (
+        clamp_norm(e_p, s.max_error_m),
+        clamp_norm(e_r, s.max_error_rad),
+    );
+    let Some(most) = most else {
+        return (e_p, e_r);
+    };
+    let weighed = norm(e_p).hypot(s.orientation_m_per_rad * norm(e_r));
+    if weighed <= most {
+        return (e_p, e_r);
+    }
+    let share = most / weighed;
+    (scale(e_p, share), scale(e_r, share))
 }
 
 /// Solve `m x = b` in place for a symmetric positive definite 6x6 `m` (`b` becomes `x`).
