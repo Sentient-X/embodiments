@@ -13,8 +13,11 @@
 //!   is measured every tick asks it to move one tick's step at a time, which its PD never
 //!   lifts against friction and gravity (the first bench run: commands dithered by 3 mrad and
 //!   the arm stayed put). It seeds from the measured joints at the first step after
-//!   [`Teleop::reset`] (engage), and re-seeds an axis whose reference strays past
-//!   [`REFERENCE_GAP`] from its measurement. A ghost with no measurement integrates freely.
+//!   [`Teleop::reset`] (engage), and holds each axis's reference within [`REFERENCE_GAP`] of
+//!   its measurement: one that strays further is brought back to the gap, never snapped onto
+//!   the measurement (a snap is a one-tick jump of the whole gap: act-sim's yaw joints, lagging
+//!   0.1 rad at speed, jumped 0.08 rad back in a tick, 1.9 m/s at the tool, 2026-10-31). A
+//!   ghost with no measurement integrates freely.
 //! - **holds**: an axis is held where it is while any limb it moves has no target: an idle
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
@@ -45,8 +48,8 @@ pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
 /// The hands an operator's intent names, in the order [`Targets`] carries them.
 pub const HANDS: [&str; 2] = ["left", "right"];
 
-/// How far a joint's reference may lead its measurement before the solve re-seeds it where it
-/// is measured: well inside the governor's tracking stop.
+/// How far a joint's reference may lead its measurement: one that strays further is held at
+/// this far; well inside the governor's tracking stop.
 pub const REFERENCE_GAP: f64 = 0.1;
 
 /// How far ahead of the camera the gaze is turned into a look-at point: far enough that the
@@ -178,6 +181,10 @@ pub struct Targets {
     /// by `tcp`'s rotation) and let the roll about it float: a grasp or a press whose roll
     /// does not matter.
     pub free_roll: [bool; 2],
+    /// Per hand: the most its tool point may move, m/s ([`crate::Ik::set_tool_speed`]): a
+    /// program's goal at its linear speed. `None`: as fast as the joints' caps allow (an
+    /// operator's hands, whose own motion is the speed).
+    pub tool_speed_m_s: [Option<f64>; 2],
     /// The operator's head when they look through the robot (remote): its local +x is the
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
@@ -578,6 +585,26 @@ impl Teleop {
         Ok(())
     }
 
+    /// Each hand's tool speed for this step, held from where `reference` (the last command)
+    /// puts the tool, not from where the reference was held back to; at engage (`seeded`)
+    /// there is no last command, only the measurement.
+    fn bound_tools(&mut self, reference: &[f64], targets: &Targets, seeded: bool) {
+        let from_last = !seeded && targets.tool_speed_m_s.iter().any(Option::is_some);
+        if from_last {
+            self.ik
+                .body()
+                .model()
+                .poses_into(reference, &mut self.frames);
+        }
+        for (limb, hand) in self.hand_of.iter().enumerate() {
+            let speed = hand.and_then(|hand| targets.tool_speed_m_s[hand]);
+            let from = speed
+                .filter(|_| from_last)
+                .map(|_| self.ik.body().frame(&self.frames, limb).t);
+            self.ik.set_tool_speed(limb, speed, from);
+        }
+    }
+
     /// One tick. `reference` is what the solve last commanded (the page's ghost: its own last
     /// answer); `measured` each axis's fresh reading, `None` where it did not answer or there
     /// is none (a ghost); `available[i]` false for an axis that must stay where it is.
@@ -604,11 +631,13 @@ impl Teleop {
                 return Err(IkError::Positions { expected, given });
             }
         }
-        // The reference, seeded from the measurement at engage and where it strays.
+        // The reference, seeded from the measurement at engage and held within the gap of it.
+        let seeded = self.seed;
         for (slot, (sent, reading)) in self.q.iter_mut().zip(reference.iter().zip(measured)) {
             *slot = match reading {
-                Some(at) if self.seed || (sent - at).abs() > REFERENCE_GAP => *at,
-                Some(_) | None => *sent,
+                Some(at) if self.seed => *at,
+                Some(at) => sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP),
+                None => *sent,
             };
         }
         self.seed = false;
@@ -668,6 +697,7 @@ impl Teleop {
                 *avail = false;
             }
         }
+        self.bound_tools(reference, targets, seeded);
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);

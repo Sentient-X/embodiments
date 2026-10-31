@@ -222,7 +222,7 @@ fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
 }
 
 #[test]
-fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
+fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap() {
     let mut solve = teleop();
     let q = start(&solve);
     let width = q.len();
@@ -236,7 +236,7 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
         .step(&reference, &measured, &available, &Targets::default(), DT)
         .expect("a step");
     assert_eq!(step.q[elbow], q[elbow]);
-    // Within the gap the reference wins; past it, the measurement.
+    // Within the gap the reference wins; past it, the reference is held at the gap.
     let mut reference = step.q.clone();
     measured[elbow] = Some(q[elbow] + REFERENCE_GAP / 2.0);
     let step = solve
@@ -248,7 +248,7 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_where_it_strays() {
     let step = solve
         .step(&reference, &measured, &available, &Targets::default(), DT)
         .expect("a step");
-    assert_eq!(step.q[elbow], q[elbow] + REFERENCE_GAP * 2.0);
+    assert!((step.q[elbow] - (q[elbow] + REFERENCE_GAP)).abs() < 1e-12);
 }
 
 #[test]
@@ -272,4 +272,73 @@ fn following_starts_only_with_every_driven_hand_at_its_gripper() {
     assert!(!solve.may_engage(&q, &at(Some(far), Some(right))));
     let gaps = solve.hand_gaps(&q, &at(Some(far), None));
     assert!((gaps[0].expect("left") - 0.07).abs() < 1e-9 && gaps[1].is_none());
+}
+
+/// `turn` applied after `rotation`, both unit quaternions (x, y, z, w).
+fn turned(turn: [f64; 4], rotation: [f64; 4]) -> [f64; 4] {
+    let ([tx, ty, tz, tw], [rx, ry, rz, rw]) = (turn, rotation);
+    [
+        tw * rx + tx * rw + ty * rz - tz * ry,
+        tw * ry - tx * rz + ty * rw + tz * rx,
+        tw * rz + tx * ry - ty * rx + tz * rw,
+        tw * rw - tx * rx - ty * ry - tz * rz,
+    ]
+}
+
+/// A hand given a tool speed moves its tool point no faster than that, every tick, however far
+/// its target and however much it must turn on the way, and ends as near it as without one. Without one it goes
+/// as fast as its joints allow, which is what let act-sim's tipped grasp reach 0.55 m/s
+/// against a 0.288 m/s goal (2026-10-31).
+#[test]
+fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
+    let peak = |speed: Option<f64>| {
+        let mut solve = teleop();
+        let mut q = start(&solve);
+        let from = tcp(&solve, &q, 0);
+        // 12 cm away and turned 30 degrees about y: a reach the joints could close fast.
+        let half = 15_f64.to_radians();
+        let target = Pose {
+            translation_m: [
+                from.translation_m[0] + 0.08,
+                from.translation_m[1] - 0.06,
+                from.translation_m[2] - 0.06,
+            ],
+            rotation_xyzw: turned([0.0, half.sin(), 0.0, half.cos()], from.rotation_xyzw),
+        };
+        let targets = Targets {
+            tcp: [Some(target), None],
+            tool_speed_m_s: [speed, None],
+            ..Targets::default()
+        };
+        let width = q.len();
+        let (measured, available) = (vec![None; width], vec![true; width]);
+        solve.reset();
+        let mut fastest = 0.0_f64;
+        let mut last = from.translation_m;
+        for _ in 0..800 {
+            let step = solve
+                .step(&q, &measured, &available, &targets, DT)
+                .expect("a step");
+            q.copy_from_slice(&step.q);
+            let now = tcp(&solve, &q, 0).translation_m;
+            let moved = (0..3)
+                .map(|k| (now[k] - last[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            fastest = fastest.max(moved / DT);
+            last = now;
+        }
+        let off = (0..3)
+            .map(|k| (last[k] - target.translation_m[k]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        (fastest, off)
+    };
+    let (free, free_off) = peak(None);
+    let (capped, off) = peak(Some(0.05));
+    assert!(free > 0.1, "unbounded, the joints go faster: {free} m/s");
+    assert!(capped <= 0.05 * (1.0 + 1e-5), "{capped} m/s against 0.05");
+    // It ends as near its target as the unbounded hand does (this one is a reach the body
+    // closes to 15 mm), only later.
+    assert!(off <= free_off + 0.001, "{off} m off, unbounded {free_off}");
 }
