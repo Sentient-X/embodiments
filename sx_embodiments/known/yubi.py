@@ -42,6 +42,8 @@ from ..layout import CoordinateUnit, EncoderReadout, Passive
 from ..mechanical import Build, Module, ModuleId
 from ..parts import GripperSpec, MimicJoint
 from ..recorded_streams import (
+    DeviceStream,
+    Measurand,
     RecordedCamera,
     RecordedCoordinate,
     RecordedPose,
@@ -255,14 +257,40 @@ YUBI_TRACKING: Final = (
     ),
 )
 
-#: A pod's cameras by the optical frame its seal records them in (sx-seal: the Quest's head
-#: pair, each hand's ``<side>_hand_cam_optical``), named as floor reviewers read them.
+
+
+def _camera(name: str, frame: str, device: str, camera: str) -> RecordedCamera:
+    return RecordedCamera(
+        name=name,
+        frame=frame,
+        video=DeviceStream(f"/{device}/{camera}/compressed"),
+        calibration=DeviceStream(f"/{device}/{camera}/camera_info"),
+    )
+
+
+#: A pod's cameras as its seal records them (sx-seal: the Quest's head pair, each hand's
+#: ``camera0``), named as floor reviewers read them. They are bindings, not cameras of the
+#: body: the wrist cameras' model, optics and mount are unmeasured, and the head pair is the
+#: Quest's, which neither hand rig's description contains. Each episode carries its own
+#: measured calibration on the calibration stream.
 POD_CAMERAS: Final = (
-    RecordedCamera(frame="quest3s_left_camera_optical", name="head_left"),
-    RecordedCamera(frame="quest3s_right_camera_optical", name="head_right"),
-    RecordedCamera(frame="left_hand_cam_optical", name="left_wrist"),
-    RecordedCamera(frame="right_hand_cam_optical", name="right_wrist"),
+    _camera("head_left", "quest3s_left_camera_optical", "quest3s", "head_left/camera"),
+    _camera("head_right", "quest3s_right_camera_optical", "quest3s", "head_right/camera"),
+    _camera("left_wrist", "left_hand_cam_optical", "gripper", "left/camera0"),
+    _camera("right_wrist", "right_hand_cam_optical", "gripper", "right/camera0"),
 )
+
+
+def pod_hands(left_link: str, right_link: str) -> tuple[RecordedPose, ...]:
+    """Each Quest controller's pose, world-from-``<side>`` controller link. The headset's own
+    pose (``/quest3s/head_pose``) is bound to nothing: neither hand rig's description has a
+    head, so it stays evidence until a revision composes the headset (a new id and delivery
+    URDF, which waits for the pods' shadow release)."""
+    return (
+        RecordedPose("left_hand", DeviceStream("/quest3s/left_controller_pose"), left_link),
+        RecordedPose("right_hand", DeviceStream("/quest3s/right_controller_pose"), right_link),
+    )
+
 
 YUBI_SPEC: Final = EmbodimentDefinition(
     collection=CollectionSetup(
@@ -320,16 +348,19 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     ),
     # Both hands are in every frame beside the robot, so each is drawn lighter.
     viewing=Viewing(tracking=YUBI_TRACKING, triangle_budget=60_000),
-    # A YUBI pod records each Quest controller's pose under the controller's own name, and each
-    # jaw's magnetic encoder under its hand's (sx-seal's process/hardware.rs writes both).
+    # A YUBI pod's seal records each Quest controller's pose and each jaw's opening in metres
+    # (sx-seal's process/gripper.rs applies the encoder law before it writes).
     recorded_streams=RecordedStreams(
-        poses=(
-            RecordedPose(site="left_hand", frame="quest3s_left_controller"),
-            RecordedPose(site="right_hand", frame="quest3s_right_controller"),
-        ),
+        poses=pod_hands("quest_left_controller", "quest_right_controller"),
         coordinates=(
-            RecordedCoordinate(component="left_jaw", frame="yubi_left_hand"),
-            RecordedCoordinate(component="right_jaw", frame="yubi_right_hand"),
+            RecordedCoordinate(
+                "left_jaw", DeviceStream("/gripper/left/magnetic_encoder"), Measurand.JAW_APERTURE_M
+            ),
+            RecordedCoordinate(
+                "right_jaw",
+                DeviceStream("/gripper/right/magnetic_encoder"),
+                Measurand.JAW_APERTURE_M,
+            ),
         ),
         cameras=POD_CAMERAS,
     ),

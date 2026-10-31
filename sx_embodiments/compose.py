@@ -332,8 +332,9 @@ class EmbodimentDefinition:
     #: What a viewer needs beside the description (`sx_embodiments.viewing`): like
     #: ``collection``, outside the revision's identity, so correcting it moves no id.
     viewing: Viewing = field(default_factory=Viewing)
-    #: What a capture rig's recording names this body's devices and measured coordinates
-    #: (`sx_embodiments.recorded_streams`), outside the revision's identity like ``viewing``.
+    #: Which recorded device stream is which of this body's sites, coordinates and cameras
+    #: (`sx_embodiments.recorded_streams`), outside the revision's identity like ``viewing``;
+    #: the registry test resolves them against the built body.
     recorded_streams: RecordedStreams = field(default_factory=RecordedStreams)
     attachments: tuple[Component, ...] = field(init=False)
 
@@ -348,11 +349,6 @@ class EmbodimentDefinition:
         components = self.build.components()
         validate_components(name, self.kind, components)
         validate_operator_mounts(name, self.kind, self.operator_mounts)
-        sites = {mount.site.value for mount in self.operator_mounts}
-        if unknown := sorted(
-            pose.site for pose in self.recorded_streams.poses if pose.site not in sites
-        ):
-            raise CompositionError(name, f"recorded poses name no operator mount: {unknown}")
         owned = {str(component.component_id) for component in components}
         if unknown := sorted(
             item.component
