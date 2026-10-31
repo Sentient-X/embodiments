@@ -285,51 +285,69 @@ fn turned(turn: [f64; 4], rotation: [f64; 4]) -> [f64; 4] {
     ]
 }
 
-/// A hand given a tool speed moves its tool point no faster than that, every tick, however far
-/// its target and however much it must turn on the way, and ends as near it as without one. Without one it goes
-/// as fast as its joints allow, which is what let act-sim's tipped grasp reach 0.55 m/s
-/// against a 0.288 m/s goal (2026-10-31).
+/// Hands given a tool speed move their tool points no faster than that, every tick, however far
+/// their targets and however much they must turn on the way, and end as near them as without
+/// one; without one they go as fast as the joints allow, which let act-sim's tipped grasp reach
+/// 0.55 m/s against a 0.288 m/s goal (2026-10-31). Both hands and the head are driven, so the
+/// torso is free and carries both arms: the whole step is shortened, never one limb's columns
+/// (which rescaled the shared torso under the other hand, and broke the rows it held). The
+/// joints accelerate as act-sim's do (a twentieth of a second to full speed), where holding the
+/// tool never needs a joint to slow past its cap; past that the cap gives way to the joints'.
 #[test]
 fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
     let peak = |speed: Option<f64>| {
-        let mut solve = teleop();
+        let mut solve = Teleop::new(
+            STATIC_UPPER_BODY_URDF,
+            STATIC_UPPER_BODY_COLLISION,
+            &TeleopConfig {
+                ramp_s: 0.05,
+                ..config()
+            },
+        )
+        .expect("solve");
         let mut q = start(&solve);
-        let from = tcp(&solve, &q, 0);
-        // 12 cm away and turned 30 degrees about y: a reach the joints could close fast.
-        let half = 15_f64.to_radians();
-        let target = Pose {
+        // The torso upright: from the suite's start it rests on the table, and the solve holds.
+        q[index(&solve, "torso_joint")] = 0.0;
+        let from = [tcp(&solve, &q, 0), tcp(&solve, &q, 1)];
+        // 7.5 cm away and turned 20 degrees about y: a reach the joints could close fast.
+        let half = 10_f64.to_radians();
+        let target = |from: Pose, dy: f64| Pose {
             translation_m: [
-                from.translation_m[0] + 0.08,
-                from.translation_m[1] - 0.06,
-                from.translation_m[2] - 0.06,
+                from.translation_m[0] + 0.05,
+                from.translation_m[1] + dy,
+                from.translation_m[2] - 0.04,
             ],
             rotation_xyzw: turned([0.0, half.sin(), 0.0, half.cos()], from.rotation_xyzw),
         };
         let targets = Targets {
-            tcp: [Some(target), None],
-            tool_speed_m_s: [speed, None],
+            tcp: [Some(target(from[0], -0.04)), Some(target(from[1], 0.04))],
+            tool_speed_m_s: [speed, speed],
+            head: Some(from[0]),
             ..Targets::default()
         };
         let width = q.len();
         let (measured, available) = (vec![None; width], vec![true; width]);
         solve.reset();
         let mut fastest = 0.0_f64;
-        let mut last = from.translation_m;
+        let mut last = [from[0].translation_m, from[1].translation_m];
         for _ in 0..800 {
             let step = solve
                 .step(&q, &measured, &available, &targets, DT)
                 .expect("a step");
             q.copy_from_slice(&step.q);
-            let now = tcp(&solve, &q, 0).translation_m;
-            let moved = (0..3)
-                .map(|k| (now[k] - last[k]).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            fastest = fastest.max(moved / DT);
-            last = now;
+            for (hand, last) in last.iter_mut().enumerate() {
+                let now = tcp(&solve, &q, hand).translation_m;
+                let moved = (0..3)
+                    .map(|k| (now[k] - last[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                fastest = fastest.max(moved / DT);
+                *last = now;
+            }
         }
+        let goal = targets.tcp[0].expect("left").translation_m;
         let off = (0..3)
-            .map(|k| (last[k] - target.translation_m[k]).powi(2))
+            .map(|k| (last[0][k] - goal[k]).powi(2))
             .sum::<f64>()
             .sqrt();
         (fastest, off)
@@ -338,7 +356,6 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
     let (capped, off) = peak(Some(0.05));
     assert!(free > 0.1, "unbounded, the joints go faster: {free} m/s");
     assert!(capped <= 0.05 * (1.0 + 1e-5), "{capped} m/s against 0.05");
-    // It ends as near its target as the unbounded hand does (this one is a reach the body
-    // closes to 15 mm), only later.
+    // It ends as near its target as the unbounded hand does, only later.
     assert!(off <= free_off + 0.001, "{off} m off, unbounded {free_off}");
 }

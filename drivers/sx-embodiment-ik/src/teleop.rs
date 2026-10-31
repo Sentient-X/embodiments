@@ -636,8 +636,10 @@ impl Teleop {
         for (slot, (sent, reading)) in self.q.iter_mut().zip(reference.iter().zip(measured)) {
             *slot = match reading {
                 Some(at) if self.seed => *at,
-                Some(at) => sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP),
-                None => *sent,
+                // A reading that is not a number leaves the reference (as the old rule did,
+                // and f64::clamp would panic on it).
+                Some(at) if at.is_finite() => sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP),
+                Some(_) | None => *sent,
             };
         }
         self.seed = false;
