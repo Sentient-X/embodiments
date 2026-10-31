@@ -1,0 +1,113 @@
+{
+ "accel": {
+  "left_elbow_pitch_joint": 36.64224778159713,
+  "left_forearm_yaw_joint": 37.69911184307752,
+  "left_gripper_left_finger_joint": 16.0,
+  "left_gripper_right_finger_joint": 16.0,
+  "left_shoulder_pitch_joint": 26.310802316025082,
+  "left_shoulder_roll_joint": 29.009043364774538,
+  "left_upper_arm_yaw_joint": 37.69911184307752,
+  "left_wrist_pitch_joint": 99.14927228527316,
+  "left_wrist_roll_joint": 125.6637061435917,
+  "right_elbow_pitch_joint": 36.69745980314285,
+  "right_forearm_yaw_joint": 37.69911184307752,
+  "right_gripper_left_finger_joint": 16.0,
+  "right_gripper_right_finger_joint": 16.0,
+  "right_shoulder_pitch_joint": 28.942538961669616,
+  "right_shoulder_roll_joint": 31.830340021899687,
+  "right_upper_arm_yaw_joint": 37.69911184307752,
+  "right_wrist_pitch_joint": 99.14782416963065,
+  "right_wrist_roll_joint": 125.6637061435917,
+  "so101_camera_tilt_joint": 16.0,
+  "so101_elbow_flex_joint": 16.0,
+  "so101_shoulder_lift_joint": 12.533686220159625,
+  "so101_shoulder_pan_joint": 16.0,
+  "so101_wrist_flex_joint": 16.0,
+  "so101_wrist_roll_joint": 16.0,
+  "torso_joint": 2.5
+ },
+ "held": [],
+ "limbs": [
+  {
+   "approach": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "frame": "left_gripper_tcp",
+   "name": "left"
+  },
+  {
+   "approach": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "frame": "right_gripper_tcp",
+   "name": "right"
+  },
+  {
+   "frame": "ZED_camera",
+   "look_forward": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "name": "head"
+  }
+ ],
+ "max_step_rad": 0.08,
+ "obstacles": [],
+ "posture": {
+  "left_elbow_pitch_joint": -0.3,
+  "left_forearm_yaw_joint": 0.0,
+  "left_shoulder_pitch_joint": -0.1,
+  "left_shoulder_roll_joint": 0.15,
+  "left_upper_arm_yaw_joint": 0.0,
+  "left_wrist_pitch_joint": 0.2,
+  "left_wrist_roll_joint": 0.0,
+  "right_elbow_pitch_joint": 0.3,
+  "right_forearm_yaw_joint": 0.0,
+  "right_shoulder_pitch_joint": 0.1,
+  "right_shoulder_roll_joint": -0.15,
+  "right_upper_arm_yaw_joint": 0.0,
+  "right_wrist_pitch_joint": -0.2,
+  "right_wrist_roll_joint": 0.0,
+  "so101_camera_tilt_joint": -0.8865,
+  "so101_elbow_flex_joint": 0.0,
+  "so101_shoulder_lift_joint": 0.0,
+  "so101_shoulder_pan_joint": 0.0,
+  "so101_wrist_flex_joint": 0.0,
+  "so101_wrist_roll_joint": 0.0,
+  "torso_joint": 0.0
+ },
+ "ramp_s": 0.1,
+ "schema": "sx.teleop-solve/v2",
+ "speed": {
+  "left_elbow_pitch_joint": 3.7699111843077517,
+  "left_forearm_yaw_joint": 3.7699111843077517,
+  "left_gripper_left_finger_joint": 4.0,
+  "left_gripper_right_finger_joint": 4.0,
+  "left_shoulder_pitch_joint": 10.471975511965978,
+  "left_shoulder_roll_joint": 10.471975511965978,
+  "left_upper_arm_yaw_joint": 3.7699111843077517,
+  "left_wrist_pitch_joint": 12.56637061435917,
+  "left_wrist_roll_joint": 12.56637061435917,
+  "right_elbow_pitch_joint": 3.7699111843077517,
+  "right_forearm_yaw_joint": 3.7699111843077517,
+  "right_gripper_left_finger_joint": 4.0,
+  "right_gripper_right_finger_joint": 4.0,
+  "right_shoulder_pitch_joint": 10.471975511965978,
+  "right_shoulder_roll_joint": 10.471975511965978,
+  "right_upper_arm_yaw_joint": 3.7699111843077517,
+  "right_wrist_pitch_joint": 12.56637061435917,
+  "right_wrist_roll_joint": 12.56637061435917,
+  "so101_camera_tilt_joint": 4.0,
+  "so101_elbow_flex_joint": 4.0,
+  "so101_shoulder_lift_joint": 4.0,
+  "so101_shoulder_pan_joint": 4.0,
+  "so101_wrist_flex_joint": 4.0,
+  "so101_wrist_roll_joint": 4.0,
+  "torso_joint": 0.25
+ }
+}
