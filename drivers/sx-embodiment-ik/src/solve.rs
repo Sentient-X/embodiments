@@ -488,7 +488,8 @@ impl Ik {
                     residual_m: 0.0,
                     residual_rad: 0.0,
                     reach: Reach::Idle,
-                    active: Vec::with_capacity(n + k),
+                    // Every column, every row and the tool's speed.
+                    active: Vec::with_capacity(n + k + 1),
                     hidden_by: None,
                 })
                 .collect(),

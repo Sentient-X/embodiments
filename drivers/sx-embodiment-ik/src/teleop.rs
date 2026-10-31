@@ -59,7 +59,11 @@ pub const GAZE_DISTANCE_M: f64 = 1.0;
 
 /// The stall rule, the one a gripper closing on something uses too: a joint whose reference
 /// stands at [`REFERENCE_GAP`] from its measurement for this long, with its measurement come no
-/// nearer the reference than [`STALL_STILL`], is pushing on something that does not give.
+/// nearer the reference than [`STALL_STILL`], is pushing on something that does not give. Only
+/// a driven arm's solved joints stall (not a finger written from a width, a held joint or an
+/// idle arm), and a stalled one is held stiff where it stopped. Something soft that keeps
+/// giving faster than [`STALL_STILL`] a stall time is not a stall: the joint goes on pushing at
+/// most the gap, as a gripper closing on something soft goes on closing.
 pub const STALL: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Movement under this (metres of a gripper's opening, radians of a joint) is no progress.
@@ -350,6 +354,9 @@ pub struct Teleop {
     leashed: Vec<Option<(f64, f64)>>,
     /// Per axis: the way it pushed when it stalled (+1, -1), until a step moves it back.
     stall: Vec<f64>,
+    /// Per axis: where it stood when it stalled, the reference it is held at: stiff there, so
+    /// it neither pushes on what stopped it nor sags away from it under a load.
+    hold: Vec<f64>,
 }
 
 impl Teleop {
@@ -513,6 +520,7 @@ impl Teleop {
             step,
             leashed: vec![None; width],
             stall: vec![0.0; width],
+            hold: vec![0.0; width],
         })
     }
 
@@ -631,9 +639,27 @@ impl Teleop {
         &mut self,
         reference: &[f64],
         measured: &[Option<f64>],
+        available: &[bool],
+        targets: &Targets,
         seeded: bool,
         dt: f64,
     ) {
+        // The limbs driven this tick: only their solved joints can stall (a finger is written
+        // from a width, a held or unavailable joint is not moved, an idle arm is held).
+        let mut driven = 0_u64;
+        for (index, hand) in self.hand_of.iter().enumerate().take(64) {
+            let asked = match hand {
+                Some(hand) => targets.tcp[*hand].is_some(),
+                // The camera turns while a hand is driven or the operator's head is given.
+                None => {
+                    Some(index) == self.head
+                        && (targets.head.is_some() || targets.tcp.iter().any(Option::is_some))
+                }
+            };
+            if asked {
+                driven |= 1 << index;
+            }
+        }
         if seeded {
             self.leashed.fill(None);
             self.stall.fill(0.0);
@@ -651,7 +677,14 @@ impl Teleop {
                 // and f64::clamp would panic on it).
                 Some(at) if at.is_finite() => {
                     let lead = sent - at;
-                    if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - 1e-9 {
+                    let solved = available[axis]
+                        && !self.held[axis]
+                        && self.limbs_of[axis] != 0
+                        && self.limbs_of[axis] & !driven == 0;
+                    if !solved {
+                        self.stall[axis] = 0.0;
+                        self.leashed[axis] = None;
+                    } else if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - 1e-9 {
                         // At the gap: pushing on something, or only lagging? It stalls when
                         // the measurement comes no nearer for the gripper's stall time.
                         let push = lead.signum();
@@ -660,6 +693,7 @@ impl Teleop {
                                 let since = since + dt;
                                 if since >= stall_s {
                                     self.stall[axis] = push;
+                                    self.hold[axis] = *at;
                                     None
                                 } else {
                                     Some((from, since))
@@ -673,8 +707,8 @@ impl Teleop {
                     if self.stall[axis] == 0.0 {
                         sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP)
                     } else {
-                        // Stalled: no push left, the reference where the joint stands.
-                        *at
+                        // Stalled: held stiff where it stood, pushing no further.
+                        self.hold[axis]
                     }
                 }
                 Some(_) | None => *sent,
@@ -710,7 +744,7 @@ impl Teleop {
         }
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
-        self.take_reference(reference, measured, seeded, dt);
+        self.take_reference(reference, measured, available, targets, seeded, dt);
         self.seed = false;
         for (slot, (available, held)) in self
             .available

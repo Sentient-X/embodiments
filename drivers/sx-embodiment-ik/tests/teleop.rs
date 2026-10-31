@@ -458,3 +458,111 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
     }
     assert!(freed, "asked the other way, the stall lets go");
 }
+
+/// A stalled joint is held stiff where it stopped, not where it is measured each tick: under a
+/// load that pulls it away from what stopped it, it stays there rather than follow the load
+/// down (held at its measurement, it went limp and fell 7.9 rad in 6 s; refute, 2026-10-31).
+/// Only a driven arm's solved joints stall: a finger closed on an object, written from a
+/// width, never does, nor does an idle arm someone pushes.
+#[test]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // tick counts and seconds
+fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
+    let mut solve = teleop();
+    let mut q = start(&solve);
+    q[index(&solve, "torso_joint")] = 0.0;
+    let elbow = index(&solve, "left_elbow_pitch_joint");
+    let right_elbow = index(&solve, "right_elbow_pitch_joint");
+    let finger = index(&solve, "left_gripper_left_finger_joint");
+    let from = tcp(&solve, &q, 0);
+    let width = q.len();
+    let available = vec![true; width];
+    // The elbow cannot pass where it starts (the way the hand asks it), and a load sags it
+    // 0.05 rad the other way from its command; the right elbow is pushed 0.15 rad by someone;
+    // the left finger is held open by an object; the rest land where they are sent.
+    let targets = Targets {
+        tcp: [
+            Some(Pose {
+                translation_m: [
+                    from.translation_m[0] + 0.06,
+                    from.translation_m[1],
+                    from.translation_m[2] - 0.08,
+                ],
+                rotation_xyzw: from.rotation_xyzw,
+            }),
+            None,
+        ],
+        gripper_width_m: [Some(0.0), None],
+        ..Targets::default()
+    };
+    let stop_at = q[elbow];
+    let reach_dir = {
+        let mut probe = teleop();
+        probe.reset();
+        let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+        let mut reference = q.clone();
+        for _ in 0..10 {
+            let step = probe
+                .step(&reference, &measured, &available, &targets, DT)
+                .expect("a step");
+            reference.copy_from_slice(&step.q);
+        }
+        (reference[elbow] - stop_at).signum()
+    };
+    let finger_open = q[finger];
+    let measure = |sent: &[f64]| -> Vec<Option<f64>> {
+        sent.iter()
+            .enumerate()
+            .map(|(axis, at)| {
+                Some(if axis == elbow {
+                    let sagged = at - 0.05 * reach_dir;
+                    if (sagged - stop_at) * reach_dir > 0.0 {
+                        stop_at
+                    } else {
+                        sagged
+                    }
+                } else if axis == right_elbow {
+                    at + 0.15
+                } else if axis == finger {
+                    finger_open
+                } else {
+                    *at
+                })
+            })
+            .collect()
+    };
+    solve.reset();
+    let mut reference = q.clone();
+    let mut stalled = false;
+    for _ in 0..((STALL.as_secs_f64() + 3.0) / DT) as usize {
+        let measured = measure(&reference);
+        let step = solve
+            .step(&reference, &measured, &available, &targets, DT)
+            .expect("a step");
+        reference.copy_from_slice(&step.q);
+        stalled |= step.stalled[elbow];
+        assert!(
+            !step.stalled[finger],
+            "a finger on an object is not a stall"
+        );
+        assert!(
+            !step.stalled[right_elbow],
+            "an idle arm someone pushes does not stall"
+        );
+        let elbow_at = measured[elbow].expect("measured");
+        assert!(
+            (elbow_at - stop_at).abs() <= 0.05 + REFERENCE_GAP + 0.03 + 1e-9,
+            "the elbow fell {} rad from where it stopped",
+            (elbow_at - stop_at).abs()
+        );
+    }
+    assert!(stalled, "the elbow stalled on its stop_at");
+    let measured = measure(&reference);
+    assert!(
+        (measured[elbow].expect("measured") - stop_at).abs() <= 0.05 + 1e-9,
+        "held where it stopped, it sags only by its load"
+    );
+}
