@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    HANDS, Pose, REFERENCE_GAP, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
+    HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
 };
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
@@ -358,4 +358,103 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
     assert!(capped <= 0.05 * (1.0 + 1e-5), "{capped} m/s against 0.05");
     // It ends as near its target as the unbounded hand does, only later.
     assert!(off <= free_off + 0.001, "{off} m off, unbounded {free_off}");
+}
+
+/// A joint that something stops pushes at most the gripper's stall time: its reference held at
+/// the gap, its measurement coming no nearer, it stalls within [`STALL`] and a tick, its
+/// reference goes to where it stands (no push left) and stays there while the hand still asks
+/// that way; when the hand asks the other way, the joint is free and moves back.
+#[test]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // tick counts and seconds
+fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked() {
+    let mut solve = teleop();
+    let mut q = start(&solve);
+    q[index(&solve, "torso_joint")] = 0.0;
+    let elbow = index(&solve, "left_elbow_pitch_joint");
+    let from = tcp(&solve, &q, 0);
+    let width = q.len();
+    let available = vec![true; width];
+    let blocked_at = q[elbow];
+    // Every joint lands where it is sent but the elbow, which something holds where it is.
+    let measure = |sent: &[f64]| -> Vec<Option<f64>> {
+        sent.iter()
+            .enumerate()
+            .map(|(axis, at)| Some(if axis == elbow { blocked_at } else { *at }))
+            .collect()
+    };
+    let reach = |dz: f64| Targets {
+        tcp: [
+            Some(Pose {
+                translation_m: [
+                    from.translation_m[0] + 0.06,
+                    from.translation_m[1],
+                    from.translation_m[2] + dz,
+                ],
+                rotation_xyzw: from.rotation_xyzw,
+            }),
+            None,
+        ],
+        ..Targets::default()
+    };
+    solve.reset();
+    let mut reference = q.clone();
+    let mut stalled_at = None;
+    let ticks = ((STALL.as_secs_f64() + 1.0) / DT) as usize;
+    for tick in 0..ticks {
+        let step = solve
+            .step(
+                &reference,
+                &measure(&reference),
+                &available,
+                &reach(-0.08),
+                DT,
+            )
+            .expect("a step");
+        reference.copy_from_slice(&step.q);
+        if step.stalled[elbow] {
+            stalled_at.get_or_insert(tick);
+            assert!(
+                (reference[elbow] - blocked_at).abs() < 1e-9,
+                "stalled, it pushes no more: {} against {blocked_at}",
+                reference[elbow]
+            );
+        } else {
+            assert!(
+                stalled_at.is_none(),
+                "it stays stalled while the hand asks that way"
+            );
+            // At most the gap and one tick's step (max_step_rad) ahead of where it stands.
+            assert!((reference[elbow] - blocked_at).abs() <= REFERENCE_GAP + 0.03 + 1e-9);
+        }
+    }
+    let stalled_at = stalled_at.expect("the blocked elbow stalled");
+    assert!(
+        // The gap is reached in a few tenths, then the stall time runs.
+        (stalled_at as f64) * DT <= STALL.as_secs_f64() + 0.5,
+        "stalled at {:.2} s",
+        stalled_at as f64 * DT
+    );
+    // The hand asks back up: the elbow is free and moves away from what stopped it.
+    let mut freed = false;
+    for _ in 0..200 {
+        let step = solve
+            .step(
+                &reference,
+                &measure(&reference),
+                &available,
+                &reach(0.08),
+                DT,
+            )
+            .expect("a step");
+        reference.copy_from_slice(&step.q);
+        if !step.stalled[elbow] {
+            freed = true;
+            break;
+        }
+    }
+    assert!(freed, "asked the other way, the stall lets go");
 }

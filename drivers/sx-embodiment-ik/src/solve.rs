@@ -344,6 +344,8 @@ pub struct Ik {
     tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
     /// Per limb, whether its tool speed bound this tick.
     tool_capped: Vec<bool>,
+    /// Per axis, the way it may not move ([`Ik::set_blocked`]): +1 not up, -1 not down, 0 free.
+    blocked: Vec<f64>,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -494,6 +496,7 @@ impl Ik {
             iterations: 0,
         };
         let limbs = body.limbs.len();
+        let axes_count = rest.len();
         Ok(Self {
             body,
             caps,
@@ -511,6 +514,7 @@ impl Ik {
             velocity: vec![0.0; n],
             tool_speed: vec![None; limbs],
             tool_capped: vec![false; limbs],
+            blocked: vec![0.0; axes_count],
             work,
             qp,
             step,
@@ -556,6 +560,19 @@ impl Ik {
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.anchored = self.preferred.is_some();
+    }
+
+    /// Hold `axis` from moving toward `push` (its sign: something stops it that way) while it
+    /// stays free to move back; 0 frees it. A step that would move it on is answered with the
+    /// axis standing; an axis out of range is ignored.
+    pub fn set_blocked(&mut self, axis: usize, push: f64) {
+        if let Some(slot) = self.blocked.get_mut(axis) {
+            *slot = if push.is_finite() && push != 0.0 {
+                push.signum()
+            } else {
+                0.0
+            };
+        }
     }
 
     /// The most `limb`'s tool point (a pose limb's frame origin) may move from now on, m/s;
@@ -951,6 +968,19 @@ impl Ik {
                 (hi, hi_by) = (lo, Bound::Accel);
             } else {
                 (lo, lo_by) = (hi, Bound::Accel);
+            }
+            // An axis blocked one way stands rather than move on that way.
+            let push = self.blocked[axis];
+            if push > 0.0 {
+                hi = hi.min(0.0);
+                lo = lo.min(hi);
+                w.safe_upper[column] = w.safe_upper[column].min(0.0);
+                w.safe_lower[column] = w.safe_lower[column].min(w.safe_upper[column]);
+            } else if push < 0.0 {
+                lo = lo.max(0.0);
+                hi = hi.max(lo);
+                w.safe_lower[column] = w.safe_lower[column].max(0.0);
+                w.safe_upper[column] = w.safe_upper[column].max(w.safe_lower[column]);
             }
             w.lower[column] = lo;
             w.upper[column] = hi;
