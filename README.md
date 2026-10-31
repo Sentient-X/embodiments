@@ -267,6 +267,17 @@ which `resolve` then accepts; `tests/test_calibrate.py` recovers known lenses an
 including the humanoid's head camera through its instance, and holds every declared camera
 calibratable.
 
+`CharucoBoard(..., marker_start_id=33)` can reserve a board marker range distinct
+from gripper fiducials in the same ArUco dictionary. It defaults to zero and is
+placed after `minimum_corners` to preserve existing positional calls. The board
+uses `columns * rows // 2` consecutive marker IDs; the complete range must fit
+the selected dictionary. Detection filters out IDs outside that board before
+interpolating corners. Physical ChArUco corner IDs stay zero-based row-major;
+the marker offset must not be added to corner IDs or to object-point indices.
+Changing the range requires printing the matching board; it cannot relabel an
+existing print. Two physical markers with the same dictionary and ID are still
+indistinguishable, so the reserved board range must not overlap scene fiducials.
+
 A stored document of any earlier schema is read with `migrate(document)`, which runs the chain
 of pure converters (13 → 14 → 15 → 16) and returns one verified identity edge: the id the bytes
 carry and the body they read as today. A converter changes only what its schema changed and

@@ -104,7 +104,8 @@ class CharucoBoard:
     """A chessboard of ``columns`` x ``rows`` squares with an ArUco marker in each white one.
 
     ``dictionary`` is an OpenCV predefined dictionary name (``"DICT_5X5_100"``). Corner ids are
-    OpenCV's: the inner chessboard corners, row by row.
+    OpenCV's: the inner chessboard corners, row by row. ``marker_start_id`` reserves
+    a consecutive marker-ID range, so unrelated scene fiducials can be excluded.
     """
 
     columns: int
@@ -113,6 +114,7 @@ class CharucoBoard:
     marker_m: float
     dictionary: str
     minimum_corners: int = 6
+    marker_start_id: int = 0
 
     def __post_init__(self) -> None:
         if self.columns < 3 or self.rows < 3:
@@ -123,6 +125,11 @@ class CharucoBoard:
             raise CalibrationSolveError(f"no ArUco dictionary {self.dictionary!r}")
         if self.minimum_corners < 4:
             raise CalibrationSolveError("a pose needs at least four corners")
+        if type(self.marker_start_id) is not int or self.marker_start_id < 0:
+            raise CalibrationSolveError("ChArUco marker_start_id must be a nonnegative integer")
+        dictionary = cv2.aruco.getPredefinedDictionary(int(getattr(cv2.aruco, self.dictionary)))
+        if self.marker_start_id + self.columns * self.rows // 2 > dictionary.bytesList.shape[0]:
+            raise CalibrationSolveError("ChArUco marker ID range exceeds its dictionary capacity")
 
     @property
     def method(self) -> CalibrationMethod:
@@ -139,7 +146,15 @@ class CharucoBoard:
     def board(self) -> cv2.aruco.CharucoBoard:
         dictionary = cv2.aruco.getPredefinedDictionary(int(getattr(cv2.aruco, self.dictionary)))
         return cv2.aruco.CharucoBoard(
-            (self.columns, self.rows), self.square_m, self.marker_m, dictionary
+            (self.columns, self.rows),
+            self.square_m,
+            self.marker_m,
+            dictionary,
+            ids=np.arange(
+                self.marker_start_id,
+                self.marker_start_id + self.columns * self.rows // 2,
+                dtype=np.int32,
+            ),
         )
 
     def points(self) -> NDArray[np.float64]:
@@ -154,10 +169,27 @@ class CharucoBoard:
 
     def detect(self, gray: Gray) -> Detection | None:
         """The corners whose markers the image shows, or ``None`` below ``minimum_corners``."""
-        detector = cv2.aruco.CharucoDetector(self.board())
-        corners, found, _marker_corners, _marker_ids = detector.detectBoard(gray)
-        ids = cast("NDArray[np.int32] | None", found)  # OpenCV answers None when it saw none
-        if ids is None or len(ids) < self.minimum_corners:
+        board = self.board()
+        dictionary = cv2.aruco.getPredefinedDictionary(int(getattr(cv2.aruco, self.dictionary)))
+        markers, found_markers, _rejected = cv2.aruco.ArucoDetector(dictionary).detectMarkers(gray)
+        marker_ids = cast("NDArray[np.int32] | None", found_markers)
+        if marker_ids is None:
+            return None
+        # Filter before interpolation: unrelated gripper fiducials must never be
+        # passed into the board's corner-ID association, even if they use the
+        # same dictionary. The caller reserves a non-overlapping board ID range.
+        board_ids = np.asarray(board.getIds(), dtype=np.int32).reshape(-1)
+        selected = np.flatnonzero(np.isin(marker_ids.reshape(-1), board_ids))
+        if not len(selected):
+            return None
+        known_markers = [markers[int(index)] for index in selected]
+        known_ids = marker_ids[selected].reshape(-1, 1)
+        found_corners, found, _known_corners, _known_ids = cv2.aruco.CharucoDetector(
+            board
+        ).detectBoard(gray, markerCorners=known_markers, markerIds=known_ids)
+        corners = cast("NDArray[np.float32] | None", found_corners)
+        ids = cast("NDArray[np.int32] | None", found)
+        if corners is None or ids is None or len(ids) < self.minimum_corners:
             return None
         return Detection.of(
             np.asarray(corners, dtype=np.float64),
