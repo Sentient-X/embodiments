@@ -29,8 +29,15 @@ fn missing_poses_are_absent_and_duplicate_or_nonfinite_targets_refuse() {
 #[test]
 fn physical_attestation_is_preserved_separately_from_ready() {
     let parsed = parse(r#"{"ready":{"joints":{"joint":0.1}},"parked":{"pose":{"joints":{"joint":-0.2}},"configuration_sha256":"exact-motion-basis","verification_reference":"physical-check/42"}}"#).unwrap();
-    assert_eq!(parsed.exit_poses.ready.unwrap().joints["joint"], 0.1);
-    let parked = parsed.exit_poses.parked.unwrap();
-    assert_eq!(parked.pose.joints["joint"], -0.2);
-    assert_eq!(parked.verification_reference, "physical-check/42");
+    // The target is the commissioned number itself, so the parse must be bit-exact.
+    assert_eq!(
+        parsed.exit_poses.ready.unwrap().joints["joint"].to_bits(),
+        0.1_f64.to_bits()
+    );
+    let attested = parsed.exit_poses.parked.unwrap();
+    assert_eq!(
+        attested.pose.joints["joint"].to_bits(),
+        (-0.2_f64).to_bits()
+    );
+    assert_eq!(attested.verification_reference, "physical-check/42");
 }
