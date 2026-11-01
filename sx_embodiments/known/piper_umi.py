@@ -16,7 +16,7 @@ from ..parts import GripperSpec, MimicJoint
 from ..recorded_streams import RecordedStreams
 from ._authoring import bounded_layout
 from ._piper_umi_assets import ASSET_IDENTITIES
-from .yubi import POD_CAMERAS
+from .yubi import POD_CAMERAS, pod_hands
 
 PIPER_UMI_ASSETS = tuple(
     packaged_asset(
@@ -69,6 +69,10 @@ PIPER_UMI_SPEC = EmbodimentDefinition(
     lineage=Lineage(family="piper-umi", revision="supplied-cad-v6-holder-tracking"),
     build=Build.of(PIPER_UMI_MODULE),
     extra_assets=PIPER_UMI_ASSETS,
-    # The same pod records it, so its cameras are named as a YUBI's are.
-    recorded_streams=RecordedStreams(cameras=POD_CAMERAS),
+    # The same seal records it: its controllers on the CAD ``<side>_vrcontroller`` links the seal
+    # mounts each hand on, its cameras named as a YUBI's are. Its jaws are not bound: the jaw
+    # declares no gap curve from the opening the seal writes to its slider coordinate.
+    recorded_streams=RecordedStreams(
+        poses=pod_hands("left_vrcontroller", "right_vrcontroller"), cameras=POD_CAMERAS
+    ),
 )
