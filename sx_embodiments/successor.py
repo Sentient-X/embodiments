@@ -55,7 +55,7 @@ def current(name: EmbodimentName) -> Embodiment:
 def superseded_ids(name: EmbodimentName) -> tuple[str, ...]:
     """The earlier ids of ``name`` whose revision drives as the current body does, sorted."""
     body = current(name)
-    kept = []
+    kept: list[str] = []
     for identity in historical_identities(name):
         earlier = read_recorded(historical_document(name, identity)).embodiment
         if wiring(earlier) == wiring(body):
@@ -66,7 +66,8 @@ def superseded_ids(name: EmbodimentName) -> tuple[str, ...]:
 def successor(identity: str) -> Embodiment | None:
     """The current body an earlier id stands for, or ``None`` when no kept revision has that
     id or the revision drives differently."""
-    for name in (*embodiments, *development_embodiments):
+    for registered in (*embodiments, *development_embodiments):
+        name = EmbodimentName(registered)
         if identity in {str(i) for i in historical_identities(name)}:
             return current(name) if identity in superseded_ids(name) else None
     return None
