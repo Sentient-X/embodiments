@@ -1,8 +1,9 @@
 """The object-first embodiment API, wire law, assets, and runtime projections."""
 
 from dataclasses import replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from sx_contracts.assets import (
@@ -259,3 +260,39 @@ def test_curve_interpolates_and_clamps() -> None:
     assert curve.at(5.0) == 4.0
     assert curve.inverse_at(9.0) == 0.5
     assert curve.inverse_at(11.0) == 0.0
+
+
+def test_derived_facts_are_computed_once_per_embodiment_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recording reader asks for joint_names per message: the description is resolved,
+    validated and parsed once per id, and a second instance decoded from the same document
+    shares that work instead of repeating it."""
+    import sx_embodiments.description as description
+    import sx_embodiments.embodiment as module
+    from sx_embodiments.compose import Component
+    from sx_embodiments.layout import StateSpace
+
+    # A label of its own gives this body an id no other test has warmed.
+    body = replace(next(iter(embodiments.values())), label=f"derived-once {uuid4()}")
+    resolves: list[AssetRef] = []
+    parses: list[bytes] = []
+    real_resolve, real_parse = module.resolve_asset, description.joint_names
+
+    def resolve(ref: AssetRef) -> Path:
+        resolves.append(ref)
+        return real_resolve(ref)
+
+    def parse(components: tuple[Component, ...], state: StateSpace, urdf: bytes) -> tuple[str, ...]:
+        parses.append(urdf)
+        return real_parse(components, state, urdf)
+
+    monkeypatch.setattr(module, "resolve_asset", resolve)
+    monkeypatch.setattr(description, "joint_names", parse)
+
+    first = body.joint_names
+    assert body.joint_names == first and body.urdf_bytes and body.urdf_path.is_file()
+    again = Embodiment.from_json(body.to_json())
+    assert again is not body and again == body and again.id == body.id
+    assert again.joint_names == first and again.urdf_bytes == body.urdf_bytes
+    assert len(resolves) == 1 and len(parses) == 1

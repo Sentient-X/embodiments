@@ -8,7 +8,7 @@ import hashlib
 import json
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Final, cast
 
@@ -108,6 +108,23 @@ from .sites import BodySite
 SCHEMA_VERSION = 16
 
 
+@dataclass(slots=True)
+class _Derived:
+    """What one embodiment's content determines but costs to derive: its id (a digest of the
+    whole document), its state space, and its description's verified path, bytes and joint
+    order (a resolve, a digest check, a validation and a URDF parse). Every fact is a function
+    of the id, since the id digests the whole document and assets are content-addressed, so
+    one record per id serves every instance in the process, whichever codec built it."""
+
+    id: EmbodimentId
+    state: StateSpace | None = None
+    description: tuple[Path, bytes] | None = None
+    joint_names: tuple[str, ...] | None = None
+
+
+_DERIVED: dict[EmbodimentId, _Derived] = {}
+
+
 @dataclass(frozen=True, slots=True)
 class Embodiment:
     """A complete, content-addressed hardware revision.
@@ -131,6 +148,9 @@ class Embodiment:
     operator_mounts: tuple[OperatorMount, ...] = ()
     sites: tuple[BodySite, ...] = ()
     schema_version: int = SCHEMA_VERSION
+    # The facts derived from this content, shared by every instance with the same id; set on
+    # first use, outside equality, hashing and the document.
+    _derived: _Derived | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.schema_version) is not int or self.schema_version != SCHEMA_VERSION:
@@ -192,13 +212,24 @@ class Embodiment:
                 return site
         raise EmbodimentSchemaError(f"{self.name}: no declared body site {name!r}")
 
+    def _facts(self) -> _Derived:
+        derived = self._derived
+        if derived is None:
+            identity = content_id(EmbodimentId, cast("JsonObject", self._content_dict()))
+            derived = _DERIVED.setdefault(identity, _Derived(identity))
+            object.__setattr__(self, "_derived", derived)
+        return derived
+
     @property
     def id(self) -> EmbodimentId:
-        return content_id(EmbodimentId, cast("JsonObject", self._content_dict()))
+        return self._facts().id
 
     @property
     def state(self) -> StateSpace:
-        return state_space(str(self.name), self.components)
+        facts = self._facts()
+        if facts.state is None:
+            facts.state = state_space(str(self.name), self.components)
+        return facts.state
 
     @property
     def cameras(self) -> tuple[CameraBinding, ...]:
@@ -229,31 +260,43 @@ class Embodiment:
             if asset.asset.format is AssetFormat.URDF and asset.asset.role is AssetRole.DESCRIPTION
         )
 
+    def _description(self) -> tuple[Path, bytes]:
+        """The description's verified path and bytes: resolved, digest-checked and validated
+        against this body once per embodiment id per process, and resolved again only if the
+        verified file has since gone away."""
+        facts = self._facts()
+        if facts.description is None or not facts.description[0].is_file():
+            path = resolve_asset(self.urdf.asset)
+            data = path.read_bytes()
+            _validate_urdf(
+                self.name,
+                tuple(asset.asset for asset in self.assets),
+                data,
+                components=self.components,
+                operator_mounts=self.operator_mounts,
+                sites=self.sites,
+            )
+            facts.description = (path, data)
+        return facts.description
+
     @property
     def urdf_path(self) -> Path:
         """Verified local path of the authoritative packaged description."""
-
-        path = resolve_asset(self.urdf.asset)
-        _validate_urdf(
-            self.name,
-            tuple(asset.asset for asset in self.assets),
-            path.read_bytes(),
-            components=self.components,
-            operator_mounts=self.operator_mounts,
-            sites=self.sites,
-        )
-        return path
+        return self._description()[0]
 
     @property
     def urdf_bytes(self) -> bytes:
-        return self.urdf_path.read_bytes()
+        return self._description()[1]
 
     @property
     def joint_names(self) -> tuple[str, ...]:
-        """Unique URDF joint names, in exactly the native state order."""
+        """Unique URDF joint names, in exactly the native state order; parsed once per id."""
         from .description import joint_names
 
-        return joint_names(self.components, self.state, self.urdf_bytes)
+        facts = self._facts()
+        if facts.joint_names is None:
+            facts.joint_names = joint_names(self.components, self.state, self.urdf_bytes)
+        return facts.joint_names
 
     @property
     def single_arm(self) -> ChainSpec:
