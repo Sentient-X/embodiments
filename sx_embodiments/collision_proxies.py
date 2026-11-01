@@ -47,9 +47,9 @@ from typing import Final
 
 import numpy as np
 import numpy.typing as npt
-from scipy.spatial import (
-    ConvexHull,  # pyright: ignore[reportMissingTypeStubs]  # no stubs
-    QhullError,  # pyright: ignore[reportMissingTypeStubs]
+from scipy.spatial import (  # pyright: ignore[reportMissingTypeStubs]  # scipy ships no stubs
+    ConvexHull,
+    QhullError,
 )
 from sx_contracts.identity import JsonValue, canonical_bytes
 
@@ -86,14 +86,6 @@ def support_document(mount: BaseMount) -> dict[str, JsonValue]:
 
 def _matrix(transform: Transform) -> Floats:
     return np.asarray(transform, dtype=np.float64).reshape(4, 4)
-
-
-def _collision_points(embodiment: Embodiment, urdf: bytes) -> dict[str, Floats]:
-    """Each link's collision mesh vertices (and primitive corners) in the link frame."""
-    return {
-        link: np.vstack([vertices for vertices, _ in meshes])
-        for link, meshes in _collision_meshes(embodiment, urdf).items()
-    }
 
 
 def _collision_meshes(

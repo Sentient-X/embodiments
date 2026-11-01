@@ -93,7 +93,11 @@ def test_tool_frames_are_the_grippers() -> None:
 def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
     import numpy as np
 
-    from sx_embodiments.collision_proxies import SCHEMA, _collision_points, support_document
+    from sx_embodiments.collision_proxies import (
+        SCHEMA,
+        _collision_meshes,  # pyright: ignore[reportPrivateUsage]  # the proxies' own mesh source
+        support_document,
+    )
 
     directory = ROOT / "render_packs" / name
     document = json.loads((directory / "collision.json").read_bytes())
@@ -102,7 +106,10 @@ def test_collision_proxies_contain_every_collision_vertex(name: str) -> None:
     assert document["urdf_sha256"] == hashlib.sha256(urdf).hexdigest()
     mount = _tool().body(name).base_mount
     assert document["support"] == (None if mount is None else support_document(mount))
-    points = _collision_points(_tool().body(name), urdf)
+    points = {
+        link: np.vstack([vertices for vertices, _ in meshes])
+        for link, meshes in _collision_meshes(_tool().body(name), urdf).items()
+    }
     assert {c["link"] for c in document["capsules"]} == set(points)
     for link, vertices in points.items():
         gaps = []
