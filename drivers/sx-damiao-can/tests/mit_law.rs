@@ -152,3 +152,43 @@ fn a_light_joint_under_firm_damping_settles_without_overshoot() {
         assert!(pair[1].0 <= target + 1e-9, "past the target: {pair:?}");
     }
 }
+
+/// The station's simulated joint is the bindings' inertia, rotor included, at the motor:
+/// every registered Damiao axis, so the rotor the registry counts is the one the sim moves.
+#[test]
+fn the_model_joint_moves_the_bindings_inertia() {
+    use sx_damiao_can::body::BODIES;
+    use sx_embodiment_drivers::InstanceDrive;
+
+    let drives: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/drives.json")).expect("drives");
+    let drive = |body: &str| {
+        let nominal = &drives[body]["nominal"];
+        InstanceDrive::parse(
+            &nominal.to_string(),
+            nominal["instance"].as_str().expect("an instance"),
+        )
+        .expect("a drive")
+    };
+    let mut axes = sx_damiao_can::b601::b601(&drive("b601-dm")).expect("b601");
+    for body in BODIES {
+        axes.extend(body.axes(&drive(body.embodiment)).expect("axes"));
+    }
+    for axis in &axes {
+        let one = std::slice::from_ref(axis);
+        let sim = Sim::for_axes(one).with_model_dynamics(one);
+        let state = sim.state();
+        let joint = state.motors[&axis.axis.binding.bus_id]
+            .dynamics
+            .as_ref()
+            .expect("dynamics");
+        let gain = axis.axis.actuator_from_joint(axis.axis.zero + 1.0);
+        let expected = axis.axis.motion.inertia / (gain * gain);
+        assert!(
+            axis.axis.motion.inertia > 0.0 && (joint.inertia - expected).abs() <= 1e-12 * expected,
+            "{}: the sim moves {} kg m^2, the bindings carry {expected}",
+            axis.axis.joint,
+            joint.inertia
+        );
+    }
+}

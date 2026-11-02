@@ -424,11 +424,13 @@ impl Sim {
     /// Every motor running its MIT law on the joint its body's own model describes: the
     /// inertia the bindings carry for its axis (the registry's estimate, at the motor through
     /// the drive's gain squared), no friction (a description carries none; a load model adds
-    /// gravity), and its model's peak torque. The body a station believes it drives, so its
-    /// feed-forward cancels what it models; friction is the bench simulation's
-    /// ([`Sim::with_mit_dynamics`], `tools/sim_speed_ceiling.py`). The bindings' inertia is the
-    /// links' plus the motor's rotor reflected through its gearbox (`ActuatorRating`'s
-    /// armature): the humanoid's wrist links alone are 1.05e-4 kg m^2, with the rotor 0.032.
+    /// gravity), and its model's peak torque. The bindings' inertia is the links' plus the
+    /// motor's rotor reflected through its gearbox (`ActuatorRating`'s armature): the
+    /// humanoid's wrist links alone are 1.05e-4 kg m^2, with the rotor 0.032. Its gravity is
+    /// the station's own model's, so the station's feed-forward cancels it; the rotor's
+    /// inertia is not in that model (the URDF carries none), as it is not on the robot either.
+    /// Friction is the bench simulation's ([`Sim::with_mit_dynamics`],
+    /// `tools/sim_speed_ceiling.py`).
     #[must_use]
     pub fn with_model_dynamics(self, axes: &[DamiaoAxis]) -> Self {
         {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 import pytest
 
@@ -13,12 +14,13 @@ from sx_embodiments.calibrate.motion import (
     joint_motion,
     tracking_bound,
 )
+from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_MASS_MARGIN,
     STATIC_UPPER_BODY_SERVO_APPROACH,
     STATIC_UPPER_BODY_SPEED_CAP,
 )
-from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorRating, LayoutError
+from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorRating, BusPort, LayoutError
 
 
 @pytest.fixture(scope="module")
@@ -80,9 +82,13 @@ def test_every_rated_joint_moves_its_rotor_beside_its_links() -> None:
     # The humanoid's wrist yaw links weigh 1.05e-4 kg·m²; its DM4340's rotor, 2e-5 kg·m² turning
     # forty times as fast, is 0.032 at the joint. Without it the joint looked a hundred times too
     # light to the simulator and the gains' ceilings (sx#3004).
-    for name in ("sentient-humanoid-upper-body", "b601-dm"):
-        body = embodiments[name]
-        motion = joint_motion(body)
+    static = development_embodiments["sentient-static-upper-body"]
+    bodies: list[tuple[Embodiment, Mapping[BusPort, float]]] = [
+        (embodiments[name], {}) for name in ("sentient-humanoid-upper-body", "b601-dm")
+    ]
+    bodies.append((static, STATIC_UPPER_BODY_MASS_MARGIN))
+    for body, margin in bodies:
+        motion = joint_motion(body, mass_margin=margin)
         for coordinate in body.state.coordinates:
             binding = coordinate.axis.actuator
             if binding is None:
