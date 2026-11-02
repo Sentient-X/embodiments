@@ -365,8 +365,10 @@ pub struct Teleop {
     grippers: [Option<Gripper>; 2],
     /// Contact detected from healthy finger feedback; separate from arm/driver faults.
     gripper_latched: [bool; 2],
-    /// Last closing progress and elapsed time, per finger axis. Allocated only at startup.
-    gripper_wait: Vec<Option<(f64, f64)>>,
+    /// Last progress, elapsed time and requested direction, per finger axis.
+    gripper_wait: Vec<Option<(f64, f64, f64)>>,
+    /// An opening obstruction stays refused until explicit re-engagement.
+    gripper_blocked: Option<usize>,
     /// Whether the next step seeds from the measured joints (after [`Teleop::reset`]).
     seed: bool,
     q: Vec<f64>,
@@ -550,6 +552,7 @@ impl Teleop {
             grippers,
             gripper_latched: [false; 2],
             gripper_wait: vec![None; width],
+            gripper_blocked: None,
             seed: true,
             q,
             available: vec![false; width],
@@ -631,6 +634,7 @@ impl Teleop {
         self.ik.reset();
         self.gripper_latched.fill(false);
         self.gripper_wait.fill(None);
+        self.gripper_blocked = None;
         self.seed = true;
     }
 
@@ -849,7 +853,7 @@ impl Teleop {
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
         self.take_reference(reference, measured, available, targets, seeded, dt);
-        self.update_gripper_contacts(measured, available, targets, dt);
+        self.update_gripper_contacts(measured, available, targets, dt)?;
         self.seed = false;
         for (slot, (available, held)) in self
             .available
@@ -942,7 +946,7 @@ impl Teleop {
             }
             self.step.stalled[axis] = *push != 0.0;
         }
-        self.write_grippers(targets);
+        self.write_grippers(targets, measured, available);
         Ok(&self.step)
     }
 
@@ -962,7 +966,7 @@ impl Teleop {
         }
     }
 
-    fn write_grippers(&mut self, targets: &Targets) {
+    fn write_grippers(&mut self, targets: &Targets, measured: &[Option<f64>], available: &[bool]) {
         for (hand, gripper) in self.grippers.iter().enumerate() {
             let Some(gripper) = gripper else { continue };
             if let Some(width) = targets.gripper_width_m[hand] {
@@ -971,6 +975,16 @@ impl Teleop {
             for &(axis, _, _) in &gripper.fingers {
                 if self.gripper_latched[hand] {
                     self.step.q[axis] = self.hold[axis];
+                } else if targets.gripper_width_m[hand].is_some()
+                    && available[axis]
+                    && !self.held[axis]
+                    && let Some(at) = measured[axis].filter(|at| at.is_finite())
+                {
+                    // Width targets bypass the arm reference integration. In particular,
+                    // opening after contact must not jump a full stroke ahead of a lagging
+                    // servo. Use the same measured lead window as the arm references.
+                    self.step.q[axis] =
+                        self.step.q[axis].clamp(at - REFERENCE_GAP, at + REFERENCE_GAP);
                 }
                 if targets.gripper_width_m[hand].is_some() || self.gripper_latched[hand] {
                     self.step.qdot[axis] = 0.0;
@@ -988,7 +1002,10 @@ impl Teleop {
         available: &[bool],
         targets: &Targets,
         dt: f64,
-    ) {
+    ) -> Result<(), IkError> {
+        if let Some(axis) = self.gripper_blocked {
+            return Err(IkError::BlockedGripper { axis });
+        }
         let noise = STALL_STILL + 2.0 * READING_JITTER;
         for (hand, gripper) in self.grippers.iter().enumerate() {
             let Some(gripper) = gripper else { continue };
@@ -1020,14 +1037,23 @@ impl Teleop {
                     for &(axis, closed, open) in &gripper.fingers {
                         let direction = (open - closed).signum();
                         self.gripper_wait[axis] = match measured[axis] {
-                            Some(at) if healthy && (at - self.step.q[axis]) * direction > noise => {
+                            Some(at) if healthy && (at - self.step.q[axis]).abs() > noise => {
+                                let push = (self.step.q[axis] - at).signum();
                                 match self.gripper_wait[axis] {
-                                    Some((from, since)) if (from - at) * direction <= noise => {
+                                    Some((from, since, previous))
+                                        if push * previous > 0.0 && (at - from) * push <= noise =>
+                                    {
                                         let since = since + dt;
-                                        contact |= since >= STALL.as_secs_f64();
-                                        Some((from, since))
+                                        if since >= STALL.as_secs_f64() {
+                                            if push * direction > 0.0 {
+                                                self.gripper_blocked = Some(axis);
+                                                return Err(IkError::BlockedGripper { axis });
+                                            }
+                                            contact = true;
+                                        }
+                                        Some((from, since, push))
                                     }
-                                    _ => Some((at, 0.0)),
+                                    _ => Some((at, 0.0, push)),
                                 }
                             }
                             _ => None,
@@ -1047,6 +1073,7 @@ impl Teleop {
                 }
             }
         }
+        Ok(())
     }
 }
 
