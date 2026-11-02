@@ -676,6 +676,14 @@ impl Ik {
         Ok(())
     }
 
+    /// How fast `axis` was last measured to move, units a second: its readings differenced,
+    /// smoothed over `MEASURED_SPEED_S` and never past [`FOLLOWER_SPEED`] times its speed cap
+    /// (one bad reading is no speed). 0 for an axis not measured.
+    #[must_use]
+    pub fn measured_speed(&self, axis: usize) -> f64 {
+        self.measured_speed.get(axis).copied().unwrap_or(0.0)
+    }
+
     /// How far the last step's cost asked `axis` to move this tick, radians (units), every
     /// other solved axis where the step put it: the move that minimises the cost along it
     /// alone, its box and caps aside. An axis held still (unavailable) that its targets press
@@ -1453,8 +1461,12 @@ impl Ik {
                 }
             }
         }
-        for j in 0..n {
-            w.still[j] = 0.0_f64.clamp(w.lower[j], w.upper[j]);
+        // Standing still as nearly as the caps allow, for a step that fails: from the caps, not
+        // from a box `all` widened (a held torso stopped dead at 5.4x its cap, #211 refute).
+        if !all {
+            for j in 0..n {
+                w.still[j] = 0.0_f64.clamp(w.lower[j], w.upper[j]);
+            }
         }
         solve
     }

@@ -9,7 +9,9 @@ use sx_embodiment_ik::teleop::{
     GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
     TeleopConfig, TeleopStep,
 };
-use sx_embodiment_ik::{Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use sx_embodiment_ik::{
+    Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
+};
 
 const DT: f64 = 0.01;
 
@@ -901,7 +903,7 @@ fn least_clearance(
     follower: Follower,
     noise: f64,
     glitch: Option<(&str, f64)>,
-) -> (f64, String, String, f64) {
+) -> (f64, String, String, f64, u32) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
@@ -960,7 +962,7 @@ fn least_clearance(
     };
     let turn = STALL.as_secs_f64() + 1.5;
     let mut least = (f64::INFINITY, String::new(), String::new());
-    let (mut before, mut lurch) = (rest.clone(), 0.0_f64);
+    let (mut before, mut lurch, mut relaxed) = (rest.clone(), 0.0_f64, 0_u32);
     let caps = solve.ik().caps().accel.clone();
     let arms: Vec<usize> = solve
         .model()
@@ -1019,6 +1021,7 @@ fn least_clearance(
         let step = solve
             .step(&q, &measured, &available, &targets, dt)
             .expect("a step");
+        relaxed += u32::from(step.solve == Solve::Relaxed);
         // How far past its acceleration cap any arm or torso joint's command turned this tick
         // (a stalled joint's jump to where it stands, or its release, is not a turn).
         for axis in arms.iter().copied() {
@@ -1061,7 +1064,7 @@ fn least_clearance(
             }
         }
     }
-    (least.0, least.1, least.2, lurch)
+    (least.0, least.1, least.2, lurch, relaxed)
 }
 
 /// The collision margin less a millimetre: a step's linearisation.
@@ -1097,7 +1100,7 @@ fn keeps(rates: &[f64], followers: &[Follower], clear_m: f64, turn: f64) {
             }
         }
         for run in runs {
-            let (dt, case, stopped, follower, noise, (clear, a, b, lurch)) =
+            let (dt, case, stopped, follower, noise, (clear, a, b, lurch, _)) =
                 run.join().expect("a case");
             assert!(
                 clear >= clear_m && lurch <= turn,
@@ -1200,6 +1203,40 @@ fn a_single_bad_reading_moves_nothing() {
     });
 }
 
+/// A collision row no step inside the acceleration caps keeps widens no cap up front: the
+/// solve finds no step, and the elastic retry keeps the rows as nearly as the caps allow, and
+/// says so (`Solve::Relaxed`). Underdamped followers that ring into the box and the other hand
+/// turned 7-121x a cap with the row's axes widened to their whole range (4ea9e84;
+/// embodiments#210, #211).
+#[test]
+fn a_row_the_caps_cannot_keep_widens_no_cap() {
+    std::thread::scope(|scope| {
+        let runs: Vec<_> = [
+            (0.002, "box", Follower::Pd(0, 9.5, 0.1), 0.0),
+            (0.004, "reach", Follower::Pd(0, 9.5, 0.15), 0.0),
+            (0.011, "reach", Follower::Pd(1, 9.5, 0.1), READING_JITTER),
+        ]
+        .into_iter()
+        .map(|(dt, case, follower, noise)| {
+            scope.spawn(move || {
+                let got = least_clearance(dt, case, true, follower, noise, None);
+                (dt, case, follower, got.3, got.4)
+            })
+        })
+        .collect();
+        let mut gave_way = 0;
+        for run in runs {
+            let (dt, case, follower, turned, relaxed) = run.join().expect("a case");
+            assert!(
+                turned <= WITHIN_THE_CAP,
+                "{case} at {dt} s, {follower:?}: turned {turned}x a cap"
+            );
+            gave_way += relaxed;
+        }
+        assert!(gave_way > 0, "rows that gave way inside the caps say so");
+    });
+}
+
 /// The least clearance and the right arm's sharpest turn against its acceleration cap, every
 /// rate, case, follower and jitter: `cargo test --release -p sx-embodiment-ik --test teleop
 /// clearance_table -- --ignored --nocapture`.
@@ -1228,7 +1265,7 @@ fn clearance_table() {
                 for follower in followers {
                     for noise in [0.0, 0.001] {
                         runs.push(scope.spawn(move || {
-                            let (c, a, b, lurch) = least_clearance(dt, case, stopped, follower, noise, None);
+                            let (c, a, b, lurch, _) = least_clearance(dt, case, stopped, follower, noise, None);
                             format!("TABLE dt={dt} {case} stop={stopped} {follower:?} noise={noise}: {:.1} mm ({a} / {b}) accel x{lurch:.1}", c * 1e3)
                         }));
                     }
