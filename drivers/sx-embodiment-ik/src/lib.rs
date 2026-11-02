@@ -77,7 +77,8 @@ pub use geometry::{
 pub use math::Iso;
 pub use model::{Frames, Model};
 pub use solve::{
-    Active, Caps, Clearance, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, Step,
+    Active, Caps, Clearance, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings,
+    Solve, Step,
 };
 pub use tool::{Grip, JawKind, Jaws, NoJawsReason, ToolFrame};
 

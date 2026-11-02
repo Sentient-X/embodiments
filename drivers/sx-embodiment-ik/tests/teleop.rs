@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig, TeleopStep,
+    GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
+    TeleopStep,
 };
 use sx_embodiment_ik::{Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
@@ -226,6 +227,7 @@ fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
 }
 
 #[test]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a tick count
 fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap() {
     let mut solve = teleop();
     let q = start(&solve);
@@ -240,19 +242,25 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap()
         .step(&reference, &measured, &available, &Targets::default(), DT)
         .expect("a step");
     assert_eq!(step.q[elbow], q[elbow]);
-    // Within the gap the reference wins; past it, the reference is held at the gap.
+    // Within the gap the reference wins; past it, the reference is held at the gap. Each new
+    // reading is fed until the solve takes it: a jump no joint makes in a tick is set aside for
+    // GLITCH_HOLD first (a_single_bad_reading_moves_nothing).
     let mut reference = step.q.clone();
+    let held = (GLITCH_HOLD.as_secs_f64() / DT).ceil() as usize + 1;
+    let mut settle = |measured: &[Option<f64>], reference: &mut Vec<f64>| {
+        for _ in 0..held {
+            let step = solve
+                .step(reference, measured, &available, &Targets::default(), DT)
+                .expect("a step");
+            reference.clone_from(&step.q);
+        }
+    };
     measured[elbow] = Some(q[elbow] + REFERENCE_GAP / 2.0);
-    let step = solve
-        .step(&reference, &measured, &available, &Targets::default(), DT)
-        .expect("a step");
-    assert_eq!(step.q[elbow], q[elbow]);
-    reference.clone_from(&step.q);
+    settle(&measured, &mut reference);
+    assert_eq!(reference[elbow], q[elbow]);
     measured[elbow] = Some(q[elbow] + REFERENCE_GAP * 2.0);
-    let step = solve
-        .step(&reference, &measured, &available, &Targets::default(), DT)
-        .expect("a step");
-    assert!((step.q[elbow] - (q[elbow] + REFERENCE_GAP)).abs() < 1e-12);
+    settle(&measured, &mut reference);
+    assert!((reference[elbow] - (q[elbow] + REFERENCE_GAP)).abs() < 1e-12);
 }
 
 #[test]
