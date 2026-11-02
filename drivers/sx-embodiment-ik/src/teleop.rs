@@ -819,7 +819,10 @@ impl Teleop {
                                 if (at - from) * push <= STALL_STILL + 2.0 * READING_JITTER =>
                             {
                                 let since = since + dt;
-                                if since >= stall_s {
+                                // Never on a reading in doubt: it may be a glitch, and the hold
+                                // is where the joint is taken to stand (a glitch on the stall's
+                                // tick held the elbow 0.09 rad off its stop, #211 refute).
+                                if since >= stall_s && self.refused[axis] == 0 {
                                     self.stall[axis] = push;
                                     self.asked_back[axis] = 0.0;
                                     self.hold[axis] = raw;
@@ -921,13 +924,17 @@ impl Teleop {
                     } else {
                         0.0
                     };
-                    let lag = if trusted.is_finite() {
+                    // Its lag only toward the command: a jump away from it (off a stop it
+                    // pushes, by up to the gap) is no move a follower makes, and taken on the
+                    // tick a stall fired it became the hold (embodiments#211 refute).
+                    let toward = if trusted.is_finite() && (at - *trusted) * (sent - *trusted) > 0.0
+                    {
                         (sent - *trusted).abs()
                     } else {
                         0.0
                     };
                     let missed = f64::from(since_read.saturating_sub(1) + *refused);
-                    let reach = lag
+                    let reach = toward
                         + FOLLOWER_SPEED * commanded
                         + FOLLOWER_SPEED * speed * dt * missed
                         + GLITCH_FLOOR;
@@ -935,9 +942,13 @@ impl Teleop {
                         FOLLOWER_SPEED * speed * dt * f64::from(*since_read) + 2.0 * READING_JITTER;
                     *since_read = 0;
                     let jump = (at - *trusted).abs();
-                    // A jump the next reading confirms is a move (a reading catching up after
-                    // a stale run); one it does not is a glitch.
-                    let confirmed = (at - *doubted).abs() <= step;
+                    // A jump the next reading confirms is a move: it agrees with the doubted one,
+                    // or goes on past it the same way (a joint shoved faster than its cap; held
+                    // back until GLITCH_HOLD, it landed in one jump, 10,000x a cap). A glitch
+                    // comes back.
+                    let further = (at - *trusted) * (*doubted - *trusted) > 0.0
+                        && (at - *trusted).abs() >= (*doubted - *trusted).abs() - step;
+                    let confirmed = (at - *doubted).abs() <= step || further;
                     if seeded
                         || !trusted.is_finite()
                         || jump <= reach

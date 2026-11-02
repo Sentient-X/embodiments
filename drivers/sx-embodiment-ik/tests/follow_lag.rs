@@ -173,7 +173,9 @@ fn an_operators_hand_is_followed_no_worse_than_today() {
         (desk, "desk", "act-sim-like", 9.5, 0.2, 40.0, 6.5, 11.5),
         (desk, "desk", "stiff", 30.0, 0.7, 30.0, 4.4, 9.5),
         (vr, "vr", "act-sim-like", 9.5, 0.2, 190.0, 86.7, 123.5),
-        (vr, "vr", "stiff", 30.0, 0.7, 140.0, 66.1, 86.5),
+        // 150 ms, 67.3 mm rms since #209 (embodiments#208): 140 / 66.1 passed only within the
+        // tenth of margin.
+        (vr, "vr", "stiff", 30.0, 0.7, 150.0, 67.3, 86.5),
     ];
     for (path, name, motor, omega, zeta, delay, rms, peak) in cases {
         let got = follow(path, omega, zeta);

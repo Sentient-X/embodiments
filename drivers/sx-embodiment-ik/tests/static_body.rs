@@ -712,3 +712,32 @@ fn the_folded_neck_rest_is_clear_of_itself() {
     let (clearance, a, b) = ik.clearance(&q);
     assert!(clearance > 0.0, "{a} and {b} at {clearance} m");
 }
+
+/// One reading that jumps ten times what the joint could move is no speed: the measured speed a measured row carries
+/// forward ([`Ik::measured_speed`]) stays within FOLLOWER_SPEED times the axis's speed cap
+/// (unbounded, a glitch differenced over a 10 ms tick read as 50 rad/s; embodiments#210).
+#[test]
+fn a_reading_that_jumps_is_no_speed() {
+    let mut solver = ik(None);
+    let q = rest(&solver);
+    let width = q.len();
+    let available = vec![true; width];
+    let targets = [None, None, None];
+    let axis = solver.body().solved()[0];
+    let cap = solver.caps().speed[axis];
+    let stuck = vec![false; width];
+    let mut measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+    for tick in 0..20 {
+        if tick == 10 {
+            // Ten times what the bound allows over a tick: unbounded, it reads past the bound.
+            measured[axis] = Some(q[axis] + 10.0 * sx_embodiment_ik::FOLLOWER_SPEED * cap * 0.01);
+        }
+        solver.set_measured(&measured, &stuck).expect("readings");
+        solver.step(&q, &available, &targets, 0.01).expect("a step");
+        assert!(
+            solver.measured_speed(axis).abs() <= sx_embodiment_ik::FOLLOWER_SPEED * cap + 1e-12,
+            "tick {tick}: {} rad/s against a {cap} rad/s cap",
+            solver.measured_speed(axis)
+        );
+    }
+}
