@@ -641,6 +641,11 @@ impl Teleop {
         self.seed = true;
     }
 
+    /// Hold motion across a brief input gap, preserving contact and engagement state.
+    pub fn hold(&mut self) {
+        self.ik.hold();
+    }
+
     /// Each hand's target as the solve takes it: its whole pose, or with its roll free only
     /// its approach axis.
     fn want_hands(&mut self, targets: &Targets) -> Result<(), IkError> {

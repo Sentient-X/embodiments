@@ -288,6 +288,12 @@ fn gripper_contact_holds_both_fingers_until_opening_without_stopping_the_other_h
         "the other arm must keep following its hand target"
     );
 
+    // A brief missing-input hold must not forget contact and squeeze again on recovery.
+    solve.hold();
+    tick(&mut solve, &mut q, &targets, true);
+    for &(axis, at) in &blocked {
+        assert_eq!(q[axis], at, "a hold must preserve captured contact");
+    }
     // No new width, or a slightly less closed request that is still inside the object,
     // must not reopen permission to squeeze.
     for width in [None, Some(left.closed_width_m + 0.001)] {

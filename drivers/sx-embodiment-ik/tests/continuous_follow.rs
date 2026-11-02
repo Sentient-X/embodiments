@@ -59,6 +59,12 @@ fn fast_hand_goals_brake_before_the_feedback_window_and_follow_the_latest_revers
         let mut limited = false;
         let mut reversed = false;
         for tick in 0..500 {
+            if tick == 100 {
+                // The station held across a short packet gap: restart planned velocity
+                // from rest without forgetting the established reference or contacts.
+                teleop.hold();
+                velocity = 0.0;
+            }
             // The hand outruns a healthy slow motor, then changes its mind. There is no
             // queued trajectory: a later goal must replace the earlier one immediately.
             let angle = if tick < 150 { sign * 0.8 } else { -sign * 0.3 };

@@ -601,6 +601,11 @@ impl Ik {
         self.anchored = self.preferred.is_some();
     }
 
+    /// Stop planned velocity without changing the posture anchor or measured windows.
+    pub fn hold(&mut self) {
+        self.velocity.fill(0.0);
+    }
+
     /// Where the next steps must leave `axis`, positions `[low, high]`, never past its joint
     /// limits; unbounded both ways frees it. The window wins over the speed and acceleration
     /// caps when they cannot meet, and its move is part of the step, so the collision rows
