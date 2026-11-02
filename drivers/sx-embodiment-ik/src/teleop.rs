@@ -71,12 +71,15 @@ pub const STALL_STILL: f64 = 0.0005;
 
 /// A stalled joint lets go when its targets have asked it back off what stopped it by more
 /// than this, radians: what each tick's solve asks of it ([`crate::Ik::asked`]), summed over
-/// the ticks since they last asked it on, so the same in any loop rate. On the static body's
-/// held left elbow (2026-11-02) a hand pushing on asks it 2e-4 to 5e-4 rad a tick on; a hand
-/// turned back 8 cm asks 1.2e-2 rad back in its first 10 ms at 100, 250 and 500 Hz, a release
-/// at once. Once the rest of the arm takes up a slow turn back, a tick asks little and the
-/// release waits while the hand still follows; a jump whose free path first draws the joint
-/// back by more than this releases it, as any genuine ask back does.
+/// the ticks since they last asked it on, so a distance rather than a rate. On the static
+/// body's held left elbow (2026-11-02) a hand pushing on asks it 2e-4 to 5e-4 rad a tick on; a
+/// hand turned back 8 cm asks 1.2e-2 rad back in its first 10 ms at 100, 250 and 500 Hz, a
+/// release at once. Once the rest of the arm takes up a slow turn back, a tick asks little:
+/// the release waits (0.2 to 1 s, the tool within 5 mm of a slow hand) while it stands still.
+/// A jump whose free path first draws the joint back by more than this releases it, as any
+/// genuine ask back does ([0.06, 0, 0.06] from Ready at 250 and 500 Hz, not at 100 Hz); the
+/// push that follows is a fresh contact's, at most the reference gap, and lasts while the
+/// hand stays there, as a fresh contact under the gap does.
 pub const STALL_RELEASE: f64 = 0.01;
 
 /// How close each driven hand's target must be to its gripper's tool point, as the robot
