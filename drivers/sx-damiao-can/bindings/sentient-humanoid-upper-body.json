@@ -15,8 +15,8 @@
       "reduction": 1.0,
       "home": 0.0,
       "speed": 10.471975511965978,
-      "acceleration": 39.2956497276854,
-      "inertia": 0.81433950632593
+      "acceleration": 38.35369146178172,
+      "inertia": 0.83433950632593
     },
     {
       "joint": "right_shoulder_pitch_joint",
@@ -32,7 +32,7 @@
       "home": 0.0,
       "speed": 10.471975511965978,
       "acceleration": 104.71975511965977,
-      "inertia": 0.05259152698919917
+      "inertia": 0.07259152698919917
     },
     {
       "joint": "right_shoulder_roll_joint",
@@ -48,7 +48,7 @@
       "home": 0.0,
       "speed": 10.471975511965978,
       "acceleration": 104.71975511965977,
-      "inertia": 0.054671421509963805
+      "inertia": 0.07467142150996381
     },
     {
       "joint": "right_elbow_yaw_joint",
@@ -64,7 +64,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.006544415173383167
+      "inertia": 0.03854441517338317
     },
     {
       "joint": "right_elbow_forearm_yaw_joint",
@@ -80,7 +80,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.0065348735140110525
+      "inertia": 0.03853487351401105
     },
     {
       "joint": "right_wrist_yaw_joint",
@@ -96,7 +96,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.00010495951843992289
+      "inertia": 0.032104959518439925
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -112,7 +112,7 @@
       "home": 0.0,
       "speed": 10.471975511965978,
       "acceleration": 104.71975511965977,
-      "inertia": 0.05278379934157938
+      "inertia": 0.07278379934157939
     },
     {
       "joint": "left_shoulder_roll_joint",
@@ -128,7 +128,7 @@
       "home": 0.0,
       "speed": 10.471975511965978,
       "acceleration": 104.71975511965977,
-      "inertia": 0.054711001160259176
+      "inertia": 0.07471100116025918
     },
     {
       "joint": "left_elbow_yaw_joint",
@@ -144,7 +144,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.006628496735252287
+      "inertia": 0.03862849673525229
     },
     {
       "joint": "left_elbow_forearm_yaw_joint",
@@ -160,7 +160,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.006536687934717511
+      "inertia": 0.03853668793471751
     },
     {
       "joint": "left_wrist_yaw_joint",
@@ -176,7 +176,7 @@
       "home": 0.0,
       "speed": 3.7699111843077517,
       "acceleration": 37.69911184307752,
-      "inertia": 0.00010533243859991862
+      "inertia": 0.03210533243859992
     }
   ],
   "supersedes": [

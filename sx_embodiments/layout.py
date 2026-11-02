@@ -147,12 +147,17 @@ class ActuatorRating:
     ``rated_torque_nm`` is the vendor's rated (continuous) torque, what the motor gives across
     its rated speed, so what a planned acceleration may spend
     (:mod:`sx_embodiments.calibrate.motion`); ``None`` where none is recorded.
+    ``armature_kg_m2`` is the rotor's inertia reflected to the output shaft (rotor inertia
+    times the internal gear ratio squared), which every joint the actuator drives moves on
+    top of its links (``JointMotion.inertia``); ``None`` where none is recorded. Left out,
+    a light link looks a hundred times lighter than it is (sx#3004).
     """
 
     peak_torque_nm: float
     supply: SupplyRange | None = None
     rated_speed_rad_s: float | None = None
     rated_torque_nm: float | None = None
+    armature_kg_m2: float | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
@@ -163,6 +168,9 @@ class ActuatorRating:
         rated = self.rated_torque_nm
         if rated is not None and not (math.isfinite(rated) and 0.0 < rated <= self.peak_torque_nm):
             raise LayoutError("actuator", "rated torque must be positive and at most the peak")
+        armature = self.armature_kg_m2
+        if armature is not None and not (math.isfinite(armature) and armature > 0.0):
+            raise LayoutError("actuator", "armature must be a positive finite kg·m²")
 
 
 def rpm(revolutions_per_minute: float) -> float:
@@ -179,22 +187,36 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
     # below it and is what binds (sx_embodiments.calibrate.motion).
     ActuatorModel.FEETECH_STS3215: ActuatorRating(2.94, rated_speed_rad_s=math.pi / 3.0 / 0.222),
     # DM-J4310-2EC V1.1 manual (files.seeedstudio.com/products/Damiao/DM-J4310-en.pdf): rated
-    # 24 V, 3/7 N·m rated/peak, rated speed 120 rpm, 200 rpm unloaded.
+    # 24 V, 3/7 N·m rated/peak, rated speed 120 rpm, 200 rpm unloaded, gear ratio 10:1.
+    # Armature: Damiao's parameter table (wiki.seeedstudio.com/damiao_series, "Rotational
+    # Inertia" 1.80E-05 kg·m², the rotor's) times 10², 1.8e-3 at the output; the bench
+    # estimate (tools/sim_joint_tracking.py, BAM) is 2e-3.
     ActuatorModel.DAMIAO_DM4310: ActuatorRating(
-        7.0, rated_speed_rad_s=rpm(120.0), rated_torque_nm=3.0
+        7.0, rated_speed_rad_s=rpm(120.0), rated_torque_nm=3.0, armature_kg_m2=1.8e-5 * 10**2
     ),
-    # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded.
+    # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded,
+    # gear ratio 40:1. Armature: the same table's 2.00E-05 kg·m² rotor times 40², 0.032 at the
+    # output (the bench estimate assumed 0.01; neither is measured on our motors yet).
     ActuatorModel.DAMIAO_DM4340: ActuatorRating(
-        27.0, rated_speed_rad_s=rpm(36.0), rated_torque_nm=9.0
+        27.0, rated_speed_rad_s=rpm(36.0), rated_torque_nm=9.0, armature_kg_m2=2.0e-5 * 40**2
     ),
     # DM-J8009-2EC manual (manuals.plus/damiao/dm-j8009-2ec-servo-motor-manual): 100 rpm at
-    # 24 V, 160 rpm unloaded.
-    ActuatorModel.DAMIAO_DM8009: ActuatorRating(40.0, rated_speed_rad_s=rpm(100.0)),
+    # 24 V, 160 rpm unloaded. Damiao publishes no rotor inertia for the 8009 family (its 2025
+    # catalogue and the table above stop at the 43 series): the armature is the bench
+    # estimate, 0.02 kg·m² (tools/sim_joint_tracking.py, BAM).
+    ActuatorModel.DAMIAO_DM8009: ActuatorRating(
+        40.0, rated_speed_rad_s=rpm(100.0), armature_kg_m2=0.02
+    ),
     # openelab.io/products/damiao-brushless-servo-dm-j8009p and
     # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
     # output), supports 24-48 V (200 rpm at 48 V), 20/40 N·m nominal/peak, 40-50 A peak.
+    # Armature as the DM8009's, the bench estimate.
     ActuatorModel.DAMIAO_DM8009P: ActuatorRating(
-        40.0, SupplyRange(24.0, 48.0), rated_speed_rad_s=rpm(100.0), rated_torque_nm=20.0
+        40.0,
+        SupplyRange(24.0, 48.0),
+        rated_speed_rad_s=rpm(100.0),
+        rated_torque_nm=20.0,
+        armature_kg_m2=0.02,
     ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
     ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),
