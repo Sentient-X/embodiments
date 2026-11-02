@@ -33,7 +33,8 @@
 //!
 //! Where a row cannot be kept within the acceleration caps, the cap yields on that row's axes
 //! (keeping clear outranks smoothness) and the step says [`Solve::Relaxed`]; if the QP then
-//! fails, each axis slows toward standing still ([`Solve::Held`]).
+//! fails, each axis slows toward standing still ([`Solve::Held`]), within its window where it
+//! has one ([`Ik::set_window`]).
 //!
 //! An unreachable or colliding target degrades smoothly: the step goes as far as the
 //! constraints allow, and each limb's [`LimbReport`] carries its residual (metres and radians
@@ -75,7 +76,9 @@ pub use geometry::{
 };
 pub use math::Iso;
 pub use model::{Frames, Model};
-pub use solve::{Active, Caps, Clearance, Ik, LimbReport, Reach, Settings, Solve, Step};
+pub use solve::{
+    Active, Caps, Clearance, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, Step,
+};
 pub use tool::{Grip, JawKind, Jaws, NoJawsReason, ToolFrame};
 
 /// The static upper body's render pack, as committed.
