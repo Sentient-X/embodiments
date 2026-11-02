@@ -368,6 +368,12 @@ pub struct Teleop {
     leashed: Vec<Option<(f64, f64)>>,
     /// Per axis: the way it pushed when it stalled (+1, -1), until the targets ask it back.
     stall: Vec<f64>,
+    /// Per axis: where it stands when it does not follow its reference (stalled, or at the
+    /// gap and coming no nearer), for the solve's pairs ([`Ik::set_stuck`]).
+    stuck: Vec<bool>,
+    /// Per axis, a stop it stalled on (where, and the way it pushed), until it is measured
+    /// past it.
+    stop: Vec<Option<(f64, f64)>>,
     /// Per stalled axis: how far its targets have asked it back since they last asked it on,
     /// radians ([`STALL_RELEASE`]).
     asked_back: Vec<f64>,
@@ -538,6 +544,8 @@ impl Teleop {
             leashed: vec![None; width],
             stall: vec![0.0; width],
             asked_back: vec![0.0; width],
+            stuck: vec![false; width],
+            stop: vec![None; width],
             hold: vec![0.0; width],
         })
     }
@@ -685,6 +693,7 @@ impl Teleop {
             }
         }
         if seeded {
+            self.stop.fill(None);
             self.leashed.fill(None);
             self.stall.fill(0.0);
         }
@@ -695,6 +704,8 @@ impl Teleop {
             .zip(reference.iter().zip(measured))
             .enumerate()
         {
+            self.ik.set_window(axis, f64::NEG_INFINITY, f64::INFINITY);
+            self.stuck[axis] = false;
             *slot = match reading {
                 Some(at) if seeded => *at,
                 // A reading that is not a number leaves the reference (as the old rule did,
@@ -707,8 +718,9 @@ impl Teleop {
                         && self.limbs_of[axis] & !driven == 0;
                     if !solved {
                         self.stall[axis] = 0.0;
+                        self.stop[axis] = None;
                         self.leashed[axis] = None;
-                    } else if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - 1e-9 {
+                    } else if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - STALL_STILL {
                         // At the gap: pushing on something, or only lagging? It stalls when
                         // the measurement comes no nearer for the gripper's stall time.
                         let push = lead.signum();
@@ -729,11 +741,41 @@ impl Teleop {
                     } else {
                         self.leashed[axis] = None;
                     }
-                    if self.stall[axis] == 0.0 {
-                        sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP)
-                    } else {
+                    // A stop it stalled on stays where it was until the joint is measured past
+                    // it: released, it pushes the same stop again.
+                    if self.stall[axis] != 0.0 {
+                        self.stop[axis] = Some((self.hold[axis], self.stall[axis]));
+                    } else if let Some((stop, push)) = self.stop[axis]
+                        && (at - stop) * push > STALL_STILL
+                    {
+                        self.stop[axis] = None;
+                    }
+                    // Not following: stalled, at the gap and come no nearer for a tick, or led
+                    // past a stop it stalled on. Planned where it stands, never counted on to
+                    // open a pair.
+                    let past_stop = self.stop[axis]
+                        .is_some_and(|(stop, push)| (sent - stop) * push > STALL_STILL);
+                    if self.stall[axis] != 0.0
+                        || past_stop
+                        || matches!(self.leashed[axis], Some((_, since)) if since > 0.0)
+                    {
+                        self.stuck[axis] = true;
+                    }
+                    if self.stall[axis] != 0.0 {
                         // Stalled: held stiff where it stood, pushing no further.
                         self.hold[axis]
+                    } else if solved {
+                        // Within the gap of its measurement by the step, not by moving the
+                        // reference: a reference moved there skipped every pair the solve
+                        // keeps clear (a lagging right arm's commands touched the left gripper,
+                        // 2026-11-02).
+                        self.ik
+                            .set_window(axis, at - REFERENCE_GAP, at + REFERENCE_GAP);
+                        *sent
+                    } else {
+                        // Not moved by the solve this tick (held, idle): within the gap of
+                        // where it is, as someone moving it takes it.
+                        sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP)
                     }
                 }
                 Some(_) | None => *sent,
@@ -836,6 +878,11 @@ impl Teleop {
                 *avail = false;
             }
         }
+        // Pairs are kept clear with a joint that does not follow where it stands, not where
+        // its reference says: planned from the reference, a pair beside an elbow pushing a
+        // stop was kept clear on a move the stop never let it make, and the right gripper
+        // reaching for the left one touched it (2026-11-02).
+        self.ik.set_measured(measured, &self.stuck)?;
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);
