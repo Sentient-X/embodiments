@@ -5,7 +5,8 @@
 //! commanded, moving at the velocity that command planned (its MIT `v_des`), and enable and
 //! disable set the state its feedback reports. A bus built [`Sim::with_mit_dynamics`] instead
 //! runs each motor's MIT law on a loaded joint in wall time: `J a = clamp(kp (p_des - q) +
-//! kd (v_des - v) + tau_ff, +-peak) - b v`, integrated at 1 ms between frames, with no torque
+//! kd (v_des - v) + tau_ff, +-peak) - b v`, integrated at 1 ms between frames implicitly in
+//! the gains and viscous friction (stable however light the joint), with no torque
 //! once disabled or after its `TIMEOUT` lapses, so lag, coast, overshoot and ringing show up. A killed motor never
 //! answers. A fault code is latched: enable and disable leave it, and only the clear frame
 //! (`FF..FB`) clears it, to disabled, unless it is persistent. Waits are recorded rather than
@@ -157,31 +158,46 @@ impl SimMotor {
             {
                 self.state = COMMUNICATION_LOST;
             }
-            let torque = if self.state == 1 {
-                (dynamics.kp * (dynamics.p_des - self.q)
-                    + dynamics.kd * (dynamics.v_des - dynamics.velocity)
-                    + dynamics.tau_ff)
-                    .clamp(-dynamics.peak, dynamics.peak)
+            // The MIT law's torque at the step's end velocity `w` is `free - stiffness w`
+            // (position moves by `w` over the step). Solving for `w` (implicit in the gains and
+            // viscous friction, semi-implicit Euler) is stable at any inertia: a light joint
+            // under a firm `kd` (the humanoid's wrists, `kd dt / J` near 48, #3004) settles as
+            // the overdamped joint it is, where explicit Euler is stable only below 2.
+            let (free, stiffness) = if self.state == 1 {
+                (
+                    dynamics.kp * (dynamics.p_des - self.q)
+                        + dynamics.kd * dynamics.v_des
+                        + dynamics.tau_ff,
+                    dynamics.kp * MIT_STEP + dynamics.kd,
+                )
             } else {
-                0.0
+                (0.0, 0.0)
             };
-            let drive = torque + dynamics.load - dynamics.damping * dynamics.velocity;
-            if dynamics.velocity.abs() < 1e-4 && drive.abs() <= dynamics.coulomb {
+            let at_rest = free.clamp(-dynamics.peak, dynamics.peak) + dynamics.load;
+            if dynamics.velocity.abs() < 1e-4 && at_rest.abs() <= dynamics.coulomb {
                 // Stuck: static friction holds it.
                 dynamics.velocity = 0.0;
             } else {
                 let direction = if dynamics.velocity.abs() < 1e-4 {
-                    drive.signum()
+                    at_rest.signum()
                 } else {
                     dynamics.velocity.signum()
                 };
                 let before = dynamics.velocity;
-                dynamics.velocity +=
-                    (drive - dynamics.coulomb * direction) / dynamics.inertia * MIT_STEP;
+                let momentum = dynamics.inertia / MIT_STEP;
+                let base = momentum * before + dynamics.load - dynamics.coulomb * direction;
+                let mut after = (base + free) / (momentum + stiffness + dynamics.damping);
+                let mut torque = free - stiffness * after;
+                if torque.abs() > dynamics.peak {
+                    // Saturated: the motor gives its peak, whatever the velocity.
+                    torque = dynamics.peak.copysign(torque);
+                    after = (base + torque) / (momentum + dynamics.damping);
+                }
+                dynamics.velocity = after;
                 // Friction stops a joint; it never reverses it.
                 if before != 0.0
-                    && before.signum() != dynamics.velocity.signum()
-                    && drive.abs() <= dynamics.coulomb
+                    && before.signum() != after.signum()
+                    && (torque + dynamics.load).abs() <= dynamics.coulomb
                 {
                     dynamics.velocity = 0.0;
                 }
@@ -410,7 +426,9 @@ impl Sim {
     /// the drive's gain squared), no friction (a description carries none; a load model adds
     /// gravity), and its model's peak torque. The body a station believes it drives, so its
     /// feed-forward cancels what it models; friction is the bench simulation's
-    /// ([`Sim::with_mit_dynamics`], `tools/sim_speed_ceiling.py`).
+    /// ([`Sim::with_mit_dynamics`], `tools/sim_speed_ceiling.py`). The bindings' inertia is the
+    /// links' alone, with no rotor reflected through the gearbox, so a wrist here is far lighter
+    /// than a real one (the humanoid's 1.05e-4 kg m^2 against about 0.01 with a DM4340's rotor).
     #[must_use]
     pub fn with_model_dynamics(self, axes: &[DamiaoAxis]) -> Self {
         {
