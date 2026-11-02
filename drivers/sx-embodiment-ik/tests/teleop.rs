@@ -793,10 +793,9 @@ fn at_the_stop(q: &[f64], elbow: usize, stopped_at: f64) -> Vec<f64> {
 /// from the command, a pair near the pushing arm was kept clear on a move the stop never let
 /// the elbow make: the right gripper touched the left at 250 and 500 Hz, and at f5244bf the
 /// left arm went 33 mm into the box (2026-11-02).
-#[test]
-fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
+fn keeps_pairs_clear_while_pushing(rates: &[f64], floor: f64) {
     let margin = sx_embodiment_ik::Settings::default().collision_margin_m;
-    for dt in [0.02, 0.01, 0.004, 0.002] {
+    for &dt in rates {
         for case in ["reach", "box"] {
             let mut config =
                 TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
@@ -882,10 +881,6 @@ fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
                 if t >= turn {
                     let (clear, a, b) = solve.ik().clearance(&at_the_stop(&q, elbow, stopped_at));
                     least = least.min(clear);
-                    // Within the margin at the loop rates a station runs today; never in
-                    // contact at the faster ones (the breach left there is the reference
-                    // rule's: embodiments#198 follow-up).
-                    let floor = if dt >= 0.01 { margin - 0.0005 } else { 0.003 };
                     assert!(
                         clear >= floor,
                         "{case} at {dt}: {a} and {b} {clear} m apart at {:.3} s",
@@ -900,4 +895,18 @@ fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
             );
         }
     }
+}
+
+/// At the rates a station runs (the static body's layout: 50 Hz) and 100 Hz, the margin.
+#[test]
+fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
+    let margin = sx_embodiment_ik::Settings::default().collision_margin_m;
+    keeps_pairs_clear_while_pushing(&[0.02, 0.01], margin - 0.0005);
+}
+
+/// At 250 and 500 Hz, clear of contact by 3 mm: the breach of the margin left there is the
+/// reference rule's (its command leads the arm by up to the gap).
+#[test]
+fn a_pushing_arm_keeps_its_pairs_clear_at_faster_rates() {
+    keeps_pairs_clear_while_pushing(&[0.004, 0.002], 0.003);
 }
