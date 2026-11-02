@@ -251,6 +251,12 @@ enum Bound {
     Accel,
 }
 
+/// How far a joint's reading may stray from where it is, radians, either way: an encoder's
+/// count and a bus's jitter. A measured pose within this of the command on every axis a pair
+/// moves is the command as far as the pair goes; two readings closer than twice this are not
+/// progress ([`crate::STALL`]). The clearance tests jitter every reading by this much.
+pub const READING_JITTER: f64 = 0.001;
+
 #[derive(Clone, Copy, Debug)]
 enum Pair {
     /// Two capsules (by index) as measured this tick: a closest point on each and the
@@ -302,6 +308,9 @@ struct Workspace {
     rows: Vec<f64>,
     rhs: Vec<f64>,
     row_active: Vec<Active>,
+    /// Per row, whether it keeps a pair already inside the margin where the body was measured:
+    /// such a row never widens a cap ([`Ik::keep_feasible`]).
+    row_inside: Vec<bool>,
     row_binds: Vec<bool>,
     used: usize,
     unit: Vec<f64>,
@@ -485,6 +494,7 @@ impl Ik {
             rows: vec![0.0; k * n],
             rhs: vec![0.0; k],
             row_active: vec![Active::Limit { axis: 0 }; k],
+            row_inside: vec![false; k],
             row_binds: vec![false; k],
             used: 0,
             unit: vec![1.0; n],
@@ -584,11 +594,12 @@ impl Ik {
         self.anchored = self.preferred.is_some();
     }
 
-    /// Where the next steps must leave `axis`, positions `[low, high]`; unbounded both ways
-    /// frees it. The window wins over the speed and acceleration caps when they cannot meet,
-    /// and is kept as every other bound is, by a step the collision rows see: a caller that
-    /// moved its positions into a window itself would move them past every pair unchecked.
-    /// A window that is not an interval, or an axis out of range, is ignored.
+    /// Where the next steps must leave `axis`, positions `[low, high]`, never past its joint
+    /// limits; unbounded both ways frees it. The window wins over the speed and acceleration
+    /// caps when they cannot meet, and its move is part of the step, so the collision rows
+    /// weigh it and the rest of the body keeps its pairs around it (they cannot refuse it): a
+    /// caller that moved its positions into the window itself moved them past every pair
+    /// unchecked. A window that is not an interval, or an axis out of range, is ignored.
     pub fn set_window(&mut self, axis: usize, low: f64, high: f64) {
         if let Some(slot) = self.window.get_mut(axis)
             && low <= high
@@ -1037,7 +1048,17 @@ impl Ik {
                     (lo, lo_by) = (-down, Bound::Limit);
                 }
             }
-            let [low, high] = self.window[axis];
+            // The window, within the joint's limits (with their margin): never past them.
+            let [mut low, mut high] = self.window[axis];
+            if let Some([low_limit, high_limit]) = axes[axis].limits
+                && low.is_finite()
+                && high.is_finite()
+            {
+                let margin = s.limit_margin_rad.min((high_limit - low_limit) / 2.0);
+                let (inside_low, inside_high) = (low_limit + margin, high_limit - margin);
+                low = low.clamp(inside_low, inside_high);
+                high = high.clamp(inside_low, inside_high);
+            }
             let window = (low - q[axis], high - q[axis]);
             let (mut safe_lo, mut safe_hi) = (lo, hi);
             within(&mut safe_lo, &mut safe_hi, window);
@@ -1090,17 +1111,13 @@ impl Ik {
                 }
                 Pair::Scene(..) => false,
             });
-            let (distance, x, y, direction, refined) = capsule_distance(
-                body,
-                frames,
-                i,
-                j,
-                if refined_already {
-                    f64::NEG_INFINITY
-                } else {
-                    0.0
-                },
-            );
+            let refine_below = if refined_already {
+                f64::NEG_INFINITY
+            } else {
+                0.0
+            };
+            let (distance, x, y, direction, refined) =
+                capsule_distance(body, frames, i, j, refine_below);
             if refined_already && distance < 0.0 {
                 continue;
             }
@@ -1232,6 +1249,13 @@ impl Ik {
                         .map(|(&axis, r)| (r * (q[axis] - w.seen_q[axis])).max(0.0))
                         .sum::<f64>();
             }
+            if candidate.measured
+                && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
+                    *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
+                })
+            {
+                continue; // measured where it was commanded, as far as this pair goes
+            }
             let reach: f64 = (0..n)
                 .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
                 .sum();
@@ -1240,6 +1264,9 @@ impl Ik {
             }
             w.rhs[slot] = rhs;
             w.row_active[slot] = active;
+            // Already inside the margin where it was measured: a follower past its command (a
+            // PD ringing), which no lurch of the command undoes.
+            w.row_inside[slot] = candidate.measured && distance < s.collision_margin_m;
             w.used += 1;
             // The same pair kept without the stuck joints: a step must keep it whether or not
             // they make their move (exactly, for one stuck joint in the pair).
@@ -1255,6 +1282,7 @@ impl Ik {
                 }
                 w.rhs[slot + 1] = rhs;
                 w.row_active[slot + 1] = active;
+                w.row_inside[slot + 1] = w.row_inside[slot];
                 w.used += 1;
             }
         }
@@ -1264,18 +1292,28 @@ impl Ik {
     /// acceleration caps can keep widens its axes to their safe range (the acceleration cap
     /// yields to keeping clear). With `all`, every row's axes yield and every row asks only
     /// that its pair come no closer, which standing still keeps.
+    ///
+    /// A row whose pair is already inside the margin where the body was measured never widens
+    /// a cap: it asks at most what the box (as the other rows left it) can give. That is a
+    /// follower ringing past its command; a cap waived for it lurched the command away and the
+    /// follower rang back in, a limit cycle 40-60 mm deep (embodiments#206: a PD at zeta 0.2).
     fn keep_feasible(&mut self, all: bool) -> Solve {
         let n = self.body.solved.len();
         let w = &mut self.work;
         let mut solve = Solve::Solved;
-        for slot in 0..w.used {
+        let least = |w: &Workspace, slot: usize| -> f64 {
             let row = &w.rows[slot * n..(slot + 1) * n];
-            let best: f64 = (0..n)
+            (0..n)
                 .map(|j| (row[j] * w.lower[j]).min(row[j] * w.upper[j]))
-                .sum();
-            if all || best > w.rhs[slot] {
+                .sum()
+        };
+        for slot in 0..w.used {
+            if w.row_inside[slot] {
+                continue;
+            }
+            if all || least(w, slot) > w.rhs[slot] {
                 for j in 0..n {
-                    if row[j] != 0.0 && !w.yielded[j] {
+                    if w.rows[slot * n + j] != 0.0 && !w.yielded[j] {
                         w.lower[j] = w.safe_lower[j];
                         w.upper[j] = w.safe_upper[j];
                         w.yielded[j] = true;
@@ -1285,6 +1323,14 @@ impl Ik {
             }
             if all {
                 w.rhs[slot] = w.rhs[slot].max(0.0);
+            }
+        }
+        for slot in 0..w.used {
+            if w.row_inside[slot] {
+                if all {
+                    w.rhs[slot] = w.rhs[slot].max(0.0);
+                }
+                w.rhs[slot] = w.rhs[slot].max(least(w, slot));
             }
         }
         for j in 0..n {
@@ -1533,8 +1579,6 @@ impl Ik {
     }
 }
 
-/// The fastest per-tick step from which ticks decelerating by at most `accel` still stop
-/// within `room`: `v dt + v^2 / 2a + v dt / 2 <= room`.
 /// `[lo, hi]` cut to `window`, or, where they do not meet, to the window's nearer end: the
 /// window wins. Whether it moved either end.
 fn within(lo: &mut f64, hi: &mut f64, (low, high): (f64, f64)) -> bool {
@@ -1552,6 +1596,8 @@ fn within(lo: &mut f64, hi: &mut f64, (low, high): (f64, f64)) -> bool {
     }
 }
 
+/// The fastest per-tick step from which ticks decelerating by at most `accel` still stop
+/// within `room`: `v dt + v^2 / 2a + v dt / 2 <= room`.
 fn braking(room: f64, accel: f64, dt: f64) -> f64 {
     dt * accel * ((2.25 * dt * dt + 2.0 * room / accel).sqrt() - 1.5 * dt)
 }

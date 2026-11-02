@@ -47,7 +47,7 @@ use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
-use crate::solve::{Caps, Ik, LimbReport, Reach, Settings, Solve};
+use crate::solve::{Caps, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve};
 
 /// The config's schema, written in every config and refused when another.
 pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
@@ -376,11 +376,13 @@ pub struct Teleop {
     /// Per axis: the way it pushed when it stalled (+1, -1), until the targets ask it back.
     stall: Vec<f64>,
     /// Per axis: where it stands when it does not follow its reference (stalled, or at the
-    /// gap and coming no nearer), for the solve's pairs ([`Ik::set_stuck`]).
+    /// gap and coming no nearer), for the solve's pairs ([`Ik::set_measured`]).
     stuck: Vec<bool>,
     /// Per axis, a stop it stalled on (where, and the way it pushed), until it is measured
     /// past it.
     stop: Vec<Option<(f64, f64)>>,
+    /// Per axis, the window its last step was given ([`Ik::set_window`]).
+    window: Vec<Option<[f64; 2]>>,
     /// Per stalled axis: how far its targets have asked it back since they last asked it on,
     /// radians ([`STALL_RELEASE`]).
     asked_back: Vec<f64>,
@@ -553,6 +555,7 @@ impl Teleop {
             asked_back: vec![0.0; width],
             stuck: vec![false; width],
             stop: vec![None; width],
+            window: vec![None; width],
             hold: vec![0.0; width],
         })
     }
@@ -713,6 +716,7 @@ impl Teleop {
             .enumerate()
         {
             self.ik.set_window(axis, f64::NEG_INFINITY, f64::INFINITY);
+            let window = self.window[axis].take();
             self.stuck[axis] = false;
             *slot = match reading {
                 Some(at) if seeded => *at,
@@ -728,12 +732,27 @@ impl Teleop {
                         self.stall[axis] = 0.0;
                         self.stop[axis] = None;
                         self.leashed[axis] = None;
-                    } else if self.stall[axis] == 0.0 && lead.abs() >= REFERENCE_GAP - STALL_STILL {
-                        // At the gap: pushing on something, or only lagging? It stalls when
-                        // the measurement comes no nearer for the gripper's stall time.
+                    } else if self.stall[axis] == 0.0
+                        && window.is_some_and(|[low, high]| {
+                            // Within a reading's jitter (either end) of the edge: a step settles
+                            // a little inside it, and the jitter moves the edge each tick.
+                            let near = STALL_STILL + 2.0 * READING_JITTER;
+                            if lead > 0.0 {
+                                *sent >= high - near
+                            } else {
+                                *sent <= low + near
+                            }
+                        })
+                    {
+                        // At the gap (the step ended on its window's edge, whatever the reading
+                        // now: noise in it moves the gap, not the push): pushing on something,
+                        // or only lagging? It stalls when the measurement comes no nearer for
+                        // the gripper's stall time.
                         let push = lead.signum();
                         self.leashed[axis] = match self.leashed[axis] {
-                            Some((from, since)) if (at - from) * push <= STALL_STILL => {
+                            Some((from, since))
+                                if (at - from) * push <= STALL_STILL + 2.0 * READING_JITTER =>
+                            {
                                 let since = since + dt;
                                 if since >= stall_s {
                                     self.stall[axis] = push;
@@ -750,11 +769,12 @@ impl Teleop {
                         self.leashed[axis] = None;
                     }
                     // A stop it stalled on stays where it was until the joint is measured past
-                    // it: released, it pushes the same stop again.
+                    // it (never by two readings' jitter): released, it pushes the same stop
+                    // again.
                     if self.stall[axis] != 0.0 {
                         self.stop[axis] = Some((self.hold[axis], self.stall[axis]));
                     } else if let Some((stop, push)) = self.stop[axis]
-                        && (at - stop) * push > STALL_STILL
+                        && (at - stop) * push > STALL_STILL + 2.0 * READING_JITTER
                     {
                         self.stop[axis] = None;
                     }
@@ -779,6 +799,7 @@ impl Teleop {
                         // 2026-11-02).
                         self.ik
                             .set_window(axis, at - REFERENCE_GAP, at + REFERENCE_GAP);
+                        self.window[axis] = Some([at - REFERENCE_GAP, at + REFERENCE_GAP]);
                         *sent
                     } else {
                         // Not moved by the solve this tick (held, idle): within the gap of

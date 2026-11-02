@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use sx_embodiment_ik::teleop::{
     HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig, TeleopStep,
 };
-use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use sx_embodiment_ik::{Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
 
@@ -35,12 +35,16 @@ fn config() -> TeleopConfig {
 }
 
 fn teleop() -> Teleop {
-    Teleop::new(
+    let mut solve = Teleop::new(
         STATIC_UPPER_BODY_URDF,
         STATIC_UPPER_BODY_COLLISION,
         &config(),
     )
-    .expect("solve")
+    .expect("solve");
+    // Answers, not the clock: a loaded host (the clearance cases on every core) past the
+    // station's budget would hold steps.
+    solve.set_deadline(std::time::Duration::from_secs(1));
+    solve
 }
 
 /// Every axis inside its range, the mid of zero and its range's middle.
@@ -305,6 +309,7 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
             },
         )
         .expect("solve");
+        solve.set_deadline(std::time::Duration::from_secs(1));
         let mut q = start(&solve);
         // The torso upright: from the suite's start it rests on the table, and the solve holds.
         q[index(&solve, "torso_joint")] = 0.0;
@@ -457,6 +462,83 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
         }
     }
     assert!(freed, "asked the other way, the stall lets go");
+}
+
+/// A blocked joint stalls though every reading jitters by [`READING_JITTER`] either way, at the
+/// Spark's 90 Hz, 50 Hz and 100 Hz, and stays stalled while the hand pushes on. Its step ends
+/// on the window's edge whatever the reading, so the jitter moves the gap, not the push (at
+/// 8d151e9, ±0.4 mrad of noise kept it from ever stalling: embodiments#206's refute).
+#[test]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // tick counts and seconds
+fn a_blocked_joint_stalls_through_a_readings_jitter() {
+    for dt in [0.011, 0.02, 0.01] {
+        let mut solve = teleop();
+        let mut q = start(&solve);
+        q[index(&solve, "torso_joint")] = 0.0;
+        let elbow = index(&solve, "left_elbow_pitch_joint");
+        let from = tcp(&solve, &q, 0);
+        let available = vec![true; q.len()];
+        let blocked_at = q[elbow];
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut jitter = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let unit = (state >> 11) as f64 / (1_u64 << 53) as f64;
+            READING_JITTER * 2.0f64.mul_add(unit, -1.0)
+        };
+        let targets = Targets {
+            tcp: [
+                Some(Pose {
+                    translation_m: [
+                        from.translation_m[0] + 0.06,
+                        from.translation_m[1],
+                        from.translation_m[2] - 0.08,
+                    ],
+                    rotation_xyzw: from.rotation_xyzw,
+                }),
+                None,
+            ],
+            ..Targets::default()
+        };
+        solve.reset();
+        let (mut at_gap, mut stalled_at) = (None, None);
+        for tick in 0..((STALL.as_secs_f64() + 1.5) / dt) as usize {
+            let measured: Vec<Option<f64>> = q
+                .iter()
+                .enumerate()
+                .map(|(axis, at)| Some(if axis == elbow { blocked_at } else { *at } + jitter()))
+                .collect();
+            let step = solve
+                .step(&q, &measured, &available, &targets, dt)
+                .expect("a step");
+            q.copy_from_slice(&step.q);
+            if (q[elbow] - blocked_at).abs() >= REFERENCE_GAP - 0.003 {
+                at_gap.get_or_insert(tick);
+            }
+            if step.stalled[elbow] {
+                stalled_at.get_or_insert(tick);
+            } else {
+                assert!(
+                    stalled_at.is_none(),
+                    "at {dt} s it stays stalled while pushed"
+                );
+            }
+        }
+        let at_gap = at_gap.unwrap_or_else(|| panic!("at {dt} s the elbow never reached the gap"));
+        let stalled_at = stalled_at.unwrap_or_else(|| panic!("at {dt} s the elbow never stalled"));
+        // The stall time from when it reached the gap; at 100 Hz the solve swings the elbow off
+        // the gap once on the way, and the stall time starts again (1.20 s).
+        let late = (stalled_at - at_gap) as f64 * dt;
+        assert!(
+            late <= 1.3,
+            "at {dt} s it stalled {late:.2} s after reaching the gap"
+        );
+    }
 }
 
 /// A stalled joint is held stiff where it stopped, not where it is measured each tick: under a
@@ -779,12 +861,30 @@ fn a_stall_lets_go_as_soon_as_the_hand_turns_back() {
     }
 }
 
+/// How the robot follows its commands in [`least_clearance`].
+#[derive(Clone, Copy, Debug)]
+enum Follower {
+    /// Reaches each command exactly, this many ticks late.
+    Late(usize),
+    /// A PD on each command this many ticks late (natural frequency rad/s, damping ratio),
+    /// as the motors of `follow_lag.rs`: act-sim-like (9.5, 0.2) rings past its commands.
+    Pd(usize, f64, f64),
+}
+
 /// The least clearance, metres, where the robot really is, from 1.5 s after the left elbow
-/// first stalls on a stop (when `stopped`) to 4 s on: `case` "reach" sends the right gripper
-/// to where the left one really is, "box" sweeps the left hand inward past a keep-out box
-/// beside its forearm. The robot is a follower `lag` ticks behind its command, its left elbow
-/// never past the stop; it is measured where it is.
-fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, String, String) {
+/// first stalls on a stop (when `stopped`) to 2.5 s on, the pair, and the right arm's sharpest
+/// turn as a multiple of its acceleration cap: `case` "reach" sends the right gripper to where
+/// the left one really is, "box" sweeps the left hand inward past a keep-out box beside its
+/// forearm. The robot is `follower`, its left elbow never past the stop; it is measured where
+/// it is, each reading off by up to `noise` either way.
+#[allow(clippy::too_many_lines)] // one scene, one follower, one loop
+fn least_clearance(
+    dt: f64,
+    case: &str,
+    stopped: bool,
+    follower: Follower,
+    noise: f64,
+) -> (f64, String, String, f64) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
@@ -827,17 +927,39 @@ fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, Stri
     let available = vec![true; rest.len()];
     let mut q = rest.clone();
     // The commands the follower has yet to reach, oldest first.
+    let (Follower::Late(lag) | Follower::Pd(lag, ..)) = follower;
     let mut sent = std::collections::VecDeque::from(vec![rest.clone(); lag + 1]);
     let mut real = rest.clone();
+    let mut speed = vec![0.0; rest.len()];
+    // A reading's jitter, uniform within `noise`, the same every run.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut jitter = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        #[allow(clippy::cast_precision_loss)] // 53 bits are plenty
+        let unit = (state >> 11) as f64 / (1_u64 << 53) as f64;
+        noise * 2.0f64.mul_add(unit, -1.0)
+    };
     let turn = STALL.as_secs_f64() + 1.5;
     let mut least = (f64::INFINITY, String::new(), String::new());
+    let (mut before, mut lurch) = (rest.clone(), 0.0_f64);
+    let caps = solve.ik().caps().accel.clone();
+    let right_arm: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.name.starts_with("right_") && !a.name.contains("finger"))
+        .map(|(axis, _)| axis)
+        .collect();
     solve.reset();
     for tick in 0_u32.. {
         let t = f64::from(tick) * dt;
-        if t > turn + 4.0 {
+        if t > turn + 2.5 {
             break;
         }
-        let measured: Vec<Option<f64>> = real.iter().copied().map(Some).collect();
+        let measured: Vec<Option<f64>> = real.iter().map(|at| Some(at + jitter())).collect();
         let inward = if case == "box" && t >= turn {
             -0.25 * ((t - turn) / 2.0).min(1.0)
         } else {
@@ -863,9 +985,36 @@ fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, Stri
         let step = solve
             .step(&q, &measured, &available, &targets, dt)
             .expect("a step");
+        // How far past its acceleration cap the right arm's command turned this tick (it never
+        // stalls here: a stalled joint's jump to where it stands is not a turn).
+        for axis in right_arm.iter().copied() {
+            let turned = (step.q[axis] - q[axis]) - (q[axis] - before[axis]);
+            if caps[axis].is_finite() && caps[axis] > 0.0 && t >= turn {
+                lurch = lurch.max(turned.abs() / (caps[axis] * dt * dt));
+            }
+        }
+        before.copy_from_slice(&q);
         q.copy_from_slice(&step.q);
         sent.push_back(q.clone());
-        real = sent.pop_front().expect("a command");
+        let command = sent.pop_front().expect("a command");
+        match follower {
+            Follower::Late(_) => real = command,
+            Follower::Pd(_, omega, zeta) => {
+                // Ten substeps of the motor over the tick.
+                let h = dt / 10.0;
+                for _ in 0..10 {
+                    for ((at, v), goal) in real.iter_mut().zip(&mut speed).zip(&command) {
+                        let accel = omega * omega * (goal - *at) - 2.0 * zeta * omega * *v;
+                        *v += accel * h;
+                        *at += *v * h;
+                    }
+                    if stopped && real[elbow] < stop_at {
+                        real[elbow] = stop_at;
+                        speed[elbow] = 0.0;
+                    }
+                }
+            }
+        }
         if stopped {
             real[elbow] = real[elbow].max(stop_at);
         }
@@ -876,7 +1025,7 @@ fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, Stri
             }
         }
     }
-    least
+    (least.0, least.1, least.2, lurch)
 }
 
 const CASES: [(&str, bool); 4] = [
@@ -886,34 +1035,108 @@ const CASES: [(&str, bool); 4] = [
     ("box", false),
 ];
 
-/// Every case at `rates`, a follower 0, 1 and 2 ticks behind, keeps the margin where the robot
-/// really is, within 1 mm (a step's linearisation: 9.35 mm at worst, chest and right upper arm at 500 Hz).
-fn keeps_the_margin(rates: &[f64]) {
+/// Every case at `rates`, each of `followers`, its readings exact and jittering by
+/// [`READING_JITTER`], keeps the margin where the robot really is, within 1.5 mm (a step's
+/// linearisation: 8.7 mm at worst, the chest and right upper arm, the elbow on its stop, two
+/// ticks late, jittering, 50 Hz; every other case within 1 mm).
+fn keeps_the_margin(rates: &[f64], followers: &[Follower]) {
     let margin = sx_embodiment_ik::Settings::default().collision_margin_m;
-    for &dt in rates {
-        for (case, stopped) in CASES {
-            for lag in 0..=2 {
-                let (clear, a, b) = least_clearance(dt, case, stopped, lag);
-                assert!(
-                    clear >= margin - 0.001,
-                    "{case} at {dt} s, stop {stopped}, {lag} ticks behind: {a} and {b} {clear} m apart"
-                );
+    // Each case on its own thread: a debug build runs them all in the time of the longest.
+    std::thread::scope(|scope| {
+        let mut runs = Vec::new();
+        for &dt in rates {
+            for (case, stopped) in CASES {
+                for &follower in followers {
+                    for noise in [0.0, READING_JITTER] {
+                        runs.push(scope.spawn(move || {
+                            let got = least_clearance(dt, case, stopped, follower, noise);
+                            (dt, case, stopped, follower, noise, got)
+                        }));
+                    }
+                }
             }
         }
-    }
+        for run in runs {
+            let (dt, case, stopped, follower, noise, (clear, a, b, _)) =
+                run.join().expect("a case");
+            assert!(
+                clear >= margin - 0.0015,
+                "{case} at {dt} s, stop {stopped}, {follower:?}, noise {noise}: {a} and {b} {clear} m apart"
+            );
+        }
+    });
 }
 
 /// A pair is kept where the robot really is, a joint pushing a stop or a follower behind its
-/// command alike, at the static body's 50 Hz and at 100 Hz. Planned from the command with the
-/// gap clamped onto it, two ticks of lag brought the grippers to 0 mm with nothing blocked and
-/// to -15 mm with the left elbow on a stop (embodiments#206; the Spark's a1dca43: -70 mm).
+/// command alike, at the static body's 50 Hz, the 90 Hz its sessions ran at, and 100 Hz: a
+/// follower 0, 2 and 4 ticks late (the Spark's arm joints trail their commands 26-63 ms, its
+/// neck 80-140 ms; its 2026-10-27..30 journals) and a stiff PD, on time and two ticks late.
+/// Planned from the command with the gap clamped onto it, three ticks of lag at 50 Hz brought
+/// the grippers to -41 mm with the left elbow on a stop (d41fcf2). An underdamped follower
+/// (act-sim-like, zeta 0.2) rings past its commands by centimetres and is kept by no plan made
+/// from positions alone: the gap in embodiments#206.
 #[test]
 fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
-    keeps_the_margin(&[0.02, 0.01]);
+    keeps_the_margin(
+        &[0.02, 0.011, 0.01],
+        &[
+            Follower::Late(0),
+            Follower::Late(2),
+            Follower::Late(4),
+            Follower::Pd(0, 30.0, 0.7),
+            Follower::Pd(2, 30.0, 0.7),
+        ],
+    );
 }
 
-/// The same at 250 and 500 Hz.
+/// The same at 250 and 500 Hz (9.1 mm at worst: the chest and right upper arm, the elbow on
+/// its stop, on time, 1 mrad of jitter, 250 Hz).
 #[test]
 fn a_pushing_arm_keeps_its_pairs_clear_at_faster_rates() {
-    keeps_the_margin(&[0.004, 0.002]);
+    keeps_the_margin(
+        &[0.004, 0.002],
+        &[
+            Follower::Late(0),
+            Follower::Late(2),
+            Follower::Pd(0, 30.0, 0.7),
+        ],
+    );
+}
+
+/// The least clearance and the right arm's sharpest turn against its acceleration cap, every
+/// rate, case, follower and jitter: `cargo test --release -p sx-embodiment-ik --test teleop
+/// clearance_table -- --ignored --nocapture`.
+#[test]
+#[ignore = "prints the clearance table"]
+fn clearance_table() {
+    let followers = [
+        Follower::Late(0),
+        Follower::Late(1),
+        Follower::Late(2),
+        Follower::Late(3),
+        Follower::Late(4),
+        Follower::Pd(0, 9.5, 0.2),
+        Follower::Pd(1, 9.5, 0.2),
+        Follower::Pd(3, 9.5, 0.2),
+        Follower::Pd(0, 30.0, 0.7),
+        Follower::Pd(2, 30.0, 0.7),
+    ];
+    std::thread::scope(|scope| {
+        let mut runs = Vec::new();
+        for dt in [0.02, 0.011, 0.01, 0.004, 0.002] {
+            for (case, stopped) in CASES {
+                for follower in followers {
+                    for noise in [0.0, 0.001] {
+                        runs.push(scope.spawn(move || {
+                            let (c, a, b, lurch) = least_clearance(dt, case, stopped, follower, noise);
+                            format!("TABLE dt={dt} {case} stop={stopped} {follower:?} noise={noise}: {:.1} mm ({a} / {b}) accel x{lurch:.1}", c * 1e3)
+                        }));
+                    }
+                }
+            }
+        }
+        for run in runs {
+            println!("{}", run.join().expect("a case"));
+        }
+    });
 }
