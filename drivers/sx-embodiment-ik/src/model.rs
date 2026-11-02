@@ -112,6 +112,17 @@ impl Model {
         &self.above[link]
     }
 
+    /// Whether `link` hangs below `ancestor` through fixed joints only (or is it).
+    pub(crate) fn rigidly_below(&self, ancestor: usize, mut link: usize) -> bool {
+        while link != ancestor {
+            match self.joints.iter().find(|joint| joint.child == link) {
+                Some(joint) if joint.leader.is_none() => link = joint.parent,
+                _ => return false,
+            }
+        }
+        true
+    }
+
     /// Every link's pose at `q` (one position per [`Model::axes`]).
     #[must_use]
     pub fn poses(&self, q: &[f64]) -> Frames {

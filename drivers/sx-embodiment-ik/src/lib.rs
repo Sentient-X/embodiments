@@ -64,6 +64,7 @@ pub mod placement;
 mod qp;
 mod solve;
 pub mod teleop;
+pub mod tool;
 
 use sx_embodiment_drivers::kinematics::TreeError;
 use thiserror::Error;
@@ -75,6 +76,7 @@ pub use geometry::{
 pub use math::Iso;
 pub use model::{Frames, Model};
 pub use solve::{Active, Caps, Clearance, Ik, LimbReport, Reach, Settings, Solve, Step};
+pub use tool::{Grip, JawKind, Jaws, NoJawsReason, ToolFrame};
 
 /// The static upper body's render pack, as committed.
 pub const STATIC_UPPER_BODY_URDF: &str =
@@ -95,6 +97,9 @@ pub const STATIC_UPPER_BODY_SUPERSEDED: &[&str] = &[
 ];
 pub const STATIC_UPPER_BODY_COLLISION: &str =
     include_str!("../../../render_packs/sentient-static-upper-body/collision.json");
+/// The static upper body's `pack.json`: its tools and how each grips ([`tool`]).
+pub const STATIC_UPPER_BODY_PACK: &str =
+    include_str!("../../../render_packs/sentient-static-upper-body/pack.json");
 
 /// A body or a step cannot be solved as asked.
 #[derive(Debug, Error, PartialEq)]
@@ -103,6 +108,8 @@ pub enum IkError {
     Tree(#[from] TreeError),
     #[error("collision proxies: {0}")]
     Proxies(String),
+    #[error("tools: {0}")]
+    Tools(String),
     #[error("limb {limb:?} names frame {frame:?}, which the tree lacks")]
     UnknownFrame { limb: String, frame: String },
     #[error("joint {0:?} declares no speed limit; give its caps")]
