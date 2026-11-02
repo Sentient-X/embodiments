@@ -566,3 +566,153 @@ fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
         "held where it stopped, it sags only by its load"
     );
 }
+
+/// The station's own solve (`fixtures/static-teleop-config.json`, the commissioned Ready
+/// posture) from Ready, its left elbow held where it stands by something it cannot pass:
+/// every other joint lands where it is sent. `push` is how far each tick's hand target sits from
+/// the tool at Ready, by tick; each tick's (reference, stalled, asked) of the elbow is handed to
+/// `check`.
+fn hold_the_elbow(
+    push: impl Fn(usize) -> [f64; 3],
+    ticks: usize,
+    mut check: impl FnMut(usize, f64, bool),
+) -> f64 {
+    let config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
+        .expect("the station's solve config");
+    let ready: BTreeMap<String, f64> =
+        serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
+    let mut solve =
+        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+    // Answers, not the clock: a debug build past the station's budget would hold steps.
+    solve.set_deadline(std::time::Duration::from_secs(1));
+    let rest: Vec<f64> = solve
+        .model()
+        .axes()
+        .iter()
+        .map(|a| ready.get(&a.name).copied().unwrap_or(0.0))
+        .collect();
+    let elbow = index(&solve, "left_elbow_pitch_joint");
+    let from = tcp(&solve, &rest, 0);
+    let blocked_at = rest[elbow];
+    let available = vec![true; rest.len()];
+    let mut reference = rest.clone();
+    solve.reset();
+    for tick in 0..ticks {
+        let measured: Vec<Option<f64>> = reference
+            .iter()
+            .enumerate()
+            .map(|(axis, at)| Some(if axis == elbow { blocked_at } else { *at }))
+            .collect();
+        let offset = push(tick);
+        let targets = Targets {
+            tcp: [
+                Some(Pose {
+                    translation_m: [0, 1, 2].map(|k| from.translation_m[k] + offset[k]),
+                    rotation_xyzw: from.rotation_xyzw,
+                }),
+                None,
+            ],
+            ..Targets::default()
+        };
+        let step = solve
+            .step(&reference, &measured, &available, &targets, DT)
+            .expect("a step");
+        reference.copy_from_slice(&step.q);
+        check(tick, reference[elbow], step.stalled[elbow]);
+    }
+    blocked_at
+}
+
+/// A hand that goes on asking into a stall keeps the joint stalled, commanded exactly where it
+/// stopped, for as long as it asks, in every direction that drives the elbow into its stop.
+/// Released on the sliver an interior-point solve leaves a blocked joint inside its block
+/// (1e-9 rad), the elbow pushed into the obstacle again by the whole reference gap while the
+/// hand still asked that way (embodiments#198, the station's held-elbow test at 2f357e7).
+#[test]
+#[allow(clippy::cast_precision_loss)] // tick counts as seconds
+fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
+    let pushes = [
+        [0.03, 0.0, -0.04],
+        [0.06, 0.0, -0.08],
+        [0.03, 0.02, -0.05],
+        [0.0, 0.0, -0.06],
+        [0.05, -0.02, -0.03],
+        [0.02, 0.01, -0.10],
+    ];
+    let ticks = (10.0 / DT) as usize;
+    for push in pushes {
+        let mut stalled_at = None;
+        let mut commanded = Vec::with_capacity(ticks);
+        let blocked = hold_the_elbow(
+            |_| push,
+            ticks,
+            |tick, elbow, stalled| {
+                commanded.push(elbow);
+                if stalled {
+                    stalled_at.get_or_insert(tick);
+                } else {
+                    assert!(
+                        stalled_at.is_none(),
+                        "{push:?}: released at {:.2} s while the hand still asks that way",
+                        tick as f64 * DT
+                    );
+                }
+            },
+        );
+        let stalled_at = stalled_at.unwrap_or_else(|| panic!("{push:?}: the held elbow stalled"));
+        assert!(
+            (stalled_at as f64) * DT <= STALL.as_secs_f64() + 0.6,
+            "{push:?}: stalled at {:.2} s",
+            stalled_at as f64 * DT
+        );
+        // From the stall on, the command never leaves where the elbow stopped: not by the gap,
+        // not by a sliver.
+        for (tick, &elbow) in commanded.iter().enumerate().skip(stalled_at) {
+            assert!(
+                elbow == blocked,
+                "{push:?}: at {:.2} s commanded {elbow} against its stop {blocked}",
+                tick as f64 * DT
+            );
+        }
+    }
+}
+
+/// A stalled joint lets go the tick the hand turns back, and moves away from what stopped it.
+#[test]
+#[allow(clippy::cast_precision_loss)] // tick counts as seconds
+fn a_stall_lets_go_the_tick_the_hand_turns_back() {
+    let turn = ((STALL.as_secs_f64() + 1.5) / DT) as usize;
+    let mut stalled_before = false;
+    let mut released = None;
+    let mut after = Vec::new();
+    let blocked = hold_the_elbow(
+        |tick| {
+            if tick < turn {
+                [0.03, 0.0, -0.04]
+            } else {
+                [0.03, 0.0, 0.04]
+            }
+        },
+        turn + 50,
+        |tick, elbow, stalled| {
+            if tick + 1 == turn {
+                stalled_before = stalled;
+            }
+            if tick >= turn {
+                if !stalled {
+                    released.get_or_insert(tick);
+                }
+                after.push(elbow);
+            }
+        },
+    );
+    assert!(stalled_before, "stalled before the hand turns back");
+    assert_eq!(
+        released,
+        Some(turn),
+        "released the tick the hand turns back"
+    );
+    // Back off the stop: the elbow had pushed toward more negative, and now moves up.
+    let back = after.last().expect("ticks after") - blocked;
+    assert!(back > 0.01, "moved back {back} rad off its stop");
+}

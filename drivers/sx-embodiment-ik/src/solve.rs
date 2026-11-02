@@ -582,6 +582,34 @@ impl Ik {
         }
     }
 
+    /// How far the last step's cost asked `axis` to move, radians (units), every other solved
+    /// axis where the step put it: the move that minimises the cost along it alone, its block
+    /// and caps aside. A blocked axis its targets still press on asks on toward what stops
+    /// it; one they would move back asks back by as far as they want it back. Unlike the
+    /// step's own move on a blocked axis, which an interior-point answer leaves a sliver
+    /// (1e-9 to 1e-8 rad) inside its block whichever way the targets press, its sign is the
+    /// targets'. 0 for an axis the solve does not move.
+    #[must_use]
+    pub fn asked(&self, axis: usize) -> f64 {
+        let Some(column) = self.body.solved.iter().position(|&a| a == axis) else {
+            return 0.0;
+        };
+        let w = &self.work;
+        let n = self.body.solved.len();
+        let row = &w.h[column * n..(column + 1) * n];
+        let curvature = row[column];
+        if curvature <= 0.0 || !curvature.is_finite() {
+            return 0.0;
+        }
+        let slope: f64 = row
+            .iter()
+            .zip(&w.still[..n])
+            .map(|(h, x)| h * x)
+            .sum::<f64>()
+            + w.g[column];
+        w.still[column] - slope / curvature
+    }
+
     /// The most `limb`'s tool point (a pose limb's frame origin) may move from now on, m/s;
     /// `None`: as fast as its joints' caps allow. A step asks the tool no further than this in
     /// a tick, its turn counted in (weighed by [`Settings::orientation_m_per_rad`]), and an
