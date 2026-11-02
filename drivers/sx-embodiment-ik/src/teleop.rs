@@ -69,6 +69,19 @@ pub const STALL: std::time::Duration = std::time::Duration::from_millis(500);
 /// Movement under this (metres of a gripper's opening, radians of a joint) is no progress.
 pub const STALL_STILL: f64 = 0.0005;
 
+/// A stalled joint lets go when its targets have asked it back off what stopped it by more
+/// than this, radians: what each tick's solve asks of it ([`crate::Ik::asked`]), summed over
+/// the ticks since they last asked it on, so a distance rather than a rate. On the static
+/// body's held left elbow (2026-11-02) a hand pushing on asks it 2e-4 to 5e-4 rad a tick on; a
+/// hand turned back 8 cm asks 1.2e-2 rad back in its first 10 ms at 100, 250 and 500 Hz, a
+/// release at once. Once the rest of the arm takes up a slow turn back, a tick asks little:
+/// the release waits (0.2 to 1 s, the tool within 5 mm of a slow hand) while it stands still.
+/// A jump whose free path first draws the joint back by more than this releases it, as any
+/// genuine ask back does ([0.06, 0, 0.06] from Ready at 250 and 500 Hz, not at 100 Hz); the
+/// push that follows is a fresh contact's, at most the reference gap, and lasts while the
+/// hand stays there, as a fresh contact under the gap does.
+pub const STALL_RELEASE: f64 = 0.01;
+
 /// How close each driven hand's target must be to its gripper's tool point, as the robot
 /// stands, before following starts: control starts from the robot's own pose, never by jumping
 /// to the operator's hands. The station and the headset both ask [`Teleop::may_engage`].
@@ -324,7 +337,8 @@ pub struct TeleopStep {
     pub limbs: Vec<LimbReport>,
     pub solve: Solve,
     /// Per axis: stalled ([`STALL`]): its reference is at its measurement and it stands
-    /// rather than push on, free to move back. The caller may end what it was doing.
+    /// rather than push on, until the hand asks it back ([`STALL_RELEASE`]). The caller may
+    /// end what it was doing.
     pub stalled: Vec<bool>,
 }
 
@@ -352,8 +366,11 @@ pub struct Teleop {
     /// Per axis: where it was measured when its reference first stood at the gap, and the
     /// seconds since, while it comes no nearer ([`STALL`]).
     leashed: Vec<Option<(f64, f64)>>,
-    /// Per axis: the way it pushed when it stalled (+1, -1), until a step moves it back.
+    /// Per axis: the way it pushed when it stalled (+1, -1), until the targets ask it back.
     stall: Vec<f64>,
+    /// Per stalled axis: how far its targets have asked it back since they last asked it on,
+    /// radians ([`STALL_RELEASE`]).
+    asked_back: Vec<f64>,
     /// Per axis: where it stood when it stalled, the reference it is held at: stiff there, so
     /// it neither pushes on what stopped it nor sags away from it under a load.
     hold: Vec<f64>,
@@ -520,6 +537,7 @@ impl Teleop {
             step,
             leashed: vec![None; width],
             stall: vec![0.0; width],
+            asked_back: vec![0.0; width],
             hold: vec![0.0; width],
         })
     }
@@ -699,6 +717,7 @@ impl Teleop {
                                 let since = since + dt;
                                 if since >= stall_s {
                                     self.stall[axis] = push;
+                                    self.asked_back[axis] = 0.0;
                                     self.hold[axis] = *at;
                                     None
                                 } else {
@@ -809,21 +828,34 @@ impl Teleop {
             }
         }
         self.bound_tools(reference, targets, seeded);
-        for (axis, push) in self.stall.iter().enumerate() {
-            self.ik.set_blocked(axis, *push);
+        // A stalled joint stands where it stopped (its reference is there): the solve moves the
+        // rest of the arm around it, and its own velocity is zero, so a release starts it from
+        // rest within its caps.
+        for (avail, push) in self.available.iter_mut().zip(&self.stall) {
+            if *push != 0.0 {
+                *avail = false;
+            }
         }
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
-        // A stalled joint stays held until a step moves it back, away from what stopped it.
-        for (axis, push) in self.stall.iter_mut().enumerate() {
-            if *push != 0.0 && (solved.q[axis] - self.q[axis]) * *push < -1e-9 {
-                *push = 0.0;
-            }
-            self.step.stalled[axis] = *push != 0.0;
-        }
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);
         self.step.limbs.clone_from(&solved.limbs);
         self.step.solve = solved.solve;
+        // It lets go once the targets have asked it back by STALL_RELEASE since they last asked
+        // it on. A step's own move is no sign: one-way blocked, the solve left it a sliver
+        // inside its block (1e-9 rad) whichever way the targets pressed, and releasing on that
+        // pushed it into what stopped it again while the hand still asked that way
+        // (embodiments#198).
+        for (axis, (push, back)) in self.stall.iter_mut().zip(&mut self.asked_back).enumerate() {
+            if *push != 0.0 {
+                let on = self.ik.asked(axis) * *push;
+                *back = if on >= 0.0 { 0.0 } else { *back - on };
+                if *back > STALL_RELEASE {
+                    *push = 0.0;
+                }
+            }
+            self.step.stalled[axis] = *push != 0.0;
+        }
         for (gripper, width) in self.grippers.iter().zip(targets.gripper_width_m) {
             if let (Some(gripper), Some(width)) = (gripper, width) {
                 gripper.write(width, &mut self.step.q);

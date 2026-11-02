@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
+    HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
@@ -565,4 +565,216 @@ fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
         (measured[elbow].expect("measured") - stop_at).abs() <= 0.05 + 1e-9,
         "held where it stopped, it sags only by its load"
     );
+}
+
+/// The station's own solve (`fixtures/static-teleop-config.json`, the commissioned Ready
+/// posture) from Ready at a tick of `dt`, its left elbow stopped where it stands by something
+/// it cannot pass the way the hand pushes it (more negative); it is free the other way, and
+/// every other joint lands where it is sent. `push(t)` is where the hand's target sits from
+/// the tool at Ready at `t` seconds; `check` sees each tick's time and step (the elbow's index
+/// given) and returns false to stop.
+fn hold_the_elbow(
+    dt: f64,
+    push: impl Fn(f64) -> [f64; 3],
+    mut check: impl FnMut(f64, usize, &TeleopStep) -> bool,
+) -> f64 {
+    let config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
+        .expect("the station's solve config");
+    let ready: BTreeMap<String, f64> =
+        serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
+    let mut solve =
+        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+    // Answers, not the clock: a debug build past the station's budget would hold steps.
+    solve.set_deadline(std::time::Duration::from_secs(1));
+    let rest: Vec<f64> = solve
+        .model()
+        .axes()
+        .iter()
+        .map(|a| ready.get(&a.name).copied().unwrap_or(0.0))
+        .collect();
+    let elbow = index(&solve, "left_elbow_pitch_joint");
+    let from = tcp(&solve, &rest, 0);
+    let stopped_at = rest[elbow];
+    let available = vec![true; rest.len()];
+    let mut reference = rest.clone();
+    solve.reset();
+    for tick in 0_u32.. {
+        let t = f64::from(tick) * dt;
+        let measured: Vec<Option<f64>> = reference
+            .iter()
+            .enumerate()
+            .map(|(axis, at)| {
+                Some(if axis == elbow {
+                    at.max(stopped_at)
+                } else {
+                    *at
+                })
+            })
+            .collect();
+        let offset = push(t);
+        let targets = Targets {
+            tcp: [
+                Some(Pose {
+                    translation_m: [0, 1, 2].map(|k| from.translation_m[k] + offset[k]),
+                    rotation_xyzw: from.rotation_xyzw,
+                }),
+                None,
+            ],
+            ..Targets::default()
+        };
+        let step = solve
+            .step(&reference, &measured, &available, &targets, dt)
+            .expect("a step");
+        reference.copy_from_slice(&step.q);
+        if !check(t, elbow, step) {
+            break;
+        }
+    }
+    stopped_at
+}
+
+/// The loop rates a station may run the solve at.
+const RATES: [f64; 3] = [0.01, 0.004, 0.002];
+
+/// Where the hand first pushes the elbow into its stop.
+const INTO: [f64; 3] = [0.03, 0.0, -0.04];
+
+/// A hand that goes on asking into a stall keeps the joint stalled, commanded exactly where it
+/// stopped, for as long as it asks, in every direction that drives the elbow into its stop and
+/// at every rate. Released on the sliver a one-way blocked solve left the joint inside its block
+/// (1e-9 rad), the elbow pushed into the obstacle again by the whole reference gap while the
+/// hand still asked that way (embodiments#198, the station's held-elbow test at 2f357e7).
+#[test]
+fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
+    let pushes = [
+        INTO,
+        [0.06, 0.0, -0.08],
+        [0.03, 0.02, -0.05],
+        [0.0, 0.0, -0.06],
+        [0.05, -0.02, -0.03],
+        [0.02, 0.01, -0.10],
+    ];
+    for dt in RATES {
+        for push in pushes {
+            let mut stalled_at = None;
+            let mut commanded = Vec::new();
+            let stopped_at = hold_the_elbow(
+                dt,
+                |_| push,
+                |t, elbow, step| {
+                    if step.stalled[elbow] {
+                        stalled_at.get_or_insert(t);
+                        commanded.push((t, step.q[elbow], step.qdot[elbow]));
+                    } else {
+                        assert!(
+                            stalled_at.is_none(),
+                            "{push:?} at {dt} s a tick: released at {t:.3} s while the hand \
+                             still asks that way"
+                        );
+                    }
+                    t < 10.0
+                },
+            );
+            let stalled_at =
+                stalled_at.unwrap_or_else(|| panic!("{push:?} at {dt}: the held elbow stalled"));
+            assert!(
+                stalled_at <= STALL.as_secs_f64() + 0.6,
+                "{push:?} at {dt}: stalled at {stalled_at:.2} s"
+            );
+            // From the stall on, the command never leaves where the elbow stopped: not by the
+            // gap, not by a sliver, and it stands.
+            for (t, elbow, speed) in commanded {
+                assert!(
+                    elbow == stopped_at && speed == 0.0,
+                    "{push:?} at {dt}: at {t:.3} s commanded {elbow} at {speed} rad/s against \
+                     its stop {stopped_at}"
+                );
+            }
+        }
+    }
+}
+
+/// A hand target that jumps, as tracking regained or a network gap resumed makes it, to where
+/// a free arm would still drive the elbow into its stop keeps the elbow stalled: the solve's
+/// first ticks toward a jumped target ask the elbow back a little while the rest of the arm
+/// catches up, which is not the hand turning back. (A jump whose free path itself first draws
+/// the elbow back past `STALL_RELEASE`, [0.06, 0, 0.06] at 250 Hz: 11 mm, is a release, and
+/// what follows pushes the stop as a fresh contact does, at most the reference gap.)
+#[test]
+fn a_jumped_target_that_still_drives_into_the_stop_keeps_the_stall() {
+    // Each, from Ready, drives a free elbow 0.05 to 0.07 rad into the stop.
+    let jumps = [[0.0, 0.0, -0.01], [0.02, 0.0, 0.01], [0.04, 0.0, 0.03]];
+    let turn = STALL.as_secs_f64() + 1.5;
+    for dt in RATES {
+        for jump in jumps {
+            let mut stalled = false;
+            hold_the_elbow(
+                dt,
+                |t| if t < turn { INTO } else { jump },
+                |t, elbow, step| {
+                    if t >= turn {
+                        assert!(
+                            step.stalled[elbow],
+                            "{jump:?} at {dt}: released at {:.3} s after the jump",
+                            t - turn
+                        );
+                    }
+                    stalled |= step.stalled[elbow];
+                    t < turn + 3.0
+                },
+            );
+            assert!(stalled, "{jump:?} at {dt}: stalled before the jump");
+        }
+    }
+}
+
+/// A stalled joint lets go within 10 ms of the hand turning back (one tick at 100 Hz), at every rate, starts
+/// from rest within its acceleration cap, and moves away from what stopped it.
+#[test]
+fn a_stall_lets_go_as_soon_as_the_hand_turns_back() {
+    let config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
+        .expect("the station's solve config");
+    let accel = config.accel["left_elbow_pitch_joint"];
+    let turn = STALL.as_secs_f64() + 1.5;
+    for dt in RATES {
+        let mut stalled_before = false;
+        let mut released = None;
+        let mut speed = 0.0;
+        let mut last = f64::NAN;
+        let stopped_at = hold_the_elbow(
+            dt,
+            |t| if t < turn { INTO } else { [0.03, 0.0, 0.04] },
+            |t, elbow, step| {
+                if t < turn {
+                    stalled_before = step.stalled[elbow];
+                } else if !step.stalled[elbow] {
+                    released.get_or_insert(t - turn);
+                }
+                let v = step.qdot[elbow];
+                if t >= turn {
+                    assert!(
+                        (v - speed).abs() <= accel * dt * (1.0 + 1e-6),
+                        "at {dt}: the elbow's speed jumped {speed} to {v} rad/s at {t:.3} s"
+                    );
+                }
+                speed = v;
+                last = step.q[elbow];
+                t < turn + 0.5
+            },
+        );
+        assert!(
+            stalled_before,
+            "at {dt}: stalled before the hand turns back"
+        );
+        let released = released.unwrap_or_else(|| panic!("at {dt}: released"));
+        assert!(
+            released <= 0.01,
+            "at {dt}: released {released:.3} s after the hand turned back"
+        );
+        assert!(
+            last - stopped_at > 0.01,
+            "at {dt}: moved back {} rad",
+            last - stopped_at
+        );
+    }
 }
