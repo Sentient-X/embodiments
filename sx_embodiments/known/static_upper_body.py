@@ -214,13 +214,17 @@ STATIC_UPPER_BODY_TORSO: Final = ChainSpec(
 
 #: Each arm's work-ready configuration, ``_ARM_JOINTS`` order: the elbow 0.3 rad off its stop
 #: at zero (where the forearm points forward at the limit), the wrist pitched back to keep the
-#: tool pointing forward, the shoulder rolled 0.15 rad outward. Forward kinematics of the
-#: description put the tool points at (0.454, +/-0.244, 0.188) m in ``base_link``, pointing
-#: +x within 0.15 rad, clear of the coffee cell's cup and counter (agent-as-policy plan, sx
-#: fleet/act/cells/coffee.json). The zero home stays the driver's calibrated zero.
+#: tool pointing forward, the shoulder rolled 0.15 rad outward and pitched 0.15 rad up. Forward
+#: kinematics of the description put the tool points at (0.465, +/-0.238, 0.210) m in
+#: ``base_link``, pointing +x within 0.05 rad. The wrists stand 27 mm above the coffee cell's
+#: counter (sx packages/sx-act/sx_act/cells/coffee.json): a settled pose keeps the follower's
+#: 10 mm collision margin plus its settle tolerance (10 mm at Ready) clear of a cell's boxes,
+#: which the station checks at load (sx fleet/station ``ready_clear_of_cell``). At 0.1 rad of
+#: shoulder pitch the left wrist stood 10.8 mm above it and home ended SETTLE_MISS (2026-11-02).
+#: The zero home stays the driver's calibrated zero.
 _ARM_READY: Final = {
-    "left": (-0.1, 0.15, 0.0, -0.3, 0.0, 0.2, 0.0),
-    "right": (0.1, -0.15, 0.0, 0.3, 0.0, -0.2, 0.0),
+    "left": (-0.15, 0.15, 0.0, -0.3, 0.0, 0.2, 0.0),
+    "right": (0.15, -0.15, 0.0, 0.3, 0.0, -0.2, 0.0),
 }
 
 

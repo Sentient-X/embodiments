@@ -19,8 +19,8 @@ const TOOL_SPEED: f64 = 0.15;
 /// The static upper body's declared work-ready configuration (`sx_embodiments`, static upper
 /// body `ready`): each arm off its elbow stop, the camera tilted to the cell.
 fn ready() -> BTreeMap<String, f64> {
-    let left = [-0.1, 0.15, 0.0, -0.3, 0.0, 0.2, 0.0];
-    let right = [0.1, -0.15, 0.0, 0.3, 0.0, -0.2, 0.0];
+    let left = [-0.15, 0.15, 0.0, -0.3, 0.0, 0.2, 0.0];
+    let right = [0.15, -0.15, 0.0, 0.3, 0.0, -0.2, 0.0];
     let arm = [
         "shoulder_pitch_joint",
         "shoulder_roll_joint",
