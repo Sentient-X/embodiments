@@ -945,16 +945,18 @@ fn least_clearance(
     let mut least = (f64::INFINITY, String::new(), String::new());
     let (mut before, mut lurch) = (rest.clone(), 0.0_f64);
     let caps = solve.ik().caps().accel.clone();
-    let right_arm: Vec<usize> = solve
+    let arms: Vec<usize> = solve
         .model()
         .axes()
         .iter()
         .enumerate()
         .filter(|(_, a)| {
-            (a.name.starts_with("right_") || a.name == "torso_joint") && !a.name.contains("finger")
+            (a.name.starts_with("right_") || a.name.starts_with("left_") || a.name == "torso_joint")
+                && !a.name.contains("finger")
         })
         .map(|(axis, _)| axis)
         .collect();
+    let mut was_stalled = vec![false; rest.len()];
     solve.reset();
     for tick in 0_u32.. {
         let t = f64::from(tick) * dt;
@@ -987,11 +989,13 @@ fn least_clearance(
         let step = solve
             .step(&q, &measured, &available, &targets, dt)
             .expect("a step");
-        // How far past its acceleration cap the right arm's command turned this tick (it never
-        // stalls here: a stalled joint's jump to where it stands is not a turn).
-        for axis in right_arm.iter().copied() {
+        // How far past its acceleration cap any arm or torso joint's command turned this tick
+        // (a stalled joint's jump to where it stands, or its release, is not a turn).
+        for axis in arms.iter().copied() {
             let turned = (step.q[axis] - q[axis]) - (q[axis] - before[axis]);
-            if caps[axis].is_finite() && caps[axis] > 0.0 && t >= turn {
+            let stall_change = step.stalled[axis] || was_stalled[axis];
+            was_stalled[axis] = step.stalled[axis];
+            if caps[axis].is_finite() && caps[axis] > 0.0 && t >= turn && !stall_change {
                 lurch = lurch.max(turned.abs() / (caps[axis] * dt * dt));
             }
         }
@@ -1032,6 +1036,9 @@ fn least_clearance(
 
 /// The collision margin less a millimetre: a step's linearisation.
 const MARGIN_WITHIN_A_MILLIMETRE: f64 = 0.009;
+/// A command turns no harder than twice its acceleration cap, a window's most (main d41fcf2: up
+/// to 23x with these followers; #207: 94x the torso, 155x a shoulder, embodiments#208).
+const WITHIN_THE_CAP: f64 = 2.05;
 
 const CASES: [(&str, bool); 4] = [
     ("reach", true),
@@ -1041,8 +1048,9 @@ const CASES: [(&str, bool); 4] = [
 ];
 
 /// Every case at `rates`, each of `followers`, its readings exact and jittering by
-/// [`READING_JITTER`], keeps `clear` metres where the robot really is.
-fn keeps(rates: &[f64], followers: &[Follower], clear_m: f64) {
+/// [`READING_JITTER`], keeps `clear_m` metres where the robot really is, and turns no arm or
+/// torso joint's command harder than `turn` times its acceleration cap.
+fn keeps(rates: &[f64], followers: &[Follower], clear_m: f64, turn: f64) {
     // Each case on its own thread: a debug build runs them all in the time of the longest.
     std::thread::scope(|scope| {
         let mut runs = Vec::new();
@@ -1059,11 +1067,11 @@ fn keeps(rates: &[f64], followers: &[Follower], clear_m: f64) {
             }
         }
         for run in runs {
-            let (dt, case, stopped, follower, noise, (clear, a, b, _)) =
+            let (dt, case, stopped, follower, noise, (clear, a, b, lurch)) =
                 run.join().expect("a case");
             assert!(
-                clear >= clear_m,
-                "{case} at {dt} s, stop {stopped}, {follower:?}, noise {noise}: {a} and {b} {clear} m apart"
+                clear >= clear_m && lurch <= turn,
+                "{case} at {dt} s, stop {stopped}, {follower:?}, noise {noise}: {a} and {b} {clear} m apart, turned {lurch}x a cap"
             );
         }
     });
@@ -1087,6 +1095,7 @@ fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
             Follower::Pd(2, 30.0, 0.7),
         ],
         MARGIN_WITHIN_A_MILLIMETRE,
+        WITHIN_THE_CAP,
     );
 }
 
@@ -1101,13 +1110,15 @@ fn a_pushing_arm_keeps_its_pairs_clear_at_faster_rates() {
             Follower::Pd(0, 30.0, 0.7),
         ],
         MARGIN_WITHIN_A_MILLIMETRE,
+        WITHIN_THE_CAP,
     );
 }
 
-/// An underdamped follower (act-sim-like, zeta 0.2), on time or a few ticks late, rings past
-/// its commands and is kept off the other arm and the box, if not at the margin: 5.1 mm at
-/// worst (main d41fcf2: 62 mm into the other gripper; with the measured rows pinned at their
-/// opening end, it touched).
+/// An underdamped follower (act-sim-like, zeta 0.2, and 0.1), on time or a few ticks late,
+/// rings past its commands and is kept off the other arm and the box: 7.7 mm at worst
+/// (main d41fcf2: 62 mm into the other gripper; without its measured speed counted, 5.1 mm at
+/// zeta 0.2 and 46 mm in at 0.1, embodiments#208). Its turns are not bounded here: a ringing
+/// arm's command turns as main's does.
 #[test]
 fn an_underdamped_follower_never_touches() {
     keeps(
@@ -1116,8 +1127,11 @@ fn an_underdamped_follower_never_touches() {
             Follower::Pd(0, 9.5, 0.2),
             Follower::Pd(1, 9.5, 0.2),
             Follower::Pd(3, 9.5, 0.2),
+            Follower::Pd(0, 9.5, 0.1),
+            Follower::Pd(1, 9.5, 0.1),
         ],
-        0.002,
+        0.007,
+        f64::INFINITY,
     );
 }
 
@@ -1136,6 +1150,9 @@ fn clearance_table() {
         Follower::Pd(0, 9.5, 0.2),
         Follower::Pd(1, 9.5, 0.2),
         Follower::Pd(3, 9.5, 0.2),
+        Follower::Pd(0, 9.5, 0.15),
+        Follower::Pd(0, 9.5, 0.1),
+        Follower::Pd(1, 9.5, 0.1),
         Follower::Pd(0, 30.0, 0.7),
         Follower::Pd(2, 30.0, 0.7),
     ];
