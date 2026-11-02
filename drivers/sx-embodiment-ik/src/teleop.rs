@@ -52,6 +52,12 @@ pub const HANDS: [&str; 2] = ["left", "right"];
 /// this far; well inside the governor's tracking stop.
 pub const REFERENCE_GAP: f64 = 0.1;
 
+/// How far a joint's reference may lead its measurement and still be counted on to keep a
+/// pair clear ([`crate::Ik::set_measured`]): a fifth of the gap, past the lag of a joint
+/// following at its speed cap over a tick or two; a joint leading further may be pushing on
+/// something it cannot pass.
+pub const TRUSTED_LEAD: f64 = REFERENCE_GAP / 5.0;
+
 /// How far ahead of the camera the gaze is turned into a look-at point: far enough that the
 /// camera's offset from the operator's eyes does not bend the gaze, near enough to stay a
 /// well-conditioned pointing task.
@@ -836,6 +842,8 @@ impl Teleop {
                 *avail = false;
             }
         }
+        // Pairs are kept clear from where the body was measured, not from the reference.
+        self.ik.set_measured(measured, TRUSTED_LEAD)?;
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);

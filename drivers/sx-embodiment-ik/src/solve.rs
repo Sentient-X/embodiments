@@ -278,6 +278,11 @@ struct Candidate {
 struct Workspace {
     frames: Frames,
     after: Frames,
+    /// The body where it was measured ([`Ik::set_measured`]): the pose collisions are
+    /// measured at.
+    seen: Frames,
+    /// Per axis, where it was measured, or where the step starts when it was not.
+    seen_q: Vec<f64>,
     jv: Vec<V3>,
     jw: Vec<V3>,
     jp: Vec<V3>,
@@ -344,6 +349,11 @@ pub struct Ik {
     tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
     /// Per limb, whether its tool speed bound this tick.
     tool_capped: Vec<bool>,
+    /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
+    measured: Vec<f64>,
+    /// How far a command may lead its measurement and still be counted on to keep a pair
+    /// clear ([`Ik::set_measured`]).
+    trusted_lead: f64,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -452,6 +462,8 @@ impl Ik {
         let work = Workspace {
             frames: body.model.poses(&rest),
             after: body.model.poses(&rest),
+            seen: body.model.poses(&rest),
+            seen_q: rest.clone(),
             jv: vec![[0.0; 3]; axes.len()],
             jw: vec![[0.0; 3]; axes.len()],
             jp: vec![[0.0; 3]; axes.len()],
@@ -495,6 +507,7 @@ impl Ik {
             iterations: 0,
         };
         let limbs = body.limbs.len();
+        let axes_count = rest.len();
         Ok(Self {
             body,
             caps,
@@ -512,6 +525,8 @@ impl Ik {
             velocity: vec![0.0; n],
             tool_speed: vec![None; limbs],
             tool_capped: vec![false; limbs],
+            measured: vec![f64::NAN; axes_count],
+            trusted_lead: f64::INFINITY,
             work,
             qp,
             step,
@@ -563,6 +578,35 @@ impl Ik {
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.anchored = self.preferred.is_some();
+    }
+
+    /// Where each axis was measured for the next steps, `None` where it was not (a ghost has
+    /// no measurement): pairs are kept clear from the body as measured, not as last
+    /// commanded, since a joint whose command leads it (pushing on something it cannot pass)
+    /// is not where the solve's integration says. A joint whose command leads it by more
+    /// than `trusted_lead` is not counted on to keep a pair clear: each pair it would help is
+    /// kept by the rest alone too (one such joint per pair, exactly). Unset, pairs are kept
+    /// at the step's own positions and every joint is counted on.
+    ///
+    /// # Errors
+    ///
+    /// [`IkError::Positions`] for a vector of the wrong length.
+    pub fn set_measured(
+        &mut self,
+        measured: &[Option<f64>],
+        trusted_lead: f64,
+    ) -> Result<(), IkError> {
+        self.trusted_lead = trusted_lead;
+        if measured.len() != self.measured.len() {
+            return Err(IkError::Positions {
+                expected: self.measured.len(),
+                given: measured.len(),
+            });
+        }
+        for (slot, reading) in self.measured.iter_mut().zip(measured) {
+            *slot = reading.filter(|v| v.is_finite()).unwrap_or(f64::NAN);
+        }
+        Ok(())
     }
 
     /// How far the last step's cost asked `axis` to move this tick, radians (units), every
@@ -784,7 +828,12 @@ impl Ik {
                 self.velocity[column] = 0.0;
             }
         }
-        self.collision_rows(dt);
+        let w = &mut self.work;
+        for ((seen, at), measured) in w.seen_q.iter_mut().zip(q).zip(&self.measured) {
+            *seen = if measured.is_finite() { *measured } else { *at };
+        }
+        self.body.model.poses_into(&w.seen_q, &mut w.seen);
+        self.collision_rows(q, dt);
         let mut solve = self.keep_feasible(false);
         let mut iterations = self.solve_qp(dt, deadline);
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
@@ -1012,7 +1061,7 @@ impl Ik {
             });
             let (distance, x, y, direction, refined) = capsule_distance(
                 body,
-                &w.frames,
+                &w.seen,
                 i,
                 j,
                 if refined_already {
@@ -1040,7 +1089,7 @@ impl Ik {
         }
         for &(capsule, k) in &self.scene_pairs {
             let c = &body.proxies.capsules[capsule];
-            let (a, b) = world(&w.frames, c);
+            let (a, b) = world(&w.seen, c);
             let distance = segment_box(&self.scene[k], a, b).1 - c.radius;
             if distance < s.influence_m {
                 w.candidates.push(Candidate {
@@ -1055,7 +1104,7 @@ impl Ik {
     /// The closest pairs within influence, each as `row . dq <= rhs`: the pair closes no
     /// faster this tick than a braking share of its axes' accelerations can still stop
     /// before the margin.
-    fn collision_rows(&mut self, dt: f64) {
+    fn collision_rows(&mut self, q: &[f64], dt: f64) {
         self.collision_candidates();
         let body = &self.body;
         let s = &self.settings;
@@ -1082,8 +1131,8 @@ impl Ik {
                 } => {
                     let d = candidate.distance;
                     let (p, c) = (&body.proxies.capsules[i], &body.proxies.capsules[j]);
-                    point_row(body, &w.frames, &mut w.jp, p.link, x, direction, -1.0, row);
-                    point_row(body, &w.frames, &mut w.jp, c.link, y, direction, 1.0, row);
+                    point_row(body, &w.seen, &mut w.jp, p.link, x, direction, -1.0, row);
+                    point_row(body, &w.seen, &mut w.jp, c.link, y, direction, 1.0, row);
                     (
                         d,
                         Active::SelfCollision {
@@ -1094,10 +1143,10 @@ impl Ik {
                 }
                 Pair::Scene(capsule, k) => {
                     let c = &body.proxies.capsules[capsule];
-                    let (a, b) = world(&w.frames, c);
+                    let (a, b) = world(&w.seen, c);
                     let (point, d, direction) = segment_box(&self.scene[k], a, b);
                     point_row(
-                        body, &w.frames, &mut w.jp, c.link, point, direction, -1.0, row,
+                        body, &w.seen, &mut w.jp, c.link, point, direction, -1.0, row,
                     );
                     (
                         d - c.radius,
@@ -1131,6 +1180,25 @@ impl Ik {
             w.rhs[slot] = rhs;
             w.row_active[slot] = active;
             w.used += 1;
+            // The same pair kept without the joints that may not follow: a step must keep it
+            // whether or not they make their move (one such joint per pair, exactly).
+            let untrusted = |j: usize| {
+                let axis = body.solved[j];
+                (q[axis] - w.seen_q[axis]).abs() > self.trusted_lead
+            };
+            if w.used < s.max_rows && (0..n).any(|j| w.rows[slot * n + j] != 0.0 && untrusted(j)) {
+                let (kept, spare) = w.rows.split_at_mut((slot + 1) * n);
+                let next = &mut spare[..n];
+                next.copy_from_slice(&kept[slot * n..]);
+                for (j, value) in next.iter_mut().enumerate() {
+                    if untrusted(j) {
+                        *value = 0.0;
+                    }
+                }
+                w.rhs[slot + 1] = rhs;
+                w.row_active[slot + 1] = active;
+                w.used += 1;
+            }
         }
     }
 
