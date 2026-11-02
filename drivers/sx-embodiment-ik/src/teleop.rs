@@ -363,6 +363,10 @@ pub struct Teleop {
     /// Axes the config holds.
     held: Vec<bool>,
     grippers: [Option<Gripper>; 2],
+    /// Contact detected from healthy finger feedback; separate from arm/driver faults.
+    gripper_latched: [bool; 2],
+    /// Last closing progress and elapsed time, per finger axis. Allocated only at startup.
+    gripper_wait: Vec<Option<(f64, f64)>>,
     /// Whether the next step seeds from the measured joints (after [`Teleop::reset`]).
     seed: bool,
     q: Vec<f64>,
@@ -544,6 +548,8 @@ impl Teleop {
             head,
             held: held_axes,
             grippers,
+            gripper_latched: [false; 2],
+            gripper_wait: vec![None; width],
             seed: true,
             q,
             available: vec![false; width],
@@ -623,6 +629,8 @@ impl Teleop {
     /// anchors posture there.
     pub fn reset(&mut self) {
         self.ik.reset();
+        self.gripper_latched.fill(false);
+        self.gripper_wait.fill(None);
         self.seed = true;
     }
 
@@ -841,6 +849,7 @@ impl Teleop {
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
         self.take_reference(reference, measured, available, targets, seeded, dt);
+        self.update_gripper_contacts(measured, available, targets, dt);
         self.seed = false;
         for (slot, (available, held)) in self
             .available
@@ -849,6 +858,7 @@ impl Teleop {
         {
             *slot = *available && !held;
         }
+        self.hold_contacted_grippers();
         self.want_hands(targets)?;
         if let Some(head) = self.head {
             self.wanted[head] = if let Some(gaze) = targets.head {
@@ -932,15 +942,111 @@ impl Teleop {
             }
             self.step.stalled[axis] = *push != 0.0;
         }
-        for (gripper, width) in self.grippers.iter().zip(targets.gripper_width_m) {
-            if let (Some(gripper), Some(width)) = (gripper, width) {
-                gripper.write(width, &mut self.step.q);
+        self.write_grippers(targets);
+        Ok(&self.step)
+    }
+
+    /// Freeze contacts before IK, including the first latched tick: no arm may count on
+    /// a blocked finger closing to create collision clearance.
+    fn hold_contacted_grippers(&mut self) {
+        for (hand, gripper) in self.grippers.iter().enumerate() {
+            if let Some(gripper) = gripper
+                && self.gripper_latched[hand]
+            {
                 for &(axis, _, _) in &gripper.fingers {
+                    self.q[axis] = self.hold[axis];
+                    self.stuck[axis] = true;
+                    self.available[axis] = false;
+                }
+            }
+        }
+    }
+
+    fn write_grippers(&mut self, targets: &Targets) {
+        for (hand, gripper) in self.grippers.iter().enumerate() {
+            let Some(gripper) = gripper else { continue };
+            if let Some(width) = targets.gripper_width_m[hand] {
+                gripper.write(width, &mut self.step.q);
+            }
+            for &(axis, _, _) in &gripper.fingers {
+                if self.gripper_latched[hand] {
+                    self.step.q[axis] = self.hold[axis];
+                }
+                if targets.gripper_width_m[hand].is_some() || self.gripper_latched[hand] {
                     self.step.qdot[axis] = 0.0;
                 }
             }
         }
-        Ok(&self.step)
+    }
+
+    /// Contact is detected before a driver fault, using the existing stall time and noise
+    /// allowance. Never invent feedback: a missing/error reading still stops at the caller's
+    /// actuator boundary. Both fingers latch together, preventing asymmetric closing.
+    fn update_gripper_contacts(
+        &mut self,
+        measured: &[Option<f64>],
+        available: &[bool],
+        targets: &Targets,
+        dt: f64,
+    ) {
+        let noise = STALL_STILL + 2.0 * READING_JITTER;
+        for (hand, gripper) in self.grippers.iter().enumerate() {
+            let Some(gripper) = gripper else { continue };
+            let healthy = gripper.fingers.iter().all(|&(axis, _, _)| {
+                available[axis] && !self.held[axis] && measured[axis].is_some_and(f64::is_finite)
+            });
+            if let Some(width) = targets.gripper_width_m[hand] {
+                gripper.write(width, &mut self.step.q);
+                // Release only when the request opens every finger away from its contact.
+                // A slightly less closed request that still pushes on the object cannot
+                // repeatedly clear the latch.
+                if healthy
+                    && self.gripper_latched[hand]
+                    && gripper.fingers.iter().all(|&(axis, closed, open)| {
+                        (self.step.q[axis] - self.hold[axis]) * (open - closed).signum() >= -noise
+                    })
+                    && (width >= gripper.open_width_m
+                        || gripper.fingers.iter().any(|&(axis, closed, open)| {
+                            (self.step.q[axis] - self.hold[axis]) * (open - closed).signum() > noise
+                        }))
+                {
+                    self.gripper_latched[hand] = false;
+                    for &(axis, _, _) in &gripper.fingers {
+                        self.gripper_wait[axis] = None;
+                    }
+                }
+                if !self.gripper_latched[hand] {
+                    let mut contact = false;
+                    for &(axis, closed, open) in &gripper.fingers {
+                        let direction = (open - closed).signum();
+                        self.gripper_wait[axis] = match measured[axis] {
+                            Some(at) if healthy && (at - self.step.q[axis]) * direction > noise => {
+                                match self.gripper_wait[axis] {
+                                    Some((from, since)) if (from - at) * direction <= noise => {
+                                        let since = since + dt;
+                                        contact |= since >= STALL.as_secs_f64();
+                                        Some((from, since))
+                                    }
+                                    _ => Some((at, 0.0)),
+                                }
+                            }
+                            _ => None,
+                        };
+                    }
+                    if contact {
+                        self.gripper_latched[hand] = true;
+                        for &(axis, _, _) in &gripper.fingers {
+                            // `healthy` established every reading before contact was counted.
+                            self.hold[axis] = measured[axis].expect("healthy finger feedback");
+                        }
+                    }
+                }
+            } else {
+                for &(axis, _, _) in &gripper.fingers {
+                    self.gripper_wait[axis] = None;
+                }
+            }
+        }
     }
 }
 
