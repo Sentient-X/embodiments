@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig,
-    TeleopStep,
+    GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
+    TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
@@ -243,10 +243,10 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap()
         .expect("a step");
     assert_eq!(step.q[elbow], q[elbow]);
     // Within the gap the reference wins; past it, the reference is held at the gap. Each new
-    // reading is fed until the solve takes it: a jump no joint makes in a tick is set aside for
-    // GLITCH_HOLD first (a_single_bad_reading_moves_nothing).
+    // reading is fed until the solve has taken it and its smoothing (STEADY_S) has settled: a
+    // jump no joint makes in a tick is set aside for GLITCH_HOLD first.
     let mut reference = step.q.clone();
-    let held = (GLITCH_HOLD.as_secs_f64() / DT).ceil() as usize + 1;
+    let held = ((GLITCH_HOLD + STEADY_S * 15).as_secs_f64() / DT).ceil() as usize;
     let mut settle = |measured: &[Option<f64>], reference: &mut Vec<f64>| {
         for _ in 0..held {
             let step = solve
@@ -260,7 +260,7 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap()
     assert_eq!(reference[elbow], q[elbow]);
     measured[elbow] = Some(q[elbow] + REFERENCE_GAP * 2.0);
     settle(&measured, &mut reference);
-    assert!((reference[elbow] - (q[elbow] + REFERENCE_GAP)).abs() < 1e-12);
+    assert!((reference[elbow] - (q[elbow] + REFERENCE_GAP)).abs() < 1e-6);
 }
 
 #[test]
@@ -483,7 +483,15 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
     clippy::cast_precision_loss
 )] // tick counts and seconds
 fn a_blocked_joint_stalls_through_a_readings_jitter() {
-    for dt in [0.011, 0.02, 0.01] {
+    // The Spark's rates with the jitter tests assume, and 250 and 500 Hz with twice it (there
+    // 1.5 mrad kept a pushing elbow from ever stalling, embodiments#210).
+    for (dt, noise) in [
+        (0.011, READING_JITTER),
+        (0.02, READING_JITTER),
+        (0.01, READING_JITTER),
+        (0.004, 2.0 * READING_JITTER),
+        (0.002, 2.0 * READING_JITTER),
+    ] {
         let mut solve = teleop();
         let mut q = start(&solve);
         q[index(&solve, "torso_joint")] = 0.0;
@@ -497,7 +505,7 @@ fn a_blocked_joint_stalls_through_a_readings_jitter() {
             state ^= state >> 7;
             state ^= state << 17;
             let unit = (state >> 11) as f64 / (1_u64 << 53) as f64;
-            READING_JITTER * 2.0f64.mul_add(unit, -1.0)
+            noise * 2.0f64.mul_add(unit, -1.0)
         };
         let targets = Targets {
             tcp: [
@@ -892,6 +900,7 @@ fn least_clearance(
     stopped: bool,
     follower: Follower,
     noise: f64,
+    glitch: Option<(&str, f64)>,
 ) -> (f64, String, String, f64) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
@@ -971,7 +980,20 @@ fn least_clearance(
         if t > turn + 2.5 {
             break;
         }
-        let measured: Vec<Option<f64>> = real.iter().map(|at| Some(at + jitter())).collect();
+        // One reading off by the glitch, half a second after the turn.
+        let glitched = glitch.and_then(|(joint, by)| {
+            ((t - turn - 0.5).abs() < dt / 2.0).then(|| (index(&solve, joint), by))
+        });
+        let measured: Vec<Option<f64>> = real
+            .iter()
+            .enumerate()
+            .map(|(axis, at)| {
+                let off = glitched
+                    .filter(|(glitched, _)| *glitched == axis)
+                    .map_or(0.0, |g| g.1);
+                Some(at + jitter() + off)
+            })
+            .collect();
         let inward = if case == "box" && t >= turn {
             -0.25 * ((t - turn) / 2.0).min(1.0)
         } else {
@@ -1067,7 +1089,7 @@ fn keeps(rates: &[f64], followers: &[Follower], clear_m: f64, turn: f64) {
                 for &follower in followers {
                     for noise in [0.0, READING_JITTER] {
                         runs.push(scope.spawn(move || {
-                            let got = least_clearance(dt, case, stopped, follower, noise);
+                            let got = least_clearance(dt, case, stopped, follower, noise, None);
                             (dt, case, stopped, follower, noise, got)
                         }));
                     }
@@ -1143,6 +1165,41 @@ fn an_underdamped_follower_never_touches() {
     );
 }
 
+/// One bad reading turns no arm or torso joint harder than twice its acceleration cap, at
+/// 90, 250 and 500 Hz: the idle right arm's elbow or the torso read 0.15 / 0.1 rad off for one
+/// tick while the left hand sweeps past the box, and the left elbow 0.05 rad off on its stop
+/// while the right hand reaches for the left. Taken as it came, the idle elbow's reference
+/// jumped 342x its cap and a reaching shoulder turned 139x (embodiments#210, 4ea9e84); now a
+/// jump no follower makes waits for the next reading to confirm it.
+#[test]
+fn a_single_bad_reading_moves_nothing() {
+    std::thread::scope(|scope| {
+        let mut runs = Vec::new();
+        for dt in [0.011, 0.004, 0.002] {
+            for (case, glitch) in [
+                ("box", ("right_elbow_pitch_joint", -0.15)),
+                ("box", ("torso_joint", 0.1)),
+                ("reach", ("left_elbow_pitch_joint", 0.05)),
+            ] {
+                for follower in [Follower::Late(1), Follower::Pd(0, 9.5, 0.2)] {
+                    runs.push(scope.spawn(move || {
+                        let got =
+                            least_clearance(dt, case, true, follower, READING_JITTER, Some(glitch));
+                        (dt, case, glitch, follower, got.3)
+                    }));
+                }
+            }
+        }
+        for run in runs {
+            let (dt, case, glitch, follower, turned) = run.join().expect("a case");
+            assert!(
+                turned <= WITHIN_THE_CAP,
+                "{case} {glitch:?} at {dt} s, {follower:?}: turned {turned}x a cap"
+            );
+        }
+    });
+}
+
 /// The least clearance and the right arm's sharpest turn against its acceleration cap, every
 /// rate, case, follower and jitter: `cargo test --release -p sx-embodiment-ik --test teleop
 /// clearance_table -- --ignored --nocapture`.
@@ -1171,7 +1228,7 @@ fn clearance_table() {
                 for follower in followers {
                     for noise in [0.0, 0.001] {
                         runs.push(scope.spawn(move || {
-                            let (c, a, b, lurch) = least_clearance(dt, case, stopped, follower, noise);
+                            let (c, a, b, lurch) = least_clearance(dt, case, stopped, follower, noise, None);
                             format!("TABLE dt={dt} {case} stop={stopped} {follower:?} noise={noise}: {:.1} mm ({a} / {b}) accel x{lurch:.1}", c * 1e3)
                         }));
                     }
