@@ -242,6 +242,20 @@ pack's URDF and proxies and solves one constrained QP differential IK per tick: 
 camera look-at, under joint limits, speed and acceleration caps, self and table collision. The
 station runs it as the authority and the headset links the same crate for its ghost.
 
+Every tool a body carries says how it grips (`sx_embodiments.tool_frames`, the `render` extra):
+each gripper, and each arm carrying none, is a `ToolFrame` in a description frame (the gripper's
+mount, the arm's last link) whose grip is `Jaws` (parallel, or a single moving jaw against a
+fixed one: the unit closing line, the approach normal to it, the grasp point) or `NoJaws` with
+its reason (`multi_finger_hand`, `bare_flange`, `device_undescribed`, `jaws_undescribed`,
+`no_jaw_motion`), never a guessed axis. One rule for every body: the jaws are what the
+gripper's joints move, the closing line is their relative velocity at the grasp point as they
+open (a prismatic jaw's axis, a revolute jaw's motion across its hinge), parallel jaws' signed
+largest-component-positive and a single jaw's from the fixed jaw to the moving one.
+`tests/test_tool_frames.py` holds every body in both registries to it, and parallel jaws to
+the line between their open fingertips within a degree. `pack.json` carries the tools, and
+`sx_embodiment_ik::Body::tool(frame)` states one in any frame riding rigidly below its own (a
+`*_gripper_tcp`), with `Jaws::closing_normal_to` for a solve's own approach.
+
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,
 each directly driven joint, each encoder-read joint, each declared camera) and the

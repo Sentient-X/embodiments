@@ -16,7 +16,9 @@ A pack is a directory of three files, generated from the body's composed descrip
   as the others do). A description with no visual at all is drawn from its collision
   geometry. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
-  count, and the body's gripper tool frames by side; and, when the body declares them
+  count, the body's gripper tool frames by side, and ``tools``, each tool's grip
+  (:mod:`sx_embodiments.tool_frames`: its frame, and its jaws' closing line, approach and grasp
+  point, or why it has none); and, when the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
   side), ``mount`` (the base mount's frame, kind and edge, as ``collision.json``'s
   ``support``, and that surface's height above the floor) and ``virtual_gripper`` (the body's
@@ -55,6 +57,7 @@ from .embodiment import Embodiment
 from .errors import EmbodimentError
 from .kinematics import Transform, from_xyz_rpy
 from .materialize import materialize
+from .tool_frames import tool_frames
 from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
@@ -925,6 +928,7 @@ def build(
         "links": [{"name": link, "triangles": triangles[link]} for link in links],
         "triangles": sum(triangles.values()),
         "tcp_frames": tcp_frames(links),
+        "tools": [tool.to_json() for tool in tool_frames(embodiment)],
         "generated_by": GENERATOR,
     }
     if viewing is not None:

@@ -5,7 +5,8 @@ use sx_embodiment_drivers::kinematics::Tree;
 use crate::geometry::{Capsule, Proxies};
 use crate::math::{Iso, V3};
 use crate::model::{Frames, Model};
-use crate::{IkError, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use crate::tool::{ToolFrame, parse_tools};
+use crate::{IkError, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_PACK, STATIC_UPPER_BODY_URDF};
 
 /// What a limb's frame is asked to do.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,6 +62,8 @@ pub struct Body {
     pub(crate) limbs: Vec<LimbFrame>,
     /// The axes solved: every axis that moves a limb's frame, in axis order.
     pub(crate) solved: Vec<usize>,
+    /// Its tools, as its pack carries them ([`Body::with_tools`]).
+    tools: Vec<ToolFrame>,
 }
 
 impl Body {
@@ -101,7 +104,52 @@ impl Body {
             proxies,
             limbs,
             solved,
+            tools: Vec::new(),
         })
+    }
+
+    /// The body with its tools, from its render pack's `pack.json`.
+    ///
+    /// # Errors
+    ///
+    /// [`IkError::Tools`] when the pack carries no readable tools, or one names a frame the
+    /// tree lacks.
+    pub fn with_tools(mut self, pack_json: &str) -> Result<Self, IkError> {
+        let tools = parse_tools(pack_json)?;
+        if let Some(tool) = tools.iter().find(|t| self.model.link(&t.frame).is_none()) {
+            return Err(IkError::Tools(format!(
+                "{} is stated in {:?}, which the tree lacks",
+                tool.component, tool.frame
+            )));
+        }
+        self.tools = tools;
+        Ok(self)
+    }
+
+    /// Every tool the pack carries, each in its own frame.
+    #[must_use]
+    pub fn tools(&self) -> &[ToolFrame] {
+        &self.tools
+    }
+
+    /// The tool whose frame link `frame` hangs rigidly below (a gripper's tool point on its
+    /// hand), its grip stated in `frame`. `None` when no tool does, or `frame` is not a link.
+    #[must_use]
+    pub fn tool(&self, frame: &str) -> Option<ToolFrame> {
+        let at = self.model.link(frame)?;
+        let (tool, own) = self.tools.iter().find_map(|tool| {
+            let own = self.model.link(&tool.frame)?;
+            self.model.rigidly_below(own, at).then_some((tool, own))
+        })?;
+        let q: Vec<f64> = self
+            .model
+            .axes()
+            .iter()
+            .map(|axis| axis.limits.map_or(0.0, |[lo, hi]| 0.0_f64.clamp(lo, hi)))
+            .collect();
+        let frames = self.model.poses(&q);
+        let (mine, theirs) = (frames.links[own], frames.links[at]);
+        Some(tool.restated(frame, (&mine.r, mine.t), (&theirs.r, theirs.t)))
     }
 
     /// The Sentient static upper body: both grippers' tool frames, and the ZED looking out
@@ -132,6 +180,7 @@ impl Body {
             },
         ];
         Self::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &limbs)
+            .and_then(|body| body.with_tools(STATIC_UPPER_BODY_PACK))
             .expect("the committed static upper body pack solves")
     }
 
