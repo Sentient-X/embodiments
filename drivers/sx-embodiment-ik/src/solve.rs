@@ -1071,6 +1071,22 @@ impl Ik {
             within(&mut safe_lo, &mut safe_hi, window);
             w.safe_lower[column] = safe_lo;
             w.safe_upper[column] = safe_hi;
+            // Feedback headroom is a moving motion limit. Brake before reaching its edge,
+            // rather than arriving at speed and clipping the next command abruptly. Keep
+            // the original safety box above: collision feasibility can still yield these
+            // predictive speed caps, just as it can yield the acceleration caps below.
+            if high.is_finite() {
+                let up = braking((high - q[axis]).max(0.0), accel, dt).max(0.0);
+                if up < hi {
+                    (hi, hi_by) = (up, Bound::Speed);
+                }
+            }
+            if low.is_finite() {
+                let down = braking((q[axis] - low).max(0.0), accel, dt).max(0.0);
+                if -down > lo {
+                    (lo, lo_by) = (-down, Bound::Speed);
+                }
+            }
             let previous = self.velocity[column] * dt;
             let swing = accel * dt * dt;
             let (a_lo, a_hi) = (previous - swing, previous + swing);
