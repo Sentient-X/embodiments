@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from sx_embodiments import development_embodiments
+from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.calibrate.motion import (
     SETTLED_TRACKING_RAD,
     JointMotion,
@@ -18,7 +18,7 @@ from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_SERVO_APPROACH,
     STATIC_UPPER_BODY_SPEED_CAP,
 )
-from sx_embodiments.layout import ACTUATOR_RATINGS, LayoutError
+from sx_embodiments.layout import ACTUATOR_RATINGS, ActuatorRating, LayoutError
 
 
 @pytest.fixture(scope="module")
@@ -74,3 +74,30 @@ def test_a_motion_must_be_positive_and_finite() -> None:
     for speed, acceleration in ((0.0, 1.0), (1.0, math.inf), (-1.0, 1.0)):
         with pytest.raises(LayoutError):
             JointMotion(speed, acceleration)
+
+
+def test_every_rated_joint_moves_its_rotor_beside_its_links() -> None:
+    # The humanoid's wrist yaw links weigh 1.05e-4 kg·m²; its DM4340's rotor, 2e-5 kg·m² turning
+    # forty times as fast, is 0.032 at the joint. Without it the joint looked a hundred times too
+    # light to the simulator and the gains' ceilings (sx#3004).
+    for name in ("sentient-humanoid-upper-body", "b601-dm"):
+        body = embodiments[name]
+        motion = joint_motion(body)
+        for coordinate in body.state.coordinates:
+            binding = coordinate.axis.actuator
+            if binding is None:
+                continue
+            armature = ACTUATOR_RATINGS[binding.model].armature_kg_m2
+            if armature is None:
+                continue
+            assert motion[coordinate.joint_name].inertia >= armature * binding.reduction**2, (
+                coordinate.joint_name
+            )
+    wrist = joint_motion(embodiments["sentient-humanoid-upper-body"])["right_wrist_yaw_joint"]
+    assert 0.032 < wrist.inertia < 0.0325
+
+
+def test_an_armature_must_be_positive_and_finite() -> None:
+    for armature in (0.0, -1e-3, math.nan):
+        with pytest.raises(LayoutError):
+            ActuatorRating(7.0, armature_kg_m2=armature)

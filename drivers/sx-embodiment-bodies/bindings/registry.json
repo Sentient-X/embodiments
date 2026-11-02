@@ -16,8 +16,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 3.7699111843077517,
-        "acceleration": 27.972419154642164,
-        "inertia": 0.3217455004604564
+        "acceleration": 25.442019724024927,
+        "inertia": 0.3537455004604564
       },
       {
         "joint": "joint2",
@@ -32,8 +32,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 3.7699111843077517,
-        "acceleration": 6.649655402258591,
-        "inertia": 0.3393101240424663
+        "acceleration": 6.076579261603889,
+        "inertia": 0.3713101240424663
       },
       {
         "joint": "joint3",
@@ -49,7 +49,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.09332469543525201
+        "inertia": 0.12532469543525201
       },
       {
         "joint": "joint4",
@@ -65,7 +65,7 @@
         "home": 0.0,
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.010248302588980795
+        "inertia": 0.012048302588980795
       },
       {
         "joint": "joint5",
@@ -81,7 +81,7 @@
         "home": 0.0,
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0029414929181119515
+        "inertia": 0.004741492918111951
       },
       {
         "joint": "joint6",
@@ -97,7 +97,7 @@
         "home": 0.0,
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0007675148885133004
+        "inertia": 0.0025675148885133
       },
       {
         "joint": "gripper_joint1",
@@ -112,7 +112,7 @@
         "reduction": 111.11111111111111,
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
-        "inertia": 0.08465579019774325
+        "inertia": 22.306878012419965
       }
     ],
     "supersedes": [
@@ -142,8 +142,8 @@
           "joint": "joint1"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 29.814250628228066,
-        "inertia": 0.3018690663141746
+        "acceleration": 26.956675260028128,
+        "inertia": 0.33386906631417457
       },
       {
         "joint": "left_joint2",
@@ -163,8 +163,8 @@
           "joint": "joint2"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 9.04937131180928,
-        "inertia": 0.3107521351610847
+        "acceleration": 8.204504563300762,
+        "inertia": 0.3427521351610847
       },
       {
         "joint": "left_joint3",
@@ -185,7 +185,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.09332469543525201
+        "inertia": 0.12532469543525201
       },
       {
         "joint": "left_joint4",
@@ -206,7 +206,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.010141312881522757
+        "inertia": 0.011941312881522757
       },
       {
         "joint": "left_joint5",
@@ -227,7 +227,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.002819282959073688
+        "inertia": 0.004619282959073687
       },
       {
         "joint": "left_joint6",
@@ -248,7 +248,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008029395038185032
+        "inertia": 0.0026029395038185033
       },
       {
         "joint": "left_gripper_joint1",
@@ -268,7 +268,7 @@
         },
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
-        "inertia": 0.08465579019774327
+        "inertia": 22.306878012419965
       },
       {
         "joint": "right_joint1",
@@ -288,8 +288,8 @@
           "joint": "joint1"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 27.972419154642164,
-        "inertia": 0.3217455004604564
+        "acceleration": 25.442019724024927,
+        "inertia": 0.3537455004604564
       },
       {
         "joint": "right_joint2",
@@ -309,8 +309,8 @@
           "joint": "joint2"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 8.43017406572898,
-        "inertia": 0.31996704880051396
+        "acceleration": 7.663722856666442,
+        "inertia": 0.351967048800514
       },
       {
         "joint": "right_joint3",
@@ -331,7 +331,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.09332469543525201
+        "inertia": 0.12532469543525201
       },
       {
         "joint": "right_joint4",
@@ -352,7 +352,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0102290016436265
+        "inertia": 0.0120290016436265
       },
       {
         "joint": "right_joint5",
@@ -373,7 +373,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0029606428096281
+        "inertia": 0.0047606428096281
       },
       {
         "joint": "right_joint6",
@@ -394,7 +394,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008056318317400975
+        "inertia": 0.0026056318317400975
       },
       {
         "joint": "right_gripper_joint1",
@@ -414,7 +414,7 @@
         },
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
-        "inertia": 0.08465579019774325
+        "inertia": 22.306878012419965
       }
     ],
     "supersedes": [
@@ -444,8 +444,8 @@
           "joint": "joint1"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 25.922736366513885,
-        "inertia": 0.3471855699472335
+        "acceleration": 23.73508042843618,
+        "inertia": 0.3791855699472335
       },
       {
         "joint": "left_joint2",
@@ -465,8 +465,8 @@
           "joint": "joint2"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 6.649655402258591,
-        "inertia": 0.3393101240424663
+        "acceleration": 6.076579261603889,
+        "inertia": 0.3713101240424663
       },
       {
         "joint": "left_joint3",
@@ -487,7 +487,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.09370887136024209
+        "inertia": 0.12570887136024209
       },
       {
         "joint": "left_joint4",
@@ -508,7 +508,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.010279866052713915
+        "inertia": 0.012079866052713915
       },
       {
         "joint": "left_joint5",
@@ -529,7 +529,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0029414929181119515
+        "inertia": 0.004741492918111951
       },
       {
         "joint": "left_joint6",
@@ -550,7 +550,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008112200746607952
+        "inertia": 0.002611220074660795
       },
       {
         "joint": "left_gripper_joint1",
@@ -570,7 +570,7 @@
         },
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
-        "inertia": 0.08465579019774325
+        "inertia": 22.306878012419965
       },
       {
         "joint": "right_joint1",
@@ -590,8 +590,8 @@
           "joint": "joint1"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 31.19257625061128,
-        "inertia": 0.28853019153310966
+        "acceleration": 28.078478214337977,
+        "inertia": 0.3205301915331097
       },
       {
         "joint": "right_joint2",
@@ -611,8 +611,8 @@
           "joint": "joint2"
         },
         "speed": 3.7699111843077517,
-        "acceleration": 9.112513505418175,
-        "inertia": 0.32960966862037644
+        "acceleration": 8.306117942805306,
+        "inertia": 0.36160966862037647
       },
       {
         "joint": "right_joint3",
@@ -633,7 +633,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.09332469543525201
+        "inertia": 0.12532469543525201
       },
       {
         "joint": "right_joint4",
@@ -654,7 +654,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.010115817495758628
+        "inertia": 0.011915817495758627
       },
       {
         "joint": "right_joint5",
@@ -675,7 +675,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0029896271290733023
+        "inertia": 0.004789627129073302
       },
       {
         "joint": "right_joint6",
@@ -696,7 +696,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008008228022085162
+        "inertia": 0.0026008228022085162
       },
       {
         "joint": "right_gripper_joint1",
@@ -716,7 +716,7 @@
         },
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
-        "inertia": 0.08465579019774325
+        "inertia": 22.306878012419965
       }
     ],
     "supersedes": [
@@ -1006,8 +1006,8 @@
           "joint": "torso_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 39.64693469281374,
-        "inertia": 0.8071241887408815
+        "acceleration": 38.6882652394837,
+        "inertia": 0.8271241887408816
       },
       {
         "joint": "right_shoulder_pitch_joint",
@@ -1028,7 +1028,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05277596313948418
+        "inertia": 0.07277596313948419
       },
       {
         "joint": "right_shoulder_roll_joint",
@@ -1049,7 +1049,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05468107822439969
+        "inertia": 0.07468107822439969
       },
       {
         "joint": "right_elbow_yaw_joint",
@@ -1070,7 +1070,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006650097984109371
+        "inertia": 0.03865009798410937
       },
       {
         "joint": "right_elbow_forearm_yaw_joint",
@@ -1091,7 +1091,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006535008594343472
+        "inertia": 0.03853500859434347
       },
       {
         "joint": "right_wrist_yaw_joint",
@@ -1112,7 +1112,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010495951843992289
+        "inertia": 0.032104959518439925
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1133,7 +1133,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05278379934157938
+        "inertia": 0.07278379934157939
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1154,7 +1154,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05470804143266231
+        "inertia": 0.07470804143266231
       },
       {
         "joint": "left_elbow_yaw_joint",
@@ -1175,7 +1175,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006622258425023675
+        "inertia": 0.038622258425023676
       },
       {
         "joint": "left_elbow_forearm_yaw_joint",
@@ -1196,7 +1196,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006536561075065381
+        "inertia": 0.03853656107506538
       },
       {
         "joint": "left_wrist_yaw_joint",
@@ -1217,7 +1217,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010533243859991819
+        "inertia": 0.03210533243859992
       }
     ],
     "supersedes": [
@@ -1241,8 +1241,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 10.471975511965978,
-        "acceleration": 39.2956497276854,
-        "inertia": 0.81433950632593
+        "acceleration": 38.35369146178172,
+        "inertia": 0.83433950632593
       },
       {
         "joint": "right_shoulder_pitch_joint",
@@ -1258,7 +1258,7 @@
         "home": 0.0,
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05259152698919917
+        "inertia": 0.07259152698919917
       },
       {
         "joint": "right_shoulder_roll_joint",
@@ -1274,7 +1274,7 @@
         "home": 0.0,
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.054671421509963805
+        "inertia": 0.07467142150996381
       },
       {
         "joint": "right_elbow_yaw_joint",
@@ -1290,7 +1290,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006544415173383167
+        "inertia": 0.03854441517338317
       },
       {
         "joint": "right_elbow_forearm_yaw_joint",
@@ -1306,7 +1306,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.0065348735140110525
+        "inertia": 0.03853487351401105
       },
       {
         "joint": "right_wrist_yaw_joint",
@@ -1322,7 +1322,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010495951843992289
+        "inertia": 0.032104959518439925
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1338,7 +1338,7 @@
         "home": 0.0,
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05278379934157938
+        "inertia": 0.07278379934157939
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1354,7 +1354,7 @@
         "home": 0.0,
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.054711001160259176
+        "inertia": 0.07471100116025918
       },
       {
         "joint": "left_elbow_yaw_joint",
@@ -1370,7 +1370,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006628496735252287
+        "inertia": 0.03862849673525229
       },
       {
         "joint": "left_elbow_forearm_yaw_joint",
@@ -1386,7 +1386,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006536687934717511
+        "inertia": 0.03853668793471751
       },
       {
         "joint": "left_wrist_yaw_joint",
@@ -1402,7 +1402,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010533243859991862
+        "inertia": 0.03210533243859992
       }
     ],
     "supersedes": [
@@ -1431,8 +1431,8 @@
           "joint": "torso_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 39.2956497276854,
-        "inertia": 0.81433950632593
+        "acceleration": 38.35369146178172,
+        "inertia": 0.83433950632593
       },
       {
         "joint": "right_shoulder_pitch_joint",
@@ -1453,7 +1453,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05259152698919917
+        "inertia": 0.07259152698919917
       },
       {
         "joint": "right_shoulder_roll_joint",
@@ -1474,7 +1474,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.054671421509963805
+        "inertia": 0.07467142150996381
       },
       {
         "joint": "right_elbow_yaw_joint",
@@ -1495,7 +1495,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006544415173383167
+        "inertia": 0.03854441517338317
       },
       {
         "joint": "right_elbow_forearm_yaw_joint",
@@ -1516,7 +1516,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.0065348735140110525
+        "inertia": 0.03853487351401105
       },
       {
         "joint": "right_wrist_yaw_joint",
@@ -1537,7 +1537,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010495951843992289
+        "inertia": 0.032104959518439925
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1558,7 +1558,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.05278379934157938
+        "inertia": 0.07278379934157939
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1579,7 +1579,7 @@
         },
         "speed": 10.471975511965978,
         "acceleration": 104.71975511965977,
-        "inertia": 0.054711001160259176
+        "inertia": 0.07471100116025918
       },
       {
         "joint": "left_elbow_yaw_joint",
@@ -1600,7 +1600,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006628496735252287
+        "inertia": 0.03862849673525229
       },
       {
         "joint": "left_elbow_forearm_yaw_joint",
@@ -1621,7 +1621,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.006536687934717511
+        "inertia": 0.03853668793471751
       },
       {
         "joint": "left_wrist_yaw_joint",
@@ -1642,7 +1642,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.00010533243859991862
+        "inertia": 0.03210533243859992
       }
     ],
     "supersedes": [
@@ -1667,7 +1667,7 @@
         "home": 0.0,
         "speed": 0.25,
         "acceleration": 2.5,
-        "inertia": 1.5623303824044565
+        "inertia": 1.5823303824044566
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1682,8 +1682,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 10.471975511965978,
-        "acceleration": 26.310802316025082,
-        "inertia": 0.3960205443367915
+        "acceleration": 25.045922363619415,
+        "inertia": 0.41602054433679153
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1698,8 +1698,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 10.471975511965978,
-        "acceleration": 29.009043364774538,
-        "inertia": 0.43227332923502443
+        "acceleration": 27.726233104269436,
+        "inertia": 0.45227332923502445
       },
       {
         "joint": "left_upper_arm_yaw_joint",
@@ -1715,7 +1715,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.12422742810052757
+        "inertia": 0.1562274281005276
       },
       {
         "joint": "left_elbow_pitch_joint",
@@ -1730,8 +1730,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 3.7699111843077517,
-        "acceleration": 36.64224778159713,
-        "inertia": 0.12378922627301989
+        "acceleration": 29.11572006808107,
+        "inertia": 0.1557892262730199
       },
       {
         "joint": "left_forearm_yaw_joint",
@@ -1747,7 +1747,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.01789811147637149
+        "inertia": 0.04989811147637149
       },
       {
         "joint": "left_wrist_pitch_joint",
@@ -1762,8 +1762,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 12.56637061435917,
-        "acceleration": 99.14927228527316,
-        "inertia": 0.01752821931891431
+        "acceleration": 89.91569069305453,
+        "inertia": 0.01932821931891431
       },
       {
         "joint": "left_wrist_roll_joint",
@@ -1779,7 +1779,7 @@
         "home": 0.0,
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008879417649592432
+        "inertia": 0.002687941764959243
       },
       {
         "joint": "right_shoulder_pitch_joint",
@@ -1794,8 +1794,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 10.471975511965978,
-        "acceleration": 28.942538961669616,
-        "inertia": 0.38266619810682095
+        "acceleration": 27.50499396297113,
+        "inertia": 0.40266619810682097
       },
       {
         "joint": "right_shoulder_roll_joint",
@@ -1810,8 +1810,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 10.471975511965978,
-        "acceleration": 31.830340021899687,
-        "inertia": 0.4059113674212546
+        "acceleration": 30.33564687883467,
+        "inertia": 0.4259113674212546
       },
       {
         "joint": "right_upper_arm_yaw_joint",
@@ -1827,7 +1827,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.12412201064124129
+        "inertia": 0.1561220106412413
       },
       {
         "joint": "right_elbow_pitch_joint",
@@ -1842,8 +1842,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 3.7699111843077517,
-        "acceleration": 36.69745980314285,
-        "inertia": 0.12368361680647628
+        "acceleration": 29.154477838892124,
+        "inertia": 0.1556836168064763
       },
       {
         "joint": "right_forearm_yaw_joint",
@@ -1859,7 +1859,7 @@
         "home": 0.0,
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.017856383949315886
+        "inertia": 0.04985638394931589
       },
       {
         "joint": "right_wrist_pitch_joint",
@@ -1874,8 +1874,8 @@
         "reduction": 1.0,
         "home": 0.0,
         "speed": 12.56637061435917,
-        "acceleration": 99.14782416963065,
-        "inertia": 0.017528417805868324
+        "acceleration": 89.9144722575486,
+        "inertia": 0.019328417805868324
       },
       {
         "joint": "right_wrist_roll_joint",
@@ -1891,7 +1891,7 @@
         "home": 0.0,
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0008778403028602714
+        "inertia": 0.0026778403028602715
       },
       {
         "joint": "left_gripper_left_finger_joint",

@@ -427,8 +427,8 @@ impl Sim {
     /// gravity), and its model's peak torque. The body a station believes it drives, so its
     /// feed-forward cancels what it models; friction is the bench simulation's
     /// ([`Sim::with_mit_dynamics`], `tools/sim_speed_ceiling.py`). The bindings' inertia is the
-    /// links' alone, with no rotor reflected through the gearbox, so a wrist here is far lighter
-    /// than a real one (the humanoid's 1.05e-4 kg m^2 against about 0.01 with a DM4340's rotor).
+    /// links' plus the motor's rotor reflected through its gearbox (`ActuatorRating`'s
+    /// armature): the humanoid's wrist links alone are 1.05e-4 kg m^2, with the rotor 0.032.
     #[must_use]
     pub fn with_model_dynamics(self, axes: &[DamiaoAxis]) -> Self {
         {

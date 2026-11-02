@@ -13,7 +13,8 @@ driven joint's :class:`JointMotion` into the driver bindings, and the governor
 * **Acceleration** is what the motor's torque leaves after holding the arm: its rated
   (continuous) torque, which it gives across its rated speed (where none is recorded,
   :data:`TORQUE_SHARE` of its peak), less the most gravity the joint ever holds, over the
-  most inertia it ever moves (the joint-space mass matrix's diagonal), both over
+  most inertia it ever moves (the joint-space mass matrix's diagonal, plus the actuator's
+  rotor reflected through the binding's reduction, ``armature_kg_m2`` times its square), both over
   :data:`POSE_SAMPLES` poses spread over every joint's range, with every link as many times
   the description's mass as the joint's port declares (a body whose description is an
   estimate the robot was measured against: the static upper body's arms, 2.61). It is never
@@ -23,8 +24,9 @@ driven joint's :class:`JointMotion` into the driver bindings, and the governor
 
 The acceleration (and the inertia rendered beside it) is an estimate, not a measurement: the
 description's masses times the port's margin (identified on the static upper body's forearm
-alone), the mass matrix's diagonal (no coupling, Coriolis or centripetal torque) and no rotor
-inertia (the vendors publish none). A joint identified in place should replace it.
+alone), the mass matrix's diagonal (no coupling, Coriolis or centripetal torque) and the
+rotor inertia Damiao's parameter table gives (the 43 series) or the bench estimate (the 8009s;
+no rotor for a model with none recorded). A joint identified in place should replace it.
 
 These are what the motors can do. A vendor chain may hold an axis lower still, where its own
 gains cannot follow that fast (``ActuatorChain::tracking_ceilings``); how much of the rest a
@@ -157,7 +159,11 @@ def joint_motion(
             raise LayoutError("actuator", f"{joint}'s {binding.model.value} has no rated speed")
         speed = min(speeds)
         margin = mass_margin.get(port, 1.0)
-        gravity, inertia = (margin * load for load in loads.get(joint, (0.0, 0.0)))
+        gravity, links = (margin * load for load in loads.get(joint, (0.0, 0.0)))
+        # The rotor turns `reduction` times as fast as the joint: its inertia at the joint is
+        # the armature times the reduction squared, whatever the links weigh.
+        armature = 0.0 if rating.armature_kg_m2 is None else rating.armature_kg_m2
+        inertia = links + armature * binding.reduction**2
         available = (
             TORQUE_SHARE * rating.peak_torque_nm
             if rating.rated_torque_nm is None
