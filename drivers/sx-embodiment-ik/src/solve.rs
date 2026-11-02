@@ -251,6 +251,11 @@ enum Bound {
     Accel,
 }
 
+/// How much faster than its speed cap a joint is taken to move, at most: a follower rings past
+/// its command, but no motor jumps the reference gap in a tick. Bounds the measured speed here
+/// and the readings [`crate::teleop::Teleop`] takes.
+pub const FOLLOWER_SPEED: f64 = 3.0;
+
 /// How far a joint's reading may stray from where it is, radians, either way: an encoder's
 /// count and a bus's jitter. A measured pose within this of the command on every axis a pair
 /// moves is the command as far as the pair goes; two readings closer than twice this are not
@@ -276,6 +281,8 @@ const MOMENTUM_S: f64 = 0.06;
 
 /// The cost of the rows' slack ([`Ik::solve_qp`]), against a cost scaled to a unit diagonal.
 const SLACK_WEIGHT: f64 = 1e4;
+/// Slack past this (the rows' units) is rows giving way, not the interior-point's sliver.
+const SLACK_USED: f64 = 1e-6;
 /// How far the slack may go, in the rows' units (unit-norm rows over one-tick speed steps).
 const SLACK_ROOM: f64 = 1e3;
 
@@ -895,14 +902,19 @@ impl Ik {
         // How fast each axis is measured to move, smoothed over MEASURED_SPEED_S (a reading's
         // jitter differenced over a 2 ms tick is a speed of a radian a second).
         let blend = 1.0 - (-dt / MEASURED_SPEED_S).exp();
-        for ((speed, before), now) in self
+        for (((speed, before), now), cap) in self
             .measured_speed
             .iter_mut()
             .zip(self.measured_before.iter_mut())
             .zip(&self.measured)
+            .zip(&self.caps.speed)
         {
             if now.is_finite() && before.is_finite() {
-                *speed += blend * ((now - *before) / dt - *speed);
+                // Never faster than the joint can move: a reading that caught up after a stale
+                // run, or a glitch the caller let through, is not a speed.
+                let most = FOLLOWER_SPEED * cap;
+                let seen = ((now - *before) / dt).clamp(-most, most);
+                *speed += blend * (seen - *speed);
             } else {
                 *speed = 0.0;
             }
@@ -919,6 +931,10 @@ impl Ik {
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
             iterations = self.solve_qp(dt, deadline, true);
+            // Rows gave way: say so, as a widened cap does.
+            if iterations.is_some() && self.qp.x[self.body.solved.len()] > SLACK_USED {
+                solve = Solve::Relaxed;
+            }
         }
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
@@ -1381,10 +1397,10 @@ impl Ik {
         }
     }
 
-    /// Give every row a step inside the box that keeps it: a row no step within the
-    /// acceleration caps can keep widens its axes to their safe range (the acceleration cap
-    /// yields to keeping clear). With `all`, every row's axes yield and every row asks only
-    /// that its pair come no closer, which standing still keeps.
+    /// Ready the rows for the solve. A commanded row no step within the acceleration caps can
+    /// keep is left to the elastic retry ([`Ik::solve_qp`]), which keeps the rows as nearly as
+    /// the caps allow. With `all` (that retry failed too), every row's axes yield to their safe
+    /// range and every row asks only that its pair come no closer, which standing still keeps.
     ///
     /// A row main never had (at the measured pose, or a stuck joint's copy) never widens a cap:
     /// one the box (as the commanded rows left it) cannot keep is eased [`SOFTENED`] of the way
@@ -1406,7 +1422,11 @@ impl Ik {
             if w.row_measured[slot] {
                 continue;
             }
-            if all || least(w, slot) > w.rhs[slot] {
+            // A row no step inside the caps keeps widens nothing here: the solve then finds no
+            // step and the elastic retry keeps the rows as nearly as the caps allow. Widening its
+            // axes to their whole range let one bad reading turn an arm 70-340x its cap
+            // (embodiments#210). Only `all`, after the retry too has failed, widens.
+            if all {
                 for j in 0..n {
                     if w.rows[slot * n + j] != 0.0 && !w.yielded[j] {
                         w.lower[j] = w.safe_lower[j];
@@ -1414,10 +1434,8 @@ impl Ik {
                         w.yielded[j] = true;
                     }
                 }
-                solve = Solve::Relaxed;
-            }
-            if all {
                 w.rhs[slot] = w.rhs[slot].max(0.0);
+                solve = Solve::Relaxed;
             }
         }
         for slot in 0..w.used {

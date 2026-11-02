@@ -47,7 +47,7 @@ use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
-use crate::solve::{Caps, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve};
+use crate::solve::{Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve};
 
 /// The config's schema, written in every config and refused when another.
 pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
@@ -75,6 +75,26 @@ pub const STALL: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Movement under this (metres of a gripper's opening, radians of a joint) is no progress.
 pub const STALL_STILL: f64 = 0.0005;
+
+/// The least jump a reading is doubted for, radians: well past any reading's noise (the
+/// clearance tests jitter readings by 1-3 mrad, and doubting noise held a reading back a tick
+/// and lurched an arm 150x its cap); a glitch worth catching is 0.05 rad and more.
+pub const GLITCH_FLOOR: f64 = 0.01;
+
+/// Over how long readings are smoothed where a stall is judged (whether the joint pushes at the
+/// gap, and whether it comes nearer): long enough to quiet a few mrad of noise at 500 Hz. The
+/// gap itself is kept from the reading: a window from the smoothed one lagged the joint and
+/// cost clearance.
+pub const STEADY_S: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// How near the reference gap, from the smoothed reading, a joint whose stall clock runs still
+/// pushes at it: at 500 Hz the acceleration cap holds the step near the noisy edge's lowest
+/// jitter, 2-3 mrad inside.
+pub const AT_THE_GAP: f64 = 0.005;
+
+/// How long a reading that jumps further than the joint could move is set aside before it is
+/// taken as real (someone moved the arm, a joint slipped).
+pub const GLITCH_HOLD: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// A stalled joint lets go when its targets have asked it back off what stopped it by more
 /// than this, radians: what each tick's solve asks of it ([`crate::Ik::asked`]), summed over
@@ -389,6 +409,20 @@ pub struct Teleop {
     /// Per axis: where it stood when it stalled, the reference it is held at: stiff there, so
     /// it neither pushes on what stopped it nor sags away from it under a load.
     hold: Vec<f64>,
+    /// Per axis: the last reading taken as where the joint is, the ticks since it was read
+    /// (a missing reading leaves the joint free to move), and for how many in a row a reading
+    /// has been refused as a jump it could not make ([`Teleop::gate_readings`]).
+    trusted: Vec<f64>,
+    /// Per axis, the last reading refused: a next one that agrees with it is a real move.
+    doubted: Vec<f64>,
+    /// Per axis, the reference the last tick was given: how fast the command moves.
+    reference_before: Vec<f64>,
+    since_read: Vec<u32>,
+    refused: Vec<u32>,
+    /// This tick's readings as the solve takes them.
+    gated: Vec<Option<f64>>,
+    /// Per axis, the readings smoothed over [`STEADY_S`]: where the gap and a stall are judged.
+    steady: Vec<f64>,
 }
 
 impl Teleop {
@@ -557,6 +591,13 @@ impl Teleop {
             stop: vec![None; width],
             window: vec![None; width],
             hold: vec![0.0; width],
+            trusted: vec![f64::NAN; width],
+            doubted: vec![f64::NAN; width],
+            reference_before: vec![f64::NAN; width],
+            since_read: vec![0; width],
+            refused: vec![0; width],
+            gated: vec![None; width],
+            steady: vec![f64::NAN; width],
         })
     }
 
@@ -678,6 +719,7 @@ impl Teleop {
     /// measurement for a joint that stalled there ([`STALL`]), and the last command otherwise,
     /// with the step's window within [`REFERENCE_GAP`] of the measurement for a joint the solve
     /// moves (clamped there for one it does not); and which joints do not follow.
+    #[allow(clippy::too_many_lines)] // every axis's gap and stall rule, in one pass
     fn take_reference(
         &mut self,
         reference: &[f64],
@@ -709,6 +751,19 @@ impl Teleop {
             self.stall.fill(0.0);
         }
         let stall_s = STALL.as_secs_f64();
+        // The gap and a stall are judged from the readings smoothed over STEADY_S: at 250 Hz and
+        // faster a reading's noise of 1.5 mrad moved the gap's edge past the stall's tolerance
+        // every few ticks, and a joint pushing a stop never stalled (embodiments#210).
+        let blend = 1.0 - (-dt / STEADY_S.as_secs_f64()).exp();
+        for (steady, reading) in self.steady.iter_mut().zip(measured) {
+            *steady = match reading {
+                Some(at) if at.is_finite() && !seeded && steady.is_finite() => {
+                    *steady + blend * (at - *steady)
+                }
+                Some(at) if at.is_finite() => *at,
+                _ => f64::NAN,
+            };
+        }
         for (axis, (slot, (sent, reading))) in self
             .q
             .iter_mut()
@@ -722,8 +777,25 @@ impl Teleop {
                 Some(at) if seeded => *at,
                 // A reading that is not a number leaves the reference (as the old rule did,
                 // and f64::clamp would panic on it).
-                Some(at) if at.is_finite() => {
+                Some(raw) if raw.is_finite() && self.steady[axis].is_finite() => {
+                    // The gap is kept from the reading; whether the joint pushes at it, and
+                    // whether it comes nearer, from the smoothed one.
+                    let raw = *raw;
+                    let at = &self.steady[axis];
                     let lead = sent - at;
+                    // Whether the last step ended on its window's edge. It starts the stall's
+                    // clock; a noisy tick off the edge does not stop it while the smoothed
+                    // reading stays at the gap (at 250 Hz and faster the acceleration cap keeps
+                    // the step from following the edge's jitter, and a pushing joint never
+                    // stalled). A joint is counted on to open no pair only on the edge.
+                    let on_edge = window.is_some_and(|[low, high]| {
+                        let near = STALL_STILL + 2.0 * READING_JITTER;
+                        if *sent - raw > 0.0 {
+                            *sent >= high - near
+                        } else {
+                            *sent <= low + near
+                        }
+                    });
                     let solved = available[axis]
                         && !self.held[axis]
                         && self.limbs_of[axis] != 0
@@ -733,16 +805,9 @@ impl Teleop {
                         self.stop[axis] = None;
                         self.leashed[axis] = None;
                     } else if self.stall[axis] == 0.0
-                        && window.is_some_and(|[low, high]| {
-                            // Within a reading's jitter (either end) of the edge: a step settles
-                            // a little inside it, and the jitter moves the edge each tick.
-                            let near = STALL_STILL + 2.0 * READING_JITTER;
-                            if lead > 0.0 {
-                                *sent >= high - near
-                            } else {
-                                *sent <= low + near
-                            }
-                        })
+                        && (on_edge
+                            || (self.leashed[axis].is_some()
+                                && lead.abs() >= REFERENCE_GAP - AT_THE_GAP))
                     {
                         // At the gap (the step ended on its window's edge, whatever the reading
                         // now: noise in it moves the gap, not the push): pushing on something,
@@ -757,7 +822,7 @@ impl Teleop {
                                 if since >= stall_s {
                                     self.stall[axis] = push;
                                     self.asked_back[axis] = 0.0;
-                                    self.hold[axis] = *at;
+                                    self.hold[axis] = raw;
                                     None
                                 } else {
                                     Some((from, since))
@@ -774,7 +839,7 @@ impl Teleop {
                     if self.stall[axis] != 0.0 {
                         self.stop[axis] = Some((self.hold[axis], self.stall[axis]));
                     } else if let Some((stop, push)) = self.stop[axis]
-                        && (at - stop) * push > STALL_STILL + 2.0 * READING_JITTER
+                        && (raw - stop) * push > STALL_STILL + 2.0 * READING_JITTER
                     {
                         self.stop[axis] = None;
                     }
@@ -785,7 +850,8 @@ impl Teleop {
                         .is_some_and(|(stop, push)| (sent - stop) * push > STALL_STILL);
                     if self.stall[axis] != 0.0
                         || past_stop
-                        || matches!(self.leashed[axis], Some((_, since)) if since > 0.0)
+                        || (on_edge
+                            && matches!(self.leashed[axis], Some((_, since)) if since > 0.0))
                     {
                         self.stuck[axis] = true;
                     }
@@ -798,16 +864,97 @@ impl Teleop {
                         // keeps clear (a lagging right arm's commands touched the left gripper,
                         // 2026-11-02).
                         self.ik
-                            .set_window(axis, at - REFERENCE_GAP, at + REFERENCE_GAP);
-                        self.window[axis] = Some([at - REFERENCE_GAP, at + REFERENCE_GAP]);
+                            .set_window(axis, raw - REFERENCE_GAP, raw + REFERENCE_GAP);
+                        self.window[axis] = Some([raw - REFERENCE_GAP, raw + REFERENCE_GAP]);
                         *sent
                     } else {
                         // Not moved by the solve this tick (held, idle): within the gap of
                         // where it is, as someone moving it takes it.
-                        sent.clamp(at - REFERENCE_GAP, at + REFERENCE_GAP)
+                        sent.clamp(raw - REFERENCE_GAP, raw + REFERENCE_GAP)
                     }
                 }
                 Some(_) | None => *sent,
+            };
+        }
+    }
+
+    /// The readings the solve takes: one that jumps further from the last trusted reading than
+    /// the joint could move since ([`FOLLOWER_SPEED`] times its speed cap, and two readings'
+    /// jitter) is taken as that reading again, for up to [`GLITCH_HOLD`]; a jump that lasts
+    /// longer is real and taken. One bad reading moved the window by the gap and the measured
+    /// speed by radians a second: an arm turned 70-140x its acceleration cap and a hand
+    /// strayed 12-31 mm (embodiments#210).
+    fn gate_readings(
+        &mut self,
+        reference: &[f64],
+        measured: &[Option<f64>],
+        gated: &mut [Option<f64>],
+        seeded: bool,
+        dt: f64,
+    ) {
+        let hold_ticks = (GLITCH_HOLD.as_secs_f64() / dt).ceil().max(1.0);
+        for (axis, (out, reading)) in gated.iter_mut().zip(measured).enumerate() {
+            let speed = self
+                .ik
+                .caps()
+                .speed
+                .get(axis)
+                .copied()
+                .unwrap_or(f64::INFINITY);
+            let sent = reference[axis];
+            let before = std::mem::replace(&mut self.reference_before[axis], sent);
+            let trusted = &mut self.trusted[axis];
+            let since_read = &mut self.since_read[axis];
+            let refused = &mut self.refused[axis];
+            let doubted = &mut self.doubted[axis];
+            // How far the joint could have moved since it was last read: after a dropout, the
+            // reading that catches up is news, not a glitch. (A station sends a stale reading
+            // as missing; a joint at rest may read the same count every tick.)
+            *since_read = since_read.saturating_add(1);
+            *out = match reading {
+                Some(at) if at.is_finite() => {
+                    // Where a follower can be: toward its command by up to all of its lag, past
+                    // it by a few of the command's own steps, or by the speed cap over a
+                    // dropout; anything further waits for the next reading to confirm it.
+                    let commanded = if before.is_finite() {
+                        (sent - before).abs()
+                    } else {
+                        0.0
+                    };
+                    let lag = if trusted.is_finite() {
+                        (sent - *trusted).abs()
+                    } else {
+                        0.0
+                    };
+                    let missed = f64::from(since_read.saturating_sub(1) + *refused);
+                    let reach = lag
+                        + FOLLOWER_SPEED * commanded
+                        + FOLLOWER_SPEED * speed * dt * missed
+                        + GLITCH_FLOOR;
+                    let step =
+                        FOLLOWER_SPEED * speed * dt * f64::from(*since_read) + 2.0 * READING_JITTER;
+                    *since_read = 0;
+                    let jump = (at - *trusted).abs();
+                    // A jump the next reading confirms is a move (a reading catching up after
+                    // a stale run); one it does not is a glitch.
+                    let confirmed = (at - *doubted).abs() <= step;
+                    if seeded
+                        || !trusted.is_finite()
+                        || jump <= reach
+                        || confirmed
+                        || f64::from(*refused) >= hold_ticks
+                    {
+                        *trusted = *at;
+                        *refused = 0;
+                        *doubted = f64::NAN;
+                        Some(*at)
+                    } else {
+                        *refused += 1;
+                        *doubted = *at;
+                        Some(*trusted)
+                    }
+                }
+                Some(_) | None => *reading,
             };
         }
     }
@@ -820,6 +967,7 @@ impl Teleop {
     ///
     /// [`IkError`] for vectors of the wrong length, a non-finite position or `dt`, and a free
     /// roll asked of a limb that declares no approach axis.
+    #[allow(clippy::too_many_lines)] // one tick, in its order
     pub fn step(
         &mut self,
         reference: &[f64],
@@ -840,6 +988,9 @@ impl Teleop {
         }
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
+        let mut gated = std::mem::take(&mut self.gated);
+        self.gate_readings(reference, measured, &mut gated, seeded, dt);
+        let measured = &gated[..];
         self.take_reference(reference, measured, available, targets, seeded, dt);
         self.seed = false;
         for (slot, (available, held)) in self
@@ -911,7 +1062,9 @@ impl Teleop {
         // its reference says: planned from the reference, a pair beside an elbow pushing a
         // stop was kept clear on a move the stop never let it make, and the right gripper
         // reaching for the left one touched it (2026-11-02).
-        self.ik.set_measured(measured, &self.stuck)?;
+        let set = self.ik.set_measured(measured, &self.stuck);
+        self.gated = gated;
+        set?;
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);
