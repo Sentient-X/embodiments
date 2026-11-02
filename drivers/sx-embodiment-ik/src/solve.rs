@@ -264,6 +264,21 @@ pub const READING_JITTER: f64 = 0.001;
 /// act-sim-like PD keeps 5.1 mm instead of touching. A tenth and a quarter both lost the PD.
 const SOFTENED: f64 = 0.2;
 
+/// How far a window may pull a step past the acceleration cap, as a multiple of it.
+const WINDOW_PULL: f64 = 2.0;
+/// Over how long a measured speed is smoothed, seconds.
+const MEASURED_SPEED_S: f64 = 0.03;
+/// How long a follower carries on at its measured speed, seconds: about the Spark's arm lag
+/// (26-63 ms). A row at the measured pose counts the move that carries it, wherever it closes
+/// the pair. An act-sim-like PD (zeta 0.2) then keeps 9.3 mm (5.1 without), zeta 0.1 7.7 mm
+/// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
+const MOMENTUM_S: f64 = 0.06;
+
+/// The cost of the rows' slack ([`Ik::solve_qp`]), against a cost scaled to a unit diagonal.
+const SLACK_WEIGHT: f64 = 1e4;
+/// How far the slack may go, in the rows' units (unit-norm rows over one-tick speed steps).
+const SLACK_ROOM: f64 = 1e3;
+
 #[derive(Clone, Copy, Debug)]
 enum Pair {
     /// Two capsules (by index) as measured this tick: a closest point on each and the
@@ -370,6 +385,9 @@ pub struct Ik {
     window: Vec<[f64; 2]>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
     measured: Vec<f64>,
+    /// Per axis, the measurement before this one, and a smoothed measured velocity (units/s).
+    measured_before: Vec<f64>,
+    measured_speed: Vec<f64>,
     /// Per axis, whether it does not follow its command ([`Ik::set_measured`]).
     stuck: Vec<bool>,
     work: Workspace,
@@ -475,7 +493,8 @@ impl Ik {
             })
             .collect();
         let k = settings.max_rows;
-        let qp = Qp::new(n, k);
+        // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
+        let qp = Qp::new(n + 1, k);
         // Twice: the pairs at the commanded positions and at the measured ones.
         let candidates = Vec::with_capacity(2 * (body.proxies.pairs.len() + scene_pairs.len()));
         let work = Workspace {
@@ -547,6 +566,8 @@ impl Ik {
             tool_capped: vec![false; limbs],
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             measured: vec![f64::NAN; axes_count],
+            measured_before: vec![f64::NAN; axes_count],
+            measured_speed: vec![0.0; axes_count],
             stuck: vec![false; axes_count],
             work,
             qp,
@@ -598,15 +619,16 @@ impl Ik {
     /// posture when one is set.
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
+        self.measured_before.fill(f64::NAN);
+        self.measured_speed.fill(0.0);
         self.anchored = self.preferred.is_some();
     }
 
     /// Where the next steps must leave `axis`, positions `[low, high]`, never past its joint
-    /// limits; unbounded both ways frees it. The window wins over the speed and acceleration
-    /// caps when they cannot meet, and its move is part of the step, so the collision rows
-    /// weigh it and the rest of the body keeps its pairs around it (they cannot refuse it): a
-    /// caller that moved its positions into the window itself moved them past every pair
-    /// unchecked. A window that is not an interval, or an axis out of range, is ignored.
+    /// limits; unbounded both ways frees it. Where the caps cannot reach it this tick, the step
+    /// goes toward it by up to twice the acceleration cap ([`WINDOW_PULL`]). Its move is part
+    /// of the step, so the collision rows weigh it: a caller that moved its positions into the
+    /// window itself moved them past every pair unchecked. A window that is not an interval, or an axis out of range, is ignored.
     pub fn set_window(&mut self, axis: usize, low: f64, high: f64) {
         if let Some(slot) = self.window.get_mut(axis)
             && low <= high
@@ -870,14 +892,38 @@ impl Ik {
         for ((seen, at), measured) in w.seen_q.iter_mut().zip(q).zip(&self.measured) {
             *seen = if measured.is_finite() { *measured } else { *at };
         }
+        // How fast each axis is measured to move, smoothed over MEASURED_SPEED_S (a reading's
+        // jitter differenced over a 2 ms tick is a speed of a radian a second).
+        let blend = 1.0 - (-dt / MEASURED_SPEED_S).exp();
+        for ((speed, before), now) in self
+            .measured_speed
+            .iter_mut()
+            .zip(self.measured_before.iter_mut())
+            .zip(&self.measured)
+        {
+            if now.is_finite() && before.is_finite() {
+                *speed += blend * ((now - *before) / dt - *speed);
+            } else {
+                *speed = 0.0;
+            }
+            *before = *now;
+        }
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
         self.collision_rows(q, dt);
         let mut solve = self.keep_feasible(false);
-        let mut iterations = self.solve_qp(dt, deadline);
+        let mut iterations = self.solve_qp(dt, deadline, false);
+        // No step inside the caps keeps every row: the rows give way, as little as they can,
+        // before any cap does. Widening every row's axes to their safe range first lurched the
+        // torso to 20x its acceleration cap and the left shoulder 155x, for no clearance
+        // (embodiments#208).
+        if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
+        {
+            iterations = self.solve_qp(dt, deadline, true);
+        }
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
             solve = self.keep_feasible(true);
-            iterations = self.solve_qp(dt, deadline);
+            iterations = self.solve_qp(dt, deadline, false);
         }
         let w = &mut self.work;
         let n = self.body.solved.len();
@@ -1067,8 +1113,24 @@ impl Ik {
                 high = high.clamp(inside_low, inside_high);
             }
             let window = (low - q[axis], high - q[axis]);
+            // Toward a window's edge as toward a limit: braking, so the step comes to rest on
+            // it rather than overshoot it and be pulled back (a pushing elbow circled the gap
+            // and never stalled, embodiments#208); applied after the acceleration cap, which it
+            // never overrules (a jittered edge moved the braking step 3x the cap at 500 Hz).
+            let edge_hi = if window.1.is_finite() && window.1 > 0.0 {
+                braking(window.1, accel, dt)
+            } else {
+                f64::INFINITY
+            };
+            let edge_lo = if window.0.is_finite() && window.0 < 0.0 {
+                -braking(-window.0, accel, dt)
+            } else {
+                f64::NEG_INFINITY
+            };
             let (mut safe_lo, mut safe_hi) = (lo, hi);
-            within(&mut safe_lo, &mut safe_hi, window);
+            if window.1 >= safe_lo && window.0 <= safe_hi {
+                within(&mut safe_lo, &mut safe_hi, window);
+            }
             w.safe_lower[column] = safe_lo;
             w.safe_upper[column] = safe_hi;
             let previous = self.velocity[column] * dt;
@@ -1086,9 +1148,28 @@ impl Ik {
             } else {
                 (lo, lo_by) = (hi, Bound::Accel);
             }
-            // Where the step must leave it ([`Ik::set_window`]): wins over the caps when they
-            // cannot meet.
-            if within(&mut lo, &mut hi, window) {
+            // Where the step must leave it ([`Ik::set_window`]).
+            if edge_hi < hi {
+                (hi, hi_by) = (edge_hi.max(lo), Bound::Limit);
+            }
+            if edge_lo > lo {
+                (lo, lo_by) = (edge_lo.min(hi), Bound::Limit);
+            }
+            if window.1 < lo || window.0 > hi {
+                // The caps cannot reach the window this tick: toward it by at most twice the
+                // acceleration cap, never past the speed and limit box. A window that won
+                // outright chattered a stopped elbow's command after its measurement's ring
+                // and jitter at 13x its cap (embodiments#208).
+                let extra = (WINDOW_PULL - 1.0) * swing;
+                if window.1 < lo {
+                    lo = (lo - extra).max(window.1).max(safe_lo.min(lo));
+                    hi = lo;
+                } else {
+                    hi = (hi + extra).min(window.0).min(safe_hi.max(hi));
+                    lo = hi;
+                }
+                (lo_by, hi_by) = (Bound::Accel, Bound::Accel);
+            } else if within(&mut lo, &mut hi, window) {
                 (lo_by, hi_by) = (Bound::Limit, Bound::Limit);
             }
             w.lower[column] = lo;
@@ -1256,7 +1337,10 @@ impl Ik {
                     .iter()
                     .zip(row.iter())
                     .filter(|&(&axis, _)| !self.stuck[axis])
-                    .map(|(&axis, r)| (r * (q[axis] - w.seen_q[axis])).max(0.0))
+                    .map(|(&axis, r)| {
+                        let carried = MOMENTUM_S * self.measured_speed[axis];
+                        (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
+                    })
                     .sum::<f64>();
                 rhs = 0.5 * room - lead;
             }
@@ -1362,8 +1446,9 @@ impl Ik {
     /// The QP sees `dq` in units of each axis's one-tick speed step (its box is then about
     /// [-1, 1]), unit-norm collision rows, and a cost scaled to a unit diagonal: the same
     /// problem, conditioned for an interior-point method whose data is otherwise 1e-4 m.
-    fn solve_qp(&mut self, dt: f64, deadline: Option<Instant>) -> Option<u32> {
+    fn solve_qp(&mut self, dt: f64, deadline: Option<Instant>, elastic: bool) -> Option<u32> {
         let n = self.body.solved.len();
+        let m = n + 1;
         let w = &mut self.work;
         let qp = &mut self.qp;
         for (column, &axis) in self.body.solved.iter().enumerate() {
@@ -1376,8 +1461,10 @@ impl Ik {
         let c = if largest > 0.0 { 1.0 / largest } else { 1.0 };
         for i in 0..n {
             for j in 0..n {
-                qp.h[i * n + j] = c * w.h[i * n + j] * w.unit[i] * w.unit[j];
+                qp.h[i * m + j] = c * w.h[i * n + j] * w.unit[i] * w.unit[j];
             }
+            qp.h[i * m + n] = 0.0;
+            qp.h[n * m + i] = 0.0;
             qp.g[i] = c * w.g[i] * w.unit[i];
             // A box closed to a point (a held axis, a forced deceleration) keeps a sliver of
             // interior for the interior-point method; the answer is clamped back to it.
@@ -1386,12 +1473,19 @@ impl Ik {
             qp.lower[i] = lo - open;
             qp.upper[i] = hi + open;
         }
+        // The slack every row may borrow, at a cost no step's tracking outweighs: closed (a
+        // sliver) but on the retry after a solve with no step inside the caps that keeps every
+        // row, where it finds the step that keeps them as nearly as the caps allow.
+        qp.h[n * m + n] = if elastic { SLACK_WEIGHT } else { 1.0 };
+        qp.g[n] = 0.0;
+        qp.lower[n] = -5e-8;
+        qp.upper[n] = if elastic { SLACK_ROOM } else { 5e-8 };
         qp.used = w.used;
         for slot in 0..w.used {
             let mut length = 0.0;
             for j in 0..n {
                 let v = w.rows[slot * n + j] * w.unit[j];
-                qp.r[slot * n + j] = v;
+                qp.r[slot * m + j] = v;
                 length += v * v;
             }
             let scale = if length > 0.0 {
@@ -1400,8 +1494,9 @@ impl Ik {
                 0.0
             };
             for j in 0..n {
-                qp.r[slot * n + j] *= scale;
+                qp.r[slot * m + j] *= scale;
             }
+            qp.r[slot * m + n] = -1.0;
             qp.rhs[slot] = w.rhs[slot] * scale;
         }
         let iterations = qp.solve(self.settings.max_iterations, deadline).ok()?;
