@@ -94,7 +94,7 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use sx_embodiment_drivers::can::{CanFrame, CanPort};
+use sx_embodiment_drivers::can::{CanFrame, CanPort, LinkHealth};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
     BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit,
@@ -398,6 +398,16 @@ pub enum DamiaoChainError {
     },
     #[error("bus_id {0} did not answer")]
     Silent(u16),
+    /// An open on a bus where nothing acknowledges a frame and no motor answered anything:
+    /// no powered node is on the bus (a CAN frame is acknowledged by any node that receives
+    /// it), so its motors are powered off or their cable is out. Silence, not a fault.
+    #[error(
+        "nothing on {bus} acknowledges a frame, so its motors are powered off or their cable is out ({refused})"
+    )]
+    NothingAnswering {
+        bus: String,
+        refused: Box<DamiaoChainError>,
+    },
     #[error("bus_id {bus_id} reports {state:?} where {expected:?} was required")]
     UnexpectedState {
         bus_id: u16,
@@ -849,6 +859,60 @@ fn disable_all<P: CanPort>(
     }
 }
 
+/// The longest an open that failed waits for its link's verdict on the bus
+/// ([`silence_of`]): a ZLG channel judges an empty bus after three refused batches of its 20 ms
+/// transmit timeout and the restart that follows, well inside this.
+const VERDICT_WAIT: Duration = Duration::from_secs(1);
+
+/// `refused`, an open's failure, as [`DamiaoChainError::NothingAnswering`] when the link reports
+/// that nothing on its bus acknowledges what it sends ([`LinkHealth::NothingAnswering`]) and no
+/// motor of `ids` answered anything during the open: no feedback frame and no register. Only
+/// that signature is silence; a motor that answered at all, wrongly or with a fault, a link
+/// that reports anything else or no health, is `refused` as it is.
+///
+/// A link still making up its mind ([`LinkHealth::Quiet`]: a ZLG channel between its first
+/// refused batch and the restart that judges the bus empty) is given its verdict, for up to
+/// [`VERDICT_WAIT`], by sending only disables: whatever answers on the bus, if anything, is
+/// told to hold no torque.
+fn silence_of<P: CanPort>(
+    control: &mut MotorControl<P>,
+    ids: &[u16],
+    refused: DamiaoChainError,
+) -> DamiaoChainError {
+    let none_answered = |control: &MotorControl<P>| {
+        ids.iter().all(|bus_id| {
+            control.motor(*bus_id).is_ok_and(|motor| {
+                motor.feedback_count == 0
+                    && std::iter::once(DmVariable::CTRL_MODE)
+                        .chain(LIMIT_REGISTERS)
+                        .all(|register| motor.get_param(register).is_none())
+            })
+        })
+    };
+    let until = Instant::now() + VERDICT_WAIT;
+    loop {
+        if !none_answered(control) {
+            return refused;
+        }
+        match control.port().health() {
+            LinkHealth::NothingAnswering { bus } => {
+                return DamiaoChainError::NothingAnswering {
+                    bus,
+                    refused: Box::new(refused),
+                };
+            }
+            LinkHealth::Quiet if Instant::now() < until => {}
+            _ => return refused,
+        }
+        let _ = phase(
+            control,
+            &every(ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+        );
+    }
+}
+
 impl<P: CanPort> DamiaoChain<P> {
     /// Validate every axis, bring every motor up as the vendor does, scale each by its own
     /// limit registers, and leave the chain disabled with every motor's disabled answer in
@@ -881,19 +945,25 @@ impl<P: CanPort> DamiaoChain<P> {
         // run (which firmware that does not report its enable state hides) would otherwise
         // hold torque through bring-up. Its answers prove nothing yet; they are taken here so
         // none is mistaken for a register's.
-        phase(
+        if let Err(error) = phase(
             &mut control,
             &every(&ids, Awaits::Feedback),
             FEEDBACK_WAIT,
             |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
         )
-        .checked()?;
+        .checked()
+        {
+            return Err(silence_of(&mut control, &ids, error.into()));
+        }
         // A motor brought up before a later one failed may hold MIT mode with torque enabled
         // (a motor left enabled by a crashed run answers its mode switch as it is): every motor
         // the chain names is disabled before the failure is returned.
         let limits = match bring_up(&mut control, &ids) {
             Ok(limits) => limits,
-            Err(error) => return Err(disable_all(&mut control, &ids, error)),
+            Err(error) => {
+                let refused = disable_all(&mut control, &ids, error);
+                return Err(silence_of(&mut control, &ids, refused));
+            }
         };
         let commandable = motors.iter().map(DamiaoAxis::commandable).collect();
         let count = motors.len();
@@ -914,7 +984,8 @@ impl<P: CanPort> DamiaoChain<P> {
             applied: vec![Feedforward::default(); count],
         };
         if let Err(error) = chain.settle_disabled() {
-            return Err(disable_all(&mut chain.control, &chain.ids, error));
+            let refused = disable_all(&mut chain.control, &chain.ids, error);
+            return Err(silence_of(&mut chain.control, &chain.ids, refused));
         }
         Ok(chain)
     }
@@ -1760,6 +1831,7 @@ impl ChainError for DamiaoChainError {
             | Self::FeedforwardLimit { .. }
             | Self::FeedforwardLength { .. } => ChainFailure::Refused,
             Self::Silent(_) => ChainFailure::Timeout,
+            Self::NothingAnswering { .. } => ChainFailure::Unavailable,
             _ => ChainFailure::Fault,
         }
     }

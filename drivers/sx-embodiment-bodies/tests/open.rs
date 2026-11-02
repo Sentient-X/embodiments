@@ -12,7 +12,7 @@ use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
     ServoCalibrations, Setup, changed_ports, closed_ports, lend_port, observe, open,
-    open_available, open_calibrated, open_with, ports, reopen_ports,
+    open_available, open_calibrated, open_unopened, open_with, ports, probe_unopened, reopen_ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::{
@@ -770,11 +770,223 @@ fn an_absent_bridge_leaves_its_bus_unavailable_and_any_other_bridge_refusal_refu
     ));
     assert_eq!(can.sent(), 0, "no CAN frame before the refusal");
     assert!(serial.values().all(|bus| bus.state().written.is_empty()));
-    // Nothing attached is no robot.
+    // Nothing attached is still the robot, every axis unavailable: its cameras are a robot's.
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut Bridges::default(),
+    )
+    .expect("a robot with nothing attached opens");
+    assert_eq!(opened.unopened.len(), 4);
+    assert_eq!(opened.body.unavailable(), (0..25).collect::<Vec<_>>());
+}
+
+/// The static upper body's setup as `static_commissioning` places it, opened with `BRING_UP`.
+fn static_setup<'a>(
+    commissioning: &'a Commissioning,
+    calibrations: &'a ServoCalibrations,
+) -> Setup<'a> {
+    Setup {
+        commissioning,
+        calibrations,
+        options: BRING_UP,
+    }
+}
+
+#[test]
+fn a_can_bus_nothing_acknowledges_opens_as_unavailable_data_and_is_opened_live_when_it_answers() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    // The Spark, 11-03: the arms' power off, the ZLG's channel judged nothing answering after
+    // the open's first frames went out ("the CAN link failed; and the disable of bus_ids [24]
+    // could not be sent, so they may hold torque").
+    let (can, serial, mut bridges) = static_bridges(&axes);
+    can.power(false);
+    can.fail_next(&[std::io::ErrorKind::NotConnected; 64]);
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &calibrations,
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("the robot opens with its arms powered off");
+    can.state().failures.clear();
+    assert_eq!(opened.unopened.len(), 1);
+    assert_eq!(opened.unopened[0].0, "can");
+    assert!(
+        opened.unopened[0].1.is_nothing_answering(),
+        "{}",
+        opened.unopened[0].1
+    );
+    assert!(opened.unopened[0].1.is_chain_silence());
+    let mut body = opened.body;
+    assert_eq!(body.axes().len(), 25);
+    assert_eq!(body.unavailable(), (0..15).collect::<Vec<_>>());
+    // The grippers and neck drive; the arms are never commanded.
+    let sent = can.sent();
+    let receipt = body.command(&rest_inside(&body)).expect("a command");
+    assert!(receipt.observed[..15].iter().all(|joint| joint.is_nan()));
+    assert_eq!(
+        can.sent(),
+        sent,
+        "nothing is sent to a bus that did not open"
+    );
+    let stop = body.stop();
+    assert!(stop.is_proven(), "{stop:?}");
+    assert_eq!(
+        stop.unreached.len(),
+        15,
+        "every motor of the bus is unreached"
+    );
+    // While the power is off a probe finds nothing, and asks no serial bus.
+    let written: usize = serial.values().map(|bus| bus.state().written.len()).sum();
+    let setup = static_setup(&commissioning, &calibrations);
+    let every = ["can".to_owned(), "neck".to_owned()];
+    let probed = probe_unopened(&drive, setup, &every, &mut bridges).expect("a probe");
+    assert!(probed.opened.is_empty() && probed.refused.is_empty());
+    assert_eq!(
+        serial
+            .values()
+            .map(|bus| bus.state().written.len())
+            .sum::<usize>(),
+        written,
+        "a probe never touches a serial bus"
+    );
+    let answered =
+        open_unopened(&mut body, &drive, setup, &every[..1], &mut bridges).expect("still silent");
+    assert!(answered.opened.is_empty() && answered.refused.is_empty());
+    assert_eq!(body.unavailable(), (0..15).collect::<Vec<_>>());
+    // Power back: the probe finds the bus answering and leaves every motor disabled, and the
+    // bus opens into the running body.
+    can.power(true);
+    assert_eq!(
+        probe_unopened(&drive, setup, &every, &mut bridges)
+            .expect("a probe")
+            .opened,
+        ["can"]
+    );
+    assert!(can.state().motors.values().all(|motor| motor.state == 0));
+    let answered =
+        open_unopened(&mut body, &drive, setup, &every[..1], &mut bridges).expect("opened");
+    assert_eq!(answered.opened, ["can"]);
+    assert!(answered.refused.is_empty());
+    assert!(
+        body.unavailable().is_empty(),
+        "every arm axis available again"
+    );
+    let receipt = body.command(&rest_inside(&body)).expect("a command");
+    assert!(
+        receipt.observed[1..15]
+            .iter()
+            .all(|joint| joint.is_finite())
+    );
+    assert!(body.stop().is_proven());
+}
+
+#[test]
+fn a_body_every_bus_of_which_is_silent_opens_and_a_can_motor_that_answers_wrongly_is_refused() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    let (can, serial, mut bridges) = static_bridges(&axes);
+    can.power(false);
+    for bus in serial.values() {
+        let ids: Vec<u8> = bus.state().servos.keys().copied().collect();
+        for id in ids {
+            bus.kill(id);
+        }
+    }
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("a robot whose every bus is silent opens");
+    assert_eq!(opened.unopened.len(), 4);
+    assert_eq!(opened.body.unavailable(), (0..25).collect::<Vec<_>>());
+    // Power back with one motor silent: that bus is refused, stays unavailable, and the
+    // rest of the body is as it was.
+    let calibrations = probed_calibrations();
+    let setup = static_setup(&commissioning, &calibrations);
+    let mut body = opened.body;
+    can.power(true);
+    can.kill(24);
+    let probed = probe_unopened(&drive, setup, &["can".to_owned()], &mut bridges).expect("probe");
+    assert!(probed.opened.is_empty(), "a refused bus does not answer");
+    assert_eq!(probed.refused.len(), 1);
+    let answered =
+        open_unopened(&mut body, &drive, setup, &["can".to_owned()], &mut bridges).expect("asked");
+    assert!(answered.opened.is_empty());
+    assert_eq!(answered.refused.len(), 1);
+    assert!(!answered.refused[0].1.is_chain_silence());
+    assert_eq!(body.unavailable(), (0..25).collect::<Vec<_>>());
+    // A link still making up its mind is given its verdict, by disables alone: the open
+    // waits until it judges the bus empty.
+    let (can, _, mut bridges) = static_bridges(&axes);
+    can.power(false);
+    can.state().verdict_after = 60;
+    let opened = open_available(
+        &drive,
+        &commissioning,
+        &probed_calibrations(),
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("opens once the link judges the bus empty");
+    assert!(opened.unopened[0].1.is_nothing_answering());
+    let frames = can.state().frames.clone();
+    let mode = frames
+        .iter()
+        .position(|frame| frame.id == 0x7FF)
+        .expect("a mode write");
+    assert!(
+        frames[mode..]
+            .iter()
+            .filter(|frame| frame.id != 0x7FF)
+            .all(|frame| frame.data[7] == 0xFD),
+        "after the mode writes, only disables"
+    );
+    // A link that never judges is refused, as before.
+    let (can, _, mut bridges) = static_bridges(&axes);
+    can.power(false);
+    can.state().verdict_after = usize::MAX;
+    assert!(
+        open_available(
+            &drive,
+            &commissioning,
+            &probed_calibrations(),
+            BRING_UP,
+            &mut bridges
+        )
+        .is_err()
+    );
+    // A powered bus with one motor silent is not silence: some node acknowledges.
+    let (can, _, mut bridges) = static_bridges(&axes);
+    can.kill(24);
     assert!(matches!(
-        open_available(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut Bridges::default()),
-        Err(OpenError::NoBusOpened(ports)) if ports.len() == 4
+        open_available(&drive, &commissioning, &probed_calibrations(), BRING_UP, &mut bridges),
+        Err(error) if !error.is_chain_silence() && !error.is_nothing_answering()
     ));
+    // A link that fails while something answers is refused, as before.
+    let (can, _, mut bridges) = static_bridges(&axes);
+    can.fail_next(&[std::io::ErrorKind::NotConnected]);
+    assert!(
+        open_available(
+            &drive,
+            &commissioning,
+            &probed_calibrations(),
+            BRING_UP,
+            &mut bridges
+        )
+        .is_err()
+    );
 }
 
 /// Bridges where one is attached but refused by the host.
