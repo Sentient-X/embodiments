@@ -629,7 +629,11 @@ fn hold_the_elbow(
 /// (1e-9 rad), the elbow pushed into the obstacle again by the whole reference gap while the
 /// hand still asked that way (embodiments#198, the station's held-elbow test at 2f357e7).
 #[test]
-#[allow(clippy::cast_precision_loss)] // tick counts as seconds
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // tick counts and seconds
 fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
     let pushes = [
         [0.03, 0.0, -0.04],
@@ -679,7 +683,11 @@ fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
 
 /// A stalled joint lets go the tick the hand turns back, and moves away from what stopped it.
 #[test]
-#[allow(clippy::cast_precision_loss)] // tick counts as seconds
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // tick counts and seconds
 fn a_stall_lets_go_the_tick_the_hand_turns_back() {
     let turn = ((STALL.as_secs_f64() + 1.5) / DT) as usize;
     let mut stalled_before = false;
