@@ -129,8 +129,6 @@ pub enum IkError {
     Targets { expected: usize, given: usize },
     #[error("limb {0:?} was given a non-finite target or one of the wrong kind")]
     Target(String),
-    #[error("gripper axis {axis} made no opening progress; re-engagement is required")]
-    BlockedGripper { axis: usize },
     #[error("a tick is a positive finite time in seconds, not {0}")]
     Tick(f64),
 }

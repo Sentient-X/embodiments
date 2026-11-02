@@ -8,9 +8,7 @@ use std::collections::BTreeMap;
 use sx_embodiment_ik::teleop::{
     HANDS, Pose, REFERENCE_GAP, STALL, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig, TeleopStep,
 };
-use sx_embodiment_ik::{
-    Body, IkError, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF,
-};
+use sx_embodiment_ik::{Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
 
@@ -407,78 +405,131 @@ fn gripper_contact_opening_recovery_stays_near_lagging_feedback() {
     );
 }
 
-/// Contact may hold a closing gripper, but a gripper that cannot open must not be
-/// driven indefinitely by repeated bounded opening targets.
+/// A blocked opening holds only that gripper. The other hand can still operate,
+/// and an opposite closing request recovers without resetting the whole solve.
 #[test]
-fn gripper_contact_that_cannot_open_faults_and_stays_faulted_until_reset() {
+#[allow(clippy::too_many_lines)] // One local-contact lifecycle, including recovery and independent motion.
+fn gripper_contact_that_cannot_open_holds_locally_and_recovers_on_closing() {
     let mut solve = teleop();
-    let gripper = solve.grippers()[0].clone().expect("left gripper");
+    let left = solve.grippers()[0].clone().expect("left gripper");
+    let right = solve.grippers()[1].clone().expect("right gripper");
     let mut measured = start(&solve);
-    for &(axis, closed, open) in &gripper.fingers {
+    for &(axis, closed, open) in &left.fingers {
         measured[axis] = closed.midpoint(open);
     }
-    let mut readings: Vec<Option<f64>> = measured.iter().copied().map(Some).collect();
-    let mut available = vec![true; measured.len()];
+    let contact = measured.clone();
     let mut reference = measured.clone();
+    let available = vec![true; measured.len()];
     let mut targets = Targets {
-        gripper_width_m: [Some(gripper.closed_width_m), None],
+        gripper_width_m: [Some(left.closed_width_m), None],
         ..Targets::default()
+    };
+    let tick = |solve: &mut Teleop,
+                reference: &mut Vec<f64>,
+                measured: &mut Vec<f64>,
+                targets: &Targets| {
+        let readings: Vec<Option<f64>> = measured.iter().copied().map(Some).collect();
+        let step = solve
+            .step(reference, &readings, &available, targets, DT)
+            .expect("gripper contact must not interrupt other motion");
+        assert!(
+            step.stalled.iter().all(|stalled| !stalled),
+            "a finger contact is not a globally stalled arm"
+        );
+        reference.copy_from_slice(&step.q);
+        measured.copy_from_slice(reference);
+        for &(axis, _, _) in &left.fingers {
+            measured[axis] = contact[axis];
+        }
     };
     let stall_ticks = usize::try_from(STALL.as_millis() / 10).expect("10 ms ticks");
     for _ in 0..stall_ticks + 2 {
-        let step = solve
-            .step(&reference, &readings, &available, &targets, DT)
-            .expect("closing contact is held");
-        reference.copy_from_slice(&step.q);
+        tick(&mut solve, &mut reference, &mut measured, &targets);
     }
-    for &(axis, _, _) in &gripper.fingers {
-        assert_eq!(reference[axis], measured[axis], "closing contact latched");
+    for &(axis, _, _) in &left.fingers {
+        assert_eq!(reference[axis], contact[axis], "closing contact latched");
     }
-    targets.gripper_width_m[0] = Some(gripper.open_width_m);
-    let mut fault_axis = None;
-    for tick in 0..stall_ticks + 2 {
-        match solve.step(&reference, &readings, &available, &targets, DT) {
-            Ok(step) => reference.copy_from_slice(&step.q),
-            Err(IkError::BlockedGripper { axis }) => {
-                assert!(
-                    tick >= stall_ticks.saturating_sub(1),
-                    "closing contact time must not count against opening recovery"
-                );
-                fault_axis = Some(axis);
-                break;
-            }
-            Err(error) => panic!("unexpected opening error: {error}"),
-        }
-    }
-    let fault_axis =
-        fault_axis.expect("stationary opening must fault within the stall time and two ticks");
-    assert!(
-        gripper
+    targets.gripper_width_m[0] = Some(left.open_width_m);
+    let mut held_at = None;
+    for frame in 0..stall_ticks + 2 {
+        tick(&mut solve, &mut reference, &mut measured, &targets);
+        if left
             .fingers
             .iter()
-            .any(|&(axis, _, _)| axis == fault_axis)
+            .all(|&(axis, _, _)| reference[axis] == contact[axis])
+        {
+            held_at.get_or_insert(frame);
+        }
+    }
+    let held_at =
+        held_at.expect("stationary opening must hold within the stall time and two ticks");
+    assert!(
+        held_at >= stall_ticks.saturating_sub(1),
+        "closing contact time must not count against opening recovery"
     );
-    // Neither removing the width command nor losing feedback clears a blocked-opening fault.
+
+    // Begin a new arm move only AFTER the opening has latched, rather than merely
+    // proving that an earlier move completed before the contact.
+    let after_latch = measured.clone();
+    let mut other_hand = tcp(&solve, &measured, 1);
+    other_hand.translation_m[2] += 0.03;
+    targets.tcp[1] = Some(other_hand);
+    targets.gripper_width_m[1] = Some(right.open_width_m);
+    for _ in 0..100 {
+        tick(&mut solve, &mut reference, &mut measured, &targets);
+        for &(axis, _, _) in &left.fingers {
+            assert_eq!(
+                reference[axis], contact[axis],
+                "repeated opening must not push again"
+            );
+        }
+    }
+    assert!(
+        solve
+            .model()
+            .axes()
+            .iter()
+            .enumerate()
+            .any(|(axis, joint)| {
+                joint.name.starts_with("right_")
+                    && !joint.name.contains("gripper")
+                    && (measured[axis] - after_latch[axis]).abs() > 0.001
+            }),
+        "the other arm must move after opening contact is latched"
+    );
+    for &(axis, _, open) in &right.fingers {
+        assert_eq!(reference[axis], open, "the other gripper still operates");
+    }
     targets.gripper_width_m[0] = None;
-    assert!(matches!(
-        solve.step(&reference, &readings, &available, &targets, DT),
-        Err(IkError::BlockedGripper { axis }) if axis == fault_axis
-    ));
-    readings[fault_axis] = None;
-    available[fault_axis] = false;
-    assert!(matches!(
-        solve.step(&reference, &readings, &available, &targets, DT),
-        Err(IkError::BlockedGripper { axis }) if axis == fault_axis
-    ));
-    // Reset is the explicit new-engagement boundary. It permits a fresh attempt, rather
-    // than making the previous fault disappear merely because a target changed.
-    solve.reset();
-    readings[fault_axis] = Some(measured[fault_axis]);
-    available[fault_axis] = true;
-    targets.gripper_width_m[0] = Some(gripper.open_width_m);
-    solve
+    tick(&mut solve, &mut reference, &mut measured, &targets);
+    for &(axis, _, _) in &left.fingers {
+        assert_eq!(
+            reference[axis], contact[axis],
+            "omission preserves opening contact"
+        );
+    }
+    // Missing feedback cannot turn a closing request into permission to clear contact.
+    targets.gripper_width_m[0] = Some(left.closed_width_m);
+    let mut readings: Vec<Option<f64>> = measured.iter().copied().map(Some).collect();
+    readings[left.fingers[0].0] = None;
+    let step = solve
         .step(&reference, &readings, &available, &targets, DT)
-        .expect("fresh engagement may attempt opening");
+        .expect("unknown feedback cannot authorize recovery");
+    for &(axis, _, _) in &left.fingers {
+        assert_eq!(step.q[axis], contact[axis]);
+    }
+    reference.copy_from_slice(&step.q);
+    // Every finger now answers, and the target is deliberately reversed away from
+    // the blocked opening. Recovery must not need a reset or affect the other arm.
+    tick(&mut solve, &mut reference, &mut measured, &targets);
+    for &(axis, closed, open) in &left.fingers {
+        let lead = reference[axis] - contact[axis];
+        assert!(lead.abs() <= REFERENCE_GAP + 1e-12);
+        assert!(
+            lead * (open - closed).signum() < 0.0,
+            "reversal must allow closing"
+        );
+    }
 }
 
 /// A closing request that has not yet latched contact must not donate its elapsed
@@ -511,7 +562,27 @@ fn gripper_contact_reversal_starts_a_new_opening_progress_window() {
         let step = solve
             .step(&reference, &readings, &available, &targets, DT)
             .expect("opening receives its own full progress window");
+        for &(axis, closed, open) in &gripper.fingers {
+            let lead = step.q[axis] - measured[axis];
+            assert!(
+                lead * (open - closed).signum() > 0.0,
+                "opening must receive its own progress window before holding"
+            );
+        }
         reference.copy_from_slice(&step.q);
+    }
+    for _ in 0..4 {
+        let step = solve
+            .step(&reference, &readings, &available, &targets, DT)
+            .expect("blocked opening holds locally");
+        assert!(step.stalled.iter().all(|stalled| !stalled));
+        reference.copy_from_slice(&step.q);
+    }
+    for &(axis, _, _) in &gripper.fingers {
+        assert_eq!(
+            reference[axis], measured[axis],
+            "opening latches after its own window"
+        );
     }
 }
 
