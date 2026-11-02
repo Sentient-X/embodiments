@@ -22,7 +22,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sx_embodiment_drivers::can::{CanFrame, CanPort};
+use sx_embodiment_drivers::can::{CanFrame, CanPort, LinkHealth};
 
 use crate::chain::{COMMUNICATION_LOST, DamiaoAxis, motor_type};
 use crate::dm_can::{DmMotorType, float_to_uint, uint_to_float};
@@ -266,6 +266,14 @@ pub struct SimState {
     /// Link failures still to come: each send or receive takes the next and fails with it,
     /// as a failing USB adapter does, sending or reading nothing.
     pub failures: VecDeque<io::ErrorKind>,
+    /// The motors' power is off: every frame is taken and nothing answers, and the link
+    /// reports nothing answering once [`SimState::verdict_after`] frames went unanswered, as
+    /// a real adapter on an unpowered bus (before then it is [`LinkHealth::Quiet`]).
+    pub unpowered: bool,
+    /// Frames sent while unpowered.
+    pub unheard: usize,
+    /// How many unanswered frames the link takes to judge the bus empty.
+    pub verdict_after: usize,
 }
 
 impl SimState {
@@ -510,6 +518,14 @@ impl Sim {
     }
 
     /// Fail the link's next sends and receives with `kinds`, one each, in order.
+    /// Switch the motors' power off (`false`) or back on: while off nothing answers, and the
+    /// link reports [`LinkHealth::NothingAnswering`].
+    pub fn power(&self, on: bool) {
+        let mut state = self.state();
+        state.unpowered = !on;
+        state.unheard = 0;
+    }
+
     pub fn fail_next(&self, kinds: &[io::ErrorKind]) {
         self.state().failures.extend(kinds.iter().copied());
     }
@@ -673,6 +689,10 @@ impl CanPort for Sim {
         state.sent += 1;
         state.frames.push(*frame);
         let id = address(frame);
+        if state.unpowered {
+            state.unheard += 1;
+            return Ok(());
+        }
         if state.dead.contains(&id) {
             return Ok(());
         }
@@ -708,6 +728,17 @@ impl CanPort for Sim {
         }
         self.sleep(deadline.saturating_duration_since(Instant::now()));
         Ok(self.state().inbox.pop_front())
+    }
+
+    fn health(&self) -> LinkHealth {
+        let state = self.state();
+        match (state.unpowered, state.unheard >= state.verdict_after) {
+            (true, true) => LinkHealth::NothingAnswering {
+                bus: "the simulated bus".to_owned(),
+            },
+            (true, false) => LinkHealth::Quiet,
+            (false, _) => LinkHealth::Unknown,
+        }
     }
 
     fn sleep(&mut self, duration: Duration) {

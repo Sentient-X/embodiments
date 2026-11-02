@@ -638,6 +638,7 @@ impl Part {
 }
 
 /// Where a bus's out-of-service axes sit in its whole vector.
+#[derive(Clone)]
 struct Mask {
     whole: Vec<BoundAxis>,
     out: Vec<usize>,
@@ -1115,21 +1116,26 @@ pub struct Opened {
     pub unopened: Vec<(String, OpenError)>,
 }
 
-/// [`open_with`], keeping the robot when a bus is silent: a bridge that is not attached, and a
+/// [`open_with`], keeping the robot when a bus is silent: a bridge that is not attached, a
 /// serial bus whose servos do not answer the open or whose link cannot carry the exchange
-/// ([`ChainFailure::Timeout`], [`ChainFailure::Unavailable`]), leave that bus's axes in the
-/// body as unavailable data. A silent serial bus's bridge is opened again and held, so no
-/// other process takes it, and it is sent a disable at once and at every stop.
+/// ([`ChainFailure::Timeout`], [`ChainFailure::Unavailable`]), and a CAN bus on which nothing
+/// acknowledges a frame and no motor answered anything ([`OpenError::is_nothing_answering`]:
+/// its motors are powered off) leave that bus's axes in the body as unavailable data. A silent
+/// serial bus's bridge is opened again and held, so no other process takes it, and it is sent
+/// a disable at once and at every stop; a silent CAN bus's bridge is closed, since no powered
+/// motor is on it. A body every bus of which is silent opens, every axis unavailable: its
+/// cameras and sensors are still a robot's, and [`open_unopened`] opens its buses into it once
+/// they answer ([`probe_unopened`]).
 ///
 /// Refused as [`open_with`] refuses them, before any chain opens: every bridge that is
 /// attached but does not open (another process holds it, it is not the bus it is named, the
 /// host refuses it). Refused whenever met: any chain error that is not silence (an actuator
-/// that answers wrongly or faulted, a configuration that does not match the body), any CAN
-/// chain error, and a body none of whose buses opened ([`OpenError::NoBusOpened`]).
+/// that answers wrongly or faulted, a configuration that does not match the body), and any
+/// CAN chain error but nothing answering.
 ///
 /// # Errors
 ///
-/// What [`open_with`] refuses but silence, and [`OpenError::NoBusOpened`].
+/// What [`open_with`] refuses but silence.
 pub fn open_available(
     drive: &InstanceDrive,
     commissioning: &Commissioning,
@@ -1150,50 +1156,247 @@ pub fn open_available(
     let mut chains: Vec<BusChain> = Vec::with_capacity(links.len());
     let mut unopened = Vec::new();
     for (port, part, mask, link) in links {
-        let link = match link {
-            Ok(link) => link,
-            Err(absent) => {
-                chains.push(mask.unopened(None)?);
-                unopened.push((port, absent));
-                continue;
+        match open_or_silent(&port, part, mask, link, commissioning, source)? {
+            (chain, None) => chains.push(chain),
+            (chain, Some(silence)) => {
+                chains.push(chain);
+                unopened.push((port, silence));
             }
-        };
-        let wire = part.wire();
-        let held = part.held_kind();
-        match part.open(&port, link, &commissioning.rails) {
-            Ok(chain) => chains.push(mask.chain(chain)?),
-            Err(error) if held.is_some() && error.is_chain_silence() => {
-                // The chain dropped its bridge with it: open it again and keep it.
-                let Wire::Serial { baud } = wire else {
-                    return Err(error);
-                };
-                let serial = commissioning
-                    .ports
-                    .get(&port)
-                    .ok_or_else(|| OpenError::MissingPort(port.clone()))?;
-                let held = match source.open_serial(serial, baud) {
-                    Ok(link) => held.map(|kind| Held::of(kind, link)),
-                    Err(OpenError::NotAttached(_)) => None,
-                    Err(refused) => return Err(refused),
-                };
-                chains.push(mask.unopened(held)?);
-                unopened.push((port, error));
-            }
-            Err(error) => return Err(error),
         }
-    }
-    if unopened.len() == chains.len() {
-        return Err(OpenError::NoBusOpened(
-            unopened
-                .into_iter()
-                .map(|(port, error)| format!("{port}: {error}"))
-                .collect(),
-        ));
     }
     Ok(Opened {
         body: Chains::new(chains),
         unopened,
     })
+}
+
+/// One bus opened on `link`, as its whole vector, or, when it is silent, its axes as
+/// unavailable data with why ([`open_available`]): an absent bridge, a silent serial bus (its
+/// bridge opened again and held) or a CAN bus on which nothing answers.
+///
+/// # Errors
+///
+/// Any chain error that is not silence, and a held bridge that does not open again but for
+/// being unplugged.
+fn open_or_silent(
+    port: &str,
+    bus: Part,
+    mask: Mask,
+    link: Result<Link, OpenError>,
+    commissioning: &Commissioning,
+    source: &mut dyn PortSource,
+) -> Result<(BusChain, Option<OpenError>), OpenError> {
+    let link = match link {
+        Ok(link) => link,
+        Err(absent) => return Ok((mask.unopened(None)?, Some(absent))),
+    };
+    let wire = bus.wire();
+    let held = bus.held_kind();
+    match bus.open(port, link, &commissioning.rails) {
+        Ok(chain) => Ok((mask.chain(chain)?, None)),
+        Err(error) if error.is_chain_silence() => {
+            let held = match (wire, held) {
+                // The chain dropped its bridge with it: open it again and keep it.
+                (Wire::Serial { baud }, Some(kind)) => {
+                    let serial = commissioning
+                        .ports
+                        .get(port)
+                        .ok_or_else(|| OpenError::MissingPort(port.to_owned()))?;
+                    match source.open_serial(serial, baud) {
+                        Ok(link) => Some(Held::of(kind, link)),
+                        Err(OpenError::NotAttached(_)) => None,
+                        Err(refused) => return Err(refused),
+                    }
+                }
+                // No powered motor is on a CAN bus nothing acknowledges: nothing to hold.
+                (Wire::Can, None) if error.is_nothing_answering() => None,
+                _ => return Err(error),
+            };
+            Ok((mask.unopened(held)?, Some(error)))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// What [`open_unopened`] came to, port by port, in the body's order.
+#[derive(Debug, Default)]
+pub struct Answered {
+    /// The buses opened into the body: their axes are available from now on.
+    pub opened: Vec<String>,
+    /// The buses whose open was refused for anything but silence: each stays unopened and
+    /// unheld, its axes unavailable and never commanded, as [`open_available`] would have
+    /// refused the body for it.
+    pub refused: Vec<(String, OpenError)>,
+}
+
+/// `body`, opened from `drive` with `setup`, with the buses of `ports` that did not open
+/// ([`Opened::unopened`]) opened into it where they now answer: each is opened as at boot,
+/// disabled, and takes its place in the body, its axes available from then on; every other
+/// bus stays as it is, open. A held bridge is closed before its bus is opened again; one
+/// still silent is held again and stays unavailable data, as [`open_available`] leaves it.
+/// Call it only while nothing commands the body (a stop proven).
+///
+/// # Errors
+///
+/// Before any bus is touched: [`OpenError::NotInPlace`] when `body` is not `setup`'s body
+/// (another number of buses), when a port is not one of its buses, or when a port's CAN bridge
+/// also carries a bus not in `ports` (that bus is open, so this one is not silent); what
+/// [`open_with`] refuses for `setup` before a bridge is opened; and a bridge that is attached
+/// and does not open (another process holds it), every held bridge then unheld.
+pub fn open_unopened(
+    body: &mut Body,
+    drive: &InstanceDrive,
+    setup: Setup,
+    ports: &[String],
+    source: &mut dyn PortSource,
+) -> Result<Answered, OpenError> {
+    let reopening = unopened_parts(body.chains().len(), drive, setup, ports)?;
+    let mut answered = Answered::default();
+    if reopening.is_empty() {
+        return Ok(answered);
+    }
+    // Each held bridge is closed before it is opened again: one process owns a bus throughout.
+    for (index, _, _, mask) in &reopening {
+        drop(body.replace(*index, mask.clone().unopened(None)?));
+    }
+    let serials = bridge_serials(setup.commissioning, &reopening)?;
+    let links = open_links(&serials, source, true)?;
+    for ((index, port, part, mask), link) in reopening.into_iter().zip(links) {
+        match open_or_silent(&port, part, mask, link, setup.commissioning, source) {
+            Ok((chain, silence)) => {
+                drop(body.replace(index, chain));
+                if silence.is_none() {
+                    answered.opened.push(port);
+                }
+            }
+            // Its placeholder stays: unopened, unheld, never commanded.
+            Err(refused) => answered.refused.push((port, refused)),
+        }
+    }
+    Ok(answered)
+}
+
+/// Of `ports`, buses of `drive`'s body opened with `setup` that did not open, the CAN buses
+/// that open cleanly now ([`Answered::opened`]): each is opened as at boot, which leaves its
+/// motors disabled with their disabled answers in hand, and closed again at once. A bus still
+/// silent is in neither list; one whose open is refused for anything else (a motor answering
+/// wrongly, a link failing without the adapter judging the bus empty) is
+/// [`Answered::refused`], for the caller to say, and is asked again next time. A serial bus is
+/// not asked: its silent bridge is held by the body, and is opened again with the rest by
+/// [`open_unopened`]. Moves nothing and touches no bus of the opened body.
+///
+/// # Errors
+///
+/// [`OpenError::NotInPlace`] for a port that is not one of the body's buses or whose CAN
+/// bridge also carries a bus not in `ports`; what [`open_with`] refuses for `setup` before a
+/// bridge is opened; and a bridge that is attached and does not open (another process holds
+/// it).
+pub fn probe_unopened(
+    drive: &InstanceDrive,
+    setup: Setup,
+    ports: &[String],
+    source: &mut dyn PortSource,
+) -> Result<Answered, OpenError> {
+    let buses = plan(
+        drive,
+        setup.commissioning,
+        setup.calibrations,
+        setup.options,
+    )?
+    .parts
+    .len();
+    let asked: Vec<_> = unopened_parts(buses, drive, setup, ports)?
+        .into_iter()
+        .filter(|(_, _, part, _)| part.wire() == Wire::Can)
+        .collect();
+    let serials = bridge_serials(setup.commissioning, &asked)?;
+    let links = open_links(&serials, source, true)?;
+    let mut probed = Answered::default();
+    for ((_, port, part, _), link) in asked.into_iter().zip(links) {
+        let Ok(link) = link else { continue };
+        match part.open(&port, link, &setup.commissioning.rails) {
+            // Opened disabled; dropping it closes its bridge.
+            Ok(chain) => {
+                drop(chain);
+                probed.opened.push(port);
+            }
+            Err(error) if error.is_chain_silence() => {}
+            Err(error) => probed.refused.push((port, error)),
+        }
+    }
+    Ok(probed)
+}
+
+/// The buses of `ports`, by their index in a body of `buses` buses opened from `drive` with
+/// `setup`, each with its part and mask, in the body's order.
+fn unopened_parts(
+    buses: usize,
+    drive: &InstanceDrive,
+    setup: Setup,
+    ports: &[String],
+) -> Result<Vec<(usize, String, Part, Mask)>, OpenError> {
+    let plan = plan(
+        drive,
+        setup.commissioning,
+        setup.calibrations,
+        setup.options,
+    )?;
+    if let Some(refused) = plan.parts.iter().find_map(|(port, part, _)| {
+        part.uncalibrated(port)
+            .or_else(|| part.over_rail(port, &setup.commissioning.rails))
+    }) {
+        return Err(refused);
+    }
+    if buses != plan.parts.len() {
+        return Err(OpenError::NotInPlace(format!(
+            "the opened body has {buses} buses and this setup opens {}",
+            plan.parts.len()
+        )));
+    }
+    if let Some(port) = ports
+        .iter()
+        .find(|port| !plan.parts.iter().any(|(name, _, _)| name == *port))
+    {
+        return Err(OpenError::NotInPlace(format!(
+            "{port} is not a bus of this body"
+        )));
+    }
+    let bridge = |port: &str| setup.commissioning.ports.get(port);
+    if let Some((port, _, _)) = plan.parts.iter().find(|(port, part, _)| {
+        ports.contains(port)
+            && part.wire() == Wire::Can
+            && plan.parts.iter().any(|(other, _, _)| {
+                !ports.contains(other) && bridge(other).is_some() && bridge(other) == bridge(port)
+            })
+    }) {
+        return Err(OpenError::NotInPlace(format!(
+            "port {port}'s bridge also carries an open bus"
+        )));
+    }
+    Ok(plan
+        .parts
+        .into_iter()
+        .enumerate()
+        .filter(|(_, (port, _, _))| ports.contains(port))
+        .map(|(index, (port, part, mask))| (index, port, part, mask))
+        .collect())
+}
+
+/// Each bus's bridge and wire, for [`open_links`].
+fn bridge_serials(
+    commissioning: &Commissioning,
+    buses: &[(usize, String, Part, Mask)],
+) -> Result<Vec<(String, Wire)>, OpenError> {
+    buses
+        .iter()
+        .map(|(_, port, part, _)| {
+            commissioning
+                .ports
+                .get(port)
+                .map(|serial| (serial.clone(), part.wire()))
+                .ok_or_else(|| OpenError::MissingPort(port.clone()))
+        })
+        .collect()
 }
 
 /// Which serial protocol a silent bus's held bridge speaks, for its disable.
@@ -1776,8 +1979,6 @@ pub enum OpenError {
         device: String,
         holder: sx_embodiment_drivers::Holder,
     },
-    #[error("no bus of this body opened: {}", .0.join("; "))]
-    NoBusOpened(Vec<String>),
     #[error(transparent)]
     Bindings(#[from] BodyError),
     #[error(transparent)]
@@ -1791,6 +1992,16 @@ impl OpenError {
     pub fn is_chain_silence(&self) -> bool {
         matches!(self, Self::Chain(error)
             if matches!(error.failure(), ChainFailure::Timeout | ChainFailure::Unavailable))
+    }
+
+    /// Whether a CAN chain's open found nothing on its bus acknowledging a frame and no motor
+    /// answering anything: no powered motor is on the bus.
+    #[must_use]
+    pub const fn is_nothing_answering(&self) -> bool {
+        matches!(
+            self,
+            Self::Chain(BusError::Damiao(DamiaoChainError::NothingAnswering { .. }))
+        )
     }
 }
 
