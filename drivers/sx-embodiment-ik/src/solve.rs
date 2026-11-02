@@ -1401,11 +1401,7 @@ impl Ik {
                     .zip(row.iter())
                     .filter(|&(&axis, _)| !self.untrusted[axis])
                     .map(|(&axis, r)| {
-                        let carried = {
-                            let c = momentum() * self.measured_speed[axis];
-                            let db = std::env::var("IK_DB").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) * READING_JITTER;
-                            c.signum() * (c.abs() - db).max(0.0)
-                        };
+                        let carried = momentum() * self.measured_speed[axis];
                         let a = r * (q[axis] - w.seen_q[axis] + carried);
                         if variant & 2097152 != 0 {
                             r * (q[axis] - w.seen_q[axis] - if variant & 256 != 0 { self.offset[axis] } else { 0.0 }) + (r * carried).max(0.0)
