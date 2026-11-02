@@ -460,7 +460,8 @@ impl Ik {
             .collect();
         let k = settings.max_rows;
         let qp = Qp::new(n, k);
-        let candidates = Vec::with_capacity(body.proxies.pairs.len() + scene_pairs.len());
+        // Twice: the pairs at the commanded positions and at the measured ones.
+        let candidates = Vec::with_capacity(2 * (body.proxies.pairs.len() + scene_pairs.len()));
         let work = Workspace {
             frames: body.model.poses(&rest),
             after: body.model.poses(&rest),
@@ -590,9 +591,7 @@ impl Ik {
     /// A window that is not an interval, or an axis out of range, is ignored.
     pub fn set_window(&mut self, axis: usize, low: f64, high: f64) {
         if let Some(slot) = self.window.get_mut(axis)
-            && !(low > high)
-            && !low.is_nan()
-            && !high.is_nan()
+            && low <= high
         {
             *slot = [low, high];
         }
@@ -1138,6 +1137,7 @@ impl Ik {
     /// The closest pairs within influence, each as `row . dq <= rhs`: the pair closes no
     /// faster this tick than a braking share of its axes' accelerations can still stop
     /// before the margin.
+    #[allow(clippy::too_many_lines)] // one pass over the pairs at both poses, in one place
     fn collision_rows(&mut self, q: &[f64], dt: f64) {
         self.work.candidates.clear();
         self.collision_candidates(false);
@@ -1538,16 +1538,18 @@ impl Ik {
 /// `[lo, hi]` cut to `window`, or, where they do not meet, to the window's nearer end: the
 /// window wins. Whether it moved either end.
 fn within(lo: &mut f64, hi: &mut f64, (low, high): (f64, f64)) -> bool {
-    let (was_lo, was_hi) = (*lo, *hi);
     if high < *lo {
         (*lo, *hi) = (high, high);
+        true
     } else if low > *hi {
         (*lo, *hi) = (low, low);
+        true
     } else {
+        let cut = low > *lo || high < *hi;
         *lo = lo.max(low);
         *hi = hi.min(high);
+        cut
     }
-    *lo != was_lo || *hi != was_hi
 }
 
 fn braking(room: f64, accel: f64, dt: f64) -> f64 {

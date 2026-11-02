@@ -17,7 +17,14 @@
 //!   its measurement: one that strays further is brought back to the gap, never snapped onto
 //!   the measurement (a snap is a one-tick jump of the whole gap: act-sim's yaw joints, lagging
 //!   0.1 rad at speed, jumped 0.08 rad back in a tick, 1.9 m/s at the tool, 2026-10-31). A
-//!   ghost with no measurement integrates freely.
+//!   joint the solve moves is brought back by the step itself ([`crate::Ik::set_window`]), so
+//!   the collision rows see the move; moving the reference there first skipped every pair
+//!   (embodiments#206). A ghost with no measurement integrates freely.
+//! - **pairs where the robot is**: between ticks a joint is somewhere between where it was
+//!   measured and where it was commanded, so pairs are kept clear at both
+//!   ([`crate::Ik::set_measured`]); a joint that does not follow (stalled, at the gap and
+//!   coming no nearer, or led past a stop it stalled on) is kept where it stands and never
+//!   counted on to open a pair.
 //! - **holds**: an axis is held where it is while any limb it moves has no target: an idle
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
@@ -664,9 +671,10 @@ impl Teleop {
         }
     }
 
-    /// The reference the step integrates from: seeded from the measurement at engage, held
-    /// within [`REFERENCE_GAP`] of it, and at the measurement for a joint that stalled there
-    /// ([`STALL`]).
+    /// The reference the step integrates from: seeded from the measurement at engage, at the
+    /// measurement for a joint that stalled there ([`STALL`]), and the last command otherwise,
+    /// with the step's window within [`REFERENCE_GAP`] of the measurement for a joint the solve
+    /// moves (clamped there for one it does not); and which joints do not follow.
     fn take_reference(
         &mut self,
         reference: &[f64],

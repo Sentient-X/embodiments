@@ -823,7 +823,7 @@ fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, Stri
     solve.set_deadline(std::time::Duration::from_secs(1));
     let elbow = index(&solve, "left_elbow_pitch_joint");
     let (left0, right0) = (tcp(&solve, &rest, 0), tcp(&solve, &rest, 1));
-    let stop = rest[elbow];
+    let stop_at = rest[elbow];
     let available = vec![true; rest.len()];
     let mut q = rest.clone();
     // The commands the follower has yet to reach, oldest first.
@@ -867,7 +867,7 @@ fn least_clearance(dt: f64, case: &str, stopped: bool, lag: usize) -> (f64, Stri
         sent.push_back(q.clone());
         real = sent.pop_front().expect("a command");
         if stopped {
-            real[elbow] = real[elbow].max(stop);
+            real[elbow] = real[elbow].max(stop_at);
         }
         if t >= turn {
             let c = solve.ik().clearance(&real);
@@ -886,18 +886,34 @@ const CASES: [(&str, bool); 4] = [
     ("box", false),
 ];
 
-#[test]
-#[ignore = "prints the clearance table"]
-fn clearance_table() {
-    for dt in [0.02, 0.01, 0.004] {
+/// Every case at `rates`, a follower 0, 1 and 2 ticks behind, keeps the margin where the robot
+/// really is, within 1 mm (a step's linearisation: 9.35 mm at worst, chest and right upper arm at 500 Hz).
+fn keeps_the_margin(rates: &[f64]) {
+    let margin = sx_embodiment_ik::Settings::default().collision_margin_m;
+    for &dt in rates {
         for (case, stopped) in CASES {
-            for lag in [0, 1, 2] {
-                let (c, a, b) = least_clearance(dt, case, stopped, lag);
-                println!(
-                    "TABLE dt={dt} {case} stopped={stopped} lag={lag}: {:.1} mm ({a} / {b})",
-                    c * 1e3
+            for lag in 0..=2 {
+                let (clear, a, b) = least_clearance(dt, case, stopped, lag);
+                assert!(
+                    clear >= margin - 0.001,
+                    "{case} at {dt} s, stop {stopped}, {lag} ticks behind: {a} and {b} {clear} m apart"
                 );
             }
         }
     }
+}
+
+/// A pair is kept where the robot really is, a joint pushing a stop or a follower behind its
+/// command alike, at the static body's 50 Hz and at 100 Hz. Planned from the command with the
+/// gap clamped onto it, two ticks of lag brought the grippers to 0 mm with nothing blocked and
+/// to -15 mm with the left elbow on a stop (embodiments#206; the Spark's a1dca43: -70 mm).
+#[test]
+fn a_pushing_arm_keeps_its_pairs_clear_where_it_really_is() {
+    keeps_the_margin(&[0.02, 0.01]);
+}
+
+/// The same at 250 and 500 Hz.
+#[test]
+fn a_pushing_arm_keeps_its_pairs_clear_at_faster_rates() {
+    keeps_the_margin(&[0.004, 0.002]);
 }
