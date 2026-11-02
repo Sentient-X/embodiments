@@ -61,6 +61,55 @@ fn a_steady_state_tick_allocates_nothing() {
     assert_eq!(worst, 0, "a tick allocated {worst} times");
 }
 
+/// A tick measured behind its command (pairs kept at both poses), one joint stuck and every
+/// axis given a window allocates nothing either.
+#[test]
+fn a_measured_tick_with_windows_allocates_nothing() {
+    let body = Body::static_upper_body();
+    let caps = Caps::declared(&body, 0.25).expect("caps").at_most(0.5);
+    let mut ik = Ik::new(body, caps, settings(), Vec::new()).expect("ik");
+    let mut q = ik.rest().to_vec();
+    let mut next = q.clone();
+    let mut measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+    let mut stuck = vec![false; q.len()];
+    stuck[3] = true;
+    let mut worst = 0;
+    for tick in 0..400 {
+        let t = f64::from(tick) * 0.01;
+        let targets = [
+            Some(Target::Pose {
+                translation_m: [0.35 + 0.1 * t.sin(), 0.22, 0.12 + 0.05 * t.cos()],
+                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+            }),
+            Some(Target::Pose {
+                translation_m: [0.4, -0.15 - 0.1 * t.sin(), 0.1],
+                rotation_xyzw: [0.0, 0.2, 0.0, 1.0],
+            }),
+            Some(Target::LookAt {
+                point_m: [0.6, 0.2 * t.sin(), 0.05],
+            }),
+        ];
+        let counted = allocation_counter::measure(|| {
+            for (axis, at) in measured.iter().enumerate() {
+                let at = at.unwrap_or(0.0);
+                ik.set_window(axis, at - 0.1, at + 0.1);
+            }
+            ik.set_measured(&measured, &stuck).expect("measured");
+            let step = ik.step(&q, &ALL[..q.len()], &targets, 0.01).expect("step");
+            next.copy_from_slice(&step.q);
+        });
+        // The robot one tick behind.
+        for (slot, at) in measured.iter_mut().zip(&q) {
+            *slot = Some(*at);
+        }
+        q.copy_from_slice(&next);
+        if tick > 10 {
+            worst = worst.max(counted.count_total);
+        }
+    }
+    assert_eq!(worst, 0, "a tick allocated {worst} times");
+}
+
 /// The clearance a control thread checks each commanded configuration with allocates nothing,
 /// and agrees with the allocating one.
 #[test]

@@ -156,6 +156,11 @@ impl Qp {
                 }
                 self.rd[j] = hx + self.g[j] + atz;
             }
+            // An iterate gone NaN (an infeasible problem driven past the floats) is a failure:
+            // f64::max below would drop its NaN residuals and call it converged.
+            if !self.x[..n].iter().all(|v| v.is_finite()) {
+                return Err(QpFailure::Numerical);
+            }
             let mu: f64 = (0..m).map(|i| self.s[i] * self.z[i]).sum::<f64>() / m as f64;
             let primal = self.rp[..m].iter().fold(0.0_f64, |a, v| a.max(v.abs()));
             let dual = self.rd.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
