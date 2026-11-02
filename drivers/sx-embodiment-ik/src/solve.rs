@@ -308,9 +308,9 @@ struct Workspace {
     rows: Vec<f64>,
     rhs: Vec<f64>,
     row_active: Vec<Active>,
-    /// Per row, whether it keeps a pair already inside the margin where the body was measured:
-    /// such a row never widens a cap ([`Ik::keep_feasible`]).
-    row_inside: Vec<bool>,
+    /// Per row, whether it keeps a pair where the body was measured: such a row never widens a
+    /// cap ([`Ik::keep_feasible`]).
+    row_measured: Vec<bool>,
     row_binds: Vec<bool>,
     used: usize,
     unit: Vec<f64>,
@@ -494,7 +494,7 @@ impl Ik {
             rows: vec![0.0; k * n],
             rhs: vec![0.0; k],
             row_active: vec![Active::Limit { axis: 0 }; k],
-            row_inside: vec![false; k],
+            row_measured: vec![false; k],
             row_binds: vec![false; k],
             used: 0,
             unit: vec![1.0; n],
@@ -1239,15 +1239,19 @@ impl Ik {
             if candidate.measured {
                 // From where it was measured the body still makes its way to its command (a
                 // following joint's lead, wherever it closes the pair), then the step: all of it
-                // short of the margin. The pace of closing is the commanded row's to keep.
-                rhs = room
-                    - body
-                        .solved
-                        .iter()
-                        .zip(row.iter())
-                        .filter(|&(&axis, _)| !self.stuck[axis])
-                        .map(|(&axis, r)| (r * (q[axis] - w.seen_q[axis])).max(0.0))
-                        .sum::<f64>();
+                // within half the room, as the commanded row's tick is. One linearisation spans
+                // that whole motion, and a follower carries on past its command: with the whole
+                // room, an act-sim-like PD (zeta 0.2) rang 40-60 mm into the other arm; with
+                // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
+                // the commanded row's to keep.
+                let lead = body
+                    .solved
+                    .iter()
+                    .zip(row.iter())
+                    .filter(|&(&axis, _)| !self.stuck[axis])
+                    .map(|(&axis, r)| (r * (q[axis] - w.seen_q[axis])).max(0.0))
+                    .sum::<f64>();
+                rhs = 0.5 * room - lead;
             }
             if candidate.measured
                 && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
@@ -1264,9 +1268,7 @@ impl Ik {
             }
             w.rhs[slot] = rhs;
             w.row_active[slot] = active;
-            // Already inside the margin where it was measured: a follower past its command (a
-            // PD ringing), which no lurch of the command undoes.
-            w.row_inside[slot] = candidate.measured && distance < s.collision_margin_m;
+            w.row_measured[slot] = candidate.measured;
             w.used += 1;
             // The same pair kept without the stuck joints: a step must keep it whether or not
             // they make their move (exactly, for one stuck joint in the pair).
@@ -1282,7 +1284,7 @@ impl Ik {
                 }
                 w.rhs[slot + 1] = rhs;
                 w.row_active[slot + 1] = active;
-                w.row_inside[slot + 1] = w.row_inside[slot];
+                w.row_measured[slot + 1] = candidate.measured;
                 w.used += 1;
             }
         }
@@ -1293,10 +1295,11 @@ impl Ik {
     /// yields to keeping clear). With `all`, every row's axes yield and every row asks only
     /// that its pair come no closer, which standing still keeps.
     ///
-    /// A row whose pair is already inside the margin where the body was measured never widens
-    /// a cap: it asks at most what the box (as the other rows left it) can give. That is a
-    /// follower ringing past its command; a cap waived for it lurched the command away and the
-    /// follower rang back in, a limit cycle 40-60 mm deep (embodiments#206: a PD at zeta 0.2).
+    /// A row at the measured pose never widens a cap: one the box (as the commanded rows left
+    /// it) cannot keep asks for the most the box gives. A follower ringing past its command,
+    /// or sagging under a load, reads a pair closer than the command will bring it; a cap
+    /// waived for that lurched the command away and the follower rang back in, 40-60 mm deep
+    /// (embodiments#206: a PD at zeta 0.2), or backed a sagging elbow 0.13 rad off its stop.
     fn keep_feasible(&mut self, all: bool) -> Solve {
         let n = self.body.solved.len();
         let w = &mut self.work;
@@ -1308,7 +1311,7 @@ impl Ik {
                 .sum()
         };
         for slot in 0..w.used {
-            if w.row_inside[slot] {
+            if w.row_measured[slot] {
                 continue;
             }
             if all || least(w, slot) > w.rhs[slot] {
@@ -1326,7 +1329,7 @@ impl Ik {
             }
         }
         for slot in 0..w.used {
-            if w.row_inside[slot] {
+            if w.row_measured[slot] {
                 if all {
                     w.rhs[slot] = w.rhs[slot].max(0.0);
                 }

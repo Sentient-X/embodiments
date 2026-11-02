@@ -43,7 +43,7 @@ fn teleop() -> Teleop {
     .expect("solve");
     // Answers, not the clock: a loaded host (the clearance cases on every core) past the
     // station's budget would hold steps.
-    solve.set_deadline(std::time::Duration::from_secs(1));
+    solve.set_deadline(std::time::Duration::from_secs(3600));
     solve
 }
 
@@ -309,7 +309,7 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
             },
         )
         .expect("solve");
-        solve.set_deadline(std::time::Duration::from_secs(1));
+        solve.set_deadline(std::time::Duration::from_secs(3600));
         let mut q = start(&solve);
         // The torso upright: from the suite's start it rests on the table, and the solve holds.
         q[index(&solve, "torso_joint")] = 0.0;
@@ -667,7 +667,7 @@ fn hold_the_elbow(
     let mut solve =
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
     // Answers, not the clock: a debug build past the station's budget would hold steps.
-    solve.set_deadline(std::time::Duration::from_secs(1));
+    solve.set_deadline(std::time::Duration::from_secs(3600));
     let rest: Vec<f64> = solve
         .model()
         .axes()
@@ -920,7 +920,7 @@ fn least_clearance(
     let left_tcp = link("left_gripper_tcp");
     let mut solve =
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
-    solve.set_deadline(std::time::Duration::from_secs(1));
+    solve.set_deadline(std::time::Duration::from_secs(3600));
     let elbow = index(&solve, "left_elbow_pitch_joint");
     let (left0, right0) = (tcp(&solve, &rest, 0), tcp(&solve, &rest, 1));
     let stop_at = rest[elbow];
@@ -1036,9 +1036,8 @@ const CASES: [(&str, bool); 4] = [
 ];
 
 /// Every case at `rates`, each of `followers`, its readings exact and jittering by
-/// [`READING_JITTER`], keeps the margin where the robot really is, within 1.5 mm (a step's
-/// linearisation: 8.7 mm at worst, the chest and right upper arm, the elbow on its stop, two
-/// ticks late, jittering, 50 Hz; every other case within 1 mm).
+/// [`READING_JITTER`], keeps the margin where the robot really is, within 1 mm (a step's
+/// linearisation).
 fn keeps_the_margin(rates: &[f64], followers: &[Follower]) {
     let margin = sx_embodiment_ik::Settings::default().collision_margin_m;
     // Each case on its own thread: a debug build runs them all in the time of the longest.
@@ -1060,7 +1059,7 @@ fn keeps_the_margin(rates: &[f64], followers: &[Follower]) {
             let (dt, case, stopped, follower, noise, (clear, a, b, _)) =
                 run.join().expect("a case");
             assert!(
-                clear >= margin - 0.0015,
+                clear >= margin - 0.001,
                 "{case} at {dt} s, stop {stopped}, {follower:?}, noise {noise}: {a} and {b} {clear} m apart"
             );
         }

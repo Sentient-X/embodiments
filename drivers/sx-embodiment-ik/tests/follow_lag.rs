@@ -164,12 +164,15 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
 /// next change to the solve meets them or says why teleop got worse.
 #[test]
 fn an_operators_hand_is_followed_no_worse_than_today() {
-    // (path, name, motor, omega, zeta, delay ms, rms mm, peak mm) as measured 2026-10-31.
+    // (path, name, motor, omega, zeta, delay ms, rms mm, peak mm) as measured 2026-10-31,
+    // and 2026-11-02 for the act-sim-like follower: its pairs kept where it was measured too
+    // (embodiments#206), the desk's peak rose 11.5 -> 13.2 mm, its delay and rms unchanged,
+    // and the VR's fell 310 -> 190 ms, 141.4 -> 84.9 mm rms, 210.3 -> 122.8 mm peak.
     type Case = (Path, &'static str, &'static str, f64, f64, f64, f64, f64);
     let cases: [Case; 4] = [
-        (desk, "desk", "act-sim-like", 9.5, 0.2, 40.0, 6.5, 11.5),
+        (desk, "desk", "act-sim-like", 9.5, 0.2, 40.0, 6.5, 13.2),
         (desk, "desk", "stiff", 30.0, 0.7, 30.0, 4.4, 9.5),
-        (vr, "vr", "act-sim-like", 9.5, 0.2, 310.0, 141.4, 210.3),
+        (vr, "vr", "act-sim-like", 9.5, 0.2, 190.0, 84.9, 122.8),
         (vr, "vr", "stiff", 30.0, 0.7, 140.0, 66.1, 86.5),
     ];
     for (path, name, motor, omega, zeta, delay, rms, peak) in cases {
