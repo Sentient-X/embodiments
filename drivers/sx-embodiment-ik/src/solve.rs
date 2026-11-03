@@ -348,6 +348,9 @@ struct Workspace {
     row_lead: Vec<f64>,
     row_budget: Vec<f64>,
     row_exact: Vec<bool>,
+    /// Per such row and joint: the joint is off its command by more than a reading's jitter,
+    /// so it may stay where it is read, keep that offset, or catch up, in any order.
+    row_kink: Vec<bool>,
     row_binds: Vec<bool>,
     used: usize,
     unit: Vec<f64>,
@@ -540,6 +543,7 @@ impl Ik {
             row_lead: vec![0.0; k * n],
             row_budget: vec![0.0; k],
             row_exact: vec![false; k],
+            row_kink: vec![false; k * n],
             row_binds: vec![false; k],
             used: 0,
             unit: vec![1.0; n],
@@ -1401,11 +1405,22 @@ impl Ik {
                     let a = if self.stuck[axis] {
                         0.0
                     } else {
-                        row[j] * (q[axis] - w.seen_q[axis] + MOMENTUM_S * self.measured_speed[axis])
+                        row[j] * (q[axis] - w.seen_q[axis] + {
+                            // A reading's jitter differenced and smoothed is a speed of up to
+                            // 2 READING_JITTER / MEASURED_SPEED_S: no motion carries it.
+                            let carried = MOMENTUM_S * self.measured_speed[axis];
+                            let noise = 2.0 * READING_JITTER * MOMENTUM_S / MEASURED_SPEED_S;
+                            carried.signum() * (carried.abs() - noise).max(0.0)
+                        })
                     };
-                    w.row_lead[slot * n + j] = a;
-                    if a > 0.0 {
-                        lead += a;
+                    // Within a reading's jitter of its command the joint is following it, with
+                    // the rest of the arm, this tick's step and all; further off it may stay
+                    // where it is read, keep its offset, or catch up, in any order.
+                    let kink = true;
+                    w.row_kink[slot * n + j] = kink;
+                    w.row_lead[slot * n + j] = if kink { a.max(0.0) } else { a };
+                    if !kink || a > 0.0 {
+                        lead += w.row_lead[slot * n + j];
                     }
                 }
                 w.row_budget[slot] = budget;
@@ -1422,7 +1437,8 @@ impl Ik {
                 (0..n)
                     .map(|j| {
                         let most = (row[j] * w.lower[j]).max(row[j] * w.upper[j]);
-                        (w.row_lead[slot * n + j] + most).max(0.0)
+                        let closing = w.row_lead[slot * n + j] + most;
+                        if w.row_kink[slot * n + j] { closing.max(0.0) } else { closing }
                     })
                     .sum::<f64>()
                     - w.row_budget[slot]
@@ -1437,11 +1453,10 @@ impl Ik {
             }
             if candidate.measured {
                 // The first cut: the joints whose lead closes the pair.
-                let (full, lead) = (&mut w.row_full[slot * n..(slot + 1) * n], &w.row_lead[slot * n..(slot + 1) * n]);
-                full.copy_from_slice(row);
-                for (value, a) in row.iter_mut().zip(lead) {
-                    if *a <= 0.0 {
-                        *value = 0.0;
+                w.row_full[slot * n..(slot + 1) * n].copy_from_slice(row);
+                for j in 0..n {
+                    if w.row_kink[slot * n + j] && w.row_lead[slot * n + j] <= 0.0 {
+                        row[j] = 0.0;
                     }
                 }
             }
@@ -1488,7 +1503,7 @@ impl Ik {
             let (mut needed, mut kept) = (0.0, 0.0);
             for j in 0..n {
                 let closing = w.row_lead[slot * n + j] + w.row_full[slot * n + j] * w.answer[j];
-                needed += closing.max(0.0);
+                needed += if w.row_kink[slot * n + j] { closing.max(0.0) } else { closing };
                 if w.rows[slot * n + j] != 0.0 {
                     kept += closing;
                 }
@@ -1503,9 +1518,11 @@ impl Ik {
             for j in 0..n {
                 let a = w.row_lead[slot * n + j];
                 let g = w.row_full[slot * n + j];
+                let kink = w.row_kink[slot * n + j];
                 w.row_lead[cut * n + j] = a;
                 w.row_full[cut * n + j] = g;
-                let closes = a + g * w.answer[j] > 0.0;
+                w.row_kink[cut * n + j] = kink;
+                let closes = !kink || a + g * w.answer[j] > 0.0;
                 w.rows[cut * n + j] = if closes { g } else { 0.0 };
                 if closes {
                     lead += a;

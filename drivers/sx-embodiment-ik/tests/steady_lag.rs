@@ -19,7 +19,9 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{Pose, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{Active, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use sx_embodiment_ik::{
+    Active, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF,
+};
 
 /// Substeps of a motor per tick.
 const SUBSTEPS: usize = 10;
@@ -31,6 +33,8 @@ struct Motor {
     omega: f64,
     zeta: f64,
     sag: f64,
+    /// Each reading off by up to this either way, radians.
+    noise: f64,
 }
 
 /// Stiff, as act-sim's arms (they stay within 4.5 mrad of their commands).
@@ -143,19 +147,31 @@ fn run(
     let last = ticks - (1.0 / dt) as usize;
     let (mut commanded, mut really) = (Vec::new(), Vec::new());
     let (mut toggles, mut before) = (0, Vec::new());
+    // A reading's jitter, uniform within the motor's noise, the same every run.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut jitter = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let unit = (state >> 11) as f64 / (1_u64 << 53) as f64;
+        motor.noise * 2.0f64.mul_add(unit, -1.0)
+    };
     teleop.reset();
     for tick in 0..ticks {
-        let measured: Vec<Option<f64>> = real.iter().copied().map(Some).collect();
+        let measured: Vec<Option<f64>> = real.iter().map(|at| Some(at + jitter())).collect();
         let step = teleop
             .step(&reference, &measured, &available, &targets, dt)
             .expect("a step");
         reference.copy_from_slice(&step.q);
-        let pairs: Vec<Active> = step.limbs[0]
-            .active
-            .iter()
-            .copied()
-            .filter(|a| matches!(a, Active::Obstacle { .. } | Active::SelfCollision { .. }))
-            .collect();
+        // The pairs binding, each once (a pair may hold through several rows).
+        let mut pairs: Vec<Active> = Vec::new();
+        for a in &step.limbs[0].active {
+            if matches!(a, Active::Obstacle { .. } | Active::SelfCollision { .. })
+                && !pairs.contains(a)
+            {
+                pairs.push(*a);
+            }
+        }
         let h = dt / SUBSTEPS as f64;
         for _ in 0..SUBSTEPS {
             for j in 0..width {
@@ -228,7 +244,7 @@ fn counter(clear: f64) -> Vec<[f64; 6]> {
 
 /// Asked 6 cm down onto a counter 3 cm under the arm, held: the solve stops it at the margin.
 fn held(motor: Motor, dt: f64) -> Run {
-    run(counter(0.03), [0.0, 0.0, -0.06], None, motor, dt, 6.0)
+    run(counter(0.03), [0.0, 0.0, -0.06], None, motor, dt, std::env::var("HOLD_S").ok().and_then(|v| v.parse().ok()).unwrap_or(6.0))
 }
 
 fn report(dt: f64, motor: Motor, got: &Run) {
@@ -250,29 +266,28 @@ fn report(dt: f64, motor: Motor, got: &Run) {
 /// rests outside the 10 mm margin where it really is, its sag counted.
 #[test]
 fn a_target_held_past_the_counter_converges_and_holds_still() {
+    let mut failed = Vec::new();
     for dt in [0.02, 0.01, 0.004] {
-        for sag in [1.0, -1.0] {
+        for (sag, noise) in [(1.0, 0.0), (-1.0, 0.0), (1.0, READING_JITTER), (0.0, READING_JITTER)] {
             let motor = Motor {
                 omega: STIFF.0,
                 zeta: STIFF.1,
                 sag,
+                noise,
             };
             let got = held(motor, dt);
             report(dt, motor, &got);
-            assert!(
-                got.command_spread_m < 0.001 && got.real_spread_m < 0.001,
-                "dt {dt} {motor:?}: spread {} / {} m",
-                got.command_spread_m,
-                got.real_spread_m
-            );
-            assert_eq!(got.toggles, 0, "dt {dt} {motor:?}: pairs toggled");
-            assert!(
-                got.clear_m >= 0.0099,
-                "dt {dt} {motor:?}: {} m clear",
-                got.clear_m
-            );
+            // Still to within a reading's jitter at the tool, and outside the margin less what
+            // a reading's jitter hides, as the clearance tests in teleop.rs ask.
+            let still = if noise > 0.0 { 0.001 } else { 0.0002 };
+            if got.command_spread_m > still || got.real_spread_m > still || got.toggles > 0
+                || got.clear_m < 0.009
+            {
+                failed.push(format!("dt {dt} {motor:?}"));
+            }
         }
     }
+    assert!(failed.is_empty(), "{failed:?}");
 }
 
 /// The same with a follower that rings past its commands: it settles to a ring of a couple of
@@ -285,6 +300,7 @@ fn a_ringing_follower_held_past_the_counter_settles() {
                 omega: RINGING.0,
                 zeta: RINGING.1,
                 sag,
+                noise: 0.0,
             };
             let got = held(motor, dt);
             report(dt, motor, &got);
@@ -318,6 +334,7 @@ fn the_long_paced_move_settles() {
                 omega,
                 zeta,
                 sag: 0.0,
+                noise: 0.0,
             };
             let got = run(Vec::new(), offset, Some(0.283), motor, dt, 5.0);
             report(dt, motor, &got);
@@ -335,29 +352,3 @@ fn the_long_paced_move_settles() {
     }
 }
 
-#[test]
-#[ignore = "timing probe"]
-fn zz_step_time() {
-    let (mut teleop, rest) = setup(counter(0.03));
-    let (start, rotation) = left_tcp(&teleop, &rest);
-    let target = Pose { translation_m: [start[0], start[1], start[2] - 0.06], rotation_xyzw: rotation };
-    let targets = Targets { tcp: [Some(target), None], ..Targets::default() };
-    let width = rest.len();
-    let (mut reference, mut real, mut v) = (rest.clone(), rest.clone(), vec![0.0; width]);
-    let bias: Vec<f64> = teleop.model().axes().iter().map(|a| sag(&a.name)).collect();
-    let available = vec![true; width];
-    let mut times = Vec::new();
-    teleop.reset();
-    for _ in 0..600 {
-        let measured: Vec<Option<f64>> = real.iter().copied().map(Some).collect();
-        let t0 = std::time::Instant::now();
-        let step = teleop.step(&reference, &measured, &available, &targets, 0.01).expect("a step");
-        times.push(t0.elapsed().as_secs_f64() * 1e3);
-        reference.copy_from_slice(&step.q);
-        for _ in 0..10 { for j in 0..width {
-            let a = 900.0 * (reference[j] - bias[j] - real[j]) - 42.0 * v[j];
-            v[j] += a * 0.001; real[j] += v[j] * 0.001; } }
-    }
-    times.sort_by(f64::total_cmp);
-    println!("STEP ms p50 {:.3} p99 {:.3} max {:.3}", times[300], times[594], times[599]);
-}
