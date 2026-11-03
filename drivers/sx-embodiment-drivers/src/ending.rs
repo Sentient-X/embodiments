@@ -5,16 +5,18 @@
 //! per body or per run instead, and [`Governor::end`] carries it out:
 //!
 //! - [`AtEnd::Home`] (the default): return every axis to its home ([`BoundAxis::home`], the
-//!   chain's declared `home`), then stop. An axis whose part declares no home (a gripper's
-//!   finger) stays where it is: a guessed pose could pinch.
+//!   chain's declared `home`), then hold it there ([`Governor::hold`]). An axis whose part
+//!   declares no home (a gripper's finger) stays where it is: a guessed pose could pinch.
 //! - [`AtEnd::Start`]: return to where the body rested when the governor was built over the
-//!   freshly opened chain (where it sat, so a pose it can be disabled in), then stop.
-//! - [`AtEnd::Release`]: stop where the body is, as before this module existed.
+//!   freshly opened chain, then hold it there.
+//! - [`AtEnd::Release`]: stop where the body is with every joint released: the one explicit
+//!   choice that disables torque, so what nothing holds up drops.
 //!
-//! There is no choice that leaves torque on after the end: a Damiao motor whose `TIMEOUT` is
-//! armed (the static upper body's 0.75 s) leaves enable mode and latches fault 0xD once nothing
-//! commands it, so "hold" would be a delayed drop, and a Feetech servo would hold with no
-//! process watching it.
+//! Every other end holds (2026-11-04: one stop everywhere, and none drops arms): the return's
+//! arrival, a return that cannot run or finish, and an abort. A hold lasts only while the tool
+//! re-sends it ([`Governor::hold_until_released`]): a Damiao motor whose `TIMEOUT` is armed
+//! (the static upper body's 0.75 s) leaves enable mode and drops its joint once nothing
+//! commands it, so a tool ends a held run by a person's second Ctrl-C, which releases.
 //!
 //! A return is motion under the same [`Governor`]: every step is slewed within the axis's speed
 //! cap (and acceleration cap, and derate), held inside its range, and tracking-checked; an axis
@@ -35,7 +37,7 @@
 //!   [`RETURN_MARGIN`]), refused outright above [`MAX_RETURN`];
 //! - the governor's own tracking, missed-answer and chain-failure stops.
 //!
-//! A return that cannot start or does not finish ends in the plain stop, and the [`Ending`]
+//! A return that cannot start or does not finish ends in the held stop, and the [`Ending`]
 //! says so ([`Ending::FellBack`] and its [`ReturnFailure`]); the caller logs it.
 //!
 //! This is the normal end only. A fault, a lost supervisor (operator, intent or command
@@ -181,7 +183,7 @@ impl fmt::Display for ReturnFailure {
 #[derive(Debug)]
 #[must_use]
 pub enum Ending {
-    /// The body reached its target ([`AtEnd::Home`] or [`AtEnd::Start`]) and was stopped there.
+    /// The body reached its target ([`AtEnd::Home`] or [`AtEnd::Start`]) and is held there.
     Returned {
         to: AtEnd,
         took: Duration,
@@ -190,9 +192,12 @@ pub enum Ending {
     /// Nothing drove the body since it was opened or last stopped, so it was not moved: it was
     /// stopped where it rests ([`AtEnd::Home`] and [`AtEnd::Start`]).
     Rested { stop: StopReport },
-    /// The body was stopped where it was ([`AtEnd::Release`]).
+    /// The body was stopped where it was with every joint released ([`AtEnd::Release`]).
     Released { stop: StopReport },
-    /// The return did not run or did not finish; the body was stopped where it was.
+    /// The operation stopped early (a fault, a refusal, a person's Ctrl-C): the body is held
+    /// where it stopped ([`Governor::hold`]).
+    Held { stop: StopReport },
+    /// The return did not run or did not finish; the body is held where it was.
     FellBack {
         to: AtEnd,
         failure: ReturnFailure,
@@ -208,6 +213,7 @@ impl Ending {
             Self::Returned { stop, .. }
             | Self::Rested { stop }
             | Self::Released { stop }
+            | Self::Held { stop }
             | Self::FellBack { stop, .. } => stop,
         }
     }
@@ -225,16 +231,17 @@ impl fmt::Display for Ending {
         match self {
             Self::Returned { to, took, .. } => write!(
                 f,
-                "returned to {to} in {:.1} s, then stopped",
+                "returned to {to} in {:.1} s, held there",
                 took.as_secs_f64()
             ),
             Self::Rested { .. } => {
                 f.write_str("nothing drove the body: stopped where it rests, not moved")
             }
-            Self::Released { .. } => f.write_str("released: stopped where it was"),
+            Self::Released { .. } => f.write_str("released: stopped where it was, torque off"),
+            Self::Held { .. } => f.write_str("stopped early: held where it was"),
             Self::FellBack { to, failure, .. } => write!(
                 f,
-                "the return to {to} fell back to the plain stop where the body was: {failure}"
+                "the return to {to} fell back to holding the body where it was: {failure}"
             ),
         }
     }
@@ -611,10 +618,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                         match ret.tick(self, feedforward.as_deref_mut()) {
                             Ok(Progress::Settled) => {
                                 let took = ret.elapsed(self);
+                                // Held at home: torque is released only on a person's call
+                                // (`AtEnd::Release`, or the tool's second Ctrl-C).
                                 return Ending::Returned {
                                     to: at_end,
                                     took,
-                                    stop: self.stop(),
+                                    stop: self.hold(),
                                 };
                             }
                             Ok(Progress::Moving) => pace(),
@@ -622,7 +631,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                         }
                     },
                 };
-                let stop = self.stop();
+                // A return that did not finish, a refusal or an abort (Ctrl-C) stops the body
+                // where it is and holds it: nothing that would fall drops.
+                let stop = self.hold();
                 if failure == ReturnFailure::NotDriven {
                     return Ending::Rested { stop };
                 }

@@ -142,8 +142,27 @@ pub struct StopReport {
     pub unreached: Vec<u16>,
     /// Actuators left holding their joint under torque ([`crate::Rest::Hold`]), proven by an
     /// answer to the hold with no fault: stopped (no motion), not released. Every other
-    /// actuator that is not unproven was released.
-    pub held: Vec<u16>,
+    /// actuator that is not unproven was released. Keyed by port and bus address: an address
+    /// is unique only on its own bus.
+    pub held: Vec<Motor>,
+}
+
+/// One actuator by its bus's port and its address on that bus.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Motor {
+    pub port: String,
+    pub bus_id: u16,
+}
+
+impl Motor {
+    /// The actuator `axis` binds.
+    #[must_use]
+    pub fn of(axis: &BoundAxis) -> Self {
+        Self {
+            port: axis.port.clone(),
+            bus_id: axis.binding.bus_id,
+        }
+    }
 }
 
 impl StopReport {
@@ -154,6 +173,14 @@ impl StopReport {
         self.unobserved.extend(other.unobserved);
         self.unreached.extend(other.unreached);
         self.held.extend(other.held);
+    }
+
+    /// Whether `axis`'s actuator is held.
+    #[must_use]
+    pub fn holds(&self, axis: &BoundAxis) -> bool {
+        self.held
+            .iter()
+            .any(|motor| motor.port == axis.port && motor.bus_id == axis.binding.bus_id)
     }
 
     #[must_use]
@@ -187,7 +214,7 @@ pub struct ProvenStop {
     faults: Vec<(u16, u8)>,
     unobserved: Vec<u16>,
     unreached: Vec<u16>,
-    held: Vec<u16>,
+    held: Vec<Motor>,
 }
 
 impl ProvenStop {
@@ -213,7 +240,7 @@ impl ProvenStop {
 
     /// Actuators left holding their joint under torque ([`StopReport::held`]).
     #[must_use]
-    pub fn held(&self) -> &[u16] {
+    pub fn held(&self) -> &[Motor] {
         &self.held
     }
 

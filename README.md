@@ -331,8 +331,12 @@ torque as feed-forward), re-sent by the caller every tick through `keep_holding`
 disables it. Which one is derived, never listed per body (`sx_embodiment_drivers::rest`): a
 joint falls when released if its actuator has no holding brake (`ActuatorRating.holding_brake`,
 false for every product rated today) and the description's gravity torque at the measured pose
-is more than half its identified static friction (`RestModel`); without a model every
-brakeless joint under torque is held. A governor fault holds every joint where it is. A held
+is more than half its identified sliding friction (`RestModel`; breakaway friction at rest does
+not count); without a model every brakeless joint under torque is held, and so is a joint with
+no reading (released only once its caller sees it silent). A governor fault holds every joint
+where it is, and so do the bench tools' ends (`Governor::hold`, `hold_until_released`): only
+`AtEnd::Release` or a person's second Ctrl-C disables torque. A bus whose link fails never stops
+another bus's holds (`Chains`, `Composite`), and a joint already held keeps its first hold. A held
 motor is watched against its rated thermal limit and torque (`rest::heat`, `rest::effort`). A
 plain `stop` still releases everything: what a deliberate Park ends with at its rest pose.
 

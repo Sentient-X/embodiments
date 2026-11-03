@@ -1201,7 +1201,8 @@ fn run() -> Result<(), String> {
             })
             .fold(first_step, f64::max);
         if fastest > step_cap {
-            let _ = governor.stop();
+            // Nothing moved: the held stop releases a body nothing drove.
+            let _ = governor.hold();
             return Err(format!(
                 "a planned step of {fastest:.4} rad exceeds the cap; nothing moved"
             ));
@@ -1211,7 +1212,7 @@ fn run() -> Result<(), String> {
     for tick in &ticks {
         for ((value, range), name) in tick.target.iter().zip(&ranges).zip(&names) {
             if !range.admits(*value) {
-                let _ = governor.stop();
+                let _ = governor.hold();
                 return Err(format!(
                     "{}: {name} target {value:.3} is outside its range from this rest; nothing moved",
                     tick.segment
@@ -1344,7 +1345,18 @@ fn run() -> Result<(), String> {
             next = Instant::now();
         }
     }
-    let report = governor.stop();
+    // The run ends held where it stopped; torque comes off only on a person's second Ctrl-C.
+    let mut report = governor.hold();
+    if !report.held.is_empty() {
+        stop.store(false, Ordering::SeqCst);
+        eprintln!(
+            "holding {} joints where they stopped: press Ctrl-C to release torque (the arms drop unless something holds them up)",
+            report.held.len()
+        );
+        report = governor.hold_until_released(&|| stop.load(Ordering::SeqCst), &mut || {
+            thread::sleep(PERIOD);
+        });
+    }
     let written = write_records(
         &mut out,
         args.supply.as_deref(),

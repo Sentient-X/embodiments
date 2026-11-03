@@ -46,3 +46,35 @@ fn the_registrys_gripper_reduction_is_the_vendors_transmission() {
         -GRIPPER_MOTOR_OPEN_RAD / GRIPPER_FINGER_OPEN_M
     );
 }
+
+/// The refute of 2026-11-03 (D): the B601's two buses held as one body; the arm's link fails,
+/// and the gripper's bus still gets its hold every exchange, the arm's axes read unavailable for
+/// the caller's silence rule instead of failing the whole hold.
+#[test]
+fn one_failing_bus_does_not_stop_the_other_buses_holds() {
+    use sx_damiao_can::b601::open_b601;
+    use sx_damiao_can::sim::Sim;
+    use sx_embodiment_drivers::{ActuatorChain, AxisReading, MissingReason, Rest};
+    let arm = Sim::b601(&[1, 2, 3, 4, 5, 6]);
+    let gripper = Sim::b601(&[7]);
+    let mut body = open_b601(arm.clone(), gripper.clone(), &nominal()).expect("opens");
+    let rest = body.last_observed().expect("rest").to_vec();
+    body.command(&rest).expect("driven");
+    let width = body.axes().len();
+    let report = body.stop_holding(&vec![Rest::Hold { gravity: 0.0 }; width]);
+    assert_eq!(report.held.len(), width, "{report:?}");
+    arm.fail_next(&[std::io::ErrorKind::TimedOut; 64]);
+    for _ in 0..3 {
+        let before = gripper.sent();
+        body.keep_holding().expect("the gripper still answers");
+        assert!(gripper.sent() > before, "the gripper's hold was re-sent");
+        let readings = body.command_readings().expect("readings");
+        assert!(
+            readings[..6]
+                .iter()
+                .all(|reading| *reading == AxisReading::Missing(MissingReason::Unavailable)),
+            "{readings:?}"
+        );
+        assert!(readings[6].is_fresh(), "{:?}", readings[6]);
+    }
+}

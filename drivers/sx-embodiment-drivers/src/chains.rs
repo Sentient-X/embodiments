@@ -39,6 +39,9 @@ pub struct Chains<C> {
     commandable: Vec<CommandRange>,
     /// Per member, its command times on its bus.
     timing: Vec<crate::BusTiming>,
+    /// The last hold's readings, every member's in its place (a member whose link failed reads
+    /// unavailable); cleared by a command or a stop.
+    kept: Option<Axes<AxisReading>>,
 }
 
 #[derive(Debug, Error)]
@@ -89,6 +92,7 @@ impl<C: ActuatorChain> Chains<C> {
             axes,
             commandable,
             timing,
+            kept: None,
         }
     }
 
@@ -134,6 +138,7 @@ impl<C: ActuatorChain> Chains<C> {
         joints: &[f64],
         feedforward: Option<&[Feedforward]>,
     ) -> Result<Receipt<C::Feedback>, ChainsError<C::Error>> {
+        self.kept = None;
         if joints.len() != self.axes.len() {
             return Err(TargetError::Width {
                 expected: self.axes.len(),
@@ -264,6 +269,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     }
 
     fn stop(&mut self) -> StopReport {
+        self.kept = None;
         let mut report = StopReport::default();
         for chain in &mut self.members {
             report.absorb(chain.stop());
@@ -273,6 +279,7 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
 
     /// Each chain its own slice of `rests`, whatever an earlier one answered.
     fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        self.kept = None;
         let mut report = StopReport::default();
         let mut rest = rests;
         for chain in &mut self.members {
@@ -285,18 +292,44 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
 
     /// Every chain's holds, one after the other, as one receipt in native state order; a
     /// chain that observes nothing reads `NaN` with default feedback at its axes. A chain whose
-    /// link fails ends the exchange: the caller releases what it can no longer hold.
+    /// link fails never stops the others' holds (the refute of 2026-11-03: one bus's error left
+    /// every other bus unheld): its axes read unavailable in [`ActuatorChain::command_readings`],
+    /// for the caller's silence rule to release them, and the exchange fails only when every
+    /// chain failed.
     fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
         let mut evidence = Evidence::BusObservedComplete;
         let mut observed = Axes::new();
         let mut feedback = Axes::new();
+        let mut readings: Axes<AxisReading> = Axes::new();
+        let mut first_failure = None;
+        let mut answered = false;
         for (index, chain) in self.members.iter_mut().enumerate() {
             let width = chain.axes().len();
-            let receipt = chain.keep_holding().map_err(|error| ChainsError::Chain {
-                index,
-                applied: true,
-                error,
-            })?;
+            let receipt = match chain.keep_holding() {
+                Ok(receipt) => {
+                    answered = true;
+                    receipt
+                }
+                Err(error) => {
+                    first_failure.get_or_insert(ChainsError::Chain {
+                        index,
+                        applied: true,
+                        error,
+                    });
+                    observed.extend((0..width).map(|_| f64::NAN));
+                    feedback.extend((0..width).map(|_| C::Feedback::default()));
+                    readings.extend(
+                        (0..width).map(|_| AxisReading::Missing(crate::MissingReason::Unavailable)),
+                    );
+                    continue;
+                }
+            };
+            match chain.command_readings() {
+                Some(own) if own.len() == width => readings.extend_from_slice(&own),
+                _ => readings.extend(
+                    (0..width).map(|_| AxisReading::Missing(crate::MissingReason::Unavailable)),
+                ),
+            }
             if receipt.evidence != Evidence::BusObservedComplete {
                 evidence = receipt.evidence;
             }
@@ -310,6 +343,10 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
             } else {
                 feedback.extend((0..width).map(|_| C::Feedback::default()));
             }
+        }
+        self.kept = Some(readings);
+        if !answered && let Some(failure) = first_failure {
+            return Err(failure);
         }
         Ok(Receipt {
             evidence,
@@ -328,6 +365,9 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
 
     /// Every chain's, in native state order, or `None` when any chain has none.
     fn command_readings(&self) -> Option<Axes<AxisReading>> {
+        if let Some(kept) = self.kept {
+            return Some(kept);
+        }
         let mut readings = Axes::new();
         for chain in &self.members {
             readings.extend(chain.command_readings()?);

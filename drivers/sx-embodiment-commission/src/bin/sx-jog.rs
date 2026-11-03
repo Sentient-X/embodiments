@@ -17,11 +17,13 @@
 //! commissioning's `out_of_service`, or in `--exclude` for this run, keeps its place in the
 //! vector and is never addressed. Relative moves need no zero calibration. When the moves are
 //! done, `--at-end` decides (`sx_embodiment_drivers::AtEnd`): `home`, the default, returns every
-//! joint under the governor to its registry home (where the calibrated zeros put it), then stops
-//! the body; `start` returns to where the body rested when it was opened; `release` stops it
-//! where it is. A return that cannot run or finish stops the body where it is, says why and
-//! exits non-zero, as does a stop that is not proven. On any refusal or fault, and on Ctrl-C at
-//! any time (during the moves or the return), the body is stopped where it is. `--log` writes every tick as one JSON
+//! joint under the governor to its registry home (where the calibrated zeros put it), then holds
+//! it there; `start` returns to where the body rested when it was opened and holds it; `release`
+//! stops it where it is with torque off. A return that cannot run or finish holds the body where
+//! it is, says why and exits non-zero, as does a stop that is not proven. On any refusal or
+//! fault, and on Ctrl-C at any time (during the moves or the return), the body is held where it
+//! is. A held body is re-sent its hold until a second Ctrl-C releases every joint (the arms drop
+//! unless something holds them up). `--log` writes every tick as one JSON
 //! line (the target asked for, the slewed command sent, what was observed, each motor's
 //! position, velocity, torque, temperatures and state) from a writer thread; the control loop
 //! only copies a fixed-size record into a preallocated queue.
@@ -39,6 +41,25 @@ use sx_embodiment_drivers::{ActuatorChain, AtEnd, AxisLimits, Governor};
 const PERIOD: Duration = Duration::from_millis(20);
 /// Ten seconds of ticks queued for the log writer.
 const LOG_CAPACITY: usize = 500;
+
+/// Hold a body its ending left held until a person presses Ctrl-C (`stop` set again), then
+/// release every joint; `None` when nothing was held.
+fn hold_until_released<C: ActuatorChain>(
+    governor: &mut Governor<C>,
+    ending: &sx_embodiment_drivers::Ending,
+    stop: &AtomicBool,
+    pace: &mut dyn FnMut(),
+) -> Option<sx_embodiment_drivers::StopReport> {
+    let held = ending.stop().held.len();
+    if held == 0 {
+        return None;
+    }
+    stop.store(false, Ordering::SeqCst);
+    eprintln!(
+        "holding {held} joints where they stopped: press Ctrl-C to release torque (the arms drop unless something holds them up)"
+    );
+    Some(governor.hold_until_released(&|| stop.load(Ordering::SeqCst), pace))
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -162,6 +183,15 @@ fn run() -> Result<(), String> {
         &mut pace,
     )?;
     eprintln!("at end: {}", ended.ending);
+    // The run ends held (a return's arrival, a fallback, Ctrl-C): torque comes off only on a
+    // person's second Ctrl-C, so nothing that would fall drops while the tool runs.
+    let released = hold_until_released(&mut governor, &ended.ending, &stop, &mut pace);
+    if let Some(released) = &released {
+        eprintln!(
+            "released: unproven {:?} faults {:?}",
+            released.unproven, released.faults
+        );
+    }
     let stop = ended.ending.stop();
     eprintln!(
         "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",

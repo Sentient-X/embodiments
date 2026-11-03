@@ -448,7 +448,7 @@ fn a_held_stop_keeps_a_loaded_shoulder_up_while_a_released_one_drops() {
         .governor
         .stop_holding(&rests_holding(width, shoulder, gravity));
     assert!(report.is_proven(), "{report:?}");
-    assert_eq!(report.held, vec![id], "{report:?}");
+    assert_eq!(ids(&report.held), vec![id], "{report:?}");
     let mut farthest: f64 = 0.0;
     for _ in 0..150 {
         rig.pass(Duration::from_millis(20));
@@ -492,7 +492,7 @@ fn a_hold_nobody_re_sends_is_dropped_by_the_motors_watchdog() {
     let report = rig
         .governor
         .stop_holding(&rests_holding(width, shoulder, gravity));
-    assert_eq!(report.held, vec![id]);
+    assert_eq!(ids(&report.held), vec![id]);
     for _ in 0..75 {
         rig.pass(Duration::from_millis(20));
     }
@@ -537,17 +537,89 @@ fn a_second_stop_releases_one_held_joint_and_keeps_the_rest() {
     assert_eq!(report.held.len(), 2, "{report:?}");
     rests[elbow] = sx_embodiment_drivers::Rest::Release;
     let report = rig.governor.stop_holding(&rests);
-    let ids = (
+    let pair = (
         rig.governor.axes()[shoulder].binding.bus_id,
         rig.governor.axes()[elbow].binding.bus_id,
     );
-    assert_eq!(report.held, vec![ids.0], "{report:?}");
+    assert_eq!(ids(&report.held), vec![pair.0], "{report:?}");
     assert_eq!(
-        rig.bus.state().motors[&ids.1].state,
+        rig.bus.state().motors[&pair.1].state,
         0,
         "the elbow is disabled"
     );
     // Everything released, as a Park ends: nothing held.
     let report = rig.governor.stop();
     assert!(report.held.is_empty() && report.is_proven(), "{report:?}");
+}
+
+/// The held motors' bus addresses, in order.
+fn ids(held: &[sx_embodiment_drivers::Motor]) -> Vec<u16> {
+    held.iter().map(|motor| motor.bus_id).collect()
+}
+
+/// The refute of 2026-11-03 (B): a command takes a held body up and enables every motor; a
+/// hold exchange right after it (the keeper's tick racing the command) must read the enabled
+/// motors as enabled, never as faulted, on firmware that reports its enable state.
+#[test]
+fn a_keep_holding_after_a_command_does_not_read_enabled_motors_as_faulted() {
+    use sx_embodiment_drivers::{AxisReading, Rest};
+    let mut axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    for axis in &mut axes {
+        axis.reports_enable_state = true;
+    }
+    let bus = Sim::for_axes(&axes);
+    for motor in bus.state().motors.values_mut() {
+        motor.reports_enable_state = true;
+    }
+    let mut chain = DamiaoChain::open(bus, axes).expect("opens");
+    let rest = chain.last_observed().expect("rest").to_vec();
+    chain.command(&rest).expect("driven");
+    let width = chain.axes().len();
+    let report = chain.stop_holding(&vec![Rest::Hold { gravity: 0.0 }; width]);
+    assert_eq!(report.held.len(), width, "{report:?}");
+    chain.command(&rest).expect("taken up again");
+    chain.keep_holding().expect("answered");
+    let readings = chain.command_readings().expect("readings");
+    assert!(
+        readings
+            .iter()
+            .all(|reading| !matches!(reading, AxisReading::Faulted(_))),
+        "{readings:?}"
+    );
+}
+
+/// The refute of 2026-11-03 (H): releasing one held joint never re-targets the others at where
+/// they sagged to since: each keeps the hold it was given when it first stopped.
+#[test]
+fn a_re_stop_keeps_each_held_joints_first_hold() {
+    let mut rig = Rig::new_at(0.25);
+    let (shoulder, gravity) = loaded_at_rest(&mut rig, -6.0);
+    let width = rig.governor.axes().len();
+    let elbow = rig.index(ELBOW);
+    let mut rests = rests_holding(width, shoulder, gravity);
+    rests[elbow] = sx_embodiment_drivers::Rest::Hold { gravity: 0.0 };
+    assert_eq!(rig.governor.stop_holding(&rests).held.len(), 2);
+    let id = rig.governor.axes()[shoulder].binding.bus_id;
+    let hold_frame = |rig: &Rig| {
+        let state = rig.bus.state();
+        state
+            .frames
+            .iter()
+            .rev()
+            .find(|frame| frame.id == u32::from(id) && frame.data[7] != 0xFD)
+            .map(|frame| frame.data)
+            .expect("a hold frame")
+    };
+    let first = hold_frame(&rig);
+    // The shoulder sags a little under its PD; the elbow is then released.
+    rig.bus.state().motors.get_mut(&id).expect("shoulder").q -= 0.01;
+    rests[elbow] = sx_embodiment_drivers::Rest::Release;
+    let report = rig.governor.stop_holding(&rests);
+    assert_eq!(ids(&report.held), vec![id]);
+    rig.governor.keep_holding().expect("held");
+    assert_eq!(
+        hold_frame(&rig),
+        first,
+        "the shoulder's hold was re-targeted"
+    );
 }

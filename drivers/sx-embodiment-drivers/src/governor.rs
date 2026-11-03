@@ -1093,6 +1093,36 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
 }
 
 impl<C: ActuatorChain, K: Clock> Governor<C, K> {
+    /// Stop holding every joint under torque where it stands, each with the gravity torque
+    /// its last command carried: the one stop a bench tool ends with, so no tool drops a joint
+    /// that would fall (a joint nothing drove is released, as every stop releases it). The
+    /// hold lasts only while the caller re-sends it ([`Self::hold_until_released`]).
+    pub fn hold(&mut self) -> StopReport {
+        let rests: Axes<crate::Rest> = self
+            .gravity
+            .iter()
+            .map(|gravity| crate::Rest::Hold { gravity: *gravity })
+            .collect();
+        self.stop_holding(&rests)
+    }
+
+    /// Keep a held body held, re-sending its hold at each `pace`, until `release` says a
+    /// person asked to let go; then release every joint (what nothing holds up drops) and
+    /// return that stop. A hold the link cannot carry ends here at once with a plain stop.
+    pub fn hold_until_released(
+        &mut self,
+        release: &dyn Fn() -> bool,
+        pace: &mut dyn FnMut(),
+    ) -> StopReport {
+        while !release() {
+            if self.keep_holding().is_err() {
+                break;
+            }
+            pace();
+        }
+        self.stop()
+    }
+
     /// What every stop clears: the motion in progress, so the next command starts afresh.
     fn forget_motion(&mut self) {
         self.held = None;

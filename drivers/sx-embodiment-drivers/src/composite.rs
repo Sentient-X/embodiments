@@ -25,6 +25,9 @@ pub struct Composite<A, B> {
     second: B,
     axes: Vec<BoundAxis>,
     commandable: Vec<CommandRange>,
+    /// The last hold's readings, both halves in place (a half whose link failed reads
+    /// unavailable); cleared by a command or a stop.
+    kept: Option<Axes<AxisReading>>,
 }
 
 #[derive(Debug, Error)]
@@ -62,6 +65,7 @@ impl<A: ActuatorChain, B: ActuatorChain<Feedback = A::Feedback>> Composite<A, B>
             second,
             axes,
             commandable,
+            kept: None,
         }
     }
 
@@ -89,6 +93,7 @@ where
 {
     /// Each chain its slice of `joints`, and of `feedforward` when given.
     fn drive(&mut self, joints: &[f64], feedforward: Option<&[Feedforward]>) -> Driven<A, B> {
+        self.kept = None;
         if joints.len() != self.axes.len() {
             return Err(TargetError::Width {
                 expected: self.axes.len(),
@@ -226,6 +231,7 @@ where
     }
 
     fn stop(&mut self) -> StopReport {
+        self.kept = None;
         let mut report = self.first.stop();
         report.absorb(self.second.stop());
         report
@@ -233,6 +239,7 @@ where
 
     /// Each half's rests to its own chain.
     fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        self.kept = None;
         let split = self.first.axes().len().min(rests.len());
         let (ours, theirs) = rests.split_at(split);
         let mut report = self.first.stop_holding(ours);
@@ -241,10 +248,40 @@ where
     }
 
     /// Both halves' holds, one after the other, as one receipt in native state order: an
-    /// axis whose half observes nothing reads `NaN`.
+    /// axis whose half observes nothing reads `NaN`. A half whose link fails never stops the
+    /// other's hold: its axes read unavailable, and the exchange fails only when both did.
     fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
-        let first = self.first.keep_holding().map_err(CompositeError::First)?;
-        let second = self.second.keep_holding().map_err(CompositeError::Second)?;
+        let widths = (self.first.axes().len(), self.second.axes().len());
+        let unread = |width: usize| -> Axes<AxisReading> {
+            (0..width)
+                .map(|_| AxisReading::Missing(crate::MissingReason::Unavailable))
+                .collect()
+        };
+        let empty = || Receipt {
+            evidence: Evidence::DispatchAttempted,
+            observed: Axes::new(),
+            feedback: Axes::new(),
+        };
+        let first = self.first.keep_holding();
+        let first_readings = match (&first, self.first.command_readings()) {
+            (Ok(_), Some(own)) if own.len() == widths.0 => own,
+            _ => unread(widths.0),
+        };
+        let second = self.second.keep_holding();
+        let second_readings = match (&second, self.second.command_readings()) {
+            (Ok(_), Some(own)) if own.len() == widths.1 => own,
+            _ => unread(widths.1),
+        };
+        let mut readings = first_readings;
+        readings.extend(second_readings);
+        self.kept = Some(readings);
+        let (first, second) = match (first, second) {
+            (Err(error), Err(_)) => return Err(CompositeError::First(error)),
+            (first, second) => (
+                first.unwrap_or_else(|_| empty()),
+                second.unwrap_or_else(|_| empty()),
+            ),
+        };
         Ok(self.joined(first, second))
     }
 
@@ -301,6 +338,9 @@ where
     }
 
     fn command_readings(&self) -> Option<Axes<AxisReading>> {
+        if let Some(kept) = self.kept {
+            return Some(kept);
+        }
         let mut readings = self.first.command_readings()?;
         readings.extend(self.second.command_readings()?);
         Some(readings)

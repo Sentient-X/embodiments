@@ -14,10 +14,11 @@
 //! Which one is derived, never listed per body: a joint **falls when released** when its
 //! actuator has no holding brake ([`crate::ActuatorRating::holding_brake`]) and the gravity
 //! torque the description gives at the measured pose is more than its identified static
-//! friction can hold with margin ([`falls`]). Without a dynamics model a brakeless joint that
-//! was under torque is held ([`unmodelled`]): no gravity is known, so none is assumed absent.
-//! A joint with no fresh reading is released: a silent motor cannot be held where nobody knows
-//! it is.
+//! sliding friction can hold with margin ([`falls`]). Without a dynamics model a brakeless
+//! joint that was under torque is held ([`unmodelled`]): no gravity is known, so none is
+//! assumed absent. A joint with no reading at all is held too, at its last commanded position
+//! with no feed-forward (it may still answer: one missed answer is no reason to drop it); a
+//! caller releases it only once it stays silent (the station's `HOLD_SILENCE`).
 
 use crate::axes::Axes;
 use crate::binding::{ActuatorRating, BoundAxis};
@@ -53,8 +54,10 @@ pub const GRAVITY_FLOOR: f64 = 1e-3;
 
 /// Whether a joint falls when its torque is released: its actuator has no holding brake and
 /// `gravity` (the torque that holds it at its pose, N·m) is above [`GRAVITY_FLOOR`] and more
-/// than `friction`'s static budget there divided by [`RELEASE_MARGIN`]. Released, the drive
-/// delivers nothing and the load is gravity's (`external = -gravity`).
+/// than `friction`'s sliding friction there divided by [`RELEASE_MARGIN`]. Released, the drive
+/// delivers nothing and the load is gravity's (`external = -gravity`). Sliding, not the
+/// breakaway (Stribeck) friction a joint shows at rest: a knock starts it moving, and then
+/// only sliding friction holds it (the refute of 2026-11-03).
 #[must_use]
 pub fn falls(rating: &ActuatorRating, gravity: f64, friction: &JointFriction) -> bool {
     if rating.holding_brake {
@@ -65,20 +68,20 @@ pub fn falls(rating: &ActuatorRating, gravity: f64, friction: &JointFriction) ->
         return true;
     }
     let load = gravity.abs();
-    load > GRAVITY_FLOOR && load * RELEASE_MARGIN > friction.budget(0.0, 0.0, -gravity)
+    load > GRAVITY_FLOOR && load * RELEASE_MARGIN > friction.sliding(0.0, -gravity)
 }
 
-/// Each axis's rest without a dynamics model: every brakeless axis with a reading is held
-/// with no feed-forward (its gravity unknown), every other is released.
+/// Each axis's rest without a dynamics model: every brakeless axis is held with no
+/// feed-forward (its gravity unknown), read or not; a braked one is released.
 #[must_use]
 pub fn unmodelled(axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
+    let _ = measured;
     axes.iter()
-        .zip(measured)
-        .map(|(axis, at)| {
-            if at.is_some() && !axis.binding.model.rating().holding_brake {
-                Rest::Hold { gravity: 0.0 }
-            } else {
+        .map(|axis| {
+            if axis.binding.model.rating().holding_brake {
                 Rest::Release
+            } else {
+                Rest::Hold { gravity: 0.0 }
             }
         })
         .collect()
@@ -116,11 +119,11 @@ impl RestModel {
         }
     }
 
-    /// Each axis's rest at `measured` (one per axis, `None` where it has no fresh reading): a
+    /// Each axis's rest at `measured` (one per axis, `None` where it has no reading at all): a
     /// joint the description carries is held with its gravity torque where it [`falls`], else
-    /// released; one the description does not carry (its gravity unknown) is held without
-    /// feed-forward unless braked; one with no reading is released. A description joint with
-    /// no reading is placed at zero for the others' gravity.
+    /// released; one the description does not carry (its gravity unknown), and one with no
+    /// reading, is held without feed-forward unless braked. A description joint with no
+    /// reading is placed at zero for the others' gravity.
     pub fn rests(&mut self, axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
         for (q, axis) in self.q.iter_mut().zip(&self.axis_of) {
             *q = axis
@@ -140,7 +143,8 @@ impl RestModel {
             let Some(index) = *axis else {
                 continue;
             };
-            if !rests[index].holds() {
+            // Unread: held as it is, no feed-forward, until its silence releases it.
+            if !rests[index].holds() || measured.get(index).copied().flatten().is_none() {
                 continue;
             }
             let gravity = self.torque[joint];
@@ -313,19 +317,35 @@ mod tests {
         assert_eq!(level[1], Rest::Hold { gravity: 0.0 });
         let hanging = model.rests(&axes, &[Some(-std::f64::consts::FRAC_PI_2), None]);
         assert_eq!(hanging[0], Rest::Release, "{hanging:?}");
-        // No reading: released, whatever the model says.
-        assert_eq!(hanging[1], Rest::Release);
+        // No reading: held without feed-forward, whatever the model says; its silence alone
+        // releases it later.
+        assert_eq!(hanging[1], Rest::Hold { gravity: 0.0 });
         let silent = model.rests(&axes, &[None, Some(0.0)]);
-        assert_eq!(silent[0], Rest::Release);
+        assert_eq!(silent[0], Rest::Hold { gravity: 0.0 });
     }
 
     #[test]
-    fn without_a_model_every_brakeless_axis_with_a_reading_is_held() {
+    fn without_a_model_every_brakeless_axis_is_held_read_or_not() {
         let axes = [axis("a"), axis("b")];
         assert_eq!(
             unmodelled(&axes, &[Some(0.2), None]).as_slice(),
-            &[Rest::Hold { gravity: 0.0 }, Rest::Release]
+            &[Rest::Hold { gravity: 0.0 }, Rest::Hold { gravity: 0.0 }]
         );
+    }
+
+    /// The refute of 2026-11-03: breakaway friction a joint shows at rest is not what holds it
+    /// once it slides. 1 N·m of gravity on 0.5 N·m of Coulomb friction falls, however large the
+    /// Stribeck term at standstill.
+    #[test]
+    fn breakaway_friction_does_not_hold_a_joint_up() {
+        let breakaway = JointFriction {
+            coulomb: 0.5,
+            stribeck: 2.0,
+            stribeck_velocity: 0.01,
+            stribeck_exponent: 1.0,
+            ..JointFriction::default()
+        };
+        assert!(falls(&DM4340.rating(), 1.0, &breakaway));
     }
 
     #[test]

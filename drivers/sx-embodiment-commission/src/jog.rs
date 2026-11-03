@@ -292,7 +292,7 @@ pub struct Ended {
     /// Why it stopped early, if it did.
     pub failure: Option<String>,
     /// What the body did at the end: the run's [`AtEnd`] when the steps finished, else
-    /// [`Ending::Released`], stopped where it was.
+    /// [`Ending::Held`], held where it stopped.
     pub ending: Ending,
 }
 
@@ -399,8 +399,8 @@ where
         }
     }
     let ending = if failure.is_some() || interrupted {
-        Ending::Released {
-            stop: governor.stop(),
+        Ending::Held {
+            stop: governor.hold(),
         }
     } else {
         // The moves carried no feed-forward, so neither does the return.
