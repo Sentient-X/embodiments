@@ -1388,7 +1388,9 @@ impl Ik {
             }
             // Never more than half the room in one tick either: a long step is where the
             // linearisation is least true.
-            let room = (distance - s.collision_margin_m).max(0.0);
+            // Read, the body may stand a reading's jitter off on every joint the pair moves.
+            let unsure = READING_JITTER * row.iter().map(|r| r.abs()).sum::<f64>();
+            let room = (distance - s.collision_margin_m - unsure).max(0.0);
             let mut rhs = braking(room, s.braking_share * capability, dt).min(0.5 * room);
             if candidate.measured {
                 // From where it was measured the body still makes its way to its command (a
@@ -1414,29 +1416,37 @@ impl Ik {
                 // lead counted signed instead let joints that catch up in different times, or a
                 // blocked joint not yet stalled, carry the arm 7-13 mm into the counter
                 // (embodiments 8b90946 refute).
-                let budget = 0.5 * room;
+                let mut budget = 0.5 * room;
                 let mut lead = 0.0;
                 for (j, &axis) in body.solved.iter().enumerate() {
-                    let a = if self.stuck[axis] {
-                        0.0
-                    } else {
-                        row[j]
-                            * (q[axis] - w.seen_q[axis] + {
-                                // A reading's jitter differenced and smoothed is a speed of up to
-                                // 2 READING_JITTER / MEASURED_SPEED_S: no motion carries it.
-                                let carried = MOMENTUM_S * self.measured_speed[axis];
-                                let noise = 2.0 * READING_JITTER * MOMENTUM_S / MEASURED_SPEED_S;
-                                carried.signum() * (carried.abs() - noise).max(0.0)
-                            })
+                    // How far its measured speed carries it: a reading's jitter differenced
+                    // and smoothed is a speed of up to 2 READING_JITTER / MEASURED_SPEED_S, and
+                    // carries nothing.
+                    let carried = {
+                        let carried = MOMENTUM_S * self.measured_speed[axis];
+                        let noise = 2.0 * READING_JITTER * MOMENTUM_S / MEASURED_SPEED_S;
+                        carried.signum() * (carried.abs() - noise).max(0.0)
                     };
+                    let (catch_up, carry) = if self.stuck[axis] {
+                        (0.0, 0.0)
+                    } else {
+                        (row[j] * (q[axis] - w.seen_q[axis]), row[j] * carried)
+                    };
+                    let a = catch_up + carry;
                     // Within a reading's jitter of its command the joint is following it, with
                     // the rest of the arm, this tick's step and all; further off it may stay
-                    // where it is read, keep its offset, or catch up, in any order.
+                    // where it is read, keep its offset, or catch up, in any order: never
+                    // counted on to open the pair but by what it is measured to be doing, moving
+                    // back toward its command (no further than its command, nor than its speed
+                    // carries it).
                     let kink = self.stuck[axis] || self.lagging[axis];
                     w.row_kink[slot * n + j] = kink;
                     w.row_lead[slot * n + j] = if kink { a.max(0.0) } else { a };
                     if !kink || a > 0.0 {
                         lead += w.row_lead[slot * n + j];
+                    }
+                    if kink && catch_up < 0.0 && carry < 0.0 {
+                        budget -= catch_up.max(carry);
                     }
                 }
                 w.row_budget[slot] = budget;
