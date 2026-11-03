@@ -103,8 +103,8 @@ use sx_embodiment_drivers::{
 use thiserror::Error;
 
 use crate::dm_can::{
-    ControlType, DmCanError, DmMotorType, DmVariable, ENABLE_WAIT, Motor, MotorCommand,
-    MotorControl, ParamValue,
+    ControlType, DmCanError, DmMotorType, DmVariable, ENABLE_WAIT, MitResidual, Motor,
+    MotorCommand, MotorControl, ParamValue,
 };
 
 /// `ActuatorModel.DAMIAO_DM4310` in the registry.
@@ -1312,16 +1312,19 @@ impl<P: CanPort> DamiaoChain<P> {
             applied.push(at_joint);
         }
         let mut frames: Axes<CanFrame> = Axes::new();
+        let mut residuals: Axes<MitResidual> = Axes::new();
         for (index, motor) in self.motors.iter().enumerate() {
             let (dq, tau) = sent[index];
-            frames.push(self.control.mit_frame(
+            let (frame, residual) = self.control.mit_frame(
                 self.ids[index],
                 motor.kp,
                 motor.kd,
                 targets[index],
                 dq,
                 tau,
-            )?);
+            )?;
+            frames.push(frame);
+            residuals.push(residual);
         }
         if !self.enabled {
             self.arm_and_enable()?;
@@ -1339,8 +1342,13 @@ impl<P: CanPort> DamiaoChain<P> {
         if let Some(failure) = self.tick.failure.take() {
             return Err(failure.into());
         }
-        // Recorded only once every frame went out.
+        // Recorded only once every frame went out. A phase that failed part way leaves every
+        // motor's residuals as they were, those whose frame went out too: their next frame
+        // repeats at most half a code of error, once.
         self.applied.copy_from_slice(&applied);
+        for (id, residual) in self.ids.iter().zip(residuals.iter()) {
+            self.control.set_mit_residual(*id, *residual)?;
+        }
         self.expect_answered(&self.tick, MotorState::Enabled)?;
         let feedback = self.feedback()?;
         let mut observed: Axes<f64> = Axes::new();
@@ -1409,7 +1417,8 @@ impl<P: CanPort> DamiaoChain<P> {
                 .control
                 .mit_frame(*id, motor.kp, motor.kd, hold, 0.0, tau)
             {
-                Ok(frame) => frames.push(frame),
+                // A brake repeats one frame; its residuals are not carried.
+                Ok((frame, _)) => frames.push(frame),
                 Err(_) => return,
             }
         }

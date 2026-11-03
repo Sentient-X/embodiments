@@ -79,6 +79,9 @@ fn feedforward_is_off_until_bounded() {
     chain.command(&rest).expect("plain");
     let ids: Vec<u16> = chain.axes().iter().map(|a| a.binding.bus_id).collect();
     let plain: Vec<[u8; 8]> = ids.iter().map(|id| last_mit(&bus, *id)).collect();
+    // A zero velocity alternates between the two codes either side of zero (error diffusion,
+    // `tests/mit_encoding.rs`), so the frame compared is the one two commands later.
+    chain.command(&rest).expect("plain again");
     let wanted = vec![
         Feedforward {
             velocity: 0.3,
@@ -315,4 +318,37 @@ fn a_geared_axis_scales_velocity_by_its_reduction_and_torque_by_its_inverse() {
     );
     let applied = chain.applied_feedforward()[gripper];
     assert!((applied.velocity - 0.01).abs() < 1e-12 && (applied.torque - 0.5).abs() < 1e-12);
+}
+
+/// Each axis' position code, sent tick after tick to a target between two codes, is the one
+/// that axis' own residual makes: the chain commits each motor's residual to that motor.
+#[test]
+fn each_motor_carries_its_own_residual_through_the_chain() {
+    use sx_damiao_can::chain::motor_type;
+    use sx_damiao_can::dm_can::float_to_uint_diffused;
+    let (bus, mut chain, rest) = opened();
+    // A different fraction of a position code on each axis, so no two residuals agree.
+    let step = 25.0 / 65535.0;
+    let targets: Vec<f64> = rest
+        .iter()
+        .enumerate()
+        .map(|(i, q)| q + step * (0.1 + 0.8 * f64::from(u32::try_from(i).unwrap()) / 16.0))
+        .collect();
+    let axes: Vec<_> = chain.axes().to_vec();
+    let mut residuals = vec![0.0; axes.len()];
+    for _ in 0..6 {
+        chain.command(&targets).expect("a command");
+        for (i, axis) in axes.iter().enumerate() {
+            let q_max = motor_type(axis.binding.model)
+                .expect("Damiao")
+                .limit_param()[0];
+            let at_motor = axis.actuator_from_joint(targets[i]);
+            let (code, carried) =
+                float_to_uint_diffused(at_motor, -q_max, q_max, 16, residuals[i]).expect("q");
+            residuals[i] = carried;
+            let data = last_mit(&bus, axis.binding.bus_id);
+            let sent = (u16::from(data[0]) << 8) | u16::from(data[1]);
+            assert_eq!(sent, code, "{}", axis.joint);
+        }
+    }
 }

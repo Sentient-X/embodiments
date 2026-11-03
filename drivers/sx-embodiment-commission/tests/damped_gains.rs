@@ -78,21 +78,18 @@ fn stepped(body: &DamiaoBody, joint: &str) -> (Fit, (f64, f64)) {
             t: f64::from(tick) * period,
             target: sent[sent.len() - 1],
             velocity: 0.0,
-            position: bus.state().motors[&id].q,
+            position: observed(bus.state().motors[&id].q),
         });
         clock.0.set(clock.0.get() + MAX_STEP_INTERVAL);
         bus.advance_time(MAX_STEP_INTERVAL);
     }
-    // The governor sends with each position the speed of the step to it, and the MIT frame
-    // carries it in 12 bits over the motor's DQ_MAX, truncated: a planned zero arrives as
-    // -0.011 rad/s on a DM8009 (at kd 5 on the torso, 3.5 mrad held off).
-    let dq = sx_damiao_can::chain::motor_type(axis.axis.binding.model)
-        .expect("a Damiao model")
-        .limit_param()[1];
+    // The governor sends with each position the speed of the step to it. The MIT frame carries
+    // it in 12 bits, error-diffused, so the velocity the motor gets averages to the planned one
+    // (a planned zero alternates between -0.011 and +0.011 rad/s on a DM8009), as the fit is
+    // given it.
     for (k, sample) in samples.iter_mut().enumerate().take(150) {
         let before = if k == 0 { rest } else { sent[k - 1] };
-        let planned = ((sent[k] - before) / period).clamp(-cap, cap);
-        sample.velocity = as_sent(planned, dq);
+        sample.velocity = ((sent[k] - before) / period).clamp(-cap, cap);
     }
     samples.truncate(150);
     let joint = bus.state().motors[&id].dynamics.expect("dynamics");
@@ -101,11 +98,16 @@ fn stepped(body: &DamiaoBody, joint: &str) -> (Fit, (f64, f64)) {
     (fit(&samples).expect("a fit"), (omega, zeta))
 }
 
-/// A planned velocity as the MIT frame carries it.
-fn as_sent(velocity: f64, dq_max: f64) -> f64 {
+/// A position as the station observes it: the motor's feedback carries it in 16 bits over
+/// `Q_MAX` (12.5 rad on every model this body drives), as `sx-identify` records it.
+fn observed(q: f64) -> f64 {
     use sx_damiao_can::dm_can::{float_to_uint, uint_to_float};
-    let bits = float_to_uint(velocity, -dq_max, dq_max, 12).expect("finite");
-    f64::from(uint_to_float(bits, -dq_max, dq_max, 12))
+    f64::from(uint_to_float(
+        float_to_uint(q, -12.5, 12.5, 16).expect("finite"),
+        -12.5,
+        12.5,
+        16,
+    ))
 }
 
 fn limits_speed<C: ActuatorChain, K: Clock>(governor: &Governor<C, K>) -> f64 {
@@ -120,9 +122,14 @@ const RINGING: [&str; 5] = [
     "right_shoulder_roll_joint",
 ];
 
-/// The step reads each follower back within 10 % in omega and 30 % in zeta (sampled at 50 Hz; it reads the proposed zeta 0.5 at 0.54-0.63), commissioned and
-/// proposed alike; the proposed ones are damped at 0.45 or more, the commissioned at 0.15 or
-/// less.
+/// The step reads each follower back within 10 % in omega and 0.03 in zeta, commissioned and
+/// proposed alike (sampled at 50 Hz, 0.47-0.51 for the proposed 0.50); the proposed ones are
+/// damped at 0.45 or more, the commissioned at 0.15 or less.
+///
+/// The zeta bound held only at 30 % while the MIT frame sent a zero torque as -0.013 N m
+/// (12 bits, no code for zero): the joint settled short of every target and the fit read that
+/// as a 1 mrad friction band, trading damping for it (0.38 for the shoulders' 0.50). With the
+/// frame's zero error-diffused the sim has no friction and the fit finds none.
 #[test]
 fn the_proposed_gains_damp_the_torso_and_shoulders_as_a_step_reads_them() {
     for (name, body, damped) in [
@@ -143,10 +150,7 @@ fn the_proposed_gains_damp_the_torso_and_shoulders_as_a_step_reads_them() {
                 (got.omega - omega).abs() <= 0.1 * omega,
                 "{name} {joint}: {got:?}"
             );
-            assert!(
-                (got.zeta - zeta).abs() <= 0.3 * zeta + 0.01,
-                "{name} {joint}: {got:?}"
-            );
+            assert!((got.zeta - zeta).abs() <= 0.03, "{name} {joint}: {got:?}");
             if damped {
                 assert!(got.zeta >= 0.45, "{name} {joint}: {got:?}");
             } else {

@@ -1,4 +1,7 @@
-//! The crate sends what Damiao's own `DM_CAN.py` sent, byte for byte and motor by motor.
+//! The crate sends what Damiao's own `DM_CAN.py` sent, byte for byte and motor by motor, but
+//! for one departure: an MIT field is rounded to the nearest code where the vendor truncates,
+//! so each of its five codes is the vendor's or the one above, and the error-diffused position,
+//! velocity and torque may be one below (`tests/mit_encoding.rs`).
 //!
 //! `fixtures/dm_can/transcripts.json` is minted by `fixtures/dm_can/mint.py`, which runs the
 //! vendor driver itself; see its header for the sources and the cross-checks. The vendor
@@ -97,8 +100,58 @@ fn motor_type(index: &Value) -> DmMotorType {
     }
 }
 
+/// An MIT frame's five codes: position, velocity, kp, kd, torque.
+fn mit_codes(data: &[u8]) -> [u16; 5] {
+    let byte = |index: usize| u16::from(data[index]);
+    [
+        (byte(0) << 8) | byte(1),
+        (byte(2) << 4) | (byte(3) >> 4),
+        ((byte(3) & 0xf) << 8) | byte(4),
+        (byte(5) << 4) | (byte(6) >> 4),
+        ((byte(6) & 0xf) << 8) | byte(7),
+    ]
+}
+
+/// `DM_CAN.py` truncates and this crate rounds (`float_to_uint`): each MIT code is the vendor's
+/// or the one above it. Position, velocity and torque are also error-diffused
+/// (`float_to_uint_diffused`), so they may be one below too; never anything else.
+fn same_mit_but_rounded(ours: &[u8], vendors: &[u8]) -> bool {
+    mit_codes(ours)
+        .iter()
+        .zip(mit_codes(vendors))
+        .enumerate()
+        .all(|(field, (ours, vendors))| {
+            *ours == vendors
+                || *ours == vendors + 1
+                || (matches!(field, 0 | 1 | 4) && *ours + 1 == vendors)
+        })
+}
+
+/// The code nearest `x` under the vendor's decoding, found by trying the vendor's truncated
+/// code and the one above: ties go to the code nearer zero, then to the lower.
+fn nearest_code(x: f64, min: f64, max: f64, bits: u32, vendors: u16) -> u16 {
+    let top = u16::try_from((1_u32 << bits) - 1).unwrap();
+    let x = x.clamp(min, max);
+    let decode = |code: u16| f64::from(code) / f64::from(top) * (max - min) + min;
+    let candidates = [vendors, vendors.saturating_add(1).min(top)];
+    *candidates
+        .iter()
+        .min_by(|a, b| {
+            let (da, db) = ((decode(**a) - x).abs(), (decode(**b) - x).abs());
+            if (da - db).abs() <= 1e-9 * (max - min) {
+                decode(**a)
+                    .abs()
+                    .total_cmp(&decode(**b).abs())
+                    .then(a.cmp(b))
+            } else {
+                da.total_cmp(&db)
+            }
+        })
+        .unwrap()
+}
+
 #[test]
-fn float_to_uint_is_the_vendors() {
+fn float_to_uint_is_the_vendors_rounded() {
     for row in transcripts()["vectors"]["float_to_uint"]
         .as_array()
         .unwrap()
@@ -107,7 +160,12 @@ fn float_to_uint_is_the_vendors() {
         let bits = u32::try_from(row["bits"].as_u64().unwrap()).unwrap();
         let ours = float_to_uint(x, f64_of(&row["min"]), f64_of(&row["max"]), bits);
         match row.get("result") {
-            Some(result) => assert_eq!(u64::from(ours.unwrap()), result.as_u64().unwrap(), "{row}"),
+            Some(result) => {
+                let vendors = u16::try_from(result.as_u64().unwrap()).unwrap();
+                let (min, max) = (f64_of(&row["min"]), f64_of(&row["max"]));
+                let nearest = nearest_code(x, min, max, bits, vendors);
+                assert_eq!(ours.unwrap(), nearest, "{row}");
+            }
             None => assert!(matches!(ours, Err(DmCanError::NotANumber)), "{row}"),
         }
     }
@@ -147,7 +205,7 @@ impl CanPort for Capture {
 }
 
 #[test]
-fn control_mit_frames_are_the_vendors() {
+fn control_mit_frames_are_the_vendors_rounded() {
     for row in transcripts()["vectors"]["mit"].as_array().unwrap() {
         let mut control = MotorControl::new(Capture::default());
         control.add_motor(Motor::new(motor_type(&row["motor_type"]), 0x01, 0x11));
@@ -164,7 +222,22 @@ fn control_mit_frames_are_the_vendors() {
         let sent = &control.port().sent;
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].id, 0x01);
-        assert_eq!(hex(&sent[0].data), row["data"].as_str().unwrap(), "{row}");
+        // A fresh motor carries no residual, so each field is the nearest code to its value.
+        let vendors = mit_codes(&unhex(row["data"].as_str().unwrap()));
+        let [q_max, dq_max, tau_max] = motor_type(&row["motor_type"]).limit_param();
+        let fields = [
+            (f64_of(&row["q"]), -q_max, q_max, 16),
+            (f64_of(&row["dq"]), -dq_max, dq_max, 12),
+            (f64_of(&row["kp"]), 0.0, 500.0, 12),
+            (f64_of(&row["kd"]), 0.0, 5.0, 12),
+            (f64_of(&row["tau"]), -tau_max, tau_max, 12),
+        ];
+        let nearest: Vec<u16> = fields
+            .iter()
+            .zip(vendors)
+            .map(|((x, min, max, bits), vendor)| nearest_code(*x, *min, *max, *bits, vendor))
+            .collect();
+        assert_eq!(mit_codes(&sent[0].data).to_vec(), nearest, "{row}");
     }
 }
 
@@ -298,10 +371,22 @@ impl Write for ReplayStream {
             return Ok(buf.len());
         };
         let next = replay.writes.remove(index);
-        assert_eq!(
+        let vendors = unhex(next["write"].as_str().unwrap());
+        // An MIT packet may round where the vendor truncated; everything else is byte for byte.
+        // MIT frames go to the motor's own CAN id (below 0x100); register frames (0x7FF),
+        // position-velocity and velocity frames (0x100 + id, 0x200 + id) and the `FF..`
+        // command frames are held byte for byte.
+        let can_id = u16::from_le_bytes([vendors[13], vendors[14]]);
+        let is_mit = can_id < 0x100 && vendors[21..28] != [0xFF; 7];
+        assert!(
+            hex(buf) == hex(&vendors)
+                || (is_mit
+                    && buf[..21] == vendors[..21]
+                    && buf[29..] == vendors[29..]
+                    && same_mit_but_rounded(&buf[21..29], &vendors[21..29])),
+            "a packet to motor {motor} differs from the vendor's next one to it: {} vs {}",
             hex(buf),
-            next["write"].as_str().unwrap(),
-            "a packet to motor {motor} differs from the vendor's next one to it"
+            hex(&vendors)
         );
         for answer in next["respond"].as_array().unwrap() {
             let bytes = unhex(answer.as_str().unwrap());

@@ -13,12 +13,22 @@
 //! `MotorControl`, and the free functions its module helpers. Every command keeps the vendor's
 //! frame, ids, waits and order: `enable` sends `FF..FC` to the motor's `SlaveID`, waits 0.1 s and
 //! reads; `disable` sends `FF..FD` and waits 0.01 s without reading; `controlMIT` packs and
-//! clamps exactly as `float_to_uint` does and reads once; register reads and writes go to
-//! `0x7FF`. `tests/fixtures/dm_can/` pins this file to transcripts recorded by running
+//! clamps as `float_to_uint` does (rounded, below) and reads once; register reads and writes go
+//! to `0x7FF`. `tests/fixtures/dm_can/` pins this file to transcripts recorded by running
 //! `DM_CAN.py` itself.
 //!
 //! Where this translation departs from `DM_CAN.py`, and why:
 //!
+//! - [`float_to_uint`] rounds to the nearest code where `DM_CAN.py` truncates. Truncation sent
+//!   every MIT field (position, velocity, kp, kd, torque) up to one step below the asked value,
+//!   half a step low on average; rounding is within half a step, and zero still sends the
+//!   vendor's code. The motor decodes with the same mapping as [`uint_to_float`].
+//! - The MIT position, velocity and torque are error-diffused ([`float_to_uint_diffused`]):
+//!   each motor carries their quantisation residuals into its next frame, so what is sent
+//!   averages to what was asked. Their ranges are symmetric and have no code for zero, so a
+//!   zero would otherwise go out as a constant half step below it: -0.011 rad/s and
+//!   -0.013 N m on a DM8009, which kd and the motor hold as a torque, 0.19 mrad on any
+//!   position. The gains' ranges start at an exact zero and are only rounded.
 //! - The USB2CAN serial framing of `__send_data` and `__extract_packets` lives in
 //!   [`crate::usb2can`], behind the bus-agnostic `CanPort`, so the same driver runs over
 //!   `SocketCAN`. The serial packet's command byte (`CMD == 0x11`, a received CAN frame) is
@@ -96,6 +106,10 @@ pub enum DmMotorType {
     DM6248P = 13,
     DM3507 = 14,
 }
+
+/// An MIT frame's position, velocity and torque quantisation errors, in codes
+/// ([`float_to_uint_diffused`]).
+pub type MitResidual = [f64; 3];
 
 /// `MotorControl.Limit_Param`: `[Q_MAX, DQ_MAX, TAU_MAX]` per [`DmMotorType`].
 pub const LIMIT_PARAM: [[f64; 3]; 15] = [
@@ -215,6 +229,10 @@ pub struct Motor {
     pub temp_param_dict: BTreeMap<u8, ParamValue>,
     /// Feedback frames decoded so far (not in `DM_CAN.py`; see the module header).
     pub feedback_count: u64,
+    /// The MIT position's, velocity's and torque's quantisation errors, in codes, carried into
+    /// the next frame ([`float_to_uint_diffused`]; not in `DM_CAN.py`). Zero after any command
+    /// frame (enable, disable, clear error), a mode switch or a limit change.
+    pub mit_residual: MitResidual,
 }
 
 impl Motor {
@@ -235,6 +253,7 @@ impl Motor {
             now_control_mode: ControlType::MIT,
             temp_param_dict: BTreeMap::new(),
             feedback_count: 0,
+            mit_residual: [0.0; 3],
         }
     }
 
@@ -356,13 +375,36 @@ impl<P: CanPort> MotorControl<P> {
         dq: f64,
         tau: f64,
     ) -> Result<(), DmCanError> {
-        let frame = self.mit_frame(slave_id, kp, kd, q, dq, tau)?;
+        let (frame, residual) = self.mit_frame(slave_id, kp, kd, q, dq, tau)?;
         self.port.send(&frame)?;
+        self.set_mit_residual(slave_id, residual)
+    }
+
+    /// Carry a sent MIT frame's residuals (from [`Self::mit_frame`]) into the next one.
+    /// Call it only once the frame went out, so an unsent frame leaves the residual as it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor.
+    pub fn set_mit_residual(
+        &mut self,
+        slave_id: u16,
+        residual: MitResidual,
+    ) -> Result<(), DmCanError> {
+        let index = self.index(slave_id)?;
+        self.motors[index].mit_residual = residual;
         Ok(())
     }
 
     /// Build before submitting a phase, so an invalid target never admits a partial group.
-    pub(crate) fn mit_frame(
+    /// Returns the frame and the residuals to commit with [`Self::set_mit_residual`] once it is
+    /// sent: position, velocity and torque are error-diffused ([`float_to_uint_diffused`]);
+    /// the gains, whose ranges start at an exact zero, are rounded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unregistered motor or a NaN.
+    pub fn mit_frame(
         &self,
         slave_id: u16,
         kp: f64,
@@ -370,14 +412,16 @@ impl<P: CanPort> MotorControl<P> {
         q: f64,
         dq: f64,
         tau: f64,
-    ) -> Result<CanFrame, DmCanError> {
+    ) -> Result<(CanFrame, MitResidual), DmCanError> {
         let index = self.index(slave_id)?;
         let kp_uint = float_to_uint(kp, 0.0, 500.0, 12)?;
         let kd_uint = float_to_uint(kd, 0.0, 5.0, 12)?;
         let [q_max, dq_max, tau_max] = self.motors[index].limit_param;
-        let q_uint = float_to_uint(q, -q_max, q_max, 16)?;
-        let dq_uint = float_to_uint(dq, -dq_max, dq_max, 12)?;
-        let tau_uint = float_to_uint(tau, -tau_max, tau_max, 12)?;
+        let [q_residual, dq_residual, tau_residual] = self.motors[index].mit_residual;
+        let (q_uint, q_residual) = float_to_uint_diffused(q, -q_max, q_max, 16, q_residual)?;
+        let (dq_uint, dq_residual) = float_to_uint_diffused(dq, -dq_max, dq_max, 12, dq_residual)?;
+        let (tau_uint, tau_residual) =
+            float_to_uint_diffused(tau, -tau_max, tau_max, 12, tau_residual)?;
         let data_buf = [
             low_byte(q_uint >> 8),
             low_byte(q_uint),
@@ -388,10 +432,13 @@ impl<P: CanPort> MotorControl<P> {
             low_byte(((kd_uint & 0xf) << 4) | ((tau_uint >> 8) & 0xf)),
             low_byte(tau_uint),
         ];
-        Ok(CanFrame {
-            id: u32::from(slave_id),
-            data: data_buf,
-        })
+        Ok((
+            CanFrame {
+                id: u32::from(slave_id),
+                data: data_buf,
+            },
+            [q_residual, dq_residual, tau_residual],
+        ))
     }
 
     /// One `FF..cmd` control frame, without the vendor's wait (not in `DM_CAN.py`).
@@ -555,7 +602,9 @@ impl<P: CanPort> MotorControl<P> {
     }
 
     fn control_cmd(&mut self, slave_id: u16, cmd: u8) -> Result<(), DmCanError> {
-        self.index(slave_id)?;
+        let index = self.index(slave_id)?;
+        // An enabled, disabled or cleared motor starts its velocity afresh.
+        self.motors[index].mit_residual = [0.0; 3];
         let data_buf = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, cmd];
         self.send_data(slave_id, data_buf)
     }
@@ -649,6 +698,7 @@ impl<P: CanPort> MotorControl<P> {
         control_mode: ControlType,
     ) -> Result<bool, DmCanError> {
         let index = self.index(slave_id)?;
+        self.motors[index].mit_residual = [0.0; 3];
         let rid = DmVariable::CTRL_MODE;
         self.write_motor_param(slave_id, rid, f64::from(control_mode as u8))?;
         for _ in 0..SWITCH_MODE_RETRIES {
@@ -715,6 +765,7 @@ impl<P: CanPort> MotorControl<P> {
     ) -> Result<(), DmCanError> {
         let index = self.index(slave_id)?;
         self.motors[index].limit_param = [p_max, v_max, t_max];
+        self.motors[index].mit_residual = [0.0; 3];
         Ok(())
     }
 
@@ -791,23 +842,77 @@ pub fn limit_min_max(x: f64, min: f64, max: f64) -> f64 {
     }
 }
 
-/// `float_to_uint`: clamp, normalise, scale to `bits`, truncate as `np.uint16` does.
+/// `float_to_uint`, rounded: clamp, normalise, scale to `bits`, and take the code whose value
+/// under [`uint_to_float`] (the vendor's mapping, which the motor's firmware decodes with) lies
+/// nearest `x`. A value exactly between two codes takes the one nearer zero, and of two equally
+/// near zero the lower.
+///
+/// `DM_CAN.py` truncates (`np.uint16`), which lands every value up to one step below what was
+/// asked; this lands within half a step. The mapping divides by `2^bits - 1`, so a symmetric
+/// range has no code for zero: zero and the range midpoint take the lower of the two codes
+/// half a step either side (`2^(bits-1) - 1`), the code `DM_CAN.py` sends for them too.
 ///
 /// # Errors
 ///
 /// A NaN passes `LIMIT_MIN_MAX` unclamped and `np.uint16` refuses it; so does this.
 pub fn float_to_uint(x: f64, x_min: f64, x_max: f64, bits: u32) -> Result<u16, DmCanError> {
+    Ok(float_to_uint_diffused(x, x_min, x_max, bits, 0.0)?.0)
+}
+
+/// [`float_to_uint`] with first-order error diffusion: `residual` (in codes) is what earlier
+/// frames sent short of, or past, the asked value; it is added before rounding and the new
+/// residual returned. Fed back frame after frame, the codes sent average to the asked value
+/// for any value, a symmetric range's zero included (which then alternates between the two
+/// codes either side of it), within one code over `N` frames. Fed its own residuals, every frame
+/// stays within one code of the asked value and the residual within half a code; a residual
+/// passed in is clamped to one, which bounds a frame's error at one and a half codes.
+///
+/// # Errors
+///
+/// A NaN, as [`float_to_uint`].
+pub fn float_to_uint_diffused(
+    x: f64,
+    x_min: f64,
+    x_max: f64,
+    bits: u32,
+    residual: f64,
+) -> Result<(u16, f64), DmCanError> {
     let x = limit_min_max(x, x_min, x_max);
     let span = x_max - x_min;
-    let data_norm = (x - x_min) / span;
-    let scaled = data_norm * f64::from((1_u32 << bits) - 1);
+    let codes = f64::from((1_u32 << bits) - 1);
+    let scaled = (x - x_min) / span * codes;
     if scaled.is_nan() {
         return Err(DmCanError::NotANumber);
     }
+    // A residual that is not finite (never produced here) is dropped, not sent.
+    let residual = if residual.is_finite() {
+        residual.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    let wanted = (scaled + residual).clamp(0.0, codes);
+    let below = wanted.floor();
+    let fraction = wanted - below;
+    let code = if fraction < 0.5 {
+        below
+    } else if fraction > 0.5 {
+        below + 1.0
+    } else {
+        // Where zero falls, in codes; of the two equally near codes take the one nearer it.
+        let zero = -x_min / span * codes;
+        if (below + 1.0 - zero).abs() < (below - zero).abs() {
+            below + 1.0
+        } else {
+            below
+        }
+    }
+    .min(codes);
+    // What could not be sent within the range is dropped, not carried.
+    let carried = wanted - code;
     // In 0..=(1 << bits) - 1 by the clamp.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let packed = scaled as u16;
-    Ok(packed)
+    let packed = code as u16;
+    Ok((packed, carried))
 }
 
 /// `uint_to_float`: computed in double precision and returned as `np.float32`.

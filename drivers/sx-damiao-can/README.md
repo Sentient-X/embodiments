@@ -120,6 +120,20 @@ the B601-DM and one whole session for the humanoid upper body, plus DM8009 frame
 cross-checked against `sentient_can` and LeRobot. The transcripts' JSON is parsed with
 `serde_json`'s `float_roundtrip`, so decoded positions compare bit for bit.
 
+One departure is deliberate: `float_to_uint` rounds each MIT field (position, velocity, kp,
+kd, torque) to the code nearest the asked value under the vendor's own decoding, where
+`DM_CAN.py` truncates and so sends every value up to one step low. An MIT frame therefore
+holds each code to the vendor's or the one above it; `tests/mit_encoding.rs` holds every
+field to half a step, zero and the range midpoint to the code nearest zero, and the ends to
+their clamp. The mapping divides by `2^bits - 1`, so a symmetric range has no code for zero:
+sent alone, a zero velocity on a DM8009 goes out as -0.011 rad/s and a zero torque as
+-0.013 N m, held for good. So position, velocity and torque are error-diffused
+(`float_to_uint_diffused`): each motor carries their quantisation residuals into its next
+frame (reset at enable, disable, clear, a mode or a limit change), and what it is sent
+averages to what was asked, alternating between the two codes either side of a zero. The
+gains, whose ranges start at an exact zero, are only rounded. The replays allow each
+diffused code to be one below the vendor's too.
+
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
