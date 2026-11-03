@@ -142,8 +142,10 @@ pub struct StopReport {
     pub unreached: Vec<u16>,
     /// Actuators left holding their joint under torque ([`crate::Rest::Hold`]), proven by an
     /// answer to the hold with no fault: stopped (no motion), not released. Every other
-    /// actuator that is not unproven was released. Keyed by port and bus address: an address
-    /// is unique only on its own bus.
+    /// actuator that is not unproven was released. An actuator sent its hold that did not
+    /// answer in time is named here too: it keeps being sent its hold, and the caller releases
+    /// it only once it stays silent past its bound (one missed answer never drops a joint).
+    /// Keyed by port and bus address: an address is unique only on its own bus.
     pub held: Vec<Motor>,
 }
 

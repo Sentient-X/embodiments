@@ -623,3 +623,24 @@ fn a_re_stop_keeps_each_held_joints_first_hold() {
         "the shoulder's hold was re-targeted"
     );
 }
+
+/// The second refute of 2026-11-03 (A): a motor silent at the stop's hold phase is kept
+/// holding (its frame re-sent), so when it answers again it is still enabled and held.
+#[test]
+fn a_motor_silent_at_the_hold_is_kept_holding_and_answers_held() {
+    let mut rig = Rig::new_at(0.25);
+    let (shoulder, gravity) = loaded_at_rest(&mut rig, -6.0);
+    let width = rig.governor.axes().len();
+    let id = rig.governor.axes()[shoulder].binding.bus_id;
+    rig.bus.kill(id);
+    let report = rig
+        .governor
+        .stop_holding(&rests_holding(width, shoulder, gravity));
+    assert_eq!(ids(&report.held), vec![id], "{report:?}");
+    rig.bus.state().dead.remove(&id);
+    rig.pass(Duration::from_millis(20));
+    rig.governor.keep_holding().expect("held");
+    let readings = rig.governor.command_readings().expect("readings");
+    assert!(readings[shoulder].is_fresh(), "{:?}", readings[shoulder]);
+    assert_eq!(rig.bus.state().motors[&id].state, 1, "still enabled, held");
+}
