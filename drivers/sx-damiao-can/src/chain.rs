@@ -1342,7 +1342,9 @@ impl<P: CanPort> DamiaoChain<P> {
         if let Some(failure) = self.tick.failure.take() {
             return Err(failure.into());
         }
-        // Recorded only once every frame went out.
+        // Recorded only once every frame went out. A phase that failed part way leaves every
+        // motor's residuals as they were, those whose frame went out too: their next frame
+        // repeats at most half a code of error, once.
         self.applied.copy_from_slice(&applied);
         for (id, residual) in self.ids.iter().zip(residuals.iter()) {
             self.control.set_mit_residual(*id, *residual)?;

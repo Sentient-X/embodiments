@@ -863,9 +863,9 @@ pub fn float_to_uint(x: f64, x_min: f64, x_max: f64, bits: u32) -> Result<u16, D
 /// frames sent short of, or past, the asked value; it is added before rounding and the new
 /// residual returned. Fed back frame after frame, the codes sent average to the asked value
 /// for any value, a symmetric range's zero included (which then alternates between the two
-/// codes either side of it), within one code over `N` frames. Every frame stays within one
-/// code of the asked value, and the residual within half a code; a residual passed in is
-/// clamped to one.
+/// codes either side of it), within one code over `N` frames. Fed its own residuals, every frame
+/// stays within one code of the asked value and the residual within half a code; a residual
+/// passed in is clamped to one, which bounds a frame's error at one and a half codes.
 ///
 /// # Errors
 ///

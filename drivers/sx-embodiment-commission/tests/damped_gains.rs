@@ -123,7 +123,7 @@ const RINGING: [&str; 5] = [
 ];
 
 /// The step reads each follower back within 10 % in omega and 0.03 in zeta, commissioned and
-/// proposed alike (sampled at 50 Hz, 0.48-0.51 for the proposed 0.50); the proposed ones are
+/// proposed alike (sampled at 50 Hz, 0.47-0.51 for the proposed 0.50); the proposed ones are
 /// damped at 0.45 or more, the commissioned at 0.15 or less.
 ///
 /// The zeta bound held only at 30 % while the MIT frame sent a zero torque as -0.013 N m
