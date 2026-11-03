@@ -408,6 +408,9 @@ pub struct Ik {
     measured_speed: Vec<f64>,
     /// Per axis, whether it does not follow its command ([`Ik::set_measured`]).
     stuck: Vec<bool>,
+    /// Per axis, whether it is off its command by more than a reading's jitter: from twice
+    /// [`READING_JITTER`] off until back within it.
+    lagging: Vec<bool>,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -592,6 +595,7 @@ impl Ik {
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
             stuck: vec![false; axes_count],
+            lagging: vec![false; axes_count],
             work,
             qp,
             step,
@@ -644,6 +648,7 @@ impl Ik {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
+        self.lagging.fill(false);
         self.anchored = self.preferred.is_some();
     }
 
@@ -943,6 +948,14 @@ impl Ik {
                 *speed = 0.0;
             }
             *before = *now;
+        }
+        for ((lagging, seen), at) in self.lagging.iter_mut().zip(&w.seen_q).zip(q) {
+            let off = (at - seen).abs();
+            if off > 2.0 * READING_JITTER {
+                *lagging = true;
+            } else if off <= READING_JITTER {
+                *lagging = false;
+            }
         }
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
         self.collision_rows(q, dt);
@@ -1416,7 +1429,7 @@ impl Ik {
                     // Within a reading's jitter of its command the joint is following it, with
                     // the rest of the arm, this tick's step and all; further off it may stay
                     // where it is read, keep its offset, or catch up, in any order.
-                    let kink = true;
+                    let kink = self.stuck[axis] || self.lagging[axis];
                     w.row_kink[slot * n + j] = kink;
                     w.row_lead[slot * n + j] = if kink { a.max(0.0) } else { a };
                     if !kink || a > 0.0 {
