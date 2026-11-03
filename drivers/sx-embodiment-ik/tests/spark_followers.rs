@@ -7,13 +7,13 @@
 //! zeta), scaled across a band for the inertia's posture dependence.
 //!
 //! Measured on main ad190f0 (2026-11-03), at 50 / 90 Hz across scale 0.8-1.25, 26-63 ms,
-//! feed-forward on and off, sag and 1 mrad jitter (`table_spark`, 3,168 runs, 0 Held): the nominal model
-//! (scale 1) keeps 2.24 mm at 50 Hz and touches at 90 Hz (-0.70 mm, the left elbow into the box
-//! at 63 ms); at 1.25x, -7.8 mm at 50 Hz and -17.2 mm at 90 Hz (a finger into the counter). The
-//! cases with a tool speed (`table_tool_speed`): the command's tool point up to 22-28x its
-//! 0.05 m/s and the real one up to 17-27x. No bar yet: main does not meet one on these
-//! followers (`docs/plans/ik-follower-model-2026-11.md` in sx, section 10).
-//!
+//! feed-forward on and off, sag and 1 mrad jitter (`table_spark`, 3,168 runs, 0 Held): the nominal
+//! model kept 2.24 mm at 50 Hz and -0.70 mm at 90 Hz (the left elbow's capsule into the box at
+//! 63 ms); at 1.25x, -7.8 mm and -17.2 mm (a finger's own shape 4.55 mm into the counter). With
+//! each pair's approach paced by its room (`Settings::approach_time_s`, 0.2 s): 8.40 / 7.33 mm
+//! nominal, 4.41 mm at worst, no part inside a box. `real` is the links' convex pieces against
+//! the boxes, the parts' own shape rather than their capsules.
+
 //! `cargo test --release -p sx-embodiment-ik --test spark_followers table -- --ignored
 //! --nocapture` prints every case (about 7 min for `table_spark` on 10 cores).
 
@@ -175,6 +175,10 @@ struct Out {
     /// The least clearance where the robot really is, metres, and between what.
     clear: f64,
     pair: String,
+    /// The same against the links' convex pieces (the parts' own shape, inside their capsules)
+    /// and the boxes: positive the least vertex distance, negative the deepest vertex inside a
+    /// box. A negative number is the part itself in the box.
+    real: f64,
     /// The fastest a speed-bound tool point was commanded, as a multiple of its speed.
     tool_x: f64,
     /// When, seconds, and how the step said it went.
@@ -184,6 +188,65 @@ struct Out {
     real_x: f64,
     held: usize,
     relaxed: usize,
+}
+
+/// Each link's convex pieces' vertices, link frame, by link index.
+fn pieces(teleop: &Teleop) -> Vec<(usize, Vec<[f64; 3]>)> {
+    #[derive(serde::Deserialize)]
+    struct Hull {
+        link: String,
+        points: Vec<[f64; 3]>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Proxies {
+        hulls: Vec<Hull>,
+    }
+    let proxies: Proxies =
+        serde_json::from_str(STATIC_UPPER_BODY_COLLISION).expect("the collision proxies");
+    proxies
+        .hulls
+        .into_iter()
+        .filter_map(|h| {
+            let l = teleop.model().links().iter().position(|l| *l == h.link)?;
+            Some((l, h.points))
+        })
+        .collect()
+}
+
+/// [`Out::real`] at `q`: `link`'s pieces' vertices against every box (a link the solve does
+/// not check against a box, one inside it at rest, is not asked).
+fn real_clearance(
+    teleop: &Teleop,
+    pieces: &[(usize, Vec<[f64; 3]>)],
+    boxes: &[[f64; 6]],
+    q: &[f64],
+    link: usize,
+) -> f64 {
+    let frames = teleop.model().poses(q);
+    let mut least = f64::INFINITY;
+    for (l, points) in pieces.iter().filter(|(l, _)| *l == link) {
+        let f = frames.links[*l];
+        for p in points {
+            let w: [f64; 3] = [0, 1, 2].map(|i| {
+                f.r[i][0].mul_add(p[0], f.r[i][1].mul_add(p[1], f.r[i][2] * p[2])) + f.t[i]
+            });
+            for b in boxes {
+                let out: f64 = (0..3)
+                    .map(|k| (b[k] - w[k]).max(w[k] - b[k + 3]).max(0.0).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                let d = if out > 0.0 {
+                    out
+                } else {
+                    -(0..3)
+                        .map(|k| (w[k] - b[k]).min(b[k + 3] - w[k]))
+                        .fold(f64::INFINITY, f64::min)
+                };
+                least = least.min(d);
+            }
+        }
+    }
+    least
 }
 
 fn link(teleop: &Teleop, name: &str) -> usize {
@@ -263,7 +326,8 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
         }
         _ => Vec::new(),
     };
-    let (mut teleop, rest) = base(obstacles);
+    let (mut teleop, rest) = base(obstacles.clone());
+    let pieces = pieces(&teleop);
     let names: Vec<String> = teleop
         .model()
         .axes()
@@ -307,6 +371,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
     };
     let mut out = Out {
         clear: f64::INFINITY,
+        real: f64::INFINITY,
         ..Out::default()
     };
     let tcps = [
@@ -442,6 +507,17 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
                 out.clear = c;
                 out.pair = format!("{a} / {b}");
             }
+            if b.starts_with("obstacle") && c < 0.01 {
+                let l = teleop
+                    .model()
+                    .links()
+                    .iter()
+                    .position(|n| *n == a)
+                    .expect("a link");
+                out.real = out
+                    .real
+                    .min(real_clearance(&teleop, &pieces, &obstacles, &real, l));
+            }
         }
     }
     out
@@ -450,7 +526,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
 fn line(scene: Scene, m: &Motor, dt: f64, tool: Option<f64>, o: &Out) -> String {
     format!(
         "{scene:?} dt {dt} scale {} generic {:?} delay {} ff {} sag {} noise {} tool {tool:?}: \
-         clear {:.2} mm ({}), tool x{:.2} at {:.2} s {:?}, real x{:.2}, held {} relaxed {}",
+         clear {:.2} mm ({}), real {:.2} mm, tool x{:.2} at {:.2} s {:?}, real x{:.2}, held {} relaxed {}",
         m.scale,
         m.generic,
         m.delay,
@@ -459,6 +535,7 @@ fn line(scene: Scene, m: &Motor, dt: f64, tool: Option<f64>, o: &Out) -> String 
         m.noise,
         o.clear * 1e3,
         o.pair,
+        o.real * 1e3,
         o.tool_x,
         o.tool_t,
         o.tool_solve,
