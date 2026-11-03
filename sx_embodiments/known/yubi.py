@@ -1,6 +1,9 @@
-"""The current YUBI bimanual handheld rig, held out pending per-unit calibration.
+"""The legacy YUBI bimanual recording description, held out pending calibration.
 
-The authoritative description is composed from the two supplied Onshape CAD exports.
+This description is composed from the two supplied four-bar Onshape CAD exports.
+It preserves the geometry recorded by the managed collection path. The physical
+cohort in sx#1354 used parallel jaws; this package does not describe those jaws.
+
 Each hand preserves the housing, controller, finger, connector, nail, grip, tip, and
 camera links. ``left_finger`` is the one encoder-driven joint; the other finger and the
 four-bar connector/nail joints mimic it. The explicit Quest tracking frame includes the
@@ -256,7 +259,6 @@ YUBI_TRACKING: Final = (
         provenance=_TOUCH_PLUS_PROVENANCE.format(side="right"),
     ),
 )
-
 
 
 def _camera(name: str, frame: str, device: str, camera: str) -> RecordedCamera:

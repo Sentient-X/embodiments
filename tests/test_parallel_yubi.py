@@ -4,8 +4,13 @@ No Parallel YUBI hardware was measured for these tests; the points are synthetic
 qualify nothing about a real unit.
 """
 
+from dataclasses import replace
+
 import pytest
 
+from sx_embodiments import development_embodiments
+from sx_embodiments.identity import EmbodimentName
+from sx_embodiments.recorded import historical_document, historical_identities, read_recorded
 from sx_embodiments.yubi import (
     ParallelYubiCalibration,
     ParallelYubiFitRefusalReason,
@@ -15,8 +20,10 @@ from sx_embodiments.yubi import (
     YubiEncoderError,
     YubiJawUnavailable,
     YubiJawUnavailableReason,
+    YubiVariant,
     fit_parallel_yubi_calibration,
     jaw_gap_m,
+    managed_yubi_recording_variant,
     yubi_jaw_law,
 )
 
@@ -108,3 +115,29 @@ def test_law_selection_refuses_unknown_uncalibrated_and_crossed_variants() -> No
     assert uncalibrated.reason is YubiJawUnavailableReason.UNCALIBRATED
     assert isinstance(crossed, YubiJawUnavailable)
     assert crossed.reason is YubiJawUnavailableReason.CALIBRATION_NOT_APPLICABLE
+
+
+def test_managed_recording_robot_identity_leaves_published_geometry_alone() -> None:
+    name = EmbodimentName("yubi")
+    current = development_embodiments[name]
+    documents = [current.to_dict()]
+    documents.extend(
+        historical_document(name, identity) for identity in historical_identities(name)
+    )
+    assert len(documents) > 1
+    for document in documents:
+        recorded = read_recorded(document)
+        assert managed_yubi_recording_variant(recorded) is YubiVariant.PARALLEL
+        assert recorded.recorded_id == document["id"]
+        assert recorded.embodiment.lineage.variant == ""
+    assert YubiVariant.PARALLEL.robot_id == "yubi_parallel"
+    assert YubiVariant.STANDARD.robot_id != YubiVariant.PARALLEL.robot_id
+
+
+def test_an_explicit_or_unpublished_variant_is_not_legacy_managed_data() -> None:
+    current = development_embodiments["yubi"]
+    for variant in ("standard", "parallel", ""):
+        body = replace(
+            current, lineage=replace(current.lineage, variant=variant, revision="unpublished")
+        )
+        assert managed_yubi_recording_variant(read_recorded(body.to_dict())) is None
