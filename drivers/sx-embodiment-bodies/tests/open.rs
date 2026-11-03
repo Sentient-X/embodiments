@@ -11,7 +11,7 @@ use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_bodies::{
     Body, BusError, Commissioning, OpenError, OpenOptions, Port, PortSource, SerialLink,
-    ServoCalibrations, Setup, changed_ports, closed_ports, lend_port, observe, open,
+    ServoCalibrations, Setup, changed_ports, close_silent, closed_ports, lend_port, observe, open,
     open_available, open_calibrated, open_unopened, open_with, ports, probe_unopened, reopen_ports,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
@@ -884,6 +884,80 @@ fn a_can_bus_nothing_acknowledges_opens_as_unavailable_data_and_is_opened_live_w
         receipt.observed[1..15]
             .iter()
             .all(|joint| joint.is_finite())
+    );
+    assert!(body.stop().is_proven());
+}
+
+#[test]
+fn a_can_bus_whose_power_is_cut_while_the_body_runs_closes_as_unavailable_data_and_opens_again() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    let setup = static_setup(&commissioning, &calibrations);
+    // The Spark, 11-03: the robot opened with its arms answering, then their power was cut.
+    let (can, _serial, mut bridges) = static_bridges(&axes);
+    let mut body = open_available(
+        &drive,
+        &commissioning,
+        &calibrations,
+        BRING_UP,
+        &mut bridges,
+    )
+    .expect("opens with every bus")
+    .body;
+    assert!(body.unavailable().is_empty());
+    assert!(
+        body.read_positions()[..15]
+            .iter()
+            .all(sx_embodiment_drivers::AxisReading::is_fresh)
+    );
+    assert!(body.stop().is_proven());
+    can.power(false);
+    assert!(
+        body.read_positions()[..15]
+            .iter()
+            .all(|reading| !reading.is_fresh()),
+        "no arm answers once the power is cut"
+    );
+    // A serial bus is never closed for silence: it is read again as its servos answer.
+    assert!(matches!(
+        close_silent(&mut body, &drive, setup, "neck"),
+        Err(OpenError::NotInPlace(_))
+    ));
+    close_silent(&mut body, &drive, setup, "can").expect("closed");
+    assert_eq!(body.unavailable(), (0..15).collect::<Vec<_>>());
+    let sent = can.sent();
+    let receipt = body
+        .command(&rest_inside(&body))
+        .expect("the neck and grippers drive");
+    assert!(receipt.observed[..15].iter().all(|joint| joint.is_nan()));
+    assert_eq!(can.sent(), sent, "nothing is sent to the closed bus");
+    let stop = body.stop();
+    assert!(stop.is_proven(), "{stop:?}");
+    assert_eq!(stop.unreached.len(), 15);
+    // Asked like a bus that did not open: silent while the power is off, opened when it is on.
+    let ports = ["can".to_owned()];
+    let probed = probe_unopened(&drive, setup, &ports, &mut bridges).expect("a probe");
+    assert!(probed.opened.is_empty() && probed.refused.is_empty());
+    can.power(true);
+    assert_eq!(
+        probe_unopened(&drive, setup, &ports, &mut bridges)
+            .expect("a probe")
+            .opened,
+        ports
+    );
+    let answered = open_unopened(&mut body, &drive, setup, &ports, &mut bridges).expect("opened");
+    assert_eq!(answered.opened, ports);
+    assert!(body.unavailable().is_empty());
+    assert!(
+        can.state().motors.values().all(|motor| motor.state == 0),
+        "opened disabled"
+    );
+    assert!(
+        body.read_positions()[1..15]
+            .iter()
+            .all(sx_embodiment_drivers::AxisReading::is_fresh)
     );
     assert!(body.stop().is_proven());
 }
