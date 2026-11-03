@@ -65,9 +65,29 @@ fn a_steady_state_tick_allocates_nothing() {
 /// axis given a window allocates nothing either.
 #[test]
 fn a_measured_tick_with_windows_allocates_nothing() {
+    measured_ticks_allocate_nothing(false);
+}
+
+/// The same with every axis on a commissioned follower: its filter, its prediction and the
+/// cuts allocate nothing.
+#[test]
+fn a_predicted_tick_allocates_nothing() {
+    measured_ticks_allocate_nothing(true);
+}
+
+fn measured_ticks_allocate_nothing(followers: bool) {
     let body = Body::static_upper_body();
     let caps = Caps::declared(&body, 0.25).expect("caps").at_most(0.5);
     let mut ik = Ik::new(body, caps, settings(), Vec::new()).expect("ik");
+    if followers {
+        let model = sx_embodiment_drivers::FollowerModel {
+            omega: 9.5,
+            zeta: 0.2,
+            feedforward: true,
+        };
+        ik.set_followers(&vec![Some(model); ik.rest().len()])
+            .expect("followers");
+    }
     let mut q = ik.rest().to_vec();
     let mut next = q.clone();
     let mut measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();

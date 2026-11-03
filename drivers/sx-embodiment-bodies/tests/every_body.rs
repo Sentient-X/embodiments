@@ -233,3 +233,46 @@ fn the_bimanual_so101_opens_each_arm_on_its_own_serial_bus() {
         .expect("left_gripper");
     assert_eq!(unavailable, [left_gripper]);
 }
+
+/// Every Damiao-driven joint of every body follows its command as a second-order follower the
+/// solve can plan on: its MIT gains over the inertia its bindings carry
+/// (`sx_embodiment_bodies::followers`). `--nocapture` prints each body's table.
+#[test]
+fn every_damiao_joint_has_a_follower_the_solve_can_plan_on() {
+    for document in documents() {
+        let body = BodyBindings::parse(&document).expect("bindings");
+        if UNOPENED.contains(&body.embodiment.as_str()) {
+            continue;
+        }
+        let drive = nominal(&body);
+        let Ok(buses) = port_buses(&drive) else {
+            continue;
+        };
+        let mut damiao = Vec::new();
+        for (port, kind, _) in buses {
+            if kind == sx_damiao_can::chain::DAMIAO_CAN {
+                damiao.extend(
+                    damiao_motors(&drive, &port)
+                        .expect("motors")
+                        .into_iter()
+                        .map(|motor| motor.axis.joint),
+                );
+            }
+        }
+        let followers = sx_embodiment_bodies::followers(&drive).expect("followers");
+        for joint in &damiao {
+            let follower = followers
+                .get(joint)
+                .unwrap_or_else(|| panic!("{}: {joint} has no follower", body.embodiment));
+            assert!(
+                follower.is_valid(),
+                "{}: {joint} {follower:?}",
+                body.embodiment
+            );
+            println!(
+                "{} {joint}: omega {:.2} rad/s, zeta {:.3}",
+                body.embodiment, follower.omega, follower.zeta
+            );
+        }
+    }
+}

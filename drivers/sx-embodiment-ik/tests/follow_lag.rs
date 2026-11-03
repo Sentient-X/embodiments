@@ -77,9 +77,21 @@ struct Follow {
     stalled: usize,
 }
 
-fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
-    let config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
+fn follow(path: Path, omega: f64, zeta: f64, modelled: bool) -> Follow {
+    let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
+    if modelled {
+        for axis in Body::static_upper_body().model().axes() {
+            config.followers.insert(
+                axis.name.clone(),
+                sx_embodiment_drivers::FollowerModel {
+                    omega,
+                    zeta,
+                    feedforward: true,
+                },
+            );
+        }
+    }
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
     let body = Body::static_upper_body();
@@ -177,10 +189,16 @@ fn an_operators_hand_is_followed_no_worse_than_today() {
         // tenth of margin.
         (vr, "vr", "stiff", 30.0, 0.7, 150.0, 67.3, 86.5),
     ];
-    for (path, name, motor, omega, zeta, delay, rms, peak) in cases {
-        let got = follow(path, omega, zeta);
+    // With each joint's follower commissioned (`TeleopConfig::followers`), the same bounds:
+    // 2026-11-03, desk 40 ms / 6.2 / 10.4 mm (act-sim-like) and 30 ms / 4.3 / 9.1 mm (stiff),
+    // VR 85.1 / 115.6 and 66.5 / 85.0 mm.
+    for ((path, name, motor, omega, zeta, delay, rms, peak), modelled) in cases
+        .into_iter()
+        .flat_map(|case| [(case, false), (case, true)])
+    {
+        let got = follow(path, omega, zeta, modelled);
         println!(
-            "{name:5} {motor:13} delay {:3.0} ms, rms {:5.1} mm, peak {:5.1} mm, stalled {}",
+            "{name:5} {motor:13} model {modelled:5} delay {:3.0} ms, rms {:5.1} mm, peak {:5.1} mm, stalled {}",
             got.delay_ms, got.rms_mm, got.peak_mm, got.stalled
         );
         assert!(

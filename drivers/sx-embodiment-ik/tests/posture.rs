@@ -57,6 +57,7 @@ fn teleop(posture: BTreeMap<String, f64>) -> Teleop {
         held: vec!["torso_joint".into()],
         obstacles: Vec::new(),
         posture,
+        followers: BTreeMap::new(),
     };
     Teleop::with_body(Body::static_upper_body(), &config).expect("solve")
 }

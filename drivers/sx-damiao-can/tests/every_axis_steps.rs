@@ -69,8 +69,10 @@ const DEADBAND: f64 = 1e-3;
 
 /// What one axis did with a small step, in motor coordinates.
 struct Answer {
-    /// The motor's position every millisecond.
+    /// The motor's position every millisecond, and the MIT frame's position and planned
+    /// velocity it was driven by over that millisecond.
     positions: Vec<f64>,
+    frames: Vec<(f64, f64)>,
     start: f64,
     target: f64,
     /// How far short of the target the joint may rest: Coulomb friction, and the quantised
@@ -120,6 +122,7 @@ fn step(axis: &DamiaoAxis, joint: Joint) -> Answer {
     let target = size.copysign(middle - rest) + rest;
     let id = axis.axis.binding.bus_id;
     let mut positions = Vec::with_capacity(TICKS * 20);
+    let mut frames = Vec::with_capacity(TICKS * 20);
     for _ in 0..TICKS {
         governor
             .command(&[target])
@@ -127,6 +130,8 @@ fn step(axis: &DamiaoAxis, joint: Joint) -> Answer {
         clock.0.set(clock.0.get() + MAX_STEP_INTERVAL);
         let mut passed = std::time::Duration::ZERO;
         while passed < MAX_STEP_INTERVAL {
+            let mit = bus.state().motors[&id].dynamics.expect("dynamics");
+            frames.push((mit.p_des, mit.v_des));
             bus.advance_time(SAMPLE);
             passed += SAMPLE;
             positions.push(bus.state().motors[&id].q);
@@ -145,6 +150,7 @@ fn step(axis: &DamiaoAxis, joint: Joint) -> Answer {
     let watched = MAX_STEP_INTERVAL.as_secs_f64() * TICKS as f64;
     Answer {
         positions,
+        frames,
         start: axis.axis.actuator_from_joint(rest),
         target,
         held: (joint.coulomb + (joint.kd * joint.v_des).abs() + joint.tau_ff.abs()) / joint.kp
@@ -164,6 +170,7 @@ fn check(joint: Joint) {
     for (body, axis) in &axes {
         let Answer {
             positions,
+            frames: _,
             start,
             target,
             held,
@@ -231,4 +238,63 @@ fn every_axis_steps_cleanly_on_the_bench_joint() {
 #[test]
 fn every_axis_steps_cleanly_on_the_lightest_link() {
     check(Joint::Light);
+}
+
+/// What a joint's step answer identifies it as: the MIT law fitted to its own readings and
+/// frames, `q'' = omega^2 (p - q) + 2 zeta omega (v - q')`, by least squares over every
+/// millisecond (the simulation's own semi-implicit step, so the fit is exact on it).
+#[allow(clippy::many_single_char_names)] // the law's own names
+fn identified(answer: &Answer) -> sx_embodiment_drivers::FollowerModel {
+    let h = SAMPLE.as_secs_f64();
+    let q = &answer.positions;
+    let (mut saa, mut sab, mut sbb, mut say, mut sby) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for k in 1..q.len() - 1 {
+        let (v0, v1) = ((q[k] - q[k - 1]) / h, (q[k + 1] - q[k]) / h);
+        let (p, v) = answer.frames[k];
+        let (a, b, y) = (p - q[k + 1], v - v1, (v1 - v0) / h);
+        saa += a * a;
+        sab += a * b;
+        sbb += b * b;
+        say += a * y;
+        sby += b * y;
+    }
+    let det = saa * sbb - sab * sab;
+    let stiffness = (say * sbb - sby * sab) / det;
+    let damping = (saa * sby - sab * say) / det;
+    let omega = stiffness.sqrt();
+    sx_embodiment_drivers::FollowerModel {
+        omega,
+        zeta: damping / (2.0 * omega),
+        feedforward: true,
+    }
+}
+
+/// Each Damiao axis's follower ([`DamiaoAxis::follower`]: its gains over the inertia its
+/// bindings carry), identified from a small step on act-sim's motor model through the chain
+/// and its governor: a ringing joint (damping ratio under 0.5) within 2 % in natural frequency
+/// and 6 % in damping (the static upper body's shoulders and torso, 0.2-0.5 % and 3.4-4.8 %,
+/// 2026-11-03); a well-damped one is printed (5-10 % slower, its wrists' damping 16 % lower).
+/// `--nocapture` prints them.
+#[test]
+fn every_axis_identifies_as_its_follower_on_the_model_the_station_drives() {
+    for (body, axis) in every_axis() {
+        let Some(declared) = axis.follower() else {
+            panic!("{body}/{}: no follower", axis.axis.joint);
+        };
+        let found = identified(&step(&axis, Joint::Model));
+        println!(
+            "{body}/{}: declared omega {:.2} zeta {:.3}, identified omega {:.2} zeta {:.3}",
+            axis.axis.joint, declared.omega, declared.zeta, found.omega, found.zeta
+        );
+        // A ringing joint is where the prediction matters (a shoulder rings at zeta 0.1); a
+        // well-damped one lands where it is sent whatever its exact rate, and a firmly damped
+        // light wrist (kd dt / J near 1) is barely excited by a 1 ms sample.
+        assert!(
+            declared.zeta >= 0.5
+                || ((found.omega / declared.omega - 1.0).abs() < 0.02
+                    && (found.zeta / declared.zeta - 1.0).abs() < 0.06),
+            "{body}/{}: identified {found:?}, declared {declared:?}",
+            axis.axis.joint
+        );
+    }
 }

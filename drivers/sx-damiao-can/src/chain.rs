@@ -232,6 +232,17 @@ pub struct DamiaoAxis {
 }
 
 impl DamiaoAxis {
+    /// How the joint follows its command under this motor's MIT law: its gains over the
+    /// inertia the bindings carry for the axis (the links' and the rotor's, at the motor through
+    /// the drive's reduction squared), as act-sim runs it
+    /// ([`crate::sim::Sim::with_model_dynamics`]). `None` where the registry knows no inertia.
+    #[must_use]
+    pub fn follower(&self) -> Option<sx_embodiment_drivers::FollowerModel> {
+        let gain = self.axis.actuator_from_joint(self.axis.zero + 1.0);
+        let inertia = self.axis.motion.inertia / (gain * gain);
+        sx_embodiment_drivers::FollowerModel::of_mit(self.kp, self.kd, inertia)
+    }
+
     /// The motor range this axis is driven within, radians: the configured range, cut to the
     /// motor's single-turn window when it spans more than one turn.
     #[must_use]

@@ -34,6 +34,7 @@ fn config() -> TeleopConfig {
         held: Vec::new(),
         obstacles: Vec::new(),
         posture: std::collections::BTreeMap::new(),
+        followers: std::collections::BTreeMap::new(),
     }
 }
 

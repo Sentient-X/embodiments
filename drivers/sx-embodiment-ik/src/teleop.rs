@@ -24,7 +24,8 @@
 //!   measured and where it was commanded, so pairs are kept clear at both
 //!   ([`crate::Ik::set_measured`]); a joint that does not follow (stalled, at the gap and
 //!   coming no nearer, or led past a stop it stalled on) is kept where it stands and never
-//!   counted on to open a pair.
+//!   counted on to open a pair. With [`TeleopConfig::followers`], where each joint will be, as
+//!   its follower predicts it; a reading its model expects is never doubted as a glitch.
 //! - **holds**: an axis is held where it is while any limb it moves has no target: an idle
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
@@ -48,6 +49,7 @@ use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
 use crate::solve::{Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve};
+use sx_embodiment_drivers::FollowerModel;
 
 /// The config's schema, written in every config and refused when another.
 pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
@@ -157,6 +159,11 @@ pub struct TeleopConfig {
     /// joint it does not name stays at its own value at engage.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub posture: BTreeMap<String, f64>,
+    /// Per joint, its commissioned follower (natural frequency and damping ratio of its drive
+    /// on its joint, [`crate::Ik::set_followers`]): pairs are kept clear where it will be, not
+    /// only where it was read. A joint it does not name keeps the conservative measured row.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub followers: BTreeMap<String, FollowerModel>,
 }
 
 impl TeleopConfig {
@@ -462,6 +469,7 @@ impl Teleop {
             .chain(config.accel.keys())
             .chain(&config.held)
             .chain(config.posture.keys())
+            .chain(config.followers.keys())
         {
             if !names.contains(joint) {
                 return Err(IkError::Caps(format!(
@@ -553,6 +561,13 @@ impl Teleop {
                 .map(|(name, rest)| config.posture.get(name).copied().unwrap_or(*rest))
                 .collect();
             ik.prefer_posture(&posture)?;
+        }
+        if !config.followers.is_empty() {
+            let followers: Vec<Option<FollowerModel>> = names
+                .iter()
+                .map(|name| config.followers.get(name).copied())
+                .collect();
+            ik.set_followers(&followers)?;
         }
         let step = TeleopStep {
             q: q.clone(),
@@ -952,6 +967,7 @@ impl Teleop {
                     if seeded
                         || !trusted.is_finite()
                         || jump <= reach
+                        || self.ik.expects(axis, *at)
                         || confirmed
                         || f64::from(*refused) >= hold_ticks
                     {

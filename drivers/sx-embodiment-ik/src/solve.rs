@@ -5,12 +5,14 @@ use std::time::{Duration, Instant};
 
 use crate::IkError;
 use crate::body::{Body, Target, Task, world};
+use crate::follower::{SAMPLES, Tracker, sample_times};
 use crate::geometry::{Obstacle, closest_segments, segment_box};
 use crate::math::{
     V3, cross, dot, from_quaternion, log, mat_mul, mat_vec, norm, scale, sub, transpose,
 };
 use crate::model::Frames;
 use crate::qp::Qp;
+use sx_embodiment_drivers::FollowerModel;
 
 /// Per-axis speed (unit/s) and acceleration (unit/s^2) caps, in [`crate::Model::axes`] order.
 #[derive(Clone, Debug, PartialEq)]
@@ -277,6 +279,20 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// Kept outside the collision margin, metres: a tick's linearisation (two wrists sliding along
+/// each other crept 2.2 mm into the margin over a second with none).
+const LINEARISATION_M: f64 = 0.00125;
+/// The share of the way back out a pair kept on its prediction is drawn each tick once inside
+/// [`LINEARISATION_M`] of its margin (a reading's jitter counted): two wrists sliding along
+/// each other crept 2.2 mm inside the margin over a second with no pull back, and an arm
+/// sagging 45 mrad rested 3.4 mm inside it. Gentle: at 0.2 and 0.5 a held command dithered
+/// 9-11 mm.
+const RESTORE: f64 = 0.1;
+
+/// How many rounds of cuts a step re-solves at most ([`Ik::cut_predicted_rows`]): each adds,
+/// for every pair whose prediction the answer breaks, the time it breaks it worst.
+const CUTS: usize = 3;
+
 /// How far past its bound a row may close and still be kept, metres: the interior point's sliver.
 const ROW_KEPT_M: f64 = 1e-6;
 
@@ -341,6 +357,18 @@ struct Workspace {
     /// Per row, whether main never had it: a pair kept where the body was measured, or a
     /// stuck joint's copy. Such a row never widens a cap ([`Ik::keep_feasible`]).
     row_measured: Vec<bool>,
+    /// Per row kept on the follower model's prediction ([`Ik::set_followers`]): the pair's
+    /// whole row at the measured pose, its room less the unmodelled joints' lead, and which
+    /// sample times are loaded (one bit each). Such a row is checked at every sample time.
+    row_full: Vec<f64>,
+    row_room: Vec<f64>,
+    row_exact: Vec<bool>,
+    row_times: Vec<u64>,
+    /// Per solved column and sample time: `A(t)` (how much of this step the joint has made by
+    /// then) and `c(t)` (where it is by then, held at its command, from where it was read).
+    pred_a: Vec<f64>,
+    pred_c: Vec<f64>,
+    scratch: Vec<f64>,
     row_binds: Vec<bool>,
     used: usize,
     unit: Vec<f64>,
@@ -398,6 +426,17 @@ pub struct Ik {
     measured_speed: Vec<f64>,
     /// Per axis, whether it does not follow its command ([`Ik::set_measured`]).
     stuck: Vec<bool>,
+    /// Per axis, its commissioned follower and state ([`Ik::set_followers`]); none: the
+    /// conservative measured row.
+    trackers: Vec<Option<Tracker>>,
+    /// Per axis, whether this tick plans on its follower's prediction.
+    trusted: Vec<bool>,
+    /// Per axis, the command the last step sent; NaN before one.
+    sent: Vec<f64>,
+    /// The prediction's sample times this tick, and the longest follower's horizon.
+    times: Vec<f64>,
+    horizon: f64,
+    times_dt: f64,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -504,7 +543,7 @@ impl Ik {
         // want of room. With 32 rows the closest pairs crowded the rest out, arm against arm (up
         // to 86 rows wanted), and the step still said Solved with a dropped row broken by up to
         // 15 mm of its closing (2026-11-03).
-        let k = 4 * (body.proxies.pairs.len() + scene_pairs.len());
+        let k = (4 + CUTS) * (body.proxies.pairs.len() + scene_pairs.len());
         // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
         let qp = Qp::new(n + 1, k);
         // Twice: the pairs at the commanded positions and at the measured ones.
@@ -533,6 +572,13 @@ impl Ik {
             rhs: vec![0.0; k],
             row_active: vec![Active::Limit { axis: 0 }; k],
             row_measured: vec![false; k],
+            row_full: vec![0.0; k * n],
+            row_room: vec![0.0; k],
+            row_exact: vec![false; k],
+            row_times: vec![0; k],
+            pred_a: vec![0.0; n * SAMPLES],
+            pred_c: vec![0.0; n * SAMPLES],
+            scratch: vec![0.0; n],
             row_binds: vec![false; k],
             used: 0,
             unit: vec![1.0; n],
@@ -581,6 +627,12 @@ impl Ik {
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
             stuck: vec![false; axes_count],
+            trackers: vec![None; axes_count],
+            trusted: vec![false; axes_count],
+            sent: vec![f64::NAN; axes_count],
+            times: vec![0.0; SAMPLES],
+            horizon: 0.0,
+            times_dt: f64::NAN,
             work,
             qp,
             step,
@@ -633,7 +685,50 @@ impl Ik {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
+        self.sent.fill(f64::NAN);
+        for tracker in self.trackers.iter_mut().flatten() {
+            tracker.reset();
+        }
         self.anchored = self.preferred.is_some();
+    }
+
+    /// Each axis's commissioned follower (every axis, `None` where it has none): from now on a
+    /// pair is kept clear where its joints will be, predicted from where they are read and how
+    /// they move, over the time they take to settle, at every one of those times exactly. An
+    /// axis with none keeps the conservative measured row ([`Ik::set_measured`]). Off the tick:
+    /// it allocates.
+    ///
+    /// # Errors
+    ///
+    /// [`IkError::Positions`] for the wrong length, [`IkError::Caps`] for a follower that is
+    /// not positive and finite.
+    pub fn set_followers(&mut self, followers: &[Option<FollowerModel>]) -> Result<(), IkError> {
+        if followers.len() != self.trackers.len() {
+            return Err(IkError::Positions {
+                expected: self.trackers.len(),
+                given: followers.len(),
+            });
+        }
+        let axes = self.body.model.axes();
+        for (index, follower) in followers.iter().enumerate() {
+            if let Some(f) = follower
+                && !f.is_valid()
+            {
+                return Err(IkError::Caps(format!(
+                    "{}: follower {f:?} is not one the solve can plan on",
+                    axes[index].name
+                )));
+            }
+        }
+        self.horizon = 0.0;
+        for (slot, follower) in self.trackers.iter_mut().zip(followers) {
+            *slot = follower.map(Tracker::new);
+            if let Some(f) = follower {
+                self.horizon = self.horizon.max(f.horizon());
+            }
+        }
+        self.times_dt = f64::NAN;
+        Ok(())
     }
 
     /// Where the next steps must leave `axis`, positions `[low, high]`, never past its joint
@@ -679,6 +774,19 @@ impl Ik {
         }
         self.stuck.copy_from_slice(stuck);
         Ok(())
+    }
+
+    /// Whether `reading` is where `axis`'s commissioned follower expects it this tick, given
+    /// the command the last step sent: a joint ringing past its command at speed is read where
+    /// it rings, not doubted as a glitch ([`crate::teleop::Teleop`]'s gate). False with no
+    /// follower, or one the readings have refused.
+    #[must_use]
+    pub fn expects(&self, axis: usize, reading: f64) -> bool {
+        let (Some(Some(tracker)), Some(&sent)) = (self.trackers.get(axis), self.sent.get(axis))
+        else {
+            return false;
+        };
+        sent.is_finite() && reading.is_finite() && tracker.expects(reading, sent)
     }
 
     /// How fast `axis` was last measured to move, units a second: its readings differenced,
@@ -933,17 +1041,21 @@ impl Ik {
             }
             *before = *now;
         }
+        // A modelled joint is where its filter has it (its readings' jitter smoothed by its
+        // model), the rest where they were read.
+        self.predict(q, dt);
+        let w = &mut self.work;
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
         self.collision_rows(q, dt);
         let mut solve = self.keep_feasible(false);
-        let mut iterations = self.solve_qp(dt, deadline, false);
+        let mut iterations = self.solve_with_cuts(dt, deadline, false);
         // No step inside the caps keeps every row: the rows give way, as little as they can,
         // before any cap does. Widening every row's axes to their safe range first lurched the
         // torso to 20x its acceleration cap and the left shoulder 155x, for no clearance
         // (embodiments#208).
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
-            iterations = self.solve_qp(dt, deadline, true);
+            iterations = self.solve_with_cuts(dt, deadline, true);
             // Rows gave way: say so, as a widened cap does.
             if iterations.is_some() && self.qp.x[self.body.solved.len()] > SLACK_USED {
                 solve = Solve::Relaxed;
@@ -969,10 +1081,11 @@ impl Ik {
             solve = Solve::Relaxed;
         }
         // Never Solved on a broken row: a step that says its rows hold keeps every one of them
-        // as it leaves (the box clamp and the tool's shortening come after the QP), or it says
-        // they gave way. It is not swapped for standing still: a row that asks its pair to
-        // open is broken worse by standing still than by the step.
-        if solve == Solve::Solved && !self.rows_kept() {
+        // as it leaves (the box clamp and the tool's shortening come after the QP), each
+        // predicted pair at every sample time, or it says they gave way. It is not swapped for
+        // standing still: a row that asks its pair to open is broken worse by standing still
+        // than by the step.
+        if solve == Solve::Solved && (!self.rows_kept() || !self.predictions_kept()) {
             solve = Solve::Relaxed;
         }
         let w = &mut self.work;
@@ -983,6 +1096,7 @@ impl Ik {
             self.step.q[axis] = q[axis] + dq[column];
             self.velocity[column] = dq[column] / dt;
             self.step.qdot[axis] = self.velocity[column];
+            self.sent[axis] = self.step.q[axis];
         }
         self.step.solve = solve;
         self.step.iterations = iterations.unwrap_or(0);
@@ -1357,9 +1471,57 @@ impl Ik {
             }
             // Never more than half the room in one tick either: a long step is where the
             // linearisation is least true.
-            let room = (distance - s.collision_margin_m).max(0.0);
+            // Kept a linearisation's reserve outside the margin.
+            let kept = s.collision_margin_m + LINEARISATION_M;
+            let room = (distance - kept).max(0.0);
             let mut rhs = braking(room, s.braking_share * capability, dt).min(0.5 * room);
-            if candidate.measured {
+            let predicted = candidate.measured
+                && body
+                    .solved
+                    .iter()
+                    .zip(row.iter())
+                    .any(|(&axis, r)| *r != 0.0 && self.trusted[axis]);
+            w.row_exact[slot] = predicted;
+            if predicted {
+                // Kept where the joints will be: each modelled joint as its follower predicts
+                // it from where it was read and how it moves, its command held after this step,
+                // at every sample time to its settling (cuts, [`Ik::cut_predicted_rows`]); the
+                // rest as below. Signed: a joint that closes the pair late and one that opens it
+                // early are each where the model has them at each time, so the row this tick
+                // keeps is the one the next tick checks, and the command never runs off to open
+                // a pair with joints nothing real follows. Within half the room, as the commanded
+                // row's tick is, less a reading's jitter on every joint the pair moves.
+                let unsure = READING_JITTER * row.iter().map(|r| r.abs()).sum::<f64>();
+                let inside = distance - kept - unsure;
+                let room = inside.max(0.0);
+                let fixed = body
+                    .solved
+                    .iter()
+                    .zip(row.iter())
+                    .filter(|&(&axis, _)| !self.stuck[axis] && !self.trusted[axis])
+                    .map(|(&axis, r)| {
+                        let carried = MOMENTUM_S * self.measured_speed[axis];
+                        (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
+                    })
+                    .sum::<f64>();
+                w.row_full[slot * n..(slot + 1) * n].copy_from_slice(row);
+                // Every joint the pair moves planned on: the whole room, so the row this tick keeps
+                // is the one the next tick checks however the arm moves (half of it shrank as a
+                // ringing arm swung away, and the command kicked back 1.7 mm each swing). A joint
+                // not planned on: half, as the conservative row.
+                // A stuck joint is never counted on to move at all (below), which no motion of
+                // it can break: it keeps the whole room too. Halved for a tick each time the stall
+                // flickered on a joint resting at its command, the command kicked 1.7 mm (a
+                // ringing follower held at the counter).
+                let all_trusted = body
+                    .solved
+                    .iter()
+                    .zip(row.iter())
+                    .all(|(&axis, r)| *r == 0.0 || self.trusted[axis] || self.stuck[axis]);
+                let share = if all_trusted { 1.0 } else { 0.5 };
+                w.row_room[slot] = share * room + RESTORE * inside.min(0.0) - fixed;
+                w.row_times[slot] = 0;
+            } else if candidate.measured {
                 // From where it was measured the body still makes its way to its command (a
                 // following joint's lead, wherever it closes the pair), then the step: all of it
                 // within half the room, as the commanded row's tick is. One linearisation spans
@@ -1379,18 +1541,61 @@ impl Ik {
                     .sum::<f64>();
                 rhs = 0.5 * room - lead;
             }
-            if candidate.measured
-                && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
-                    *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
-                })
-            {
-                continue; // measured where it was commanded, as far as this pair goes
-            }
-            let reach: f64 = (0..n)
-                .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
-                .sum();
-            if reach <= rhs {
-                continue; // no step inside the box can close it that far
+            if predicted {
+                // The worst sample time at the step the last tick took (as the box allows),
+                // loaded; none a step inside the box can break, no row.
+                let (mut worst, mut worst_over, mut worst_rhs, mut reachable) =
+                    (0, f64::NEG_INFINITY, 0.0, false);
+                for k in 0..SAMPLES {
+                    let mut bound = w.row_room[slot];
+                    let (mut likely, mut most) = (0.0, 0.0);
+                    for (j, &axis) in body.solved.iter().enumerate() {
+                        let r = w.row_full[slot * n + j];
+                        if r == 0.0 {
+                            continue;
+                        }
+                        let c = if self.trusted[axis] {
+                            bound -= r * w.pred_c[j * SAMPLES + k];
+                            r * w.pred_a[j * SAMPLES + k]
+                        } else {
+                            r
+                        };
+                        let previous = (self.velocity[j] * dt).clamp(w.lower[j], w.upper[j]);
+                        likely += c * previous;
+                        most += (c * w.lower[j]).max(c * w.upper[j]);
+                    }
+                    reachable |= most > bound;
+                    if likely - bound > worst_over {
+                        (worst, worst_over, worst_rhs) = (k, likely - bound, bound);
+                    }
+                }
+                if !reachable {
+                    continue; // no step inside the box can break it at any time
+                }
+                for (j, &axis) in body.solved.iter().enumerate() {
+                    let r = w.row_full[slot * n + j];
+                    row[j] = if r != 0.0 && self.trusted[axis] {
+                        r * w.pred_a[j * SAMPLES + worst]
+                    } else {
+                        r
+                    };
+                }
+                w.row_times[slot] = 1 << worst;
+                rhs = worst_rhs;
+            } else {
+                if candidate.measured
+                    && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
+                        *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
+                    })
+                {
+                    continue; // measured where it was commanded, as far as this pair goes
+                }
+                let reach: f64 = (0..n)
+                    .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
+                    .sum();
+                if reach <= rhs {
+                    continue; // no step inside the box can close it that far
+                }
             }
             w.rhs[slot] = rhs;
             w.row_active[slot] = active;
@@ -1411,6 +1616,7 @@ impl Ik {
                 w.rhs[slot + 1] = rhs;
                 w.row_active[slot + 1] = active;
                 w.row_measured[slot + 1] = true;
+                w.row_exact[slot + 1] = false;
                 w.used += 1;
             }
         }
@@ -1480,6 +1686,169 @@ impl Ik {
             }
         }
         solve
+    }
+
+    /// Each modelled joint's state from its reading and the command it had, whether the reading
+    /// bears its model out, and its prediction this tick: by each sample time, `A(t)` of this
+    /// step made and `c(t)` of the way from where it was read, its command held.
+    fn predict(&mut self, q: &[f64], dt: f64) {
+        self.trusted.fill(false);
+        if self.horizon <= 0.0 {
+            return;
+        }
+        if self.times_dt.to_bits() != dt.to_bits() {
+            sample_times(
+                dt,
+                self.horizon.max(dt * SAMPLES as f64 / 4.0),
+                &mut self.times,
+            );
+            self.times_dt = dt;
+        }
+        let w = &mut self.work;
+        for (column, &axis) in self.body.solved.iter().enumerate() {
+            let Some(tracker) = self.trackers[axis].as_mut() else {
+                continue;
+            };
+            tracker.prepare(dt, &self.times, READING_JITTER);
+            let reading = self.measured[axis];
+            let sent = if self.sent[axis].is_finite() {
+                self.sent[axis]
+            } else {
+                q[axis]
+            };
+            // The command it followed, pushed by the step's planned velocity where it was sent.
+            let driven = tracker.driven(sent, self.velocity[column]);
+            tracker.read(reading.is_finite().then_some(reading), driven);
+            // A joint its model bears out is planned on even where the teleoperation stall
+            // calls it stuck (a joint pushing a stop is refused by its model instead): its
+            // rest offset says where it stops. Held stuck, a ringing joint resting short of its
+            // command halved its pairs' room for a tick whenever the stall flickered, and the
+            // command kicked 1.7 mm each time (2-4 mm held at the counter at 90 Hz; 0.4 mm now).
+            self.trusted[axis] = tracker.trusted();
+            if !self.trusted[axis] {
+                continue;
+            }
+            w.seen_q[axis] = tracker.x;
+            let offset = tracker.x - q[axis] + tracker.b;
+            let rest = q[axis] - tracker.b - tracker.x;
+            for k in 0..SAMPLES {
+                let (e, f) = (tracker.e[k], tracker.f[k]);
+                w.pred_a[column * SAMPLES + k] = tracker.a[k];
+                w.pred_c[column * SAMPLES + k] = f.mul_add(tracker.v, e.mul_add(offset, rest));
+            }
+        }
+    }
+
+    /// Into `scratch`, row `slot`'s prediction at sample `k` (`full` its whole row): each
+    /// modelled joint's share of the step by then, the rest's whole step; and its bound.
+    fn predicted_row(&mut self, slot: usize, k: usize) -> f64 {
+        let n = self.body.solved.len();
+        let w = &mut self.work;
+        let mut rhs = w.row_room[slot];
+        for (j, &axis) in self.body.solved.iter().enumerate() {
+            let r = w.row_full[slot * n + j];
+            if r != 0.0 && self.trusted[axis] {
+                w.scratch[j] = r * w.pred_a[j * SAMPLES + k];
+                rhs -= r * w.pred_c[j * SAMPLES + k];
+            } else {
+                w.scratch[j] = r;
+            }
+        }
+        rhs
+    }
+
+    /// `rhs` eased as [`Ik::keep_feasible`] eases a measured row the box cannot keep, for the
+    /// row in `scratch`.
+    fn eased(&self, rhs: f64) -> f64 {
+        let w = &self.work;
+        let n = self.body.solved.len();
+        let (mut low, mut most) = (0.0, 0.0);
+        for j in 0..n {
+            let (a, b) = (w.scratch[j] * w.lower[j], w.scratch[j] * w.upper[j]);
+            low += a.min(b);
+            most += a.max(b);
+        }
+        if low > rhs {
+            low + SOFTENED * (most - low)
+        } else {
+            rhs
+        }
+    }
+
+    /// The worst sample time of row `slot`'s prediction at step `dq` (`w.answer` or
+    /// `w.still`), how far past its bound it closes there, and that bound.
+    fn worst_time(&mut self, slot: usize, at_answer: bool) -> (usize, f64, f64) {
+        let n = self.body.solved.len();
+        let mut worst = (0, f64::NEG_INFINITY, 0.0);
+        for k in 0..SAMPLES {
+            let rhs = self.predicted_row(slot, k);
+            let rhs = self.eased(rhs);
+            let w = &self.work;
+            let dq = if at_answer { &w.answer } else { &w.still };
+            let closes: f64 = (0..n).map(|j| w.scratch[j] * dq[j]).sum();
+            if closes - rhs > worst.1 {
+                worst = (k, closes - rhs, rhs);
+            }
+        }
+        worst
+    }
+
+    /// The solve, then for each pair whose prediction the answer breaks at a sample time it
+    /// does not hold, that time's row added (a cut) and the solve again: at most [`CUTS`]
+    /// rounds, deterministic. A round's answer that still breaks one is checked as the step
+    /// leaves ([`Ik::predictions_kept`]) and fails closed.
+    fn solve_with_cuts(
+        &mut self,
+        dt: f64,
+        deadline: Option<Instant>,
+        elastic: bool,
+    ) -> Option<u32> {
+        let mut iterations = self.solve_qp(dt, deadline, elastic);
+        for _ in 0..CUTS {
+            let Some(done) = iterations else { break };
+            if !self.cut_predicted_rows() || deadline.is_some_and(|d| Instant::now() >= d) {
+                break;
+            }
+            iterations = self.solve_qp(dt, deadline, elastic).map(|more| more + done);
+        }
+        iterations
+    }
+
+    /// Add a cut for every predicted row the answer breaks; whether one was added.
+    fn cut_predicted_rows(&mut self) -> bool {
+        let n = self.body.solved.len();
+        let capacity = self.work.rhs.len();
+        let used = self.work.used;
+        let mut added = false;
+        for slot in 0..used {
+            if !self.work.row_exact[slot] || self.work.used == capacity {
+                continue;
+            }
+            let (k, over, rhs) = self.worst_time(slot, true);
+            if over <= ROW_KEPT_M || self.work.row_times[slot] & (1 << k) != 0 {
+                continue;
+            }
+            self.work.row_times[slot] |= 1 << k;
+            self.predicted_row(slot, k);
+            let w = &mut self.work;
+            let cut = w.used;
+            let (head, tail) = w.rows.split_at_mut(cut * n);
+            let _ = head;
+            tail[..n].copy_from_slice(&w.scratch);
+            w.rhs[cut] = rhs;
+            w.row_active[cut] = w.row_active[slot];
+            w.row_measured[cut] = true;
+            w.row_exact[cut] = false;
+            w.used += 1;
+            added = true;
+        }
+        added
+    }
+
+    /// Whether the step (`still`) keeps every predicted row at every sample time.
+    fn predictions_kept(&mut self) -> bool {
+        (0..self.work.used)
+            .all(|slot| !self.work.row_exact[slot] || self.worst_time(slot, false).1 <= ROW_KEPT_M)
     }
 
     /// Whether the step (`still`) keeps every row it was solved with, to a micrometre.

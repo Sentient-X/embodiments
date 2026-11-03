@@ -43,6 +43,7 @@ pub mod composite;
 pub mod drive;
 pub mod dynamics;
 pub mod ending;
+pub mod follower;
 pub mod governor;
 pub mod holder;
 pub mod host_needs;
@@ -80,6 +81,7 @@ pub use ending::{
     AtEnd, Ending, FeedforwardFn, MAX_RETURN, Pace, Progress, RETURN_MARGIN, RETURN_SETTLE,
     RETURN_SLACK, RETURN_SPEED_SHARE, RETURN_TOLERANCE, Return, ReturnFailure,
 };
+pub use follower::FollowerModel;
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,
     MAX_STEP_INTERVAL, MonotonicClock,

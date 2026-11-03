@@ -54,6 +54,7 @@ fn main() {
         held: Vec::new(),
         obstacles: Vec::new(),
         posture: std::collections::BTreeMap::new(),
+        followers: std::collections::BTreeMap::new(),
     };
     let mut solve =
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");

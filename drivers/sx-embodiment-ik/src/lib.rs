@@ -29,7 +29,14 @@
 //!   ignore, and **scene collision** against boxes ([`Obstacle`]: the table), as linearised
 //!   distance rows for every pair within [`Settings::influence_m`] (none is dropped, and a step
 //!   that does not keep every row it was solved with says so, [`Solve::Relaxed`]): each pair closes this tick no faster than a share of its axes'
-//!   acceleration can still stop it before [`Settings::collision_margin_m`].
+//!   acceleration can still stop it before [`Settings::collision_margin_m`], with a
+//!   linearisation's reserve.
+//! - **pairs where the joints will be** ([`Ik::set_followers`]): each joint with a
+//!   commissioned follower ([`sx_embodiment_drivers::FollowerModel`]) is filtered from its
+//!   readings and commands (position, velocity, the offset it rests at) and predicted, its
+//!   command held after this step, to its settling; each pair is kept clear at every one of 40
+//!   sample times of that prediction (cuts, at most three re-solves). A joint without one, or
+//!   whose readings refuse its model, keeps the conservative row at the measured pose.
 //!
 //! Where a row cannot be kept within the acceleration caps, the cap yields on that row's axes
 //! (keeping clear outranks smoothness) and the step says [`Solve::Relaxed`]; if the QP then
@@ -57,6 +64,7 @@
 )]
 
 mod body;
+mod follower;
 mod geometry;
 pub mod hull;
 mod math;

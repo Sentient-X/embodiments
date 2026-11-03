@@ -939,6 +939,31 @@ pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis
     Opener::of(drive)?.damiao(drive, port)
 }
 
+/// Every Damiao-driven joint of `drive`'s body with the follower its MIT law makes of it
+/// ([`DamiaoAxis::follower`]), by joint name: what the teleoperation solve predicts each joint
+/// through (`sx_embodiment_ik::teleop::TeleopConfig::followers`). A joint on another bus, or
+/// whose inertia the registry does not know, is not named.
+///
+/// # Errors
+///
+/// What [`ports`] refuses, and a Damiao port no driver composes for this body.
+pub fn followers(
+    drive: &InstanceDrive,
+) -> Result<BTreeMap<String, sx_embodiment_drivers::FollowerModel>, OpenError> {
+    let mut followers = BTreeMap::new();
+    for (port, bus, _) in port_buses(drive)? {
+        if bus != DAMIAO_CAN {
+            continue;
+        }
+        for motor in damiao_motors(drive, &port)? {
+            if let Some(follower) = motor.follower() {
+                followers.insert(motor.axis.joint.clone(), follower);
+            }
+        }
+    }
+    Ok(followers)
+}
+
 /// How a body is opened beyond its drive, commissioning and calibrations.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OpenOptions<'a> {
