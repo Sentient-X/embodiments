@@ -257,6 +257,12 @@ where
         unavailable
     }
 
+    fn read_only_disables(&self) -> Vec<u16> {
+        let mut disables = self.first.read_only_disables();
+        disables.extend(self.second.read_only_disables());
+        disables
+    }
+
     fn command_readings(&self) -> Option<Axes<AxisReading>> {
         let mut readings = self.first.command_readings()?;
         readings.extend(self.second.command_readings()?);

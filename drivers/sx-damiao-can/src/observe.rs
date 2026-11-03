@@ -17,6 +17,17 @@
 //! motor's enable state, a fresh answer reporting enabled or disabled is fresh either way; a
 //! fault code is faulted.
 //!
+//! **Out of service beside a chain** ([`DamiaoObserver::out_of_service`]): a body's
+//! out-of-service motors are read by this observer on their chain's link, and there it also
+//! sends each one a disable (`FF..FD`), once at open and again whenever its feedback reports it
+//! enabled: a status refresh may keep an enabled motor's `TIMEOUT` watchdog fed, and a motor a
+//! crashed run left enabled would otherwise hold torque under a chain that never commands it.
+//! A disable cannot move a motor. Its port admits that frame and nothing more: still never an
+//! enable, MIT frame, mode or register write, clear, zero or save. It also takes a motor's
+//! limit row only when it is its model's own table row (no alternate `PMAX`/`VMAX`), since a
+//! wrong row reads a fresh position at the wrong scale, and its polls wait
+//! [`crate::chain::Wait::Sense`], not a control tick's margin.
+//!
 //! A motor that does not answer its limit registers at open is not refused: it reads missing
 //! (corrupt: its scale is unknown) until it answers a poll, when its registers are read again.
 //! A motor whose registers hold a row no Damiao table carries reads corrupt for the observer's
@@ -31,16 +42,31 @@ use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::{Axes, AxisReading, BoundAxis, MissingReason, Observe, validate_chain};
 
 use crate::chain::{
-    Awaits, DamiaoAxis, DamiaoChainError, LIMIT_REGISTERS, MotorState, Phase, REGISTER_WAIT,
-    Request, Wait, every, held_limits, motor_type, phase, phase_into, validate,
+    Awaits, DamiaoAxis, DamiaoChainError, FEEDBACK_WAIT, LIMIT_REGISTERS, MotorLimits, MotorState,
+    Phase, REGISTER_WAIT, Request, Wait, every, held_limits, motor_type, phase, phase_into,
+    validate,
 };
-use crate::dm_can::{Motor, MotorControl};
+use crate::dm_can::{DmMotorType, Motor, MotorCommand, MotorControl};
+
+/// Whether `limits` are `model`'s own table row, as float32 registers hold it.
+// A register holds the exact float32 of a table literal; equality is the comparison meant.
+#[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
+fn own_row(limits: &MotorLimits, model: DmMotorType) -> bool {
+    let row = model.limit_param().map(|value| value as f32);
+    [limits.p_max, limits.v_max, limits.t_max] == row
+}
 use crate::scan;
 
 /// The id register requests and status refreshes are sent to.
 const PARAM_ID: u32 = 0x7FF;
 /// A status refresh's command byte: ask for one feedback frame.
 const REFRESH: u8 = 0xCC;
+
+/// Whether `frame` is a motor's disable (`FF FF FF FF FF FF FF FD` on its id).
+#[must_use]
+pub const fn is_disable(frame: &CanFrame) -> bool {
+    frame.id < PARAM_ID && matches!(frame.data, [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD])
+}
 
 /// Whether `frame` only asks: a register read ([`scan::is_read_only`]) or a status refresh
 /// (`0x7FF`, `0xCC`).
@@ -49,61 +75,82 @@ pub const fn only_asks(frame: &CanFrame) -> bool {
     scan::is_read_only(frame) || (frame.id == PARAM_ID && frame.data[2] == REFRESH)
 }
 
-/// A port that carries only [`only_asks`] frames; any other frame is refused before the link
-/// sees it.
-pub struct AskOnlyCanPort<P>(P);
+/// A port that carries only [`only_asks`] frames, and [`is_disable`] ones when built
+/// [`AskOnlyCanPort::disabling`]; any other frame is refused before the link sees it.
+pub struct AskOnlyCanPort<P> {
+    port: P,
+    disables: bool,
+}
 
 impl<P> AskOnlyCanPort<P> {
     pub const fn new(port: P) -> Self {
-        Self(port)
+        Self {
+            port,
+            disables: false,
+        }
+    }
+
+    /// A port that also carries disables: what an out-of-service motor's observer speaks
+    /// through.
+    pub const fn disabling(port: P) -> Self {
+        Self {
+            port,
+            disables: true,
+        }
+    }
+
+    /// Whether this port lets `frame` through.
+    #[must_use]
+    pub const fn admits(&self, frame: &CanFrame) -> bool {
+        only_asks(frame) || (self.disables && is_disable(frame))
     }
 }
 
 impl<P: CanPort> CanPort for AskOnlyCanPort<P> {
     fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
-        if !only_asks(frame) {
+        if !self.admits(frame) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "an observer sends only register reads and status refreshes",
+                "an observer sends only register reads, status refreshes and (out of service) disables",
             ));
         }
-        self.0.send(frame)
+        self.port.send(frame)
     }
 
     fn receive(&mut self) -> io::Result<Option<CanFrame>> {
-        self.0.receive()
+        self.port.receive()
     }
 
     fn receive_until(&mut self, deadline: Instant) -> io::Result<Option<CanFrame>> {
-        self.0.receive_until(deadline)
+        self.port.receive_until(deadline)
     }
 
     fn sleep(&mut self, duration: Duration) {
-        self.0.sleep(duration);
+        self.port.sleep(duration);
     }
 
     fn frame_allowance(&self) -> Duration {
-        self.0.frame_allowance()
+        self.port.frame_allowance()
     }
 
     fn counters(&self) -> Vec<(&'static str, u64)> {
-        self.0.counters()
+        self.port.counters()
     }
 
     fn health(&self) -> sx_embodiment_drivers::can::LinkHealth {
-        self.0.health()
+        self.port.health()
     }
 
     fn answered(&mut self, round_trip: Duration) {
-        self.0.answered(round_trip);
+        self.port.answered(round_trip);
     }
 
     fn round_trip(&mut self) -> Option<sx_embodiment_drivers::can::RoundTrip> {
-        self.0.round_trip()
+        self.port.round_trip()
     }
 
     fn round_trip_max(&mut self) -> Option<Duration> {
-        self.0.round_trip_max()
+        self.port.round_trip_max()
     }
 }
 
@@ -128,6 +175,11 @@ pub struct DamiaoObserver<P> {
     every_feedback: Vec<Request>,
     /// The poll's buffers, allocated at open and reused every read.
     tick: Phase,
+    /// Out of service beside a chain ([`DamiaoObserver::out_of_service`]): disables, takes
+    /// only its model's own limit row, and waits [`Wait::Sense`].
+    out_of_service: bool,
+    /// Every motor sent a disable, by bus id, in order, since open.
+    disabled: Vec<u16>,
 }
 
 impl<P: CanPort> DamiaoObserver<P> {
@@ -139,13 +191,47 @@ impl<P: CanPort> DamiaoObserver<P> {
     /// Refuses what [`DamiaoChain::open`](crate::chain::DamiaoChain::open) refuses before a
     /// frame (an invalid or unqualified axis, ids or a range the protocol cannot carry), and the link's failure.
     pub fn open(port: P, motors: Vec<DamiaoAxis>) -> Result<Self, DamiaoChainError> {
+        Self::opened(AskOnlyCanPort::new(port), motors, false)
+    }
+
+    /// `motors`, out of service beside the chain on `port`'s link: opened as
+    /// [`DamiaoObserver::open`] does, then each sent one disable, whatever it answers; and
+    /// from then on sent another whenever its feedback reports it enabled.
+    ///
+    /// # Errors
+    ///
+    /// As [`DamiaoObserver::open`].
+    pub fn out_of_service(port: P, motors: Vec<DamiaoAxis>) -> Result<Self, DamiaoChainError> {
+        let mut observer = Self::opened(AskOnlyCanPort::disabling(port), motors, true)?;
+        let ids: Vec<u16> = observer.every_feedback.iter().map(|r| r.bus_id).collect();
+        let _ = phase(
+            &mut observer.control,
+            &every(&ids, Awaits::Feedback),
+            FEEDBACK_WAIT,
+            |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+        );
+        observer.disabled.extend(ids);
+        Ok(observer)
+    }
+
+    /// Every motor sent a disable, by bus id, in order, since open.
+    #[must_use]
+    pub fn disabled(&self) -> &[u16] {
+        &self.disabled
+    }
+
+    fn opened(
+        port: AskOnlyCanPort<P>,
+        motors: Vec<DamiaoAxis>,
+        out_of_service: bool,
+    ) -> Result<Self, DamiaoChainError> {
         let axes: Vec<BoundAxis> = motors.iter().map(|motor| motor.axis.clone()).collect();
         validate_chain(&axes)?;
         let mut ids = Vec::new();
         for motor in &motors {
             validate(motor, &mut ids)?;
         }
-        let mut control = MotorControl::new(AskOnlyCanPort::new(port));
+        let mut control = MotorControl::new(port);
         for motor in &motors {
             let binding = motor.axis.binding;
             let model =
@@ -166,6 +252,8 @@ impl<P: CanPort> DamiaoObserver<P> {
             scale: vec![Scale::Unknown; motors.len()],
             motors,
             axes,
+            out_of_service,
+            disabled: Vec::new(),
         };
         for index in 0..observer.motors.len() {
             observer.scale(index)?;
@@ -191,6 +279,14 @@ impl<P: CanPort> DamiaoObserver<P> {
         )
         .checked()?;
         self.scale[index] = match held_limits(&mut self.control, bus_id) {
+            // Out of service, only the model's own row: an alternate one (a `PMAX` beside its
+            // table's) may as well be a corrupt register, which scales a fresh reading wrong.
+            Ok(limits)
+                if self.out_of_service
+                    && !own_row(&limits, self.control.motor(bus_id)?.motor_type) =>
+            {
+                Scale::Refused
+            }
             Ok(_) => Scale::Reported,
             Err(DamiaoChainError::LimitMismatch { motor: None, .. }) => Scale::Unknown,
             Err(DamiaoChainError::LimitMismatch { .. }) => Scale::Refused,
@@ -199,18 +295,23 @@ impl<P: CanPort> DamiaoObserver<P> {
         Ok(())
     }
 
-    /// One refresh phase, decoded as the chain decodes it, either enable state accepted.
+    /// One refresh phase, decoded as the chain decodes it, either enable state accepted. Out
+    /// of service, a motor answering enabled is sent a disable at once, unawaited.
     fn poll(&mut self) -> Axes<AxisReading> {
         phase_into(
             &mut self.control,
             &self.every_feedback,
-            Wait::Tick,
+            if self.out_of_service {
+                Wait::Sense
+            } else {
+                Wait::Tick
+            },
             |control, _, request| control.send_refresh(request.bus_id),
             &mut self.tick,
         );
         let asked = &self.tick;
         let link_failed = asked.failure.is_some();
-        (0..self.every_feedback.len())
+        let readings = (0..self.every_feedback.len())
             .map(|index| {
                 let Ok(cached) = self.control.motor(self.every_feedback[index].bus_id) else {
                     return AxisReading::Missing(MissingReason::Unavailable);
@@ -235,18 +336,45 @@ impl<P: CanPort> DamiaoObserver<P> {
                     received: at,
                 }
             })
-            .collect()
+            .collect();
+        if self.out_of_service {
+            self.disable_enabled();
+        }
+        readings
+    }
+
+    /// Send a disable, unawaited, to every motor whose answer this poll reported it enabled.
+    fn disable_enabled(&mut self) {
+        for index in 0..self.every_feedback.len() {
+            let bus_id = self.every_feedback[index].bus_id;
+            let enabled = self.tick.received[index].is_some()
+                && self.control.motor(bus_id).is_ok_and(|motor| {
+                    MotorState::from_err(motor.get_error()) == MotorState::Enabled
+                });
+            if enabled
+                && self
+                    .control
+                    .send_command(bus_id, MotorCommand::Disable)
+                    .is_ok()
+            {
+                self.disabled.push(bus_id);
+            }
+        }
     }
 
     #[must_use]
     pub const fn port(&self) -> &P {
-        &self.control.port().0
+        &self.control.port().port
     }
 }
 
 impl<P: CanPort> Observe for DamiaoObserver<P> {
     fn axes(&self) -> &[BoundAxis] {
         &self.axes
+    }
+
+    fn sent_disables(&self) -> Vec<u16> {
+        self.disabled.clone()
     }
 
     /// One status refresh per motor, decoded as [`DamiaoChain`](crate::chain::DamiaoChain)

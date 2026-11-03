@@ -497,6 +497,12 @@ pub trait ActuatorChain {
         Vec::new()
     }
 
+    /// Each out-of-service actuator its read-only observer sent a disable, by bus id, in
+    /// order, since open ([`Observe::sent_disables`]): the only write one ever gets.
+    fn read_only_disables(&self) -> Vec<u16> {
+        Vec::new()
+    }
+
     /// The axes (indices in native state order) commissioning's rails put over their model's
     /// supported supply, each with what it is held to: a [`crate::Governor`] applies them.
     /// Fixed once the chain is open.
@@ -542,6 +548,13 @@ pub trait Observe {
     /// axis's drive map and unit calibration, as [`ActuatorChain::read_positions`] reports them.
     /// An axis that did not answer is missing or faulted in its place, never dropped.
     fn read_positions(&mut self) -> Axes<AxisReading>;
+
+    /// Each actuator this observer sent a disable, by bus id, in order, since it opened: an
+    /// out-of-service motor's observer beside a chain does ([`crate::Masked::reading`]); one
+    /// that writes nothing never does.
+    fn sent_disables(&self) -> Vec<u16> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

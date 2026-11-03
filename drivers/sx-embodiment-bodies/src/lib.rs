@@ -172,9 +172,11 @@ pub struct Commissioning {
     /// It is still a sensor: on a bus that opens, it is read through its vendor's observer
     /// on the same link ([`Masked::reading`]), by requests that only ask (a Damiao status
     /// refresh and register reads, a Feetech or Dynamixel `PING` and `READ`), never enabled,
-    /// disabled, configured or sent a goal; it reads fresh when it answers and out of service
-    /// when it does not, never refusing the body. A port whose every axis is out of service is
-    /// left closed.
+    /// configured or sent a goal; a Damiao motor is sent a disable once at open and whenever
+    /// it answers enabled, the one write it gets. It reads fresh when it answers plausibly,
+    /// unavailable when its reading is not plausible, and out of service when it does not
+    /// answer, never refusing the body. A port whose every axis is out of service is left
+    /// closed.
     pub out_of_service: BTreeSet<String>,
     /// Each power rail's measured voltage, by selector (`*`, a port, a model, or
     /// `<port>/<model>`): what derates or refuses an axis over its model's supported supply;
@@ -650,8 +652,16 @@ struct ReadOnlyPart(Part);
 
 impl ReadOnlyPart {
     /// Its vendor's observer of these axes on `link`, which refuses every request but a read.
-    fn observe(self, port: &str, link: Link) -> Result<BusObserver, OpenError> {
-        self.0.observe(port, link)
+    /// `beside_chain`, a Damiao motor's observer also disables it, once now and whenever it
+    /// answers enabled ([`DamiaoObserver::out_of_service`]): nothing commands it, so nothing
+    /// may leave it holding torque. Observing a body writes nothing.
+    fn observe(self, port: &str, link: Link, beside_chain: bool) -> Result<BusObserver, OpenError> {
+        match (self.0, link) {
+            (Part::Damiao(axes), Link::Can(link)) if beside_chain => {
+                Ok(Box::new(DamiaoObserver::out_of_service(link, axes)?))
+            }
+            (bus, link) => bus.observe(port, link),
+        }
     }
 }
 
@@ -710,9 +720,14 @@ impl Mask {
     /// The read-only axes' observer on `link`; `None` when there is none to read or it does
     /// not open (its link failed): its axes then read out of service, as they did unread, and
     /// the bus opens all the same.
-    fn read_only_observer(&mut self, name: &str, link: Option<Link>) -> Option<BusObserver> {
+    fn read_only_observer(
+        &mut self,
+        name: &str,
+        link: Option<Link>,
+        beside_chain: bool,
+    ) -> Option<BusObserver> {
         let read_only = self.read_only.take()?;
-        read_only.observe(name, link?).ok()
+        read_only.observe(name, link?, beside_chain).ok()
     }
 
     /// A bus that did not open, as its whole vector: every axis reads
@@ -722,15 +737,10 @@ impl Mask {
     /// every stop, and its actuators are reported unreached.
     fn unopened(self, held: Option<Held>) -> Result<BusChain, OpenError> {
         let every: Vec<usize> = (0..self.whole.len()).collect();
-        // An out-of-service actuator is never sent a write, not even this disable.
+        // An out-of-service actuator is disabled with the rest: nothing commands it, so
+        // nothing may leave it holding torque.
         let mut unopened = Unopened {
-            ids: self
-                .whole
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| !self.out.contains(index))
-                .map(|(_, axis)| axis.binding.bus_id)
-                .collect(),
+            ids: self.whole.iter().map(|axis| axis.binding.bus_id).collect(),
             held,
         };
         unopened.disable();
@@ -753,7 +763,7 @@ impl Mask {
         if self.out.is_empty() {
             return Ok(chain);
         }
-        let observer = self.read_only_observer(port, read_only);
+        let observer = self.read_only_observer(port, read_only, true);
         let masked = Masked::new(chain, self.whole, &self.out)
             .map_err(DamiaoChainError::from)?
             .answering(|axis| MotorFeedback::unavailable(axis.binding.bus_id));
@@ -774,7 +784,7 @@ impl Mask {
         if self.out.is_empty() {
             return Ok(observer);
         }
-        let read = self.read_only_observer(port, read_only);
+        let read = self.read_only_observer(port, read_only, false);
         let masked =
             Masked::observing(observer, self.whole, &self.out).map_err(DamiaoChainError::from)?;
         Ok(Box::new(match read {

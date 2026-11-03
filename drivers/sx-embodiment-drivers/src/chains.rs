@@ -292,6 +292,14 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         Some(readings)
     }
 
+    /// Every chain's, in order.
+    fn read_only_disables(&self) -> Vec<u16> {
+        self.members
+            .iter()
+            .flat_map(ActuatorChain::read_only_disables)
+            .collect()
+    }
+
     /// Every chain's, shifted to the chain's place in the vector.
     fn unavailable(&self) -> Vec<usize> {
         let mut first = 0;
@@ -418,6 +426,10 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn unavailable(&self) -> Vec<usize> {
         (**self).unavailable()
+    }
+
+    fn read_only_disables(&self) -> Vec<u16> {
+        (**self).read_only_disables()
     }
 
     fn derated(&self) -> Vec<AxisDerate> {
