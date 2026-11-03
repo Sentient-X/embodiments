@@ -340,10 +340,10 @@ struct Workspace {
     /// Per row, whether main never had it: a pair kept where the body was measured, or a
     /// stuck joint's copy. Such a row never widens a cap ([`Ik::keep_feasible`]).
     row_measured: Vec<bool>,
-    /// Per row kept where the body was measured, its pair's whole row and each joint's way
-    /// still to come (`r_j (q_j - seen_j + carried_j)`, 0 for a stuck joint), so the solve can
-    /// check the step against `sum_j max(lead_j + r_j dq_j, 0)` ([`Ik::cut_measured_rows`]);
-    /// and the room the row is held to. `exact` marks such rows.
+    /// Per row kept where the body was measured: its pair's whole row, each joint's way still
+    /// to come (`r_j (q_j - seen_j + carried_j)`, its positive part for a lagging joint, 0 for
+    /// a stuck one), the room the row is held to, and whether it is such a row, so the solve
+    /// checks its answer against the row as it truly is ([`Ik::cut_measured_rows`]).
     row_full: Vec<f64>,
     row_lead: Vec<f64>,
     row_budget: Vec<f64>,
@@ -670,7 +670,9 @@ impl Ik {
     /// pass), for the next steps. Between ticks each joint is somewhere between where it was
     /// measured and where it was commanded, so pairs are kept clear at both: at the commanded
     /// positions as the step moves them, and at the measured ones for the whole motion still
-    /// to come, the command's lead counted where it closes a pair. A stuck joint is never
+    /// to come: a joint within [`READING_JITTER`] of its command follows it, one further off
+    /// may stay, keep its offset or catch up in its own time and is never counted on to open
+    /// a pair, kept exactly (cuts). A stuck joint is never
     /// counted on to open a pair: each pair it would help is kept by the rest alone too
     /// (exactly, for one stuck joint in the pair).
     ///
@@ -971,10 +973,6 @@ impl Ik {
                 break;
             }
             iterations = self.solve_qp(dt, deadline, false);
-        }
-        if std::env::var("IK_CUTDBG").is_ok() && iterations.is_some() {
-            let left = self.cut_measured_rows();
-            eprintln!("CUT used {} still_violated {}", self.work.used, left);
         }
         // No step inside the caps keeps every row: the rows give way, as little as they can,
         // before any cap does. Widening every row's axes to their safe range first lurched the
@@ -1401,30 +1399,35 @@ impl Ik {
                 // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
                 // the commanded row's to keep.
                 //
-                // Each joint is somewhere between its reading and its next command, and never
-                // counted on to open the pair: the motion still to come is
-                // sum_j max(lead_j + r_j dq_j, 0). It is kept exactly, as cuts: this row holds
-                // the joints whose lead closes the pair, and a step that closes it with another
-                // joint gets that joint's cut too ([`Ik::cut_measured_rows`]). Every joint's
-                // step counted linearly against the leads' positive parts was a different
-                // constraint from the one the next tick checks: the solve met it by moving
-                // joints already behind the arm, which moved nothing there, and was asked again
-                // every tick. Near the counter the command swung 2-8 cm at 1-2 Hz for as long
-                // as it was held, and a 0.23 m move stalled 0.05 rad short (act-sim
-                // 2026-11-03).
+                // A joint within a reading's jitter of its command follows it with the rest of
+                // the arm: its lead and its step count as they are. A joint further off (or
+                // stuck) may stay where it is read, keep its offset and move with its command,
+                // or catch up, each joint in its own time, and is never counted on to open the
+                // pair: its share is max(lead_j+ + r_j dq_j, 0). The sum is kept exactly, as
+                // cuts: this row holds the joints whose lead closes the pair, and a step that
+                // closes it with another gets that joint's cut too ([`Ik::cut_measured_rows`]),
+                // so the row this tick keeps is the one the next tick checks. Counted linearly
+                // against the leads' positive parts, a step met the row by moving joints already
+                // behind the arm, which moved nothing there, and was asked again every tick:
+                // near the counter the command swung 2-8 cm at 1-2 Hz for as long as it was
+                // held, and a 0.23 m move stalled 0.05 rad short (act-sim 2026-11-03). Each
+                // lead counted signed instead let joints that catch up in different times, or a
+                // blocked joint not yet stalled, carry the arm 7-13 mm into the counter
+                // (embodiments 8b90946 refute).
                 let budget = 0.5 * room;
                 let mut lead = 0.0;
                 for (j, &axis) in body.solved.iter().enumerate() {
                     let a = if self.stuck[axis] {
                         0.0
                     } else {
-                        row[j] * (q[axis] - w.seen_q[axis] + {
-                            // A reading's jitter differenced and smoothed is a speed of up to
-                            // 2 READING_JITTER / MEASURED_SPEED_S: no motion carries it.
-                            let carried = MOMENTUM_S * self.measured_speed[axis];
-                            let noise = 2.0 * READING_JITTER * MOMENTUM_S / MEASURED_SPEED_S;
-                            carried.signum() * (carried.abs() - noise).max(0.0)
-                        })
+                        row[j]
+                            * (q[axis] - w.seen_q[axis] + {
+                                // A reading's jitter differenced and smoothed is a speed of up to
+                                // 2 READING_JITTER / MEASURED_SPEED_S: no motion carries it.
+                                let carried = MOMENTUM_S * self.measured_speed[axis];
+                                let noise = 2.0 * READING_JITTER * MOMENTUM_S / MEASURED_SPEED_S;
+                                carried.signum() * (carried.abs() - noise).max(0.0)
+                            })
                     };
                     // Within a reading's jitter of its command the joint is following it, with
                     // the rest of the arm, this tick's step and all; further off it may stay
@@ -1451,7 +1454,11 @@ impl Ik {
                     .map(|j| {
                         let most = (row[j] * w.lower[j]).max(row[j] * w.upper[j]);
                         let closing = w.row_lead[slot * n + j] + most;
-                        if w.row_kink[slot * n + j] { closing.max(0.0) } else { closing }
+                        if w.row_kink[slot * n + j] {
+                            closing.max(0.0)
+                        } else {
+                            closing
+                        }
                     })
                     .sum::<f64>()
                     - w.row_budget[slot]
@@ -1516,7 +1523,11 @@ impl Ik {
             let (mut needed, mut kept) = (0.0, 0.0);
             for j in 0..n {
                 let closing = w.row_lead[slot * n + j] + w.row_full[slot * n + j] * w.answer[j];
-                needed += if w.row_kink[slot * n + j] { closing.max(0.0) } else { closing };
+                needed += if w.row_kink[slot * n + j] {
+                    closing.max(0.0)
+                } else {
+                    closing
+                };
                 if w.rows[slot * n + j] != 0.0 {
                     kept += closing;
                 }
