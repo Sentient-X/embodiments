@@ -455,8 +455,11 @@ impl Return {
     ///
     /// # Errors
     ///
-    /// [`ReturnFailure::Deadline`] once the deadline passes unsettled, and
-    /// [`ReturnFailure::Governor`] for a refused step or a fault the governor stopped for.
+    /// [`ReturnFailure::Deadline`] once the deadline passes unsettled,
+    /// [`ReturnFailure::Unobserved`] when a returning axis's answer missed the step (an
+    /// unattended move does not go on around a joint that stopped answering: the caller's stop
+    /// follows), and [`ReturnFailure::Governor`] for a refused step or a fault the governor
+    /// stopped for.
     pub fn tick<C: ActuatorChain, K: Clock>(
         &mut self,
         governor: &mut Governor<C, K>,
@@ -470,6 +473,19 @@ impl Return {
         }
         self.advance(governor, now);
         let receipt = self.send(governor, feedforward)?;
+        if let Some(index) = self
+            .returning
+            .iter()
+            .zip(&receipt.observed)
+            .position(|(returning, observed)| *returning && observed.is_nan())
+        {
+            return Err(ReturnFailure::Unobserved {
+                joint: governor
+                    .axes()
+                    .get(index)
+                    .map_or_else(String::new, |axis| axis.joint.clone()),
+            });
+        }
         // Every returning axis sent its target and observed near it: a late answer (NaN) is
         // not arrival.
         let on_target = governor.sent().is_some_and(|sent| {
@@ -497,8 +513,8 @@ impl Return {
 
     /// Keep the body enabled at the target: each call sends it again, with `feedforward` when
     /// given (called before the return settled, it keeps approaching at the return's pace). No
-    /// deadline: the caller bounds how long the body is held, and the governor's tracking,
-    /// missed-answer and chain-failure stops still apply.
+    /// deadline: the caller bounds how long the body is held; the governor holds a silent axis
+    /// where it was sent, and its tracking and chain-failure stops still apply.
     ///
     /// # Errors
     ///
@@ -1009,9 +1025,11 @@ mod tests {
     #[test]
     fn a_latched_fault_stops_in_place_with_no_command() {
         let mut chain = fake([0.5, 0.3]);
-        // Observed 0.3 from every command: the first trips the tracking stop and latches.
+        // Observed 0.3 from every command: the first stray is pulled back, the second trips the
+        // tracking stop and latches.
         chain.lag = 0.3;
         let (mut governor, clock) = opened(chain);
+        assert!(governor.command(&[0.5, 0.3]).is_ok());
         assert!(governor.command(&[0.5, 0.3]).is_err());
         assert!(governor.is_latched());
         let sent = governor.chain().sent.len();
@@ -1036,7 +1054,8 @@ mod tests {
         };
         assert!(matches!(failure, ReturnFailure::Governor { .. }));
         assert!(stop.is_proven());
-        assert_eq!(governor.chain().sent.len(), 2);
+        // The first stray is pulled back; the second, at once, latches.
+        assert_eq!(governor.chain().sent.len(), 3);
     }
 
     #[test]
@@ -1245,8 +1264,10 @@ mod tests {
         }
         assert!(close(&governor.chain().at, &[0.0, -0.4]));
         assert_eq!(governor.chain().stops, 0, "never disabled while held");
-        // A body that stops following while held is stopped by the governor and latched.
+        // A body that stops following while held is pulled back once, then stopped by the
+        // governor and latched.
         governor.chain_mut().lag = 0.3;
+        ret.hold(&mut governor, None).expect("pulled back");
         assert!(matches!(
             ret.hold(&mut governor, None),
             Err(ReturnFailure::Governor { .. })

@@ -1522,7 +1522,7 @@ fn a_governed_static_upper_body_brings_the_neck_in_from_where_the_probe_found_it
     // The servo stops at its own calibrated minimum.
     assert_eq!(*tilt.last().expect("ticks"), TILT_MIN);
     // Inside, the tilt is tracked again like any axis: commanded away while its servo stalls,
-    // the governor stops the body and latches a tracking fault.
+    // the governor pulls it back once, then stops the body and latches a tracking fault.
     let mut away = target.clone();
     away[24] = -0.5;
     let mut failure = None;

@@ -344,7 +344,7 @@ fn a_disengaged_body_returns_home_and_is_held_there_enabled() {
 }
 
 #[test]
-fn a_motor_lost_during_the_return_is_a_governor_fault_for_the_plain_stop() {
+fn a_motor_lost_during_the_return_ends_it_for_the_plain_stop() {
     let drive = drive();
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     let bus = Sim::for_axes(&axes);
@@ -362,15 +362,16 @@ fn a_motor_lost_during_the_return_is_a_governor_fault_for_the_plain_stop() {
             Err(failure) => break failure,
         }
     };
-    assert!(
-        matches!(failure, ReturnFailure::Governor { .. }),
-        "{failure}"
+    let joint = governor.axes()[elbow].joint.clone();
+    assert_eq!(
+        failure,
+        ReturnFailure::Unobserved {
+            joint: joint.clone()
+        }
     );
-    // The governor stopped the body and latched: nothing moves it again.
-    assert!(governor.is_latched());
-    assert!(governor.sent().is_none());
-    assert!(matches!(
-        Return::begin(&mut governor, AtEnd::Home, &[]),
-        Err(ReturnFailure::Latched)
-    ));
+    // Nothing returns again while it is silent.
+    assert_eq!(
+        Return::begin(&mut governor, AtEnd::Home, &[]).err(),
+        Some(ReturnFailure::Unobserved { joint })
+    );
 }

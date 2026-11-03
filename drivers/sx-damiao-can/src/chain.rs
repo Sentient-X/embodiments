@@ -51,7 +51,8 @@
 //!   succeeds when any motor answered: that axis is observed as `NaN` and read
 //!   [`MissingReason::Stale`] in [`ActuatorChain::command_readings`], and its answer, when it
 //!   lands, is decoded at the next phase's drain. The governor decides what a missing reading
-//!   means (`sx_embodiment_drivers::governor`: one in a row per axis is tolerated). Until
+//!   means (`sx_embodiment_drivers::governor`: a silent axis is held where it was last sent until it
+//!   answers). Until
 //!   2026-10-26 one late answer failed the whole command as `Silent(<id>)` and stopped the run;
 //!   on the static upper body these came from the host parking the adapter's I/O thread
 //!   (`sx_zlg_usbcanfd` now runs it under the time-constraint policy), not from the motors.

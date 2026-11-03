@@ -49,23 +49,28 @@
 //!   cannot be governed. A chain error other than a refusal (the chain may have applied part
 //!   of the command) stops the chain and latches [`GovernorError::Faulted`]; a refusal, which
 //!   changed nothing, is returned as it is.
-//! - **One late answer is data, two are a fault.** An axis the receipt observes as `NaN` (its
-//!   actuator's answer missed the command's deadline: [`AxisReading::Missing`] in
-//!   [`ActuatorChain::command_readings`]) is not tracked that tick, and the next command steps
-//!   from the position last sent. [`MAX_MISSED_IN_A_ROW`] such ticks in a row are tolerated; one
-//!   more stops the chain and latches [`GovernorError::Unanswered`]. Each tick moves an axis at
-//!   most `max_speed` × [`MAX_STEP_INTERVAL`] (10 mrad at 0.5 rad/s), so an axis goes
-//!   unobserved for at most one such step before it is tracked again or stopped, well inside
-//!   the actuators' own communication watchdogs. A late answer is usually the host, not the
-//!   motor: an overloaded macOS scheduler parks a thread for tens of milliseconds (run CSVs of
-//!   2026-10-26 show 50 Hz ticks up to 98 ms apart at load 30–100), and stopping a run on it
-//!   threw away a good run while proving nothing about the body.
+//! - **A silent axis holds; silence is data, never a fault.** An axis the receipt observes as
+//!   `NaN` (its actuator's answer missed the command's deadline: [`AxisReading::Missing`] in
+//!   [`ActuatorChain::command_readings`]) is not tracked that tick, and every later command
+//!   holds it at the position last sent, at rest (its target is not followed, it is never
+//!   stepped), until a receipt observes it again; then it is stepped and tracked as before. The
+//!   hold frame keeps its torque on: a motor left without frames would trip its own watchdog
+//!   and drop the joint (Damiao arms have no brakes). Nothing is latched for silence (owner,
+//!   2026-11-03: one missed reading ended 15 sessions and safe-stopped the whole body); a bus
+//!   that stays silent is the chain's to close, and a motor reporting a fault is the caller's
+//!   to stop. A late answer is usually the host, not the motor: an overloaded macOS scheduler
+//!   parks a thread for tens of milliseconds (run CSVs of 2026-10-26 show 50 Hz ticks up to
+//!   98 ms apart at load 30–100).
 //! - **Unavailable axes** ([`ActuatorChain::unavailable`], marked by commissioning) keep their
 //!   place in every vector but are neither stepped nor tracked: their targets reach no
 //!   actuator, and their observations are `NaN`.
-//! - **Tracking error.** When a command's receipt carries observed positions, each must lie
-//!   within `max_tracking_error` of what was just sent. One that does not stops the chain and
-//!   latches a fault: every later command is refused until [`ActuatorChain::clear_faults`].
+//! - **Tracking error.** When a command's receipt carries observed positions, each should lie
+//!   within `max_tracking_error` of what was just sent. One that does not is pulled back: the
+//!   next command steps that axis from where it was observed, at rest, so it pushes no torque
+//!   into whatever stopped it ([`Governor::pulled_back`] says which, for the caller's warning).
+//!   The same axis straying again within [`TRACKING_REPEAT`] is stuck or broken: that stops the
+//!   chain and latches [`GovernorError::Tracking`], and every later command is refused until
+//!   [`ActuatorChain::clear_faults`].
 //!
 //! The governor bounds what the station asks; it is not a substitute for the motors' own
 //! protections.
@@ -86,9 +91,11 @@ use crate::rail::AxisDerate;
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
 pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
 
-/// How many commands in a row one axis may go unobserved (`NaN` in the receipt) before the
-/// governor stops the chain.
-pub const MAX_MISSED_IN_A_ROW: u8 = 1;
+/// How soon one axis straying past its tracking bound again latches a fault. A first stray is
+/// pulled back (a bump, a lag on a fast move, a hand pushing the arm); a joint that strays again
+/// within 2 s of being pulled back to where it stands is stuck or broken, not lagging, and
+/// pulling it back again and again would only hide that.
+pub const TRACKING_REPEAT: Duration = Duration::from_secs(2);
 /// A joint resting outside its range that comes no closer to it by this much (rad, a few
 /// encoder counts above read noise) within [`OUTSIDE_STALL`] cannot come in.
 pub const OUTSIDE_PROGRESS: f64 = 0.005;
@@ -232,14 +239,6 @@ pub enum GovernorError<E> {
         found: usize,
         stop: StopReport,
     },
-    #[error(
-        "joint {joint} went unobserved for {ticks} commands in a row; the chain was stopped and the fault is latched"
-    )]
-    Unanswered {
-        joint: String,
-        ticks: u8,
-        stop: StopReport,
-    },
     #[error("a fault is latched; recover the body and clear it before commanding")]
     Latched,
 }
@@ -250,7 +249,6 @@ impl<E: ChainError> ChainError for GovernorError<E> {
             Self::Chain(error) | Self::Faulted { error, .. } => error.failure(),
             Self::Target(_) | Self::NoStart | Self::Latched => ChainFailure::Refused,
             Self::Tracking { .. } | Self::Unobserved { .. } => ChainFailure::Fault,
-            Self::Unanswered { .. } => ChainFailure::Timeout,
         }
     }
 }
@@ -300,8 +298,13 @@ pub struct Governor<C, K = MonotonicClock> {
     /// Per axis, the recent speed its tracking bound is widened by ([`TRACKING_MEMORY`]); zero
     /// whenever the governor takes the body up.
     recent: Vec<f64>,
-    /// Per axis, the commands in a row whose receipt did not observe it.
-    missed: Vec<u8>,
+    /// Per available axis, whether the last receipt did not observe it: held where it was last
+    /// sent until one does.
+    silent: Vec<bool>,
+    /// Per axis, when it last strayed past its tracking bound and was pulled back.
+    tripped: Vec<Option<Instant>>,
+    /// The first axis the last command pulled back to where it was observed.
+    pulled_back: Option<usize>,
     /// Per axis, how many times it was approached again outside its range since the chain
     /// was last stopped or cleared: kept apart from the outside record, which a joint reading
     /// near its edge clears and recreates, so the cap holds (refute of the re-approach).
@@ -452,7 +455,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             latched: false,
             unavailable: chain_unavailable,
             recent: vec![0.0; width],
-            missed: vec![0; width],
+            silent: vec![false; width],
+            tripped: vec![None; width],
+            pulled_back: None,
             reapproached: vec![0; width],
             derated,
             torque_caps,
@@ -513,6 +518,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.brought_in
     }
 
+    /// The first axis the last command found past its tracking bound and pulled back: the next
+    /// command steps it from where it was observed, at rest. `None` when every axis tracked. A
+    /// second stray of it within [`TRACKING_REPEAT`] latches [`GovernorError::Tracking`]. A
+    /// caller warns once per pull-back.
+    #[must_use]
+    pub const fn pulled_back(&self) -> Option<usize> {
+        self.pulled_back
+    }
+
     /// The first axis resting outside its range that made no progress toward it for
     /// [`OUTSIDE_STALL`] (a servo too weak against gravity on its stop): it is held where it
     /// rests, no longer pushed in, until it is observed inside its range again or the governor
@@ -570,6 +584,15 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     fn seed(&mut self) -> Result<Held, GovernorError<C::Error>> {
         let width = self.chain.axes().len();
         self.recent.fill(0.0);
+        // An axis the chain holds no number for is held where the body starts until a
+        // receipt observes it.
+        let observed = self.chain.last_observed();
+        for (index, silent) in self.silent.iter_mut().enumerate() {
+            *silent = !self.unavailable.contains(&index)
+                && observed
+                    .as_ref()
+                    .is_some_and(|observed| observed.get(index).is_none_or(|at| !at.is_finite()));
+        }
         let position = match self.start.take() {
             Some(start) => start,
             None => self
@@ -611,7 +634,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.interval = None;
         self.outside.fill(None);
         self.noted = None;
-        self.missed.fill(0);
+        self.silent.fill(false);
+        self.tripped.fill(None);
         let stop = self.chain.stop();
         make(stop)
     }
@@ -716,6 +740,14 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 speeds.push(0.0);
                 lowers.push(range.lower);
                 uppers.push(range.upper);
+                continue;
+            }
+            if self.silent[index] {
+                // Silent: held at the position last sent, at rest, whatever it is asked.
+                positions.push(*value);
+                speeds.push(0.0);
+                lowers.push(held.lower[index]);
+                uppers.push(held.upper[index]);
                 continue;
             }
             let at = observed
@@ -906,30 +938,6 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         }
     }
 
-    /// Count each available axis' unobserved (`NaN`) commands in a row, restarting at an
-    /// observed one; the first axis past [`MAX_MISSED_IN_A_ROW`], counting nothing then.
-    fn count_missed(&mut self, observed: &[f64]) -> Option<usize> {
-        let past = observed.iter().enumerate().find(|(index, value)| {
-            !self.unavailable.contains(index)
-                && value.is_nan()
-                && self.missed[*index] >= MAX_MISSED_IN_A_ROW
-        });
-        if let Some((index, _)) = past {
-            return Some(index);
-        }
-        for (index, value) in observed.iter().enumerate() {
-            if self.unavailable.contains(&index) {
-                continue;
-            }
-            self.missed[index] = if value.is_nan() {
-                self.missed[index] + 1
-            } else {
-                0
-            };
-        }
-        None
-    }
-
     /// Refuse a vector of the wrong width, or a target that is not a number on an available
     /// axis. Any finite target is taken: each step moves toward it only as far as it is
     /// admissible ([`CommandRange::admissible`]), so one outside its axis's range is brought in
@@ -963,6 +971,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         joints: &[f64],
         feedforward: Option<&[Feedforward]>,
     ) -> Result<Receipt<C::Feedback>, GovernorError<C::Error>> {
+        self.pulled_back = None;
         if self.latched {
             return Err(GovernorError::Latched);
         }
@@ -985,7 +994,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             now.saturating_duration_since(at).min(MAX_STEP_INTERVAL)
         });
         self.rearm_outside(joints, now);
-        let (next, velocity, (lower, upper), brought_in) =
+        let (mut next, mut velocity, (lower, upper), brought_in) =
             self.step(&held, joints, elapsed.as_secs_f64());
         self.brought_in = brought_in;
         self.interval = Some((lower, upper));
@@ -1010,43 +1019,45 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 stop,
             }));
         }
-        if let Some(index) = self.count_missed(&receipt.observed[..width]) {
-            let joint = self.chain.axes()[index].joint.clone();
-            let ticks = self.missed[index] + 1;
-            return Err(self.fault(|stop| GovernorError::Unanswered { joint, ticks, stop }));
-        }
         let fade = (-elapsed.as_secs_f64() / TRACKING_MEMORY.as_secs_f64()).exp();
         for (recent, speed) in self.recent.iter_mut().zip(velocity.iter()) {
             *recent = speed.abs().max(*recent * fade);
         }
         let step = MAX_STEP_INTERVAL.as_secs_f64();
-        let strayed = receipt
-            .observed
-            .iter()
-            .zip(&next)
-            .zip(self.limits.iter().zip(self.chain.axes()).zip(&self.recent))
-            .enumerate()
-            .filter(|(index, ((observed, _), _))| {
-                !(self.unavailable.contains(index) || observed.is_nan())
-            })
-            .map(|(_, ((observed, sent), ((limit, axis), recent)))| {
-                (
+        for index in 0..width {
+            let observed = receipt.observed[index];
+            if self.unavailable.contains(&index) || observed.is_nan() {
+                continue;
+            }
+            let bound = self.limits[index].max_tracking_error
+                + TRACKING_PERIODS * self.recent[index] * step;
+            if within(observed, next[index], bound) {
+                continue;
+            }
+            let again = self.tripped[index]
+                .is_some_and(|at| now.saturating_duration_since(at) < TRACKING_REPEAT);
+            if again {
+                let joint = self.chain.axes()[index].joint.clone();
+                let commanded = next[index];
+                return Err(self.fault(|stop| GovernorError::Tracking {
+                    joint,
+                    commanded,
                     observed,
-                    sent,
-                    axis,
-                    limit.max_tracking_error + TRACKING_PERIODS * recent * step,
-                )
-            })
-            .find(|(observed, sent, _, bound)| !within(**observed, **sent, *bound))
-            .map(|(observed, sent, axis, bound)| (axis.joint.clone(), *sent, *observed, bound));
-        if let Some((joint, commanded, observed, limit)) = strayed {
-            return Err(self.fault(|stop| GovernorError::Tracking {
-                joint,
-                commanded,
-                observed,
-                limit,
-                stop: Box::new(stop),
-            }));
+                    limit: bound,
+                    stop: Box::new(stop),
+                }));
+            }
+            // Pulled back: the next command steps it from where it stands, at rest, pushing
+            // nothing into what stopped it; never past its interval (a joint pushed further out
+            // of its range is not followed out).
+            self.tripped[index] = Some(now);
+            self.pulled_back.get_or_insert(index);
+            next[index] = observed.clamp(lower[index], upper[index]);
+            velocity[index] = 0.0;
+            self.recent[index] = 0.0;
+        }
+        for (index, silent) in self.silent.iter_mut().enumerate() {
+            *silent = !self.unavailable.contains(&index) && receipt.observed[index].is_nan();
         }
         self.note_outside(&receipt.observed[..width], now);
         self.held = Some(Held {
@@ -1113,7 +1124,8 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.interval = None;
         self.outside.fill(None);
         self.noted = None;
-        self.missed.fill(0);
+        self.silent.fill(false);
+        self.tripped.fill(None);
         self.reapproached.fill(0);
         self.chain.stop()
     }
@@ -1161,7 +1173,8 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
 
     fn clear_faults(&mut self) {
         self.latched = false;
-        self.missed.fill(0);
+        self.silent.fill(false);
+        self.tripped.fill(None);
         self.reapproached.fill(0);
         self.held = None;
         self.interval = None;
@@ -1391,6 +1404,16 @@ mod tests {
         left.iter().zip(right).all(|(a, b)| (a - b).abs() < 1e-12)
     }
 
+    impl<K: Clock> Governor<Fake, K> {
+        /// The planned velocity the last command sent axis `index`.
+        fn feedforward_velocity_of_last(&self, index: usize) -> f64 {
+            self.chain()
+                .feedforward
+                .last()
+                .map_or(0.0, |sent| sent[index].velocity)
+        }
+    }
+
     #[test]
     fn rated_limits_are_the_hardwares_at_the_share_asked() {
         let axis = axis("a", 1);
@@ -1410,9 +1433,10 @@ mod tests {
     }
 
     /// REFUTE H2 (10-30): the bound grows with the speed the axis is stepped at, not its cap. A
-    /// joint blocked while moving slowly (a hand, the coffee machine) is stopped by about
-    /// 0.2 rad, however fast the joint could go; at full speed the bound is wide enough for
-    /// the step's lead.
+    /// joint blocked while moving slowly (a hand, the coffee machine) is caught by about
+    /// 0.2 rad, however fast the joint could go: pulled back to where it stands the first time
+    /// (2026-11-03), and stopped when it is pushed past the bound again within
+    /// [`TRACKING_REPEAT`]. At full speed the bound is wide enough for the step's lead.
     #[test]
     fn a_slow_joint_that_is_blocked_trips_at_the_at_rest_bound() {
         let fast = AxisLimits {
@@ -1426,20 +1450,30 @@ mod tests {
         let mut governor =
             Governor::with_clock(chain, vec![fast; 2], clock.clone()).expect("limits");
         governor.command(&[0.0, 0.5]).expect("held");
+        let started = clock.now();
         let mut target = 0.0;
-        let tripped = loop {
+        let mut pulled = None;
+        loop {
             clock.advance(MAX_STEP_INTERVAL);
             target += 0.1 * MAX_STEP_INTERVAL.as_secs_f64();
             match governor.command(&[target, 0.5]) {
-                Ok(_) => assert!(target < 0.3, "never stopped"),
-                Err(GovernorError::Tracking { limit, .. }) => break limit,
+                Ok(_) => {
+                    assert!(target < 0.4, "never stopped");
+                    if pulled.is_none() && governor.pulled_back() == Some(0) {
+                        // Observed at 0: the error it was caught at is what was sent.
+                        pulled = Some(governor.chain().sent.last().expect("sent")[0]);
+                    }
+                }
+                Err(GovernorError::Tracking { .. }) => break,
                 Err(other) => panic!("{other:?}"),
             }
-        };
+        }
+        let pulled = pulled.expect("pulled back before it latched");
         assert!(
-            tripped < 0.21,
-            "a joint creeping at 0.1 rad/s tripped only at {tripped}"
+            pulled < 0.21,
+            "a joint creeping at 0.1 rad/s was caught only at {pulled}"
         );
+        assert!(clock.now().saturating_duration_since(started) < Duration::from_secs(4));
         // Stepping at 10 rad/s, the same axis may lead by three steps of it.
         let mut chain = fake(true);
         chain.pinned = Some((0, 0.0));
@@ -1585,35 +1619,45 @@ mod tests {
         assert!(close(&governor.chain().sent[2], &[0.008, 0.4925]));
     }
 
+    /// Owner 2026-11-03: one missed reading must not end a session. A silent axis is held where
+    /// it was last sent, at rest, for as long as it is silent, whatever it is asked; the other
+    /// axis keeps following; nothing latches; once it answers it is stepped again.
     #[test]
-    fn one_late_answer_is_tolerated_and_two_in_a_row_stop_the_chain() {
+    fn a_silent_axis_is_held_where_it_was_sent_and_follows_again_when_it_answers() {
         let (mut governor, clock) = governed(fake(true));
         governor.command(&[0.0, 0.5]).expect("hold");
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.0, 0.5]).expect("still");
         governor.chain_mut().silent = Some(1);
-        clock.advance(Duration::from_millis(20));
-        governor
-            .command(&[0.0, 0.5])
-            .expect("one late answer is data");
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.9, -0.9]).expect("the miss is data");
+        let held = governor.chain().sent.last().expect("sent")[1];
+        for _ in 0..200 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor
+                .command(&[0.9, -0.9])
+                .expect("a silent axis never latches");
+            let sent = governor.chain().sent.last().expect("sent");
+            assert!(
+                (sent[1] - held).abs() < 1e-12,
+                "the silent axis moved: {sent:?}"
+            );
+            assert!(governor.feedforward_velocity_of_last(1).abs() < 1e-12);
+        }
+        let sent = governor.chain().sent.last().expect("sent").clone();
+        assert!(
+            (sent[0] - 0.9).abs() < 1e-9,
+            "the answering axis follows: {sent:?}"
+        );
+        assert_eq!(governor.chain().stops, 0);
+        assert!(!governor.is_latched());
         governor.chain_mut().silent = None;
-        clock.advance(Duration::from_millis(20));
-        governor
-            .command(&[0.0, 0.5])
-            .expect("answered again: the count restarts");
-        governor.chain_mut().silent = Some(1);
-        clock.advance(Duration::from_millis(20));
-        governor
-            .command(&[0.0, 0.5])
-            .expect("a single late answer again");
-        clock.advance(Duration::from_millis(20));
-        assert!(matches!(
-            governor.command(&[0.0, 0.5]),
-            Err(GovernorError::Unanswered { ref joint, ticks: 2, .. }) if joint == "b"
-        ));
-        assert_eq!(governor.chain().stops, 1);
-        assert!(matches!(
-            governor.command(&[0.0, 0.5]),
-            Err(GovernorError::Latched)
-        ));
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.9, -0.9]).expect("answered");
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.9, -0.9]).expect("stepped again");
+        let sent = governor.chain().sent.last().expect("sent");
+        assert!(sent[1] < held - 1e-6, "it follows again: {sent:?}");
     }
 
     #[test]
@@ -1639,40 +1683,75 @@ mod tests {
         assert!(governor.chain().sent[1][0] <= 0.95 + 1e-12);
     }
 
+    /// Row 10 of the soft-gates plan: a first stray past the bound is pulled back to where the
+    /// joint is observed (no torque into what stopped it) and the body keeps going; the same
+    /// joint straying again within `TRACKING_REPEAT` latches, as before.
     #[test]
-    fn a_body_that_does_not_follow_is_stopped_and_the_fault_latches() {
+    fn a_stray_is_pulled_back_once_and_a_repeat_within_the_window_latches() {
         let mut chain = fake(true);
         chain.lag = 0.3;
-        let (mut governor, _) = governed(chain);
+        let (mut governor, clock) = governed(chain);
+        governor
+            .command(&[0.1, 0.5])
+            .expect("a first stray is pulled back");
+        assert_eq!(governor.pulled_back(), Some(0));
+        assert_eq!(governor.chain().stops, 0);
+        // The next step starts from where "a" was observed (0.005 + 0.3), not from what was sent.
+        clock.advance(MAX_STEP_INTERVAL);
         match governor.command(&[0.1, 0.5]) {
             Err(GovernorError::Tracking { joint, limit, .. }) => {
                 assert_eq!(joint, "a");
-                // 0.2 at rest, widened by three steps at the 0.25 rad/s it was stepped at.
-                assert!((limit - (0.2 + 3.0 * 0.25 * 0.02)).abs() < 1e-12, "{limit}");
+                assert!((0.2..0.3).contains(&limit), "{limit}");
             }
             other => panic!("expected a tracking fault, got {other:?}"),
         }
+        assert!((governor.chain().sent[1][0] - (0.305 - 0.005)).abs() < 1e-9);
         assert_eq!(governor.chain().stops, 1);
         assert!(matches!(
             governor.command(&[0.0, 0.5]),
             Err(GovernorError::Latched)
         ));
-        assert_eq!(governor.chain().sent.len(), 1, "nothing sent while latched");
+        assert_eq!(governor.chain().sent.len(), 2, "nothing sent while latched");
         governor.chain_mut().lag = 0.0;
         governor.clear_faults();
         governor.command(&[0.0, 0.5]).expect("after clearing");
+        assert_eq!(governor.pulled_back(), None);
     }
 
     #[test]
-    fn an_axis_never_observed_stops_on_its_second_command() {
+    fn a_stray_after_the_window_is_pulled_back_again() {
+        let mut chain = fake(true);
+        chain.lag = 0.3;
+        let (mut governor, clock) = governed(chain);
+        governor.command(&[0.1, 0.5]).expect("pulled back");
+        assert_eq!(governor.pulled_back(), Some(0));
+        governor.chain_mut().lag = 0.0;
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.3, 0.5]).expect("tracks");
+        assert_eq!(governor.pulled_back(), None);
+        clock.advance(TRACKING_REPEAT);
+        governor.chain_mut().lag = 0.3;
+        governor
+            .command(&[0.3, 0.5])
+            .expect("past the window: pulled back again, not latched");
+        assert_eq!(governor.pulled_back(), Some(0));
+        assert!(!governor.is_latched());
+        assert_eq!(governor.chain().stops, 0);
+    }
+
+    #[test]
+    fn an_axis_never_observed_is_held_where_it_starts() {
         let mut chain = fake(true);
         chain.lag = f64::NAN;
-        let (mut governor, _) = governed(chain);
-        governor.command(&[0.0, 0.5]).expect("one unobserved tick");
-        assert!(matches!(
-            governor.command(&[0.0, 0.5]),
-            Err(GovernorError::Unanswered { ticks: 2, .. })
-        ));
+        let (mut governor, clock) = governed(chain);
+        governor.command(&[0.9, -0.9]).expect("one unobserved tick");
+        let first = governor.chain().sent[0].clone();
+        for _ in 0..50 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.9, -0.9]).expect("never latched");
+            assert!(close(governor.chain().sent.last().expect("sent"), &first));
+        }
+        assert!(!governor.is_latched());
     }
 
     #[test]
@@ -2003,6 +2082,11 @@ mod tests {
         chain.rest = vec![-2.4, 0.5];
         chain.lag = -0.3;
         let (mut governor, clock) = governed(chain);
+        clock.advance(MAX_STEP_INTERVAL);
+        governor
+            .command(&[0.0, 0.5])
+            .expect("a first stray is pulled back");
+        assert_eq!(governor.pulled_back(), Some(0));
         clock.advance(MAX_STEP_INTERVAL);
         assert!(matches!(
             governor.command(&[0.0, 0.5]),
