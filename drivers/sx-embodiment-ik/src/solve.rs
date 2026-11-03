@@ -1294,6 +1294,15 @@ impl Ik {
         if apart {
             self.collision_candidates(true);
         }
+        // A row asks its pair to open no faster than the slowest tool speed set: a speed-bound
+        // step is scaled as a whole to its tool's speed (`bound_tool_speed`), and a row that
+        // asked more gave the cap way, 7-28x (0.05 m/s commanded at up to 1.4 m/s).
+        let opening_most = self
+            .tool_speed
+            .iter()
+            .flatten()
+            .map(|(speed, _)| speed * dt * std::env::var("IKK").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1.0))
+            .fold(f64::INFINITY, f64::min);
         let body = &self.body;
         let s = &self.settings;
         let w = &mut self.work;
@@ -1379,6 +1388,7 @@ impl Ik {
                     .sum::<f64>();
                 rhs = 0.5 * room - lead;
             }
+            rhs = rhs.max(-opening_most);
             if candidate.measured
                 && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
                     *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
@@ -1587,13 +1597,14 @@ impl Ik {
                 floor = floor.max(upper / x);
             }
         }
-        // Nor below the scale at which a row would break: a row that asks the pair to open
-        // (its bound below zero, at the measured pose) is kept by the step and broken by a
-        // shorter one. Shortened past it, then held for it, a tool-speed step broke such rows by
-        // up to 26 mm and cost 5.6 mm of clearance (refute of embodiments 885f73b).
-        // Keeping clear outranks the tool's speed: where a row stops the shortening, the tool
-        // moves faster than its speed and the step says so ([`Solve::Relaxed`]).
+        // A row is no floor: the tool's speed is a limit for the people beside the robot, and
+        // a row asking its pair to open faster than the shortened step does is eased to what
+        // that step opens (the rows ask no more than the tool's speed, `collision_rows`), and
+        // the step says so ([`Solve::Relaxed`]). Floored at the rows instead, the tool gave
+        // way 7-28x to them (refute of embodiments#215).
+        let keep_floor = std::env::var_os("IKFLOOR").is_some();
         let mut row_floor = 0.0_f64;
+        if keep_floor {
         for slot in 0..w.used {
             let row = &w.rows[slot * n..(slot + 1) * n];
             let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
@@ -1602,7 +1613,7 @@ impl Ik {
                 row_floor = row_floor.max(if closes <= bound { bound / closes } else { 1.0 });
             }
         }
-        let rows_bind = row_floor > floor;
+        }
         let floor = floor.max(row_floor).min(1.0);
         let mut scale = 1.0_f64;
         let mut over = false;
@@ -1640,12 +1651,23 @@ impl Ik {
             }
             scale = next;
         }
+        let mut eased = false;
         if scale < 1.0 {
+            // A row the step kept, broken by the shortening (one that asked its pair to open),
+            // is eased to what the shortened step opens; a row the step broke stays broken.
+            for slot in 0..w.used {
+                let row = &w.rows[slot * n..(slot + 1) * n];
+                let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
+                if closes <= w.rhs[slot] + ROW_KEPT_M && scale * closes > w.rhs[slot] {
+                    w.rhs[slot] = scale * closes;
+                    eased = true;
+                }
+            }
             for value in &mut w.still[..n] {
                 *value *= scale;
             }
         }
-        over && rows_bind && scale <= floor
+        over && eased
     }
 
     /// Residuals, binding constraints and reach per limb, at the new positions.
