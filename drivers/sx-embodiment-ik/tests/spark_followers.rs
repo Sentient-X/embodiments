@@ -765,6 +765,16 @@ fn table_tool_speed() {
                         ..SPARK_MOTOR
                     },
                     Motor {
+                        zeta: Some(0.5),
+                        ..SPARK_MOTOR
+                    },
+                    Motor {
+                        noise: READING_JITTER,
+                        sag: 1.0,
+                        zeta: Some(0.5),
+                        ..SPARK_MOTOR
+                    },
+                    Motor {
                         generic: Some((9.5, 0.1, false)),
                         delay: 0.0,
                         feedforward: false,
