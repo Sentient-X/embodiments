@@ -469,15 +469,23 @@ pub(crate) enum Wait {
     /// stale reading, not a failure, so the tick is not held for the link's worst case (the
     /// ZLG adapter's allowance is 42 ms; the wait before 2026-10-26 was 62 ms).
     Tick,
+    /// A read of out-of-service motors beside a commanded chain ([`crate::observe`]): the
+    /// bus's time plus [`SENSE_MARGIN`], so a silent one holds a control tick a few
+    /// milliseconds at most; a later answer is a stale reading, read again after a back-off.
+    Sense,
 }
+
+/// What a read of out-of-service motors waits beyond the bus's time: the host's p99 round trip
+/// measured on the static upper body (3.7 ms, 2026-10-26) and some.
+pub(crate) const SENSE_MARGIN: Duration = Duration::from_millis(6);
 
 impl Wait {
     fn after_last_frame(self, requests: usize, allowance: Duration) -> Duration {
+        let bus = FRAME_TIME * u32::try_from(2 * requests).unwrap_or(u32::MAX);
         match self {
             Self::Link(wait) => wait + allowance,
-            Self::Tick => {
-                FRAME_TIME * u32::try_from(2 * requests).unwrap_or(u32::MAX) + HOST_MARGIN
-            }
+            Self::Tick => bus + HOST_MARGIN,
+            Self::Sense => bus + SENSE_MARGIN,
         }
     }
 }

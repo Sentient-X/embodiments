@@ -1139,6 +1139,10 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.unavailable.clone()
     }
 
+    fn read_only_disables(&self) -> Vec<u16> {
+        self.chain.read_only_disables()
+    }
+
     fn derated(&self) -> Vec<AxisDerate> {
         self.derated.clone()
     }

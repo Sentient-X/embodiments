@@ -12,16 +12,22 @@
 //! [`ReadOnly`] set reads the unavailable axes ([`Masked::reading`]): a motor that answers is
 //! read [`AxisReading::Fresh`], so forward kinematics through it (the static upper body's head
 //! camera and both tools hang off its torso) places what it carries; one that does not reads
-//! [`MissingReason::OutOfService`], never an error. The split is in the types: the commanded
-//! axes are `inner`, an [`ActuatorChain`]; the read-only ones are a boxed [`Observe`], whose
-//! whole surface is its axes and a read, and nothing on a command, stop or fault path here
-//! touches it. Each vendor's observer also speaks through a port that refuses every frame but
-//! a read, so a command cannot reach a read-only actuator even by its bytes.
+//! [`MissingReason::OutOfService`], never an error. An out-of-service actuator may be faulty,
+//! so a fresh reading is taken only when plausible (inside its axis's bounds, no faster than
+//! its rated speed from the last one taken, its scale its model's own); one that is not reads
+//! [`MissingReason::Unavailable`]. The split is in the types: the commanded axes are `inner`,
+//! an [`ActuatorChain`]; the read-only ones are a boxed [`Observe`], whose whole surface is its
+//! axes and a read, and nothing on a command, stop or fault path here touches it. Each
+//! vendor's observer speaks through a port that refuses every frame but a read and, for a
+//! Damiao motor out of service, its disable (sent once at open and whenever it answers
+//! enabled: a status refresh may feed the watchdog of a motor some crashed run left enabled),
+//! so no command reaches a read-only actuator even by its bytes.
 //!
-//! A read costs the bus one request per read-only actuator and waits for its answer, so on the
-//! command path it is taken at most every [`SENSE_PERIOD`]; after a read that missed it waits
-//! out a back-off ([`SENSE_RETRY`], doubling to [`SENSE_RETRY_MAX`]) before asking again, so a
-//! dead motor costs a control loop one answer wait now and then, not every tick.
+//! A read costs the bus one request per read-only actuator and waits for its answer (a Damiao
+//! one at most its bus time and 6 ms), so on the command path it is taken at most every
+//! [`SENSE_PERIOD`]; after a read that missed it waits out a back-off ([`SENSE_RETRY`],
+//! doubling to [`SENSE_RETRY_MAX`]) before asking again, so a dead motor costs a control loop
+//! one short answer wait now and then, not every tick.
 
 use std::time::{Duration, Instant};
 
@@ -72,12 +78,23 @@ pub struct ReadOnly {
     asked: Option<Instant>,
     /// How long after a read that missed it is asked again.
     retry: Duration,
+    /// How many of its actuators answered the last read, plausibly or not: what the back-off
+    /// goes by, since an implausible answer came as quickly as a good one.
+    heard: usize,
+    /// Per observer axis, the last reading taken as where it is, and the last one refused
+    /// as a jump it could not make ([`ReadOnly::plausible`]).
+    trusted: Vec<Option<(f64, Instant)>>,
+    doubted: Vec<Option<f64>>,
 }
 
+/// How far past its declared bounds, or past where its speed could take it, an out-of-service
+/// reading may lie and still be taken: two readings' noise.
+const PLAUSIBLE_SLACK: f64 = 2.0 * crate::chain::READ_NOISE_RAD;
+
 impl ReadOnly {
-    /// Whether every read-only axis answered the last read.
+    /// Whether every read-only actuator answered the last read.
     fn answered(&self) -> bool {
-        !self.last.is_empty() && self.last.iter().all(AxisReading::is_fresh)
+        self.asked.is_some() && self.heard == self.at.len()
     }
 
     /// Read the observer when it is due: at `period` after the last read while every axis
@@ -93,22 +110,70 @@ impl ReadOnly {
         {
             return;
         }
-        let missed_before = self.asked.is_some() && !self.last.iter().any(AxisReading::is_fresh);
+        let missed_before = self.asked.is_some() && self.heard == 0;
         let readings = self.observer.read_positions();
         self.asked = Some(Instant::now());
         let whole = readings.len() == self.at.len();
+        self.heard = if whole {
+            readings.iter().filter(|reading| reading.is_fresh()).count()
+        } else {
+            0
+        };
         self.last.clear();
         for index in 0..self.at.len() {
-            self.last.push(match readings.get(index) {
-                Some(reading) if whole && reading.is_fresh() => *reading,
+            let reading = match readings.get(index) {
+                Some(reading) if whole => self.plausible(index, *reading),
                 _ => AxisReading::Missing(MissingReason::OutOfService),
-            });
+            };
+            self.last.push(reading);
         }
-        self.retry = if self.last.iter().any(AxisReading::is_fresh) || !missed_before {
+        self.retry = if self.heard > 0 || !missed_before {
             SENSE_RETRY
         } else {
             (self.retry * 2).min(SENSE_RETRY_MAX)
         };
+    }
+
+    /// `reading` of observer axis `index`, as it may reach forward kinematics and a solve. An
+    /// out-of-service actuator may be faulty, so a fresh reading is taken only when it is
+    /// plausible: inside its axis's declared bounds, and no further from the last one taken
+    /// than its rated speed could carry it since (or confirming the last one refused, which
+    /// was then a real move). An implausible reading, or one whose scale the observer refused
+    /// ([`MissingReason::Corrupt`]), is [`MissingReason::Unavailable`]; one that did not
+    /// answer is out of service.
+    fn plausible(&mut self, index: usize, reading: AxisReading) -> AxisReading {
+        let unavailable = AxisReading::Missing(MissingReason::Unavailable);
+        let AxisReading::Fresh { position, received } = reading else {
+            return if reading == AxisReading::Missing(MissingReason::Corrupt) {
+                unavailable
+            } else {
+                AxisReading::Missing(MissingReason::OutOfService)
+            };
+        };
+        let axis = &self.observer.axes()[index];
+        if !position.is_finite()
+            || position < axis.lower - PLAUSIBLE_SLACK
+            || position > axis.upper + PLAUSIBLE_SLACK
+        {
+            return unavailable;
+        }
+        let reach = |since: Instant| {
+            axis.motion.speed * received.saturating_duration_since(since).as_secs_f64()
+                + PLAUSIBLE_SLACK
+        };
+        let taken = match self.trusted[index] {
+            None => true,
+            Some((at, since)) => (position - at).abs() <= reach(since),
+        } || self.doubted[index]
+            .is_some_and(|doubted| (position - doubted).abs() <= PLAUSIBLE_SLACK);
+        if taken {
+            self.trusted[index] = Some((position, received));
+            self.doubted[index] = None;
+            reading
+        } else {
+            self.doubted[index] = Some(position);
+            unavailable
+        }
     }
 
     /// The last read at each read-only axis, over `whole`.
@@ -185,20 +250,6 @@ impl<C, F> Masked<C, F> {
     /// This chain with `observer` reading its unavailable axes ([`ReadOnly`]): its axes must be
     /// the unavailable ones, in order. It is only read, never commanded.
     ///
-    /// The read-only set is an [`Observe`], so a chain, which can command, is refused by the
-    /// types rather than by a check:
-    ///
-    /// ```compile_fail
-    /// use sx_embodiment_drivers::{ActuatorChain, BoundAxis, Masked};
-    /// fn read_through<C>(masked: Masked<C, C::Feedback>, commanding: C) -> Masked<C, C::Feedback>
-    /// where
-    ///     C: ActuatorChain + Send + 'static,
-    /// {
-    ///     // An ActuatorChain is not an Observe: this does not compile.
-    ///     masked.reading(Box::new(commanding)).unwrap()
-    /// }
-    /// ```
-    ///
     /// # Errors
     ///
     /// [`TargetError::Width`] when `observer`'s axes are not this chain's unavailable axes.
@@ -219,12 +270,16 @@ impl<C, F> Masked<C, F> {
                 actual: read.len(),
             });
         }
+        let count = self.unavailable.len();
         self.read_only = Some(ReadOnly {
             observer,
             at: self.unavailable.clone(),
             last: Axes::new(),
             asked: None,
             retry: SENSE_RETRY,
+            heard: 0,
+            trusted: vec![None; count],
+            doubted: vec![None; count],
         });
         Ok(self)
     }
@@ -332,6 +387,10 @@ impl<O: Observe + ?Sized> Observe for Box<O> {
         (**self).axes()
     }
 
+    fn sent_disables(&self) -> Vec<u16> {
+        (**self).sent_disables()
+    }
+
     fn read_positions(&mut self) -> Axes<AxisReading> {
         (**self).read_positions()
     }
@@ -392,8 +451,8 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
         self.spread_readings(&readings)
     }
 
-    /// `inner`'s stop alone: a read-only actuator was never enabled here, so it is sent
-    /// nothing, not even a disable.
+    /// `inner`'s stop alone: a read-only actuator was never enabled here; its observer
+    /// disabled it at open and disables it whenever it answers enabled.
     fn stop(&mut self) -> StopReport {
         self.inner.stop()
     }
@@ -414,6 +473,14 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
 
     fn unavailable(&self) -> Vec<usize> {
         self.unavailable.clone()
+    }
+
+    /// The disables the read-only observer sent its out-of-service actuators.
+    fn read_only_disables(&self) -> Vec<u16> {
+        self.read_only
+            .as_ref()
+            .map(|read_only| read_only.observer.sent_disables())
+            .unwrap_or_default()
     }
 
     /// `inner`'s, placed in the full vector.
@@ -795,5 +862,93 @@ mod tests {
         let masked =
             Masked::new(commanded, vec![axis("arm", 1), axis("torso", 2)], &[1]).expect("masked");
         assert!(masked.reading(Box::new(sensor)).is_err());
+    }
+
+    /// Readings handed out in order, each `received` `gap` after the one before.
+    struct Scripted {
+        axes: Vec<BoundAxis>,
+        script: std::collections::VecDeque<Option<f64>>,
+        corrupt: bool,
+        clock: Instant,
+        gap: Duration,
+    }
+
+    impl Observe for Scripted {
+        fn axes(&self) -> &[BoundAxis] {
+            &self.axes
+        }
+
+        fn read_positions(&mut self) -> Axes<AxisReading> {
+            self.clock += self.gap;
+            let reading = if self.corrupt {
+                AxisReading::Missing(MissingReason::Corrupt)
+            } else {
+                match self.script.pop_front().flatten() {
+                    Some(position) => AxisReading::Fresh {
+                        position,
+                        received: self.clock,
+                    },
+                    None => AxisReading::Missing(MissingReason::Timeout),
+                }
+            };
+            Axes::filled(reading, 1)
+        }
+    }
+
+    fn scripted(script: &[Option<f64>], corrupt: bool) -> Masked<Commanded, ()> {
+        let commanded = Commanded {
+            axes: vec![axis("arm", 1)],
+            ranges: vec![CommandRange {
+                lower: -1.0,
+                upper: 1.0,
+            }],
+            at: 0.0,
+        };
+        // The torso turns at most 1 rad/s ([`axis`]); a read every 100 ms.
+        let sensor = Scripted {
+            axes: vec![axis("torso", 2)],
+            script: script.iter().copied().collect(),
+            corrupt,
+            clock: Instant::now(),
+            gap: Duration::from_millis(100),
+        };
+        Masked::new(commanded, vec![axis("arm", 1), axis("torso", 2)], &[1])
+            .expect("masked")
+            .reading(Box::new(sensor))
+            .expect("read")
+    }
+
+    #[test]
+    fn an_implausible_read_only_reading_is_unavailable_never_fresh() {
+        let unavailable = AxisReading::Missing(MissingReason::Unavailable);
+        // Outside the axis's bounds (-1..1): a faulty encoder or a wrong scale.
+        let mut masked = scripted(&[Some(0.2), Some(1.5), Some(-3.0), Some(0.21)], false);
+        let mut read = || masked.read_positions()[1];
+        assert_eq!(read().position(), Some(0.2));
+        assert_eq!(read(), unavailable);
+        assert_eq!(read(), unavailable);
+        assert_eq!(read().position(), Some(0.21));
+        // A jump no faster than 1 rad/s could make in 100 ms is refused; one the next reading
+        // confirms was a real move (a person turned it), and is taken.
+        let mut masked = scripted(
+            &[Some(0.0), Some(0.05), Some(0.6), Some(0.6), Some(0.62)],
+            false,
+        );
+        let mut read = || masked.read_positions()[1];
+        assert_eq!(read().position(), Some(0.0));
+        assert_eq!(read().position(), Some(0.05));
+        assert_eq!(read(), unavailable, "0.55 rad in 100 ms");
+        assert_eq!(read().position(), Some(0.6), "confirmed");
+        assert_eq!(read().position(), Some(0.62));
+        // A glitch that comes back is refused alone.
+        let mut masked = scripted(&[Some(0.1), Some(0.9), Some(0.1)], false);
+        let mut read = || masked.read_positions()[1];
+        assert_eq!(read().position(), Some(0.1));
+        assert_eq!(read(), unavailable);
+        assert_eq!(read().position(), Some(0.1));
+        // A reading whose scale the observer refused (another model's limit row).
+        let mut masked = scripted(&[], true);
+        assert_eq!(masked.read_positions()[1], unavailable);
+        assert!(masked.last_observed().expect("observed")[1].is_nan());
     }
 }
