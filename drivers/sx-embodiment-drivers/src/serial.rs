@@ -6,6 +6,7 @@
 //! `setPacketTimeout`, `isPacketTimeout`), so a driver keeps its vendor's read loop unchanged.
 
 use std::io;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 /// A link to one serial bus.
@@ -97,6 +98,59 @@ impl<P: SerialPort + ?Sized> SerialPort for Box<P> {
 
     fn is_packet_timeout(&mut self) -> bool {
         (**self).is_packet_timeout()
+    }
+}
+
+/// One serial link shared by two drivers that take turns on it: a body's chain of commanded
+/// servos and the observer of its out-of-service ones on the same bus ([`crate::Masked::reading`]).
+/// Each call takes the link alone, and the two are only ever called one after the other (an
+/// exchange starts with [`SerialPort::clear_port`]), so neither sees the other's answers.
+pub struct SharedSerialPort<P>(Arc<Mutex<P>>);
+
+impl<P> SharedSerialPort<P> {
+    #[must_use]
+    pub fn new(port: P) -> Self {
+        Self(Arc::new(Mutex::new(port)))
+    }
+
+    /// The link; a driver that panicked holding it left nothing half-written that matters to
+    /// a read, so a poisoned lock is taken as it stands.
+    fn link(&self) -> MutexGuard<'_, P> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl<P> Clone for SharedSerialPort<P> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<P: SerialPort> SerialPort for SharedSerialPort<P> {
+    fn clear_port(&mut self) -> io::Result<()> {
+        self.link().clear_port()
+    }
+
+    fn write_port(&mut self, packet: &[u8]) -> io::Result<usize> {
+        self.link().write_port(packet)
+    }
+
+    fn read_port(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.link().read_port(buffer)
+    }
+
+    fn timeout(&self) -> Duration {
+        self.link().timeout()
+    }
+
+    fn set_packet_timeout(&mut self, packet_length: usize) {
+        self.link().set_packet_timeout(packet_length);
+    }
+
+    fn is_packet_timeout(&mut self) -> bool {
+        self.link().is_packet_timeout()
     }
 }
 
