@@ -76,10 +76,12 @@ pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
 /// Why. The commissioned shoulders follow at zeta 0.10-0.12 and the torso at 0.063 (their gains
 /// over the registry inertia; a step on act-sim's motor model reads them back within 1 % in
 /// omega and 7 % in zeta, `sx-embodiment-commission` `tests/damped_gains.rs`). They ring. With
-/// the Spark's 26-63 ms transport delay and the caps the station applies, main's solve brought
+/// the Spark's 26-63 ms transport delay and the caps the station applies, the solve before its
+/// paced approach (embodiments#219) brought
 /// the left elbow 4.5 mm inside its 10 mm margin at 90 Hz, and a part 0.49 mm into a keep-out
 /// box at 50 Hz (embodiments `tests/spark_followers.rs` `table_gains`, 2026-11-03). With these
-/// gains: 7.98 / 7.94 mm at 90 / 50 Hz, no part inside a box over the 0.8-1.25x inertia band.
+/// gains: 7.98 / 7.94 mm at 90 / 50 Hz, no part inside a box over the 0.8-1.25x inertia band
+/// (with the paced approach, 8.93 / 8.80 mm, commissioned 5.55 / 6.98 at 0.2 s).
 /// The desk path tracks at 17.6 mm rms (commissioned 13.8), and act-sim passes as it does today.
 /// They do not bring a tool speed within its cap (the command 19-24x, the real tool 15-18x at
 /// 0.05 m/s): that overspeed is the rows'.
