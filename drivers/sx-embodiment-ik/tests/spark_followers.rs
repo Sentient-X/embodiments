@@ -37,57 +37,62 @@ use sx_embodiment_ik::{
 
 const SUBSTEPS: usize = 20;
 
-/// Each Damiao joint: (omega rad/s, zeta) of its MIT gains over the registry's inertia at the
-/// joint (rotor through the reduction squared included), and the planned-velocity cap
-/// `MAX_COAST kp / kd` (rad/s). Printed by embodiments `ik/follower-model`'s
-/// `every_damiao_joint_has_a_follower_the_solve_can_plan_on`, 2026-11-03.
-const SPARK: [(&str, f64, f64, f64); 15] = [
-    ("torso_joint", 5.03, 0.063, 0.1 * 40.0 / 1.0),
-    (
-        "left_shoulder_pitch_joint",
-        12.11,
-        0.108,
-        0.1 * 60.984 / 1.091,
-    ),
-    (
-        "left_shoulder_roll_joint",
-        11.61,
-        0.104,
-        0.1 * 60.984 / 1.091,
-    ),
-    ("left_upper_arm_yaw_joint", 12.39, 1.291, 0.1 * 24.0 / 5.0),
-    ("left_elbow_pitch_joint", 13.99, 1.068, 0.1 * 30.492 / 4.655),
-    ("left_forearm_yaw_joint", 24.12, 1.973, 0.1 * 29.04 / 4.75),
-    ("left_wrist_pitch_joint", 32.17, 0.804, 0.1 * 20.0 / 1.0),
-    ("left_wrist_roll_joint", 86.26, 2.156, 0.1 * 20.0 / 1.0),
-    (
-        "right_shoulder_pitch_joint",
-        12.31,
-        0.110,
-        0.1 * 60.984 / 1.091,
-    ),
-    ("right_shoulder_roll_joint", 9.93, 0.116, 0.1 * 42.0 / 0.98),
-    (
-        "right_upper_arm_yaw_joint",
-        13.98,
-        1.067,
-        0.1 * 30.492 / 4.655,
-    ),
-    (
-        "right_elbow_pitch_joint",
-        13.99,
-        1.068,
-        0.1 * 30.492 / 4.655,
-    ),
-    (
-        "right_forearm_yaw_joint",
-        24.73,
-        1.888,
-        0.1 * 30.492 / 4.655,
-    ),
-    ("right_wrist_pitch_joint", 32.17, 0.804, 0.1 * 20.0 / 1.0),
-    ("right_wrist_roll_joint", 86.42, 2.161, 0.1 * 20.0 / 1.0),
+/// Each Damiao joint: its commissioned MIT gains (kp N m/rad, kd N m s/rad), the inertia its
+/// bindings carry at the joint (kg m^2, the rotor through the reduction squared included; `kp /
+/// omega^2` of embodiments `ik/follower-model`'s followers table, 2026-11-03) and its motor's peak
+/// torque (N m, `vocabulary.json` ratings).
+const SPARK: [(&str, f64, f64, f64, f64); 15] = [
+    ("torso_joint", 40.0, 1.0, 1.58097, 40.0),
+    ("left_shoulder_pitch_joint", 60.984, 1.091, 0.41584, 40.0),
+    ("left_shoulder_roll_joint", 60.984, 1.091, 0.45243, 40.0),
+    ("left_upper_arm_yaw_joint", 24.0, 5.0, 0.15634, 27.0),
+    ("left_elbow_pitch_joint", 30.492, 4.655, 0.15579, 27.0),
+    ("left_forearm_yaw_joint", 29.04, 4.75, 0.04992, 27.0),
+    ("left_wrist_pitch_joint", 20.0, 1.0, 0.01933, 7.0),
+    ("left_wrist_roll_joint", 20.0, 1.0, 0.00269, 7.0),
+    ("right_shoulder_pitch_joint", 60.984, 1.091, 0.40244, 40.0),
+    ("right_shoulder_roll_joint", 42.0, 0.98, 0.42594, 40.0),
+    ("right_upper_arm_yaw_joint", 30.492, 4.655, 0.15602, 27.0),
+    ("right_elbow_pitch_joint", 30.492, 4.655, 0.15579, 27.0),
+    ("right_forearm_yaw_joint", 30.492, 4.655, 0.04986, 27.0),
+    ("right_wrist_pitch_joint", 20.0, 1.0, 0.01933, 7.0),
+    ("right_wrist_roll_joint", 20.0, 1.0, 0.00268, 7.0),
 ];
+
+/// The MIT frame's damping range: kd at most this (`dm_can.rs`, 12 bits over 0..5).
+const KD_MAX: f64 = 5.0;
+
+/// A joint's gains retuned toward damping ratio `zeta` (never less damped than commissioned):
+/// kd raised to reach it, at most [`KD_MAX`]; where that is not enough, kp lowered until it is.
+fn retuned(kp: f64, kd: f64, inertia: f64, zeta: Option<f64>) -> (f64, f64) {
+    let Some(zeta) = zeta else {
+        return (kp, kd);
+    };
+    let want = 2.0 * zeta * (kp * inertia).sqrt();
+    if want <= kd {
+        return (kp, kd);
+    }
+    if want <= KD_MAX {
+        return (kp, want);
+    }
+    let kp = (KD_MAX / (2.0 * zeta)).powi(2) / inertia;
+    (kp, KD_MAX)
+}
+
+/// The gains of `name` on `m` as the station drives it: `(kp, kd, inertia, peak)`.
+fn gains(m: &Motor, name: &str) -> Option<(f64, f64, f64, f64)> {
+    SPARK
+        .iter()
+        .find(|(n, ..)| *n == name)
+        .map(|&(_, kp, kd, j, peak)| {
+            let (kp, kd) = if name == "torso_joint" || name.contains("shoulder") {
+                retuned(kp, kd, j, m.zeta)
+            } else {
+                (kp, kd)
+            };
+            (kp, kd, j, peak)
+        })
+}
 
 /// The simulated robot.
 #[derive(Clone, Copy, Debug)]
@@ -104,6 +109,8 @@ struct Motor {
     sag: f64,
     /// Each reading off by up to this, radians.
     noise: f64,
+    /// The torso's and shoulders' gains retuned toward this damping ratio ([`retuned`]).
+    zeta: Option<f64>,
 }
 
 const SPARK_MOTOR: Motor = Motor {
@@ -113,6 +120,7 @@ const SPARK_MOTOR: Motor = Motor {
     feedforward: true,
     sag: 0.0,
     noise: 0.0,
+    zeta: None,
 };
 
 /// act-sim's left arm at the end of a 0.23 m move (2026-11-03).
@@ -144,12 +152,12 @@ fn follower(m: &Motor, name: &str) -> (f64, f64, f64) {
         };
         return (w, z, f64::INFINITY);
     }
-    SPARK
-        .iter()
-        .find(|(n, ..)| *n == name)
-        .map_or((30.0, 0.7, f64::INFINITY), |&(_, w, z, cap)| {
-            (w * m.scale, z, cap)
-        })
+    gains(m, name).map_or((30.0, 0.7, f64::INFINITY), |(kp, kd, j, _)| {
+        // The real joint's inertia off the registry's by the scale's square.
+        let j = j / (m.scale * m.scale);
+        let omega = (kp / j).sqrt();
+        (omega, kd / (2.0 * (kp * j).sqrt()), 0.1 * kp / kd)
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -168,6 +176,8 @@ enum Scene {
     Cross { sweep: bool },
     /// The left hand swept across the chest to the right and back, 1.5 s each way.
     Chest,
+    /// The desk operator's hand path (`follow_lag.rs`), followed for 8 s.
+    Desk,
 }
 
 #[derive(Debug, Default)]
@@ -186,6 +196,11 @@ struct Out {
     tool_solve: Option<Solve>,
     /// The fastest the real tool point moved over a tick, as a multiple of its speed.
     real_x: f64,
+    /// After the first second, the real tool point's rms and peak distance from its target,
+    /// metres; over the last second, the commanded tool point's spread (a cycle), metres.
+    rms: f64,
+    peak: f64,
+    spread: f64,
     held: usize,
     relaxed: usize,
 }
@@ -267,10 +282,22 @@ fn pose_at(teleop: &Teleop, q: &[f64], name: &str) -> Pose {
     }
 }
 
-fn base(obstacles: Vec<[f64; 6]>) -> (Teleop, Vec<f64>) {
+fn base(obstacles: Vec<[f64; 6]>, m: &Motor) -> (Teleop, Vec<f64>) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     config.obstacles = obstacles;
+    // The station's caps: each Damiao joint's held to its gains' tracking ceilings
+    // (`DamiaoChain::tracking_ceilings`), on the registry's inertia.
+    for (name, speed) in &mut config.speed {
+        if let Some((kp, kd, j, peak)) = gains(m, name) {
+            *speed = speed
+                .min(0.2 * kp / kd)
+                .min(0.1 * (kp / j).sqrt())
+                .min((0.2 * peak / j).sqrt());
+            let accel = config.accel.entry(name.clone()).or_insert(f64::INFINITY);
+            *accel = accel.min(0.1 * kp / j);
+        }
+    }
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
     let mut teleop =
@@ -286,7 +313,7 @@ fn base(obstacles: Vec<[f64; 6]>) -> (Teleop, Vec<f64>) {
 }
 
 fn counter(clear: f64) -> Vec<[f64; 6]> {
-    let (teleop, rest) = base(Vec::new());
+    let (teleop, rest) = base(Vec::new(), &SPARK_MOTOR);
     let t = pose_at(&teleop, &rest, "left_gripper_tcp").translation_m;
     let at = |below: f64| {
         vec![[
@@ -300,7 +327,7 @@ fn counter(clear: f64) -> Vec<[f64; 6]> {
     };
     let mut below = 0.0;
     loop {
-        let (probe, _) = base(at(below));
+        let (probe, _) = base(at(below), &SPARK_MOTOR);
         let mut frames = probe.model().poses(&rest);
         if probe.ik().clearance_into(&rest, &mut frames).scene_m >= clear {
             return at(below);
@@ -313,7 +340,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
     let obstacles = match scene {
         Scene::Counter { .. } => counter(0.03),
         Scene::Box { .. } => {
-            let (probe, rest) = base(Vec::new());
+            let (probe, rest) = base(Vec::new(), &SPARK_MOTOR);
             let f = probe.model().poses(&rest).links[link(&probe, "left_forearm_yaw_link")].t;
             vec![[
                 f[0] - 0.06,
@@ -326,7 +353,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
         }
         _ => Vec::new(),
     };
-    let (mut teleop, rest) = base(obstacles.clone());
+    let (mut teleop, rest) = base(obstacles.clone(), &m);
     let pieces = pieces(&teleop);
     let names: Vec<String> = teleop
         .model()
@@ -353,7 +380,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
     let left0 = pose_at(&teleop, &rest, "left_gripper_tcp");
     let right0 = pose_at(&teleop, &rest, "right_gripper_tcp");
     let seconds = match scene {
-        Scene::Counter { .. } => 8.0,
+        Scene::Counter { .. } | Scene::Desk => 8.0,
         _ => 5.5,
     };
     let ticks = (seconds / dt) as usize;
@@ -380,9 +407,10 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
     ];
     let turn = match scene {
         Scene::Reach { .. } | Scene::Box { .. } | Scene::Cross { .. } | Scene::Chest => 1.5,
-        Scene::Counter { .. } => 0.0,
+        Scene::Counter { .. } | Scene::Desk => 0.0,
     };
     let mut was_stalled = vec![false; width];
+    let (mut errors, mut commanded) = (Vec::new(), Vec::new());
     teleop.reset();
     for tick in 0..ticks {
         let t = tick as f64 * dt;
@@ -427,7 +455,16 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
                 let k = (since / 1.5).min(2.0);
                 toward_right(if k <= 1.0 { k } else { 2.0 - k })
             }
+            Scene::Desk => {
+                use std::f64::consts::TAU;
+                at([
+                    0.0,
+                    0.05 * (TAU * 0.5 * t).sin(),
+                    0.03 * (TAU * 0.25 * t).sin(),
+                ])
+            }
         });
+        let goal = targets.tcp[0].expect("a goal").translation_m;
         if matches!(scene, Scene::Reach { .. }) && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: pose_at(&teleop, &real, "left_gripper_tcp").translation_m,
@@ -501,6 +538,17 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
                 out.real_x = out.real_x.max(d / dt / speed);
             }
         }
+        if t >= 1.0 {
+            let at = pose_at(&teleop, &real, "left_gripper_tcp").translation_m;
+            let e = (0..3)
+                .map(|k| (at[k] - goal[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            errors.push(e);
+        }
+        if t >= seconds - 1.0 {
+            commanded.push(pose_at(&teleop, &reference, "left_gripper_tcp").translation_m);
+        }
         if t >= turn {
             let (c, a, b) = teleop.ik().clearance(&real);
             if c < out.clear {
@@ -520,14 +568,27 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
             }
         }
     }
+    out.rms = (errors.iter().map(|e| e * e).sum::<f64>() / errors.len().max(1) as f64).sqrt();
+    out.peak = errors.iter().copied().fold(0.0, f64::max);
+    out.spread = (0..3)
+        .map(|k| {
+            let (lo, hi) = commanded
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| {
+                    (l.min(p[k]), h.max(p[k]))
+                });
+            hi - lo
+        })
+        .fold(0.0, f64::max);
     out
 }
 
 fn line(scene: Scene, m: &Motor, dt: f64, tool: Option<f64>, o: &Out) -> String {
     format!(
-        "{scene:?} dt {dt} scale {} generic {:?} delay {} ff {} sag {} noise {} tool {tool:?}: \
-         clear {:.2} mm ({}), real {:.2} mm, tool x{:.2} at {:.2} s {:?}, real x{:.2}, held {} relaxed {}",
+        "{scene:?} dt {dt} scale {} zeta {:?} generic {:?} delay {} ff {} sag {} noise {} tool {tool:?}: \
+         clear {:.2} mm ({}), real {:.2} mm, tool x{:.2} at {:.2} s {:?}, real x{:.2}, held {} relaxed {}, rms {:.1} peak {:.1} spread {:.1} mm",
         m.scale,
+        m.zeta,
         m.generic,
         m.delay,
         m.feedforward,
@@ -541,7 +602,10 @@ fn line(scene: Scene, m: &Motor, dt: f64, tool: Option<f64>, o: &Out) -> String 
         o.tool_solve,
         o.real_x,
         o.held,
-        o.relaxed
+        o.relaxed,
+        o.rms * 1e3,
+        o.peak * 1e3,
+        o.spread * 1e3
     )
 }
 
@@ -715,6 +779,42 @@ fn table_tool_speed() {
                     },
                 ] {
                     cases.push((scene, m, dt, Some(tool)));
+                }
+            }
+        }
+    }
+    worst(&table(&cases));
+}
+
+/// The torso and shoulders retuned toward a damping ratio (`retuned`), against the commissioned
+/// gains: the Spark's followers across the band, 50 and 90 Hz, no tool speed.
+#[test]
+#[ignore = "prints the table, about 6 min in release"]
+fn table_gains() {
+    let mut cases = Vec::new();
+    for dt in [0.02, 0.011] {
+        let mut scenes = scenes();
+        scenes.push(Scene::Desk);
+        for scene in scenes {
+            for zeta in [None, Some(0.5), Some(0.7)] {
+                for scale in [0.8, 1.0, 1.25] {
+                    for delay in [0.026, 0.045, 0.063] {
+                        for (sag, noise) in [(0.0, 0.0), (1.0, READING_JITTER)] {
+                            cases.push((
+                                scene,
+                                Motor {
+                                    scale,
+                                    delay,
+                                    sag,
+                                    noise,
+                                    zeta,
+                                    ..SPARK_MOTOR
+                                },
+                                dt,
+                                None,
+                            ));
+                        }
+                    }
                 }
             }
         }
