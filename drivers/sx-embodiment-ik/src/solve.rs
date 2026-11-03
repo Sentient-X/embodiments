@@ -85,8 +85,6 @@ pub struct Settings {
     pub influence_m: f64,
     /// The share of a pair's full braking capability its approach is planned with.
     pub braking_share: f64,
-    /// The most collision rows one tick carries (the closest candidates).
-    pub max_rows: usize,
     /// The most any axis moves in one tick, whatever its speed cap: the QP is a
     /// linearisation, and a collision row is only as true as the step is short. Each axis's
     /// step is its cap times the tick ([`Caps`]), so this binds only above 3 rad/s at a 10 ms
@@ -119,7 +117,6 @@ impl Default for Settings {
             collision_margin_m: 0.01,
             influence_m: 0.2,
             braking_share: 0.5,
-            max_rows: 32,
             max_step_rad: 0.03,
             max_error_m: 0.1,
             max_error_rad: 0.5,
@@ -227,7 +224,8 @@ pub enum Solve {
     /// was exceeded on that row's axes (reported [`Active::Accel`]), or a pair already inside
     /// its margin was held to come no closer.
     Relaxed,
-    /// The solver failed: every solved axis slows toward standing still within its caps.
+    /// The solver failed, or its answer broke a row it was solved with: every solved axis
+    /// slows toward standing still within its caps.
     Held,
 }
 
@@ -278,6 +276,9 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// the pair. An act-sim-like PD (zeta 0.2) then keeps 9.3 mm (5.1 without), zeta 0.1 7.7 mm
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
+
+/// How far past its bound a row may close and still be kept, metres: the interior point's sliver.
+const ROW_KEPT_M: f64 = 1e-6;
 
 /// The cost of the rows' slack ([`Ik::solve_qp`]), against a cost scaled to a unit diagonal.
 const SLACK_WEIGHT: f64 = 1e4;
@@ -333,6 +334,8 @@ struct Workspace {
     upper_by: Vec<Bound>,
     yielded: Vec<bool>,
     still: Vec<f64>,
+    /// Standing still as nearly as the caps allow: the step a failed or unkept solve takes.
+    hold: Vec<f64>,
     candidates: Vec<Candidate>,
     rows: Vec<f64>,
     rhs: Vec<f64>,
@@ -499,7 +502,11 @@ impl Ik {
                 })
             })
             .collect();
-        let k = settings.max_rows;
+        // Every pair at both poses, each with its stuck joints' copy: a row is never dropped for
+        // want of room. With 32 rows the closest pairs crowded the rest out, arm against arm (up
+        // to 64 rows wanted), and the step still said Solved with a dropped row broken by up to
+        // 15 mm of its closing (2026-11-03).
+        let k = 4 * (body.proxies.pairs.len() + scene_pairs.len());
         // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
         let qp = Qp::new(n + 1, k);
         // Twice: the pairs at the commanded positions and at the measured ones.
@@ -523,6 +530,7 @@ impl Ik {
             upper_by: vec![Bound::Speed; n],
             yielded: vec![false; n],
             still: vec![0.0; n],
+            hold: vec![0.0; n],
             candidates,
             rows: vec![0.0; k * n],
             rhs: vec![0.0; k],
@@ -936,12 +944,14 @@ impl Ik {
         // before any cap does. Widening every row's axes to their safe range first lurched the
         // torso to 20x its acceleration cap and the left shoulder 155x, for no clearance
         // (embodiments#208).
+        let mut gave_way = false;
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
             iterations = self.solve_qp(dt, deadline, true);
             // Rows gave way: say so, as a widened cap does.
             if iterations.is_some() && self.qp.x[self.body.solved.len()] > SLACK_USED {
                 solve = Solve::Relaxed;
+                gave_way = true;
             }
         }
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
@@ -961,6 +971,16 @@ impl Ik {
             solve = Solve::Held;
         }
         self.bound_tool_speed(q, dt);
+        // Fail closed: a step that says its rows hold keeps every one of them as it leaves
+        // (the box clamp and the tool's shortening come after the QP), or it is not taken.
+        if solve != Solve::Held && !gave_way && !self.rows_kept() {
+            solve = Solve::Held;
+            let w = &mut self.work;
+            for j in 0..n {
+                w.still[j] = w.hold[j].clamp(w.lower[j], w.upper[j]);
+            }
+            self.bound_tool_speed(q, dt);
+        }
         let w = &mut self.work;
         let dq = &w.still;
         self.step.q.copy_from_slice(q);
@@ -1288,9 +1308,6 @@ impl Ik {
             .sort_unstable_by(|x, y| x.distance.total_cmp(&y.distance));
         w.used = 0;
         for index in 0..w.candidates.len() {
-            if w.used == s.max_rows {
-                break;
-            }
             let candidate = w.candidates[index];
             let slot = w.used;
             let row = &mut w.rows[slot * n..(slot + 1) * n];
@@ -1388,7 +1405,7 @@ impl Ik {
             // The same pair kept without the stuck joints: a step must keep it whether or not
             // they make their move (exactly, for one stuck joint in the pair).
             let untrusted = |j: usize| self.stuck[body.solved[j]];
-            if w.used < s.max_rows && (0..n).any(|j| w.rows[slot * n + j] != 0.0 && untrusted(j)) {
+            if (0..n).any(|j| w.rows[slot * n + j] != 0.0 && untrusted(j)) {
                 let (kept, spare) = w.rows.split_at_mut((slot + 1) * n);
                 let next = &mut spare[..n];
                 next.copy_from_slice(&kept[slot * n..]);
@@ -1467,8 +1484,20 @@ impl Ik {
             for j in 0..n {
                 w.still[j] = 0.0_f64.clamp(w.lower[j], w.upper[j]);
             }
+            w.hold.copy_from_slice(&w.still);
         }
         solve
+    }
+
+    /// Whether the step (`still`) keeps every row it was solved with, to a micrometre.
+    fn rows_kept(&self) -> bool {
+        let n = self.body.solved.len();
+        let w = &self.work;
+        (0..w.used).all(|slot| {
+            let row = &w.rows[slot * n..(slot + 1) * n];
+            let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
+            closes <= w.rhs[slot] + ROW_KEPT_M
+        })
     }
 
     /// Load the QP and solve; the iteration count, or `None` on failure.
@@ -2071,5 +2100,100 @@ fn deadline_after(budget: Duration) -> Option<Instant> {
         None
     } else {
         Some(Instant::now() + budget)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, VecDeque};
+
+    use crate::teleop::{Pose, Targets, Teleop, TeleopConfig};
+    use crate::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve};
+
+    fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
+        let body = teleop.ik().body();
+        let frame = body.frame(&body.model().poses(q), hand).to_transform();
+        let p = sx_embodiment_drivers::kinematics::pose_of(&frame);
+        Pose {
+            translation_m: p.translation_m,
+            rotation_xyzw: p.rotation_xyzw,
+        }
+    }
+
+    /// The right hand reaching for the left one, a follower two ticks behind its commands, at
+    /// the station's 50 Hz: arm against arm wants more rows than the old cap of 32 (up to 64),
+    /// every one is loaded, and no step that says `Solved` breaks one (`Relaxed` says rows gave way). With the cap, the
+    /// rows past it were dropped and the step still said `Solved` with a dropped row broken by
+    /// up to 15 mm of its closing (2026-11-03).
+    #[test]
+    fn arm_against_arm_drops_no_row_and_a_kept_step_keeps_every_row() {
+        let config =
+            TeleopConfig::parse(include_str!("../tests/fixtures/static-teleop-config.json"))
+                .expect("the station's solve config");
+        let ready: BTreeMap<String, f64> =
+            serde_json::from_str(include_str!("../tests/fixtures/static-ready.json"))
+                .expect("ready");
+        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
+            .expect("solve");
+        solve.set_deadline(std::time::Duration::from_secs(3600));
+        let rest: Vec<f64> = solve
+            .model()
+            .axes()
+            .iter()
+            .map(|a| ready.get(&a.name).copied().unwrap_or(0.0))
+            .collect();
+        let left_tcp = solve
+            .model()
+            .links()
+            .iter()
+            .position(|l| l == "left_gripper_tcp")
+            .expect("tcp");
+        let (left0, right0) = (tcp(&solve, &rest, 0), tcp(&solve, &rest, 1));
+        let available = vec![true; rest.len()];
+        let dt = 0.02;
+        let (mut q, mut real) = (rest.clone(), rest.clone());
+        let mut sent = VecDeque::from(vec![rest.clone(); 3]);
+        let (mut most, mut held) = (0, 0);
+        solve.reset();
+        for tick in 0..250 {
+            let t = f64::from(tick) * dt;
+            let measured: Vec<Option<f64>> = real.iter().copied().map(Some).collect();
+            let mut targets = Targets {
+                tcp: [
+                    Some(Pose {
+                        translation_m: [0, 1, 2]
+                            .map(|k| left0.translation_m[k] + [0.03, 0.0, -0.04][k]),
+                        rotation_xyzw: left0.rotation_xyzw,
+                    }),
+                    None,
+                ],
+                ..Targets::default()
+            };
+            if t >= 1.0 {
+                targets.tcp[1] = Some(Pose {
+                    translation_m: solve.model().poses(&real).links[left_tcp].t,
+                    rotation_xyzw: right0.rotation_xyzw,
+                });
+            }
+            let step = solve
+                .step(&q, &measured, &available, &targets, dt)
+                .expect("a step");
+            let solved = step.solve;
+            q.copy_from_slice(&step.q);
+            held += usize::from(solved == Solve::Held);
+            let ik = solve.ik();
+            most = most.max(ik.work.used);
+            assert!(
+                solved != Solve::Solved || ik.rows_kept(),
+                "tick {tick}: a {solved:?} step breaks a row"
+            );
+            sent.push_back(q.clone());
+            real = sent.pop_front().expect("a command");
+        }
+        assert!(
+            most > 32,
+            "the case wants more rows than the old cap: {most}"
+        );
+        assert_eq!(held, 0, "no step fails for want of a row");
     }
 }
