@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
-    TeleopConfig, TeleopStep,
+    Clutch, GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets,
+    Teleop, TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{
     Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
@@ -266,26 +266,70 @@ fn the_reference_seeds_from_the_measurement_at_engage_and_stays_within_the_gap()
 }
 
 #[test]
-fn following_starts_only_with_every_driven_hand_at_its_gripper() {
+fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_hand_moves() {
     let mut solve = teleop();
     let q = start(&solve);
+    let tools = solve.tool_poses(&q);
     let (left, right) = (tcp(&solve, &q, 0), tcp(&solve, &q, 1));
-    let at = |left: Option<Pose>, right: Option<Pose>| Targets {
-        tcp: [left, right],
+    for (pose, at) in [(left, tools[0]), (right, tools[1])] {
+        let at = at.expect("a gripper per hand");
+        assert!((0..3).all(|k| (pose.translation_m[k] - at.translation_m[k]).abs() < 1e-12));
+    }
+    // The operator's hand is 30 cm away and turned: holding on, the target is the gripper.
+    let quarter = [
+        0.0,
+        0.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2,
+    ];
+    let hand = Pose {
+        translation_m: [0.3, -0.2, 0.9],
+        rotation_xyzw: quarter,
+    };
+    let mut clutch = Clutch::default();
+    let mut targets = Targets {
+        tcp: [Some(hand), None],
         ..Targets::default()
     };
-    // No hand driven: nothing to start from.
-    assert!(!solve.may_engage(&q, &at(None, None)));
-    assert!(solve.may_engage(&q, &at(Some(left), Some(right))));
-    assert!(solve.may_engage(&q, &at(Some(left), None)));
-    let mut near = left;
-    near.translation_m[0] += 0.05;
-    assert!(solve.may_engage(&q, &at(Some(near), Some(right))));
-    let mut far = left;
-    far.translation_m[2] += 0.07;
-    assert!(!solve.may_engage(&q, &at(Some(far), Some(right))));
-    let gaps = solve.hand_gaps(&q, &at(Some(far), None));
-    assert!((gaps[0].expect("left") - 0.07).abs() < 1e-9 && gaps[1].is_none());
+    clutch.apply(&tools, &mut targets);
+    let held = targets.tcp[0].expect("left");
+    assert!((0..3).all(|k| (held.translation_m[k] - left.translation_m[k]).abs() < 1e-12));
+    assert!(angle(held.rotation_xyzw, left.rotation_xyzw) < 1e-9);
+    assert!(clutch.holds(0) && !clutch.holds(1));
+    // The hand moves 5 cm up and turns 0.2 rad about the robot's z: the gripper does the same.
+    let turn = [0.0, 0.0, 0.1_f64.sin(), 0.1_f64.cos()];
+    let moved = Pose {
+        translation_m: [0.3, -0.2, 0.95],
+        rotation_xyzw: turned(turn, quarter),
+    };
+    let mut targets = Targets {
+        tcp: [Some(moved), None],
+        ..Targets::default()
+    };
+    clutch.apply(&tools, &mut targets);
+    let followed = targets.tcp[0].expect("left");
+    assert!((followed.translation_m[2] - (left.translation_m[2] + 0.05)).abs() < 1e-12);
+    assert!((angle(followed.rotation_xyzw, turned(turn, left.rotation_xyzw))) < 1e-9);
+    // The hand drops out of tracking: it lets go, and takes hold afresh where it is seen next.
+    let mut gone = Targets::default();
+    clutch.apply(&tools, &mut gone);
+    assert!(!clutch.holds(0));
+    let mut back = Targets {
+        tcp: [Some(moved), None],
+        ..Targets::default()
+    };
+    clutch.apply(&tools, &mut back);
+    let again = back.tcp[0].expect("left");
+    assert!((0..3).all(|k| (again.translation_m[k] - left.translation_m[k]).abs() < 1e-12));
+    // Released (a regrip): the next target takes hold afresh too.
+    clutch.release();
+    assert!(!clutch.holds(0));
+}
+
+/// The angle between two unit quaternions' rotations, radians.
+fn angle(a: [f64; 4], b: [f64; 4]) -> f64 {
+    let dot: f64 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    2.0 * dot.abs().min(1.0).acos()
 }
 
 /// `turn` applied after `rotation`, both unit quaternions (x, y, z, w).
