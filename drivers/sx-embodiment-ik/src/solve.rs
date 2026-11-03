@@ -340,6 +340,14 @@ struct Workspace {
     /// Per row, whether main never had it: a pair kept where the body was measured, or a
     /// stuck joint's copy. Such a row never widens a cap ([`Ik::keep_feasible`]).
     row_measured: Vec<bool>,
+    /// Per row kept where the body was measured, its pair's whole row and each joint's way
+    /// still to come (`r_j (q_j - seen_j + carried_j)`, 0 for a stuck joint), so the solve can
+    /// check the step against `sum_j max(lead_j + r_j dq_j, 0)` ([`Ik::cut_measured_rows`]);
+    /// and the room the row is held to. `exact` marks such rows.
+    row_full: Vec<f64>,
+    row_lead: Vec<f64>,
+    row_budget: Vec<f64>,
+    row_exact: Vec<bool>,
     row_binds: Vec<bool>,
     used: usize,
     unit: Vec<f64>,
@@ -528,6 +536,10 @@ impl Ik {
             rhs: vec![0.0; k],
             row_active: vec![Active::Limit { axis: 0 }; k],
             row_measured: vec![false; k],
+            row_full: vec![0.0; k * n],
+            row_lead: vec![0.0; k * n],
+            row_budget: vec![0.0; k],
+            row_exact: vec![false; k],
             row_binds: vec![false; k],
             used: 0,
             unit: vec![1.0; n],
@@ -932,6 +944,21 @@ impl Ik {
         self.collision_rows(q, dt);
         let mut solve = self.keep_feasible(false);
         let mut iterations = self.solve_qp(dt, deadline, false);
+        // The rows kept where the body was measured, exactly: re-solved with each cut a step
+        // needs, at most once per joint.
+        for _ in 0..self.body.solved.len() {
+            if iterations.is_none() || !self.cut_measured_rows() {
+                break;
+            }
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                break;
+            }
+            iterations = self.solve_qp(dt, deadline, false);
+        }
+        if std::env::var("IK_CUTDBG").is_ok() && iterations.is_some() {
+            let left = self.cut_measured_rows();
+            eprintln!("CUT used {} still_violated {}", self.work.used, left);
+        }
         // No step inside the caps keeps every row: the rows give way, as little as they can,
         // before any cap does. Widening every row's axes to their safe range first lurched the
         // torso to 20x its acceleration cap and the left shoulder 155x, for no clearance
@@ -1356,17 +1383,33 @@ impl Ik {
                 // room, an act-sim-like PD (zeta 0.2) rang 40-60 mm into the other arm; with
                 // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
                 // the commanded row's to keep.
-                let lead = body
-                    .solved
-                    .iter()
-                    .zip(row.iter())
-                    .filter(|&(&axis, _)| !self.stuck[axis])
-                    .map(|(&axis, r)| {
-                        let carried = MOMENTUM_S * self.measured_speed[axis];
-                        (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
-                    })
-                    .sum::<f64>();
-                rhs = 0.5 * room - lead;
+                //
+                // Each joint is somewhere between its reading and its next command, and never
+                // counted on to open the pair: the motion still to come is
+                // sum_j max(lead_j + r_j dq_j, 0). It is kept exactly, as cuts: this row holds
+                // the joints whose lead closes the pair, and a step that closes it with another
+                // joint gets that joint's cut too ([`Ik::cut_measured_rows`]). Every joint's
+                // step counted linearly against the leads' positive parts was a different
+                // constraint from the one the next tick checks: the solve met it by moving
+                // joints already behind the arm, which moved nothing there, and was asked again
+                // every tick. Near the counter the command swung 2-8 cm at 1-2 Hz for as long
+                // as it was held, and a 0.23 m move stalled 0.05 rad short (act-sim
+                // 2026-11-03).
+                let budget = 0.5 * room;
+                let mut lead = 0.0;
+                for (j, &axis) in body.solved.iter().enumerate() {
+                    let a = if self.stuck[axis] {
+                        0.0
+                    } else {
+                        row[j] * (q[axis] - w.seen_q[axis] + MOMENTUM_S * self.measured_speed[axis])
+                    };
+                    w.row_lead[slot * n + j] = a;
+                    if a > 0.0 {
+                        lead += a;
+                    }
+                }
+                w.row_budget[slot] = budget;
+                rhs = budget - lead;
             }
             if candidate.measured
                 && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
@@ -1375,15 +1418,37 @@ impl Ik {
             {
                 continue; // measured where it was commanded, as far as this pair goes
             }
-            let reach: f64 = (0..n)
-                .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
-                .sum();
-            if reach <= rhs {
+            let reach: f64 = if candidate.measured {
+                (0..n)
+                    .map(|j| {
+                        let most = (row[j] * w.lower[j]).max(row[j] * w.upper[j]);
+                        (w.row_lead[slot * n + j] + most).max(0.0)
+                    })
+                    .sum::<f64>()
+                    - w.row_budget[slot]
+            } else {
+                (0..n)
+                    .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
+                    .sum::<f64>()
+                    - rhs
+            };
+            if reach <= 0.0 {
                 continue; // no step inside the box can close it that far
+            }
+            if candidate.measured {
+                // The first cut: the joints whose lead closes the pair.
+                let (full, lead) = (&mut w.row_full[slot * n..(slot + 1) * n], &w.row_lead[slot * n..(slot + 1) * n]);
+                full.copy_from_slice(row);
+                for (value, a) in row.iter_mut().zip(lead) {
+                    if *a <= 0.0 {
+                        *value = 0.0;
+                    }
+                }
             }
             w.rhs[slot] = rhs;
             w.row_active[slot] = active;
             w.row_measured[slot] = candidate.measured;
+            w.row_exact[slot] = candidate.measured;
             w.used += 1;
             // The same pair kept without the stuck joints: a step must keep it whether or not
             // they make their move (exactly, for one stuck joint in the pair).
@@ -1400,9 +1465,75 @@ impl Ik {
                 w.rhs[slot + 1] = rhs;
                 w.row_active[slot + 1] = active;
                 w.row_measured[slot + 1] = true;
+                w.row_exact[slot + 1] = false;
                 w.used += 1;
             }
         }
+    }
+
+    /// Whether the answer keeps every row kept where the body was measured as it truly is,
+    /// `sum_j max(lead_j + r_j dq_j, 0) <= budget`; for each it does not, the cut of the joints
+    /// that close the pair at that answer is added (`sum_{j in S} (lead_j + r_j dq_j) <=
+    /// budget`), eased as [`Ik::keep_feasible`] eases such rows. True when one was added.
+    fn cut_measured_rows(&mut self) -> bool {
+        let n = self.body.solved.len();
+        let max_rows = self.settings.max_rows;
+        let w = &mut self.work;
+        let mut added = false;
+        let used = w.used;
+        for slot in 0..used {
+            if !w.row_exact[slot] || w.used == max_rows {
+                continue;
+            }
+            let (mut needed, mut kept) = (0.0, 0.0);
+            for j in 0..n {
+                let closing = w.row_lead[slot * n + j] + w.row_full[slot * n + j] * w.answer[j];
+                needed += closing.max(0.0);
+                if w.rows[slot * n + j] != 0.0 {
+                    kept += closing;
+                }
+            }
+            let budget = w.row_budget[slot];
+            // Within the solver's tolerance of what the row already holds.
+            if needed <= budget.max(kept) + 1e-9 + 1e-6 * budget.abs() {
+                continue;
+            }
+            let cut = w.used;
+            let mut lead = 0.0;
+            for j in 0..n {
+                let a = w.row_lead[slot * n + j];
+                let g = w.row_full[slot * n + j];
+                w.row_lead[cut * n + j] = a;
+                w.row_full[cut * n + j] = g;
+                let closes = a + g * w.answer[j] > 0.0;
+                w.rows[cut * n + j] = if closes { g } else { 0.0 };
+                if closes {
+                    lead += a;
+                }
+            }
+            let mut rhs = budget - lead;
+            let row = &w.rows[cut * n..(cut + 1) * n];
+            let low: f64 = (0..n)
+                .map(|j| (row[j] * w.lower[j]).min(row[j] * w.upper[j]))
+                .sum();
+            if low > rhs {
+                let most: f64 = (0..n)
+                    .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
+                    .sum();
+                rhs = low + SOFTENED * (most - low);
+            }
+            w.rhs[cut] = rhs;
+            w.row_budget[cut] = budget;
+            w.row_active[cut] = w.row_active[slot];
+            w.row_measured[cut] = true;
+            w.row_exact[cut] = true;
+            w.used += 1;
+            added = true;
+            if w.used == max_rows {
+                break;
+            }
+        }
+        added
     }
 
     /// Ready the rows for the solve. A commanded row no step within the acceleration caps can
