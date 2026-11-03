@@ -1543,13 +1543,15 @@ impl<P: CanPort> DamiaoChain<P> {
                     report.faults.push((bus_id, code));
                     report.unproven.push(bus_id);
                 }
-                (true, Ok(MotorState::Enabled)) if holding => {
+                // Answered enabled; or, firmware that never reports its enable state, answered
+                // with no fault; or sent its hold and silent at the stop (the second refute of
+                // 2026-11-03: one missed answer dropped it), kept holding with its frame re-sent
+                // until it answers or its caller's silence bound releases it.
+                (true, Ok(MotorState::Enabled)) | (false, _) if holding => {
                     report
                         .held
                         .push(sx_embodiment_drivers::Motor::of(&self.motors[index].axis));
                 }
-                // Firmware that never reports its enable state answers a hold as it answers
-                // anything: with no fault, it holds.
                 (true, Ok(MotorState::Disabled))
                     if holding && !self.motors[index].reports_enable_state =>
                 {
@@ -1658,8 +1660,8 @@ impl<P: CanPort> DamiaoChain<P> {
             }
         }
         let report = self.stop_report(&answered, &holds);
-        // A motor meant to hold that faulted or stayed silent is not left holding: its hold
-        // is never re-sent, and it is sent the disable (it is unproven either way).
+        // A motor meant to hold that answered with a fault is not left holding: its hold is
+        // never re-sent, and it is sent the disable (it is unproven). A silent one is kept.
         let dropped: Vec<u16> = (0..self.ids.len())
             .filter(|index| holds[*index].is_some() && !report.holds(&self.motors[*index].axis))
             .map(|index| self.ids[index])
