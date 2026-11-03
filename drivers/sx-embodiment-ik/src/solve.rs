@@ -221,11 +221,11 @@ pub struct LimbReport {
 pub enum Solve {
     Solved,
     /// Solved, with a collision row needing more than the caps allow: the acceleration cap
-    /// was exceeded on that row's axes (reported [`Active::Accel`]), or a pair already inside
-    /// its margin was held to come no closer.
+    /// was exceeded on that row's axes (reported [`Active::Accel`]), a pair already inside
+    /// its margin was held to come no closer, or a row gave way (never `Solved` with a row
+    /// broken).
     Relaxed,
-    /// The solver failed, or its answer broke a row it was solved with: every solved axis
-    /// slows toward standing still within its caps.
+    /// The solver failed: every solved axis slows toward standing still within its caps.
     Held,
 }
 
@@ -334,8 +334,6 @@ struct Workspace {
     upper_by: Vec<Bound>,
     yielded: Vec<bool>,
     still: Vec<f64>,
-    /// Standing still as nearly as the caps allow: the step a failed or unkept solve takes.
-    hold: Vec<f64>,
     candidates: Vec<Candidate>,
     rows: Vec<f64>,
     rhs: Vec<f64>,
@@ -504,7 +502,7 @@ impl Ik {
             .collect();
         // Every pair at both poses, each with its stuck joints' copy: a row is never dropped for
         // want of room. With 32 rows the closest pairs crowded the rest out, arm against arm (up
-        // to 64 rows wanted), and the step still said Solved with a dropped row broken by up to
+        // to 86 rows wanted), and the step still said Solved with a dropped row broken by up to
         // 15 mm of its closing (2026-11-03).
         let k = 4 * (body.proxies.pairs.len() + scene_pairs.len());
         // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
@@ -530,7 +528,6 @@ impl Ik {
             upper_by: vec![Bound::Speed; n],
             yielded: vec![false; n],
             still: vec![0.0; n],
-            hold: vec![0.0; n],
             candidates,
             rows: vec![0.0; k * n],
             rhs: vec![0.0; k],
@@ -944,14 +941,12 @@ impl Ik {
         // before any cap does. Widening every row's axes to their safe range first lurched the
         // torso to 20x its acceleration cap and the left shoulder 155x, for no clearance
         // (embodiments#208).
-        let mut gave_way = false;
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
             iterations = self.solve_qp(dt, deadline, true);
             // Rows gave way: say so, as a widened cap does.
             if iterations.is_some() && self.qp.x[self.body.solved.len()] > SLACK_USED {
                 solve = Solve::Relaxed;
-                gave_way = true;
             }
         }
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
@@ -971,15 +966,12 @@ impl Ik {
             solve = Solve::Held;
         }
         self.bound_tool_speed(q, dt);
-        // Fail closed: a step that says its rows hold keeps every one of them as it leaves
-        // (the box clamp and the tool's shortening come after the QP), or it is not taken.
-        if solve != Solve::Held && !gave_way && !self.rows_kept() {
-            solve = Solve::Held;
-            let w = &mut self.work;
-            for j in 0..n {
-                w.still[j] = w.hold[j].clamp(w.lower[j], w.upper[j]);
-            }
-            self.bound_tool_speed(q, dt);
+        // Never Solved on a broken row: a step that says its rows hold keeps every one of them
+        // as it leaves (the box clamp and the tool's shortening come after the QP), or it says
+        // they gave way. It is not swapped for standing still: a row that asks its pair to
+        // open is broken worse by standing still than by the step.
+        if solve == Solve::Solved && !self.rows_kept() {
+            solve = Solve::Relaxed;
         }
         let w = &mut self.work;
         let dq = &w.still;
@@ -1484,7 +1476,6 @@ impl Ik {
             for j in 0..n {
                 w.still[j] = 0.0_f64.clamp(w.lower[j], w.upper[j]);
             }
-            w.hold.copy_from_slice(&w.still);
         }
         solve
     }
@@ -1592,6 +1583,18 @@ impl Ik {
                 floor = floor.max(lower / x);
             } else if x < 0.0 && upper < 0.0 {
                 floor = floor.max(upper / x);
+            }
+        }
+        // Nor below the scale at which a row would break: a row that asks the pair to open
+        // (its bound below zero, at the measured pose) is kept by the step and broken by a
+        // shorter one. Shortened past it, then held for it, a tool-speed step broke such rows by
+        // up to 26 mm and cost 5.6 mm of clearance (refute of embodiments 885f73b).
+        for slot in 0..w.used {
+            let row = &w.rows[slot * n..(slot + 1) * n];
+            let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
+            let bound = w.rhs[slot];
+            if closes < 0.0 && bound < 0.0 {
+                floor = floor.max(if closes <= bound { bound / closes } else { 1.0 });
             }
         }
         let floor = floor.min(1.0);
@@ -2121,7 +2124,7 @@ mod tests {
     }
 
     /// The right hand reaching for the left one, a follower two ticks behind its commands, at
-    /// the station's 50 Hz: arm against arm wants more rows than the old cap of 32 (up to 64),
+    /// the station's 50 Hz: arm against arm wants more rows than the old cap of 32 (up to 86),
     /// every one is loaded, and no step that says `Solved` breaks one (`Relaxed` says rows gave way). With the cap, the
     /// rows past it were dropped and the step still said `Solved` with a dropped row broken by
     /// up to 15 mm of its closing (2026-11-03).

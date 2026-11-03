@@ -27,8 +27,8 @@
 //!   reached in a ramp the caller names, since no description declares one);
 //! - **self-collision** between proxy capsules on links the pack's `collision.json` does not
 //!   ignore, and **scene collision** against boxes ([`Obstacle`]: the table), as linearised
-//!   distance rows for every pair within [`Settings::influence_m`] (none is dropped: a step
-//!   that does not keep every row it was solved with is not taken, [`Solve::Held`]): each pair closes this tick no faster than a share of its axes'
+//!   distance rows for every pair within [`Settings::influence_m`] (none is dropped, and a step
+//!   that does not keep every row it was solved with says so, [`Solve::Relaxed`]): each pair closes this tick no faster than a share of its axes'
 //!   acceleration can still stop it before [`Settings::collision_margin_m`].
 //!
 //! Where a row cannot be kept within the acceleration caps, the cap yields on that row's axes

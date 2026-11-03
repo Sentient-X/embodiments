@@ -895,7 +895,6 @@ enum Follower {
 /// the left one really is, "box" sweeps the left hand inward past a keep-out box beside its
 /// forearm. The robot is `follower`, its left elbow never past the stop; it is measured where
 /// it is, each reading off by up to `noise` either way.
-#[allow(clippy::too_many_lines)] // one scene, one follower, one loop
 fn least_clearance(
     dt: f64,
     case: &str,
@@ -903,6 +902,20 @@ fn least_clearance(
     follower: Follower,
     noise: f64,
     glitch: Option<(&str, f64)>,
+) -> (f64, String, String, f64, u32) {
+    least_clearance_at(dt, case, stopped, follower, noise, glitch, None)
+}
+
+/// [`least_clearance`] with both hands' tool points held to `tool_speed` m/s.
+#[allow(clippy::too_many_lines)] // one scene, one follower, one loop
+fn least_clearance_at(
+    dt: f64,
+    case: &str,
+    stopped: bool,
+    follower: Follower,
+    noise: f64,
+    glitch: Option<(&str, f64)>,
+    tool_speed: Option<f64>,
 ) -> (f64, String, String, f64, u32) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
@@ -1012,6 +1025,7 @@ fn least_clearance(
             ],
             ..Targets::default()
         };
+        targets.tool_speed_m_s = [tool_speed; 2];
         if case == "reach" && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: solve.model().poses(&real).links[left_tcp].t,
@@ -1234,6 +1248,44 @@ fn a_row_the_caps_cannot_keep_widens_no_cap() {
             gave_way += relaxed;
         }
         assert!(gave_way > 0, "rows that gave way inside the caps say so");
+    });
+}
+
+/// A tool speed never shortens a step past a row that asks its pair to open: shortened, then
+/// held for breaking it, an underdamped follower's step broke such rows by up to 26 mm and came
+/// within 3.0 mm of the box (refute of embodiments 885f73b; 8.6 mm without the tool speed).
+#[test]
+fn a_tool_speed_never_shortens_a_step_past_a_row() {
+    std::thread::scope(|scope| {
+        let mut runs = Vec::new();
+        for dt in [0.02, 0.011] {
+            for case in ["box", "reach"] {
+                for follower in [Follower::Pd(0, 9.5, 0.1), Follower::Pd(1, 9.5, 0.1)] {
+                    for tool in [0.05, 0.2] {
+                        runs.push(scope.spawn(move || {
+                            let got = least_clearance_at(
+                                dt,
+                                case,
+                                true,
+                                follower,
+                                READING_JITTER,
+                                None,
+                                Some(tool),
+                            );
+                            (dt, case, follower, tool, got)
+                        }));
+                    }
+                }
+            }
+        }
+        for run in runs {
+            let (dt, case, follower, tool, (clear, a, b, _, _)) = run.join().expect("a case");
+            println!("{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m");
+            assert!(
+                clear >= 0.009,
+                "{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m apart"
+            );
+        }
     });
 }
 
