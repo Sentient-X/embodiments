@@ -66,7 +66,7 @@ TRACKING_PERIODS: Final = 3.0
 #: ``sx_embodiment_drivers::MAX_STEP_INTERVAL``: the longest step the governor ever takes.
 STEP_INTERVAL_S: Final = 0.02
 #: ``sx_embodiment_drivers::governor::TRACKING_MEMORY``: how long a speed widens the bound.
-TRACKING_MEMORY_S: Final = 0.1
+TRACKING_MEMORY_S: Final = 0.2
 
 
 @dataclass(frozen=True, slots=True)

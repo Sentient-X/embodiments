@@ -117,7 +117,7 @@ pub const TRACKING_PERIODS: f64 = 3.0;
 /// `exp(-dt / TRACKING_MEMORY)` unless the step is faster, so the bound is the at-rest one again
 /// a few tenths of a second after the axis stops, and a blocked joint creeping slowly is
 /// stopped at it.
-pub const TRACKING_MEMORY: Duration = Duration::from_millis(100);
+pub const TRACKING_MEMORY: Duration = Duration::from_millis(200);
 
 /// One axis's bounds, in the joint's own unit (rad or m) and per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1403,6 +1403,39 @@ mod tests {
                 "{share}"
             );
         }
+    }
+
+    #[test]
+    fn speed_memory_decays_over_200_ms_without_raising_its_peak() {
+        let limit = AxisLimits {
+            max_speed: 1.0,
+            max_tracking_error: SETTLED_TRACKING,
+            max_acceleration: None,
+        };
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let mut governor =
+            Governor::with_clock(fake(true), vec![limit; 2], clock.clone()).expect("limits");
+        governor.command(&[0.0, 0.5]).expect("held");
+        clock.advance(MAX_STEP_INTERVAL);
+        governor.command(&[0.02, 0.5]).expect("1 rad/s step");
+        assert!((governor.recent[0] - 1.0).abs() < 1e-9);
+        // The decay uses the governor's bounded step time; advance five regular ticks.
+        for _ in 0..5 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.02, 0.5]).expect("hold after moving");
+        }
+        assert!((governor.recent[0] - (-0.5_f64).exp()).abs() < 1e-9);
+        let bound = limit.max_tracking_error
+            + TRACKING_PERIODS * governor.recent[0] * MAX_STEP_INTERVAL.as_secs_f64();
+        assert!(bound > 0.2 && bound < 0.26, "no wider than the moving peak");
+        for _ in 0..50 {
+            clock.advance(MAX_STEP_INTERVAL);
+            governor.command(&[0.02, 0.5]).expect("settled hold");
+        }
+        assert!(
+            governor.recent[0] < 0.005,
+            "the moving allowance does not persist"
+        );
     }
 
     /// REFUTE H2 (10-30): the bound grows with the speed the axis is stepped at, not its cap. A
