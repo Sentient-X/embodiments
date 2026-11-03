@@ -277,45 +277,6 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
-/// Where even keeping every tool's speed has no step (the acceleration caps carry a joint on),
-/// a tool's speed gives way a tenth as far as the pairs' rows do for the same slack.
-const TOOL_GIVES: f64 = 0.1;
-/// The directions a tool's speed is kept along ([`Ik::tool_rows`]): the cube's faces, edges
-/// and corners, unit length.
-const TOOL_DIRECTIONS: usize = 26;
-/// The share of a tick's tool move each direction is held to, so no move between two
-/// directions exceeds it (0.886, the widest angle's cosine, exactly from the polytope's
-/// vertices). A free move runs at 0.88-1.0 of its speed, 7-10 % slower than before. Held to
-/// 0.95, a 0.2 m/s tool ran 1.34x at 90 Hz and its arm came within 8.2 mm (9.4 at 0.88);
-/// turned to face the asked move each tick, act-sim's press missed by 43 mm.
-const POLYTOPE_INSIDE: f64 = 0.88;
-const TOOL_UNITS: [V3; TOOL_DIRECTIONS] = {
-    let mut units = [[0.0; 3]; TOOL_DIRECTIONS];
-    let mut count = 0;
-    let mut x = -1;
-    while x <= 1 {
-        let mut y = -1;
-        while y <= 1 {
-            let mut z = -1;
-            while z <= 1 {
-                if x != 0 || y != 0 || z != 0 {
-                    let length = match x * x + y * y + z * z {
-                        1 => 1.0,
-                        2 => std::f64::consts::SQRT_2,
-                        _ => 1.732_050_807_568_877_2,
-                    };
-                    units[count] = [x as f64 / length, y as f64 / length, z as f64 / length];
-                    count += 1;
-                }
-                z += 1;
-            }
-            y += 1;
-        }
-        x += 1;
-    }
-    units
-};
-
 /// How far past its bound a row may close and still be kept, metres: the interior point's sliver.
 const ROW_KEPT_M: f64 = 1e-6;
 
@@ -381,8 +342,6 @@ struct Workspace {
     /// stuck joint's copy. Such a row never widens a cap ([`Ik::keep_feasible`]).
     row_measured: Vec<bool>,
     row_binds: Vec<bool>,
-    /// Whether the elastic retry keeps every tool's speed while the pairs give way.
-    tool_hard: bool,
     used: usize,
     unit: Vec<f64>,
     answer: Vec<f64>,
@@ -430,7 +389,6 @@ pub struct Ik {
     tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
     /// Per limb, whether its tool speed bound this tick.
     tool_capped: Vec<bool>,
-
     /// Per axis, where the next step must leave it ([`Ik::set_window`]).
     window: Vec<[f64; 2]>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
@@ -546,8 +504,7 @@ impl Ik {
         // want of room. With 32 rows the closest pairs crowded the rest out, arm against arm (up
         // to 86 rows wanted), and the step still said Solved with a dropped row broken by up to
         // 15 mm of its closing (2026-11-03).
-        let k =
-            4 * (body.proxies.pairs.len() + scene_pairs.len()) + TOOL_DIRECTIONS * body.limbs.len();
+        let k = 4 * (body.proxies.pairs.len() + scene_pairs.len());
         // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
         let qp = Qp::new(n + 1, k);
         // Twice: the pairs at the commanded positions and at the measured ones.
@@ -577,7 +534,6 @@ impl Ik {
             row_active: vec![Active::Limit { axis: 0 }; k],
             row_measured: vec![false; k],
             row_binds: vec![false; k],
-            tool_hard: false,
             used: 0,
             unit: vec![1.0; n],
             answer: vec![0.0; n],
@@ -620,7 +576,6 @@ impl Ik {
             velocity: vec![0.0; n],
             tool_speed: vec![None; limbs],
             tool_capped: vec![false; limbs],
-
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
@@ -980,7 +935,6 @@ impl Ik {
         }
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
         self.collision_rows(q, dt);
-        self.tool_rows(dt);
         let mut solve = self.keep_feasible(false);
         let mut iterations = self.solve_qp(dt, deadline, false);
         // No step inside the caps keeps every row: the rows give way, as little as they can,
@@ -989,21 +943,7 @@ impl Ik {
         // (embodiments#208).
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
-            // The pairs give way first, every tool held to its speed; then the tools too.
-            let tools = (0..self.work.used)
-                .any(|slot| matches!(self.work.row_active[slot], Active::ToolSpeed { .. }));
-            for tool_hard in [true, false] {
-                if iterations.is_some() || deadline.is_some_and(|d| Instant::now() >= d) {
-                    break;
-                }
-                // With no tool's speed in the rows the two retries are one.
-                if !tool_hard && !tools {
-                    break;
-                }
-                self.work.tool_hard = tool_hard;
-                iterations = self.solve_qp(dt, deadline, true);
-                self.work.tool_hard = false;
-            }
+            iterations = self.solve_qp(dt, deadline, true);
             // Rows gave way: say so, as a widened cap does.
             if iterations.is_some() && self.qp.x[self.body.solved.len()] > SLACK_USED {
                 solve = Solve::Relaxed;
@@ -1438,21 +1378,6 @@ impl Ik {
                     })
                     .sum::<f64>();
                 rhs = 0.5 * room - lead;
-                {
-                    // Never asked to open the pair faster than a speed-bound limb it moves may
-                    // move: a recovery runs within the tool's speed, never a jump. Asked to
-                    // recover a lagging arm's whole lead in one tick, the step carried its
-                    // tool 7-12.5x its speed (0.05 m/s at 90 Hz, 2026-11-03).
-                    let mut most = f64::INFINITY;
-                    for (index, columns) in self.limb_columns.iter().enumerate() {
-                        if let Some((speed, _)) = self.tool_speed[index]
-                            && columns.iter().any(|&c| row[c] != 0.0)
-                        {
-                            most = most.min(speed * dt);
-                        }
-                    }
-                    rhs = rhs.max(-most);
-                }
             }
             if candidate.measured
                 && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
@@ -1486,61 +1411,6 @@ impl Ik {
                 w.rhs[slot + 1] = rhs;
                 w.row_active[slot + 1] = active;
                 w.row_measured[slot + 1] = true;
-                w.used += 1;
-            }
-        }
-    }
-
-    /// Each speed-bound limb's tool point kept within its speed this tick, in the QP itself, so
-    /// the step that keeps the pairs clear is found within it rather than shortened after:
-    /// its linearised move along each of [`TOOL_DIRECTIONS`] directions no further than the
-    /// speed allows ([`POLYTOPE_INSIDE`]). A direction no step in the box reaches, no row.
-    fn tool_rows(&mut self, dt: f64) {
-        let body = &self.body;
-        let n = body.solved.len();
-        let w = &mut self.work;
-        for (index, limb) in body.limbs.iter().enumerate() {
-            let Some((speed, from)) = self.tool_speed[index] else {
-                continue;
-            };
-            if !matches!(limb.task, Task::Pose) {
-                continue;
-            }
-            let most = speed * dt;
-            let start = w.frames.links[limb.frame].t;
-            let from = from
-                .filter(|from| norm(sub(*from, start)) <= most)
-                .unwrap_or(start);
-            for &axis in &body.solved {
-                w.jv[axis] = [0.0; 3];
-            }
-            body.model
-                .point_jacobian(&w.frames, limb.frame, start, &mut w.jv);
-            let offset = sub(start, from);
-            for direction in TOOL_UNITS {
-                let used = w.used;
-                if used == w.rhs.len() {
-                    return;
-                }
-                let row = &mut w.rows[used * n..(used + 1) * n];
-                for (column, &axis) in body.solved.iter().enumerate() {
-                    row[column] = dot(direction, w.jv[axis]);
-                }
-                // Never asked back toward where the tool was last commanded: standing still is
-                // within its speed.
-                let rhs = POLYTOPE_INSIDE
-                    .mul_add(most, -dot(direction, offset))
-                    .max(0.0);
-                let reach: f64 = (0..n)
-                    .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
-                    .sum();
-                if reach <= rhs {
-                    continue;
-                }
-                w.rhs[used] = rhs;
-                w.row_active[used] = Active::ToolSpeed { limb: index };
-                // Never widens a cap: eased where the box cannot keep it, as a measured row is.
-                w.row_measured[used] = true;
                 w.used += 1;
             }
         }
@@ -1678,12 +1548,7 @@ impl Ik {
             for j in 0..n {
                 qp.r[slot * m + j] *= scale;
             }
-            // A tool's speed never gives way with the pairs: the arm backs off within it.
-            qp.r[slot * m + n] = if matches!(w.row_active[slot], Active::ToolSpeed { .. }) {
-                if w.tool_hard { 0.0 } else { -TOOL_GIVES }
-            } else {
-                -1.0
-            };
+            qp.r[slot * m + n] = -1.0;
             qp.rhs[slot] = w.rhs[slot] * scale;
         }
         let iterations = qp.solve(self.settings.max_iterations, deadline).ok()?;

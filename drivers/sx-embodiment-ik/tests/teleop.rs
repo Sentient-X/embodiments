@@ -903,31 +903,11 @@ fn least_clearance(
     noise: f64,
     glitch: Option<(&str, f64)>,
 ) -> (f64, String, String, f64, u32) {
-    least_clearance_at(
-        dt,
-        case,
-        stopped,
-        follower,
-        noise,
-        glitch,
-        None,
-        &mut Speeds::default(),
-    )
-}
-
-/// What a run's commands did beside their clearance: the fastest a hand's commanded tool point
-/// moved over a tick as a multiple of its tool speed, and the steps that held or gave way.
-#[derive(Debug, Default)]
-struct Speeds {
-    over: f64,
-    held: u32,
-    relaxed: u32,
-    /// The slowest step, seconds.
-    slowest: f64,
+    least_clearance_at(dt, case, stopped, follower, noise, glitch, None)
 }
 
 /// [`least_clearance`] with both hands' tool points held to `tool_speed` m/s.
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one scene, one follower, one loop
+#[allow(clippy::too_many_lines)] // one scene, one follower, one loop
 fn least_clearance_at(
     dt: f64,
     case: &str,
@@ -936,7 +916,6 @@ fn least_clearance_at(
     noise: f64,
     glitch: Option<(&str, f64)>,
     tool_speed: Option<f64>,
-    speeds: &mut Speeds,
 ) -> (f64, String, String, f64, u32) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
@@ -1053,19 +1032,12 @@ fn least_clearance_at(
                 rotation_xyzw: right0.rotation_xyzw,
             });
         }
-        let clock = std::time::Instant::now();
         let step = solve
             .step(&q, &measured, &available, &targets, dt)
             .expect("a step");
-        speeds.slowest = speeds.slowest.max(clock.elapsed().as_secs_f64());
         relaxed += u32::from(step.solve == Solve::Relaxed);
-        speeds.relaxed += u32::from(step.solve == Solve::Relaxed);
-        speeds.held += u32::from(step.solve == Solve::Held);
-
         // How far past its acceleration cap any arm or torso joint's command turned this tick
         // (a stalled joint's jump to where it stands, or its release, is not a turn).
-        // A stall's onset or release moves the reference to where the joint stands: not a step.
-        let stall_moved = arms.iter().any(|&a| step.stalled[a] != was_stalled[a]);
         for axis in arms.iter().copied() {
             let turned = (step.q[axis] - q[axis]) - (q[axis] - before[axis]);
             let stall_change = step.stalled[axis] || was_stalled[axis];
@@ -1076,16 +1048,6 @@ fn least_clearance_at(
         }
         before.copy_from_slice(&q);
         q.copy_from_slice(&step.q);
-        if let Some(speed) = tool_speed.filter(|_| !stall_moved && tick > 0) {
-            for hand in 0..2 {
-                let (from, to) = (tcp(&solve, &before, hand), tcp(&solve, &q, hand));
-                let moved = (0..3)
-                    .map(|k| (to.translation_m[k] - from.translation_m[k]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                speeds.over = speeds.over.max(moved / (speed * dt));
-            }
-        }
         sent.push_back(q.clone());
         let command = sent.pop_front().expect("a command");
         match follower {
@@ -1315,7 +1277,6 @@ fn a_tool_speed_never_shortens_a_step_past_a_row() {
                                 noise,
                                 None,
                                 Some(tool),
-                                &mut Speeds::default(),
                             );
                             (dt, case, follower, tool, got)
                         }));
@@ -1373,130 +1334,4 @@ fn clearance_table() {
             println!("{}", run.join().expect("a case"));
         }
     });
-}
-
-/// Every clearance case with both hands' tool points held to 0.05 and 0.2 m/s: the least
-/// clearance, the fastest commanded tool step against its speed, and the steps that held or gave
-/// way: `cargo test --release --test teleop tool_speed_table -- --ignored --nocapture`.
-#[test]
-#[ignore = "prints the tool speed table"]
-fn tool_speed_table() {
-    let followers = [
-        Follower::Late(0),
-        Follower::Late(2),
-        Follower::Late(4),
-        Follower::Pd(0, 9.5, 0.2),
-        Follower::Pd(1, 9.5, 0.2),
-        Follower::Pd(3, 9.5, 0.2),
-        Follower::Pd(0, 9.5, 0.1),
-        Follower::Pd(1, 9.5, 0.1),
-        Follower::Pd(0, 30.0, 0.7),
-        Follower::Pd(2, 30.0, 0.7),
-    ];
-    std::thread::scope(|scope| {
-        let mut runs = Vec::new();
-        for dt in [0.02, 0.011, 0.01, 0.004, 0.002] {
-            for (case, stopped) in CASES {
-                for follower in followers {
-                    for noise in [0.0, READING_JITTER] {
-                        for tool in [0.05, 0.2] {
-                            runs.push(scope.spawn(move || {
-                                let mut speeds = Speeds::default();
-                                let (c, a, b, _, _) = least_clearance_at(
-                                    dt, case, stopped, follower, noise, None, Some(tool), &mut speeds,
-                                );
-                                format!(
-                                    "TOOL dt={dt} {case} stop={stopped} {follower:?} noise={noise} tool={tool}: {:.2} mm ({a} / {b}) over {:.2} held {} relaxed {}",
-                                    c * 1e3, speeds.over, speeds.held, speeds.relaxed
-                                )
-                            }));
-                        }
-                    }
-                }
-            }
-        }
-        for run in runs {
-            println!("{}", run.join().expect("a case"));
-        }
-    });
-}
-
-/// A tool's speed holds while its arm's pairs are kept clear, at 50 and 90 Hz: a recovery runs
-/// within it, never a jump, and the margin absorbs the tick it costs. Every commanded tool step
-/// within 1.06x of 0.05 m/s and 1.3x of 0.2 m/s (the speed is kept in the QP along 26
-/// directions; a tick whose acceleration caps carry a joint on gives way a tenth as far as the
-/// pairs), and every pair at least 9 mm apart. Before: 8.5-8.9x and 5.9-6.3x, 9.4-9.9 / 8.8-9.4
-/// mm (embodiments#215).
-#[test]
-fn a_tool_speed_holds_while_its_pairs_are_kept_clear() {
-    std::thread::scope(|scope| {
-        let mut runs = Vec::new();
-        for dt in [0.02, 0.011] {
-            for (case, stopped) in CASES {
-                for follower in [
-                    Follower::Late(2),
-                    Follower::Pd(1, 9.5, 0.1),
-                    Follower::Pd(0, 9.5, 0.2),
-                    Follower::Pd(2, 30.0, 0.7),
-                ] {
-                    for noise in [0.0, READING_JITTER] {
-                        for (tool, most) in [(0.05, 1.06), (0.2, 1.3)] {
-                            runs.push(scope.spawn(move || {
-                                let mut speeds = Speeds::default();
-                                let (clear, a, b, _, _) = least_clearance_at(
-                                    dt,
-                                    case,
-                                    stopped,
-                                    follower,
-                                    noise,
-                                    None,
-                                    Some(tool),
-                                    &mut speeds,
-                                );
-                                (
-                                    dt, case, stopped, follower, noise, tool, most, clear, a, b,
-                                    speeds,
-                                )
-                            }));
-                        }
-                    }
-                }
-            }
-        }
-        for run in runs {
-            let (dt, case, stopped, follower, noise, tool, most, clear, a, b, speeds) =
-                run.join().expect("a case");
-            assert!(
-                speeds.over <= most && clear >= 0.009 && speeds.held == 0,
-                "{case} at {dt} s, stop {stopped}, {follower:?}, noise {noise}, tool {tool} m/s: {a} and {b} {clear} m apart, {speeds:?}"
-            );
-        }
-    });
-}
-
-/// The slowest step of the tool-speed cases, one at a time (a quiet host): `--ignored --nocapture`.
-#[test]
-#[ignore = "prints step times"]
-fn tool_speed_step_times() {
-    for dt in [0.02, 0.011, 0.002] {
-        for (case, stopped) in CASES {
-            for tool in [None, Some(0.05), Some(0.2)] {
-                let mut speeds = Speeds::default();
-                least_clearance_at(
-                    dt,
-                    case,
-                    stopped,
-                    Follower::Pd(1, 9.5, 0.1),
-                    READING_JITTER,
-                    None,
-                    tool,
-                    &mut speeds,
-                );
-                println!(
-                    "TIME dt={dt} {case} stop={stopped} tool={tool:?}: slowest {:.3} ms",
-                    speeds.slowest * 1e3
-                );
-            }
-        }
-    }
 }
