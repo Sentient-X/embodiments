@@ -278,7 +278,14 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// the pair. An act-sim-like PD (zeta 0.2) then keeps 9.3 mm (5.1 without), zeta 0.1 7.7 mm
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
-fn momentum() -> f64 { static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new(); *V.get_or_init(|| std::env::var("IK_MOM").ok().and_then(|v| v.parse().ok()).unwrap_or(MOMENTUM_S)) }
+
+/// Over how long the lag a joint rests at is learned, seconds ([`Ik::set_measured`]): a
+/// position-controlled joint stands a steady few milliradians short of its command under a load
+/// (act-sim's arms 2.4-7.5 mrad), and that lag is no motion still to come.
+const RESTING_S: f64 = 0.1;
+/// A joint is at rest while its measured speed and its commanded velocity are both under this,
+/// rad/s: its reading moves less than [`READING_JITTER`] over twice [`RESTING_S`].
+const RESTING_SPEED: f64 = READING_JITTER / (2.0 * RESTING_S);
 
 /// The cost of the rows' slack ([`Ik::solve_qp`]), against a cost scaled to a unit diagonal.
 const SLACK_WEIGHT: f64 = 1e4;
@@ -398,8 +405,9 @@ pub struct Ik {
     measured_speed: Vec<f64>,
     /// Per axis, whether it does not follow its command ([`Ik::set_measured`]).
     stuck: Vec<bool>,
-    offset: Vec<f64>,
-    untrusted: Vec<bool>,
+    /// Per axis, how far short of its command it rests, learned over [`RESTING_S`] while it
+    /// and its command stand still (units; 0 until it has).
+    resting_lag: Vec<f64>,
     work: Workspace,
     qp: Qp,
     step: Step,
@@ -579,8 +587,7 @@ impl Ik {
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
             stuck: vec![false; axes_count],
-            offset: vec![0.0; axes_count],
-            untrusted: vec![false; axes_count],
+            resting_lag: vec![0.0; axes_count],
             work,
             qp,
             step,
@@ -633,7 +640,7 @@ impl Ik {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
-        self.offset.fill(0.0);
+        self.resting_lag.fill(0.0);
         self.anchored = self.preferred.is_some();
     }
 
@@ -655,9 +662,11 @@ impl Ik {
     /// pass), for the next steps. Between ticks each joint is somewhere between where it was
     /// measured and where it was commanded, so pairs are kept clear at both: at the commanded
     /// positions as the step moves them, and at the measured ones for the whole motion still
-    /// to come, the command's lead counted where it closes a pair. A stuck joint is never
-    /// counted on to open a pair: each pair it would help is kept by the rest alone too
-    /// (exactly, for one stuck joint in the pair).
+    /// to come: the command's lead over the reading, opening or closing, less the lag the joint
+    /// rests at (learned while it and its command stand still: a load's steady sag moves with
+    /// the command), and its momentum where it closes a pair. A stuck joint is never counted
+    /// on to open a pair: each pair it would help is kept by the rest alone too (exactly, for
+    /// one stuck joint in the pair).
     ///
     /// # Errors
     ///
@@ -934,32 +943,17 @@ impl Ik {
             }
             *before = *now;
         }
-        if variant() & 256 != 0 {
-            let rest = rest_speed();
-            for (column, &axis) in self.body.solved.iter().enumerate() {
-                if self.measured[axis].is_finite()
-                    && self.measured_speed[axis].abs() <= rest
-                    && self.velocity[column].abs() <= rest
-                {
-                    if variant() & 8192 != 0 {
-                        let blend = 1.0 - (-dt / 0.1_f64).exp();
-                        self.offset[axis] += blend * (q[axis] - w.seen_q[axis] - self.offset[axis]);
-                    } else {
-                        self.offset[axis] = q[axis] - w.seen_q[axis];
-                    }
-                }
-            }
-        }
-        self.untrusted.copy_from_slice(&self.stuck);
-        if variant() & 1048576 != 0 {
-            for &axis in &self.body.solved {
-                let transient = q[axis] - w.seen_q[axis] - self.offset[axis];
-                if self.measured[axis].is_finite()
-                    && transient.abs() > READING_JITTER
-                    && self.measured_speed[axis].abs() <= rest_speed()
-                {
-                    self.untrusted[axis] = true;
-                }
+        // The lag each joint rests at: its command's lead over its reading while both stand
+        // still. Held while either moves; a joint not measured rests at its command.
+        let blend = 1.0 - (-dt / RESTING_S).exp();
+        for (column, &axis) in self.body.solved.iter().enumerate() {
+            let lag = &mut self.resting_lag[axis];
+            if !self.measured[axis].is_finite() {
+                *lag = 0.0;
+            } else if self.measured_speed[axis].abs() <= RESTING_SPEED
+                && self.velocity[column].abs() <= RESTING_SPEED
+            {
+                *lag += blend * (q[axis] - w.seen_q[axis] - *lag);
             }
         }
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
@@ -1368,10 +1362,6 @@ impl Ik {
                     )
                 }
             };
-            let same = candidate.measured
-                && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
-                    *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
-                });
             // row . dq is how far the pair closes this tick.
             let capability: f64 = body
                 .solved
@@ -1387,195 +1377,42 @@ impl Ik {
             let room = (distance - s.collision_margin_m).max(0.0);
             let mut rhs = braking(room, s.braking_share * capability, dt).min(0.5 * room);
             if candidate.measured {
-                // From where it was measured the body still makes its way to its command (a
-                // following joint's lead, wherever it closes the pair), then the step: all of it
-                // within half the room, as the commanded row's tick is. One linearisation spans
-                // that whole motion, and a follower carries on past its command: with the whole
-                // room, an act-sim-like PD (zeta 0.2) rang 40-60 mm into the other arm; with
-                // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
-                // the commanded row's to keep.
-                let variant = variant();
+                // From where it was measured the body still makes its way to its command, then
+                // the step: all of it within half the room, as the commanded row's tick is. One
+                // linearisation spans that whole motion: with the whole room, an act-sim-like PD
+                // (zeta 0.2) rang 40-60 mm into the other arm; with half, it touches at worst
+                // (1.5 mm in; embodiments#206). The pace of closing is the commanded row's to keep.
+                //
+                // The way to the command is counted as it is, opening or closing, less the lag
+                // the joint rests at (no motion still to come: it moves with its command), so a
+                // step this row pays for is paid for the next tick too. Counted only where it
+                // closed the pair, a lagging joint's opening was never credited while its step
+                // was: the solve "opened" the pair by moving joints already behind the arm, which
+                // moved nothing that was there, and the row asked again every tick. Near the
+                // counter the command swung 30-80 mm at 1-2 Hz for as long as it was held, and a
+                // 0.23 m move stalled 0.05 rad short (act-sim, 2026-11-03). Where its measured
+                // speed carries it (a follower rings past its command) is counted only where it
+                // closes the pair: an underdamped follower otherwise came within 3-7 mm.
                 let lead = body
                     .solved
                     .iter()
                     .zip(row.iter())
-                    .filter(|&(&axis, _)| !self.untrusted[axis])
+                    .filter(|&(&axis, _)| !self.stuck[axis])
                     .map(|(&axis, r)| {
-                        let carried = momentum() * self.measured_speed[axis];
-                        let a = r * (q[axis] - w.seen_q[axis] + carried);
-                        if variant & 2097152 != 0 {
-                            r * (q[axis] - w.seen_q[axis] - if variant & 256 != 0 { self.offset[axis] } else { 0.0 }) + (r * carried).max(0.0)
-                        } else if variant & 1 != 0 { a } else { a.max(0.0) }
+                        let ahead = q[axis] - w.seen_q[axis];
+                        // Never more of it than the joint lags now, nor the other way.
+                        let resting = self.resting_lag[axis].clamp(ahead.min(0.0), ahead.max(0.0));
+                        let carried = MOMENTUM_S * self.measured_speed[axis];
+                        r * (ahead - resting) + (r * carried).max(0.0)
                     })
                     .sum::<f64>();
-                let budget = if variant & 2 != 0 {
-                    braking(room, s.braking_share * capability, dt).min(0.5 * room)
-                } else if variant & 8 != 0 {
-                    std::env::var("IK_K").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1.0) * room
-                } else if variant & 64 != 0 {
-                    (dt / follow_t()).min(0.5) * room
-                } else {
-                    0.5 * room
-                };
-                rhs = budget - lead;
-                if variant & 8388608 != 0 {
-                    let (mut d, mut c, mut cp) = (0.0, 0.0, 0.0);
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        if row[j] == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        d += row[j] * (q[axis] - w.seen_q[axis]);
-                        let k = row[j] * MOMENTUM_S * self.measured_speed[axis];
-                        c += k;
-                        cp += k.max(0.0);
-                    }
-                    rhs = budget - d - if c > 0.0 { cp } else { 0.0 };
-                }
-                if variant & 4194304 != 0 {
-                    let (mut d, mut c) = (0.0, 0.0);
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        if row[j] == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        d += row[j] * (q[axis] - w.seen_q[axis] - if variant & 256 != 0 { self.offset[axis] } else { 0.0 });
-                        c += row[j] * MOMENTUM_S * self.measured_speed[axis];
-                    }
-                    rhs = budget - d - c.max(0.0);
-                }
-                if trace() {
-                    eprintln!("ML d {distance:.5} room {room:.5} lead {lead:.5} rhs {rhs:.5}");
-                }
-                if variant & 32 != 0
-                    && !body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
-                        *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
-                    })
-                {
-                    let mut lead = 0.0;
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        let r = row[j];
-                        if r == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        let a = r * (q[axis] - w.seen_q[axis] + MOMENTUM_S * self.measured_speed[axis]);
-                        let (x, y) = (r * w.lower[j], r * w.upper[j]);
-                        let (lo, hi) = (x.min(y), x.max(y));
-                        if a + lo >= 0.0 {
-                            lead += a;
-                        } else if a + hi <= 0.0 {
-                            row[j] = 0.0;
-                        } else {
-                            let k = (a + hi) / (hi - lo);
-                            row[j] *= k;
-                            lead -= k * lo;
-                        }
-                    }
-                    rhs = budget - lead;
-                }
-                if variant & 128 != 0 && !same {
-                    let mut lead = 0.0;
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        let r = row[j];
-                        if r == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        let transient = q[axis] - w.seen_q[axis] - self.offset[axis];
-                        if variant & 4096 != 0 {
-                            let kappa = if transient.abs() <= READING_JITTER {
-                                1.0
-                            } else {
-                                (self.measured_speed[axis].abs() / rest_speed()).min(1.0)
-                            };
-                            let carry = (r * MOMENTUM_S * self.measured_speed[axis]).max(0.0);
-                            lead += kappa * r * transient + carry
-                                + if variant & 512 != 0 { (1.0 - kappa) * (r * transient).max(0.0) } else { 0.0 };
-                            row[j] *= kappa;
-                            continue;
-                        }
-                        let follows = transient.abs() <= READING_JITTER
-                            || if variant & 2048 != 0 {
-                                self.measured_speed[axis].abs() > rest_speed()
-                            } else {
-                                self.measured_speed[axis] * transient > 0.0
-                            };
-                        let a = r * (transient + MOMENTUM_S * self.measured_speed[axis]);
-                        if follows && variant & 1024 != 0 {
-                            lead += r * transient + (r * MOMENTUM_S * self.measured_speed[axis]).max(0.0);
-                        } else if follows || (variant & 512 != 0 && a > 0.0) {
-                            lead += a;
-                        } else {
-                            row[j] = 0.0;
-                        }
-                    }
-                    rhs = budget - lead;
-                }
-                if variant & 65536 != 0 && !same {
-                    let mut lead = 0.0;
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        let r = row[j];
-                        if r == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        let transient = q[axis] - w.seen_q[axis] - self.offset[axis];
-                        let v = self.measured_speed[axis];
-                        let blocked = transient.abs() > READING_JITTER
-                            && v.abs() <= rest_speed()
-                            && self.velocity[j].abs() > rest_speed();
-                        if blocked && r * transient <= 0.0 {
-                            row[j] = 0.0;
-                        } else {
-                            let carry = MOMENTUM_S * v;
-                            lead += r * (transient + carry);
-                        }
-                    }
-                    rhs = budget - lead;
-                }
-                if variant & 131072 != 0 {
-                    let (mut catch_up, mut carry) = (0.0, 0.0);
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        let r = row[j];
-                        if r == 0.0 || self.untrusted[axis] {
-                            continue;
-                        }
-                        let c = r * MOMENTUM_S * self.measured_speed[axis];
-                        let d = r * (q[axis] - w.seen_q[axis]);
-                        if variant & 262144 != 0 {
-                            catch_up += (d + c).max(0.0) - c.max(0.0);
-                        } else {
-                            catch_up += d.max(0.0);
-                        }
-                        carry += if variant & 524288 != 0 { c } else { c.max(0.0) };
-                    }
-                    rhs = (budget - catch_up).max(0.0) - carry.max(0.0);
-                }
-                if variant & 32768 != 0 {
-                    let signed = body
-                        .solved
-                        .iter()
-                        .zip(row.iter())
-                        .filter(|&(&axis, _)| !self.untrusted[axis])
-                        .map(|(&axis, r)| r * (q[axis] - w.seen_q[axis] + MOMENTUM_S * self.measured_speed[axis]))
-                        .sum::<f64>();
-                    rhs = (budget - lead).max(0.0).min(budget - signed);
-                    if trace() {
-                        eprintln!("MM room {room:.5} clip {lead:.5} signed {signed:.5} rhs {rhs:.5}");
-                    }
-                }
-                if variant & 16384 != 0 {
-                    rhs = rhs.max(0.0);
-                }
-                if variant & 4 != 0 {
-                    for (j, &axis) in body.solved.iter().enumerate() {
-                        let carried = momentum() * self.measured_speed[axis];
-                        if !self.untrusted[axis] && row[j] * (q[axis] - w.seen_q[axis] + carried) < 0.0 {
-                            row[j] = 0.0;
-                        }
-                    }
-                }
-                if variant & 16 != 0 {
-                    continue;
-                }
+                rhs = 0.5 * room - lead;
             }
-            if same {
+            if candidate.measured
+                && body.solved.iter().zip(row.iter()).all(|(&axis, r)| {
+                    *r == 0.0 || (q[axis] - w.seen_q[axis]).abs() <= READING_JITTER
+                })
+            {
                 continue; // measured where it was commanded, as far as this pair goes
             }
             let reach: f64 = (0..n)
@@ -1590,7 +1427,7 @@ impl Ik {
             w.used += 1;
             // The same pair kept without the stuck joints: a step must keep it whether or not
             // they make their move (exactly, for one stuck joint in the pair).
-            let untrusted = |j: usize| self.untrusted[body.solved[j]];
+            let untrusted = |j: usize| self.stuck[body.solved[j]];
             if w.used < s.max_rows && (0..n).any(|j| w.rows[slot * n + j] != 0.0 && untrusted(j)) {
                 let (kept, spare) = w.rows.split_at_mut((slot + 1) * n);
                 let next = &mut spare[..n];
@@ -1842,9 +1679,6 @@ impl Ik {
             let row = &w.rows[slot * n..(slot + 1) * n];
             let value: f64 = row.iter().zip(dq).map(|(a, b)| a * b).sum();
             w.row_binds[slot] = value >= w.rhs[slot] - 1e-6 * (1e-3 + w.rhs[slot].abs());
-            if trace() {
-                eprintln!("TR slot {slot} meas {} {:?} value {:.5} rhs {:.5} bind {}", w.row_measured[slot], w.row_active[slot], value, w.rhs[slot], w.row_binds[slot]);
-            }
         }
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let pose = w.after.links[limb.frame];
@@ -2278,24 +2112,4 @@ fn deadline_after(budget: Duration) -> Option<Instant> {
     } else {
         Some(Instant::now() + budget)
     }
-}
-
-fn variant() -> u32 {
-    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("IK_VARIANT").ok().and_then(|v| v.parse().ok()).unwrap_or(2105600))
-}
-
-fn follow_t() -> f64 {
-    static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("IK_T").ok().and_then(|v| v.parse().ok()).unwrap_or(0.06))
-}
-
-fn trace() -> bool {
-    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("IK_TRACE").is_ok())
-}
-
-fn rest_speed() -> f64 {
-    static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("IK_REST").ok().and_then(|v| v.parse().ok()).unwrap_or(0.005))
 }

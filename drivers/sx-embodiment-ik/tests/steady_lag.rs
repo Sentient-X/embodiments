@@ -51,6 +51,7 @@ struct Run {
     /// The real tool point's distance from the target at the end, metres, and the rotation
     /// error, radians.
     error_m: f64,
+    error_rad: f64,
     least_clear_m: f64,
 }
 
@@ -67,7 +68,11 @@ fn setup(obstacles: Vec<[f64; 6]>) -> (Teleop, Vec<f64>) {
         .model()
         .axes()
         .iter()
-        .map(|a| ready.get(&a.name).copied().unwrap_or(0.0))
+        .map(|a| {
+            let at = ready.get(&a.name).copied().unwrap_or(0.0);
+            // The commissioned Ready since embodiments#213: each shoulder pitched 0.15 rad.
+            if a.name.ends_with("shoulder_pitch_joint") { 1.5 * at } else { at }
+        })
         .collect();
     (teleop, rest)
 }
@@ -179,7 +184,8 @@ fn hold(
     };
     println!("least pair {least_pair} end real {:.2} mm cmd {:.2} mm", teleop.ik().clearance(&real).0 * 1e3, teleop.ik().clearance(&reference).0 * 1e3);
     let end = path(seconds);
-    let (at, _) = left_tcp(&teleop, &real);
+    let (at, turned) = left_tcp(&teleop, &real);
+    let dot: f64 = (0..4).map(|k| turned[k] * rotation[k]).sum();
     Run {
         command_spread_m: spread(&commanded),
         real_spread_m: spread(&really),
@@ -188,6 +194,7 @@ fn hold(
             .map(|k| (start[k] + end[k] - at[k]).powi(2))
             .sum::<f64>()
             .sqrt(),
+        error_rad: 2.0 * dot.abs().min(1.0).acos(),
         least_clear_m: least,
     }
 }
@@ -279,11 +286,14 @@ fn a_target_held_past_the_counter_converges_and_holds_still() {
 fn a_long_paced_move_settles() {
     for dt in [0.02, 0.01] {
         for motor in MOTORS {
-            let goal = [0.035, -0.228, 0.04];
+            let (teleop, rest) = setup(Vec::new());
+            let (start, _) = left_tcp(&teleop, &rest);
+            let goal = [0.50 - start[0], 0.01 - start[1], 0.25 - start[2]];
             let run = hold(Vec::new(), &move |_| goal, Some(0.3), motor, dt, 5.0);
             println!(
-                "dt {dt} {motor:?}: error {:.1} mm, command spread {:.2} mm, toggles {}",
+                "dt {dt} {motor:?}: start {start:?} error {:.1} mm {:.3} rad, command spread {:.2} mm, toggles {}",
                 run.error_m * 1e3,
+                run.error_rad,
                 run.command_spread_m * 1e3,
                 run.toggles
             );
