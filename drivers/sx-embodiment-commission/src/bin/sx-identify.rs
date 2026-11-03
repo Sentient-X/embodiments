@@ -2,12 +2,12 @@
 //! arms and record what the motors measured, for `tools/identify_dynamics.py fit`.
 //!
 //! ```text
-//! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>
+//! sx-identify --plan <plan.json> --part holds|left|right|sweep:<joint>|breakaway:<joint>|step:<joint>
 //!             --record <out.csv> --drive <instance-drive.json> --instance <id>
 //!             --bus <identity> [--speed 0.25]
 //!             [--with-torso] [--without <joint>]... [--feedforward urdf|<dynamics.json>]
 //!             [--feedforward-ramp-s 2] [--supply-volts 48|<model>=<V>,*=<V>] [--supply-source <s>]
-//!             [--move] [--seconds 30]
+//!             [--gains commissioned|damped] [--move] [--seconds 30]
 //! ```
 //!
 //! `--part latency` moves nothing: it polls every chain motor through the read-only observer
@@ -16,6 +16,16 @@
 //! p90, p99, p99.9, max, µs), the polls it missed by reason, the poll durations, the frames the
 //! adapter received that no poll took (answers that came after their poll gave up), and the
 //! adapter's counters (lost to a full ring, refused or failed batches, stalls, recoveries).
+//!
+//! `step:<joint>` (sweep plan) checks a joint's gains: from the middle of its swept range it
+//! rests 1 s, steps 0.02 rad (at `--speed`) and holds 2 s, then steps back, twice
+//! (`rest:<n>:+|-`, `step:<n>:+|-`). After the run each step is fitted
+//! (`sx_embodiment_commission::step_response`) to the follower the gains make of the joint and
+//! printed beside the model's (the gains over the bindings' inertia). With `--gains damped`
+//! the run drives the proposed `STATIC_UPPER_BODY_DAMPED` instead of the commissioned gains,
+//! and exits 1 unless every step's fit explains it (`Fit::explains`) at a damping ratio of at
+//! least 0.45. A first torso step needs the torso in the plan (the sweep plan has no torso
+//! staging yet: `the plan does not sweep torso_joint`).
 //!
 //! `jog:<joint>` (sweep plan) moves the joint from its staging pose 0.5 rad at 0.3 rad/s,
 //! holds 2 s, and back, twice (`jog:<n>:+|-`, `hold:<n>:+|-`): the bench test of tracking.
@@ -71,7 +81,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use sx_damiao_can::chain::{DamiaoAxis, DamiaoChain};
-use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
+use sx_damiao_can::static_upper_body::{STATIC_UPPER_BODY, STATIC_UPPER_BODY_DAMPED};
+use sx_embodiment_commission::step_response::{self, Sample};
 use sx_embodiment_drivers::governor::{AxisLimits, Governor};
 use sx_embodiment_drivers::{
     ActuatorChain, Dynamics, DynamicsCalibration, Feedforward, FeedforwardLimit, InstanceDrive,
@@ -93,6 +104,11 @@ const MAX_AXES: usize = 16;
 /// The bench jog: 0.5 rad at 0.3 rad/s, as the jogs of 2026-10-26.
 const JOG_TRAVEL: f64 = 0.5;
 const JOG_SPEED: f64 = 0.3;
+/// The gains check's step, rad, and the least damping ratio `--gains damped` accepts: on
+/// act-sim's motor model the fit reads the proposed zeta 0.5 at 0.54-0.63 (it reads high by up
+/// to a quarter), so 0.45 accepts no joint truly damped below about 0.36.
+const STEP: f64 = 0.02;
+const DAMPED_AT_LEAST: f64 = 0.45;
 /// The share of a motor's peak torque the feed-forward may send.
 const FEEDFORWARD_SHARE: f64 = 0.25;
 const URDF: &str =
@@ -228,6 +244,9 @@ struct Args {
     motion: bool,
     /// How long `--part latency` polls.
     seconds: f64,
+    /// The proposed damped gains (`STATIC_UPPER_BODY_DAMPED`) for this run, not the
+    /// commissioned ones.
+    damped: bool,
 }
 
 fn parse() -> Result<Args, String> {
@@ -248,6 +267,7 @@ fn parse() -> Result<Args, String> {
         source: None,
         motion: false,
         seconds: 30.0,
+        damped: false,
     };
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -275,6 +295,13 @@ fn parse() -> Result<Args, String> {
                 parsed.supply = Some(text);
             }
             "--move" => parsed.motion = true,
+            "--gains" => {
+                parsed.damped = match value()?.as_str() {
+                    "commissioned" => false,
+                    "damped" => true,
+                    _ => return Err("--gains is commissioned or damped".into()),
+                }
+            }
             "--seconds" => {
                 parsed.seconds = value()?.parse().map_err(|_| "bad --seconds")?;
                 if !(parsed.seconds.is_finite() && parsed.seconds > 0.0 && parsed.seconds <= 3600.0)
@@ -295,9 +322,12 @@ fn parse() -> Result<Args, String> {
         "holds" | "left" | "right" | "check" | "latency"
     ) || parsed.part.starts_with("sweep:")
         || parsed.part.starts_with("breakaway:")
-        || parsed.part.starts_with("jog:");
+        || parsed.part.starts_with("jog:")
+        || parsed.part.starts_with("step:");
     if !known {
-        return Err("--part is holds, left, right, sweep:<joint> or breakaway:<joint>".into());
+        return Err(
+            "--part is holds, left, right, sweep:<joint>, breakaway:<joint> or step:<joint>".into(),
+        );
     }
     if !(parsed.speed > 0.0 && parsed.speed <= MAX_SPEED) {
         return Err(format!("--speed is in (0, {MAX_SPEED}] rad/s"));
@@ -481,6 +511,21 @@ fn schedule_sweep(
             hold(&mut ticks, &format!("hold:{rep}:-"), &at(from), 2.0);
         }
         travel(&mut ticks, "move", &at(from), &ready, speed);
+    } else if kind == "step" {
+        let middle = f64::midpoint(lower, upper);
+        travel(&mut ticks, "move", &at(lower), &at(middle), speed);
+        let mut from = middle;
+        for rep in 0..2 {
+            for (sign, label) in [(1.0, "+"), (-1.0, "-")] {
+                hold(&mut ticks, &format!("rest:{rep}:{label}"), &at(from), 1.0);
+                let to = (from + sign * STEP).clamp(lower, upper);
+                let segment = format!("step:{rep}:{label}");
+                travel(&mut ticks, &segment, &at(from), &at(to), speed);
+                hold(&mut ticks, &segment, &at(to), 2.0);
+                from = to;
+            }
+        }
+        travel(&mut ticks, "move", &at(from), &ready, speed);
     } else {
         return Err(format!("unknown part {part}"));
     }
@@ -497,7 +542,11 @@ fn schedule(
     rest: &[f64],
     speed: f64,
 ) -> Result<Vec<Tick>, String> {
-    if part.starts_with("sweep:") || part.starts_with("breakaway:") || part.starts_with("jog:") {
+    if part.starts_with("sweep:")
+        || part.starts_with("breakaway:")
+        || part.starts_with("jog:")
+        || part.starts_with("step:")
+    {
         return schedule_sweep(plan, part, names, rest, speed);
     }
     let mut ticks = Vec::new();
@@ -637,6 +686,8 @@ struct Record {
     position: [f64; MAX_AXES],
     velocity: [f64; MAX_AXES],
     torque: [f64; MAX_AXES],
+    /// What the governor sent this tick, after its slew (the step check fits against it).
+    sent: [f64; MAX_AXES],
 }
 
 /// The CSV, written after the run: time, segment, then every target, position, velocity and
@@ -992,7 +1043,12 @@ fn run() -> Result<(), String> {
         &args.instance,
     )
     .map_err(|e| e.to_string())?;
-    let axes: Vec<DamiaoAxis> = STATIC_UPPER_BODY
+    let body = if args.damped {
+        &STATIC_UPPER_BODY_DAMPED
+    } else {
+        &STATIC_UPPER_BODY
+    };
+    let axes: Vec<DamiaoAxis> = body
         .axes(&drive)
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -1078,6 +1134,23 @@ fn run() -> Result<(), String> {
         Some(source) => Some(Model::new(source, &names)?),
         None => None,
     };
+    // What each axis' gains make of it over the bindings' inertia, at the joint: omega, zeta,
+    // the planned-velocity cap (`MAX_COAST kp / kd`) and the MIT frame's DQ_MAX, for the step
+    // check.
+    let followers: Vec<(f64, f64, f64, f64)> = axes
+        .iter()
+        .map(|a| {
+            let g = a.axis.actuator_from_joint(a.axis.zero + 1.0);
+            let (kp, kd, j) = (a.kp * g * g, a.kd * g * g, a.axis.motion.inertia);
+            (
+                (kp / j).sqrt(),
+                kd / (2.0 * (kp * j).sqrt()),
+                sx_damiao_can::chain::MAX_COAST * a.kp / a.kd,
+                sx_damiao_can::chain::motor_type(a.axis.binding.model)
+                    .map_or(f64::INFINITY, |m| m.limit_param()[1]),
+            )
+        })
+        .collect();
     let chain = DamiaoChain::open(port, axes).map_err(|e| e.to_string())?;
     let width = chain.axes().len();
     let mut governor = Governor::new(
@@ -1210,7 +1283,11 @@ fn run() -> Result<(), String> {
             position: [0.0; MAX_AXES],
             velocity: [0.0; MAX_AXES],
             torque: [0.0; MAX_AXES],
+            sent: [0.0; MAX_AXES],
         };
+        if let Some(sent) = governor.sent() {
+            record.sent[..width].copy_from_slice(&sent[..width]);
+        }
         for (axis, (q, answer)) in receipt.observed.iter().zip(&receipt.feedback).enumerate() {
             record.position[axis] = *q;
             record.velocity[axis] = f64::from(answer.velocity) / gains[axis];
@@ -1289,5 +1366,108 @@ fn run() -> Result<(), String> {
         "stopped: unproven {:?} faults {:?} answered disable, enable state unobservable {:?}",
         report.unproven, report.faults, report.unobserved
     );
-    outcome
+    outcome?;
+    match args.part.strip_prefix("step:") {
+        Some(joint) => step_check(&args, joint, &names, &followers, &ticks, &records),
+        None => Ok(()),
+    }
+}
+
+/// Fit each recorded step of `joint` (its last rest tick, then the step and its hold) and
+/// print it beside the follower its gains make (`followers`: omega, zeta, planned-velocity
+/// cap, `DQ_MAX`); with `--gains damped`, refuse a step damped less than [`DAMPED_AT_LEAST`].
+/// A planned velocity as the MIT frame carries it, over the motor's `dq_max`.
+fn as_sent(velocity: f64, dq_max: f64) -> f64 {
+    use sx_damiao_can::dm_can::{float_to_uint, uint_to_float};
+    float_to_uint(velocity, -dq_max, dq_max, 12).map_or(velocity, |bits| {
+        f64::from(uint_to_float(bits, -dq_max, dq_max, 12))
+    })
+}
+
+fn step_check(
+    args: &Args,
+    joint: &str,
+    names: &[String],
+    followers: &[(f64, f64, f64, f64)],
+    ticks: &[Tick],
+    records: &[Record],
+) -> Result<(), String> {
+    let index = names
+        .iter()
+        .position(|n| n == joint)
+        .ok_or(format!("{joint} is not in the chain"))?;
+    let (omega, zeta, coast, dq_max) = followers[index];
+    let cap = args.speed.min(coast);
+    let period = PERIOD.as_secs_f64();
+    let mut weak = Vec::new();
+    let segments: std::collections::BTreeSet<&str> = ticks
+        .iter()
+        .map(|t| t.segment.as_str())
+        .filter(|s| s.starts_with("step:"))
+        .collect();
+    for segment in segments {
+        let Some(first) = records
+            .iter()
+            .position(|r| ticks[r.tick].segment == segment)
+        else {
+            continue;
+        };
+        let start = first.saturating_sub(1);
+        let begin = records[start].elapsed;
+        let mut before = records[start.saturating_sub(1)].sent[index];
+        let samples: Vec<Sample> = records[start..]
+            .iter()
+            .take_while(|r| r.tick == records[start].tick || ticks[r.tick].segment == segment)
+            .map(|r| {
+                // What was sent, after the governor's slew (the torso's acceleration ceiling
+                // spreads a two-tick step over several), and its step speed as the planned
+                // velocity.
+                // The governor sends the speed of its step as the planned velocity, and the MIT
+                // frame carries it in 12 bits over the motor's DQ_MAX, truncated (a planned
+                // zero arrives as -0.011 rad/s on a DM8009).
+                let target = r.sent[index];
+                let velocity = as_sent(((target - before) / period).clamp(-cap, cap), dq_max);
+                before = target;
+                Sample {
+                    t: r.elapsed.saturating_sub(begin).as_secs_f64(),
+                    target,
+                    velocity,
+                    position: r.position[index],
+                }
+            })
+            .collect();
+        let Some(fit) = step_response::fit(&samples) else {
+            eprintln!("{segment}: {joint}: too few samples to fit");
+            weak.push(segment.to_owned());
+            continue;
+        };
+        eprintln!(
+            "{segment}: {joint}: omega {:.2} rad/s, zeta {:.3}, delay {:.0} ms, friction band \
+             {:.1} mrad, overshoot {:.0} %, rms {:.2} mrad (the gains over the bindings' inertia: \
+             omega {omega:.2}, zeta {zeta:.3})",
+            fit.omega,
+            fit.zeta,
+            fit.delay_s * 1e3,
+            fit.band * 1e3,
+            fit.overshoot * 100.0,
+            fit.rms * 1e3
+        );
+        let size = samples.last().map_or(0.0, |s| s.target) - samples[0].target;
+        if !fit.explains(size) {
+            eprintln!(
+                "{segment}: {joint}: the fit does not explain the step (friction or a stop may \
+                 hold it): it is not evidence of damping"
+            );
+            weak.push(segment.to_owned());
+        } else if fit.zeta < DAMPED_AT_LEAST {
+            weak.push(segment.to_owned());
+        }
+    }
+    if args.damped && !weak.is_empty() {
+        return Err(format!(
+            "{joint}: steps {weak:?} are damped less than {DAMPED_AT_LEAST} on the proposed gains: \
+             keep the commissioned ones"
+        ));
+    }
+    Ok(())
 }

@@ -33,5 +33,6 @@ pub mod output;
 pub mod probe;
 pub mod record;
 pub mod station_loan;
+pub mod step_response;
 pub mod sysfs;
 pub mod tty;
