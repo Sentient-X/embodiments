@@ -13,12 +13,16 @@
 //! `MotorControl`, and the free functions its module helpers. Every command keeps the vendor's
 //! frame, ids, waits and order: `enable` sends `FF..FC` to the motor's `SlaveID`, waits 0.1 s and
 //! reads; `disable` sends `FF..FD` and waits 0.01 s without reading; `controlMIT` packs and
-//! clamps exactly as `float_to_uint` does and reads once; register reads and writes go to
-//! `0x7FF`. `tests/fixtures/dm_can/` pins this file to transcripts recorded by running
+//! clamps as `float_to_uint` does (rounded, below) and reads once; register reads and writes go
+//! to `0x7FF`. `tests/fixtures/dm_can/` pins this file to transcripts recorded by running
 //! `DM_CAN.py` itself.
 //!
 //! Where this translation departs from `DM_CAN.py`, and why:
 //!
+//! - [`float_to_uint`] rounds to the nearest code where `DM_CAN.py` truncates. Truncation sent
+//!   every MIT field (position, velocity, kp, kd, torque) up to one step below the asked value,
+//!   half a step low on average; rounding is within half a step, and zero still sends the
+//!   vendor's code. The motor decodes with the same mapping as [`uint_to_float`].
 //! - The USB2CAN serial framing of `__send_data` and `__extract_packets` lives in
 //!   [`crate::usb2can`], behind the bus-agnostic `CanPort`, so the same driver runs over
 //!   `SocketCAN`. The serial packet's command byte (`CMD == 0x11`, a received CAN frame) is
@@ -791,7 +795,15 @@ pub fn limit_min_max(x: f64, min: f64, max: f64) -> f64 {
     }
 }
 
-/// `float_to_uint`: clamp, normalise, scale to `bits`, truncate as `np.uint16` does.
+/// `float_to_uint`, rounded: clamp, normalise, scale to `bits`, and take the code whose value
+/// under [`uint_to_float`] (the vendor's mapping, which the motor's firmware decodes with) lies
+/// nearest `x`. A value exactly between two codes takes the one nearer zero, and of two equally
+/// near zero the lower.
+///
+/// `DM_CAN.py` truncates (`np.uint16`), which lands every value up to one step below what was
+/// asked; this lands within half a step. The mapping divides by `2^bits - 1`, so a symmetric
+/// range has no code for zero: zero and the range midpoint take the lower of the two codes
+/// half a step either side (`2^(bits-1) - 1`), the code `DM_CAN.py` sends for them too.
 ///
 /// # Errors
 ///
@@ -799,14 +811,29 @@ pub fn limit_min_max(x: f64, min: f64, max: f64) -> f64 {
 pub fn float_to_uint(x: f64, x_min: f64, x_max: f64, bits: u32) -> Result<u16, DmCanError> {
     let x = limit_min_max(x, x_min, x_max);
     let span = x_max - x_min;
-    let data_norm = (x - x_min) / span;
-    let scaled = data_norm * f64::from((1_u32 << bits) - 1);
+    let codes = f64::from((1_u32 << bits) - 1);
+    let scaled = (x - x_min) / span * codes;
     if scaled.is_nan() {
         return Err(DmCanError::NotANumber);
     }
-    // In 0..=(1 << bits) - 1 by the clamp.
+    let below = scaled.floor();
+    let fraction = scaled - below;
+    let code = if fraction < 0.5 {
+        below
+    } else if fraction > 0.5 {
+        below + 1.0
+    } else {
+        // Where zero falls, in codes; of the two equally near codes take the one nearer it.
+        let zero = -x_min / span * codes;
+        if (below + 1.0 - zero).abs() < (below - zero).abs() {
+            below + 1.0
+        } else {
+            below
+        }
+    };
+    // In 0..=(1 << bits) - 1 by the clamp: a fraction is only nonzero below the top code.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let packed = scaled as u16;
+    let packed = code.min(codes) as u16;
     Ok(packed)
 }
 
