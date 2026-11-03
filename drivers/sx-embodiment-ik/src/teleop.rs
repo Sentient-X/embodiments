@@ -112,7 +112,7 @@ pub const STALL_RELEASE: f64 = 0.01;
 /// How close each driven hand's target must be to its gripper's tool point, as the robot
 /// stands, before following starts: control starts from the robot's own pose, never by jumping
 /// to the operator's hands. The station and the headset both ask [`Teleop::may_engage`].
-pub const ENGAGE_RADIUS_M: f64 = 0.06;
+pub const ENGAGE_RADIUS_M: f64 = 0.15;
 
 /// One limb of the config: a frame of the description and its task.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

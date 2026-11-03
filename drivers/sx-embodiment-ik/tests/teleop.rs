@@ -278,14 +278,36 @@ fn following_starts_only_with_every_driven_hand_at_its_gripper() {
     assert!(!solve.may_engage(&q, &at(None, None)));
     assert!(solve.may_engage(&q, &at(Some(left), Some(right))));
     assert!(solve.may_engage(&q, &at(Some(left), None)));
+    // The 15 cm gate applies to every driven hand, using Cartesian distance.
     let mut near = left;
-    near.translation_m[0] += 0.05;
+    near.translation_m[0] += 0.149;
     assert!(solve.may_engage(&q, &at(Some(near), Some(right))));
+    let mut near_right = right;
+    near_right.translation_m[1] -= 0.149;
+    assert!(solve.may_engage(&q, &at(Some(near), Some(near_right))));
+    // A farther accepted target still starts from measured joints, under the existing
+    // 1 rad/s speed, 0.25 s ramp and feedback-reference bounds of this test config.
+    solve.reset();
+    let measured: Vec<_> = q.iter().copied().map(Some).collect();
+    let step = solve
+        .step(&q, &measured, &vec![true; q.len()], &at(Some(near), Some(near_right)), DT)
+        .expect("bounded first step after engagement");
+    for ((next, velocity), actual) in step.q.iter().zip(&step.qdot).zip(&q) {
+        assert!((next - actual).abs() <= REFERENCE_GAP + 1e-9);
+        assert!(velocity.abs() <= DT / 0.25 + 1e-9);
+    }
     let mut far = left;
-    far.translation_m[2] += 0.07;
+    far.translation_m[2] += 0.151;
     assert!(!solve.may_engage(&q, &at(Some(far), Some(right))));
+    let mut far_right = right;
+    far_right.translation_m[1] -= 0.151;
+    assert!(!solve.may_engage(&q, &at(Some(left), Some(far_right))));
+    let mut diagonal = left;
+    diagonal.translation_m[0] += 0.11;
+    diagonal.translation_m[1] += 0.11;
+    assert!(!solve.may_engage(&q, &at(Some(diagonal), Some(right))));
     let gaps = solve.hand_gaps(&q, &at(Some(far), None));
-    assert!((gaps[0].expect("left") - 0.07).abs() < 1e-9 && gaps[1].is_none());
+    assert!((gaps[0].expect("left") - 0.151).abs() < 1e-9 && gaps[1].is_none());
 }
 
 /// `turn` applied after `rotation`, both unit quaternions (x, y, z, w).
