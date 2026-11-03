@@ -1,6 +1,7 @@
 //! The crate sends what Damiao's own `DM_CAN.py` sent, byte for byte and motor by motor, but
 //! for one departure: an MIT field is rounded to the nearest code where the vendor truncates,
-//! so each of its five codes is the vendor's or the one above (`tests/mit_encoding.rs`).
+//! so each of its five codes is the vendor's or the one above, and the error-diffused position,
+//! velocity and torque may be one below (`tests/mit_encoding.rs`).
 //!
 //! `fixtures/dm_can/transcripts.json` is minted by `fixtures/dm_can/mint.py`, which runs the
 //! vendor driver itself; see its header for the sources and the cross-checks. The vendor
@@ -112,12 +113,18 @@ fn mit_codes(data: &[u8]) -> [u16; 5] {
 }
 
 /// `DM_CAN.py` truncates and this crate rounds (`float_to_uint`): each MIT code is the vendor's
-/// or the one above it, never anything else.
+/// or the one above it. Position, velocity and torque are also error-diffused
+/// (`float_to_uint_diffused`), so they may be one below too; never anything else.
 fn same_mit_but_rounded(ours: &[u8], vendors: &[u8]) -> bool {
     mit_codes(ours)
         .iter()
         .zip(mit_codes(vendors))
-        .all(|(ours, vendors)| *ours == vendors || *ours == vendors + 1)
+        .enumerate()
+        .all(|(field, (ours, vendors))| {
+            *ours == vendors
+                || *ours == vendors + 1
+                || (matches!(field, 0 | 1 | 4) && *ours + 1 == vendors)
+        })
 }
 
 /// The code nearest `x` under the vendor's decoding, found by trying the vendor's truncated
@@ -215,12 +222,22 @@ fn control_mit_frames_are_the_vendors_rounded() {
         let sent = &control.port().sent;
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].id, 0x01);
-        let vendors = unhex(row["data"].as_str().unwrap());
-        assert!(
-            same_mit_but_rounded(&sent[0].data, &vendors),
-            "{row}: {}",
-            hex(&sent[0].data)
-        );
+        // A fresh motor carries no residual, so each field is the nearest code to its value.
+        let vendors = mit_codes(&unhex(row["data"].as_str().unwrap()));
+        let [q_max, dq_max, tau_max] = motor_type(&row["motor_type"]).limit_param();
+        let fields = [
+            (f64_of(&row["q"]), -q_max, q_max, 16),
+            (f64_of(&row["dq"]), -dq_max, dq_max, 12),
+            (f64_of(&row["kp"]), 0.0, 500.0, 12),
+            (f64_of(&row["kd"]), 0.0, 5.0, 12),
+            (f64_of(&row["tau"]), -tau_max, tau_max, 12),
+        ];
+        let nearest: Vec<u16> = fields
+            .iter()
+            .zip(vendors)
+            .map(|((x, min, max, bits), vendor)| nearest_code(*x, *min, *max, *bits, vendor))
+            .collect();
+        assert_eq!(mit_codes(&sent[0].data).to_vec(), nearest, "{row}");
     }
 }
 
@@ -356,7 +373,11 @@ impl Write for ReplayStream {
         let next = replay.writes.remove(index);
         let vendors = unhex(next["write"].as_str().unwrap());
         // An MIT packet may round where the vendor truncated; everything else is byte for byte.
-        let is_mit = motor != 0x7FF && vendors[21..28] != [0xFF; 7];
+        // MIT frames go to the motor's own CAN id (below 0x100); register frames (0x7FF),
+        // position-velocity and velocity frames (0x100 + id, 0x200 + id) and the `FF..`
+        // command frames are held byte for byte.
+        let can_id = u16::from_le_bytes([vendors[13], vendors[14]]);
+        let is_mit = can_id < 0x100 && vendors[21..28] != [0xFF; 7];
         assert!(
             hex(buf) == hex(&vendors)
                 || (is_mit

@@ -1,9 +1,18 @@
 //! Every MIT field (position, velocity, kp, kd, torque) is encoded to the nearest code under the
 //! vendor's own decoding (`uint_to_float`, the mapping the motor's firmware decodes with): a
 //! round trip is within half a step, zero and the range midpoint take the code nearest zero, and
-//! values past either end clamp to it.
+//! values past either end clamp to it. Position, velocity and torque are also error-diffused:
+//! each motor carries their quantisation residuals into its next frame, so a zero averages to
+//! zero.
 
-use sx_damiao_can::dm_can::{DmCanError, LIMIT_PARAM, float_to_uint, uint_to_float};
+use std::io;
+use std::time::Duration;
+
+use sx_damiao_can::dm_can::{
+    ControlType, DmCanError, DmMotorType, LIMIT_PARAM, Motor, MotorCommand, MotorControl,
+    float_to_uint, float_to_uint_diffused, uint_to_float,
+};
+use sx_embodiment_drivers::can::{CanFrame, CanPort};
 
 /// Each MIT field's range and width, for every Damiao model's limit row.
 fn fields() -> Vec<(&'static str, f64, f64, u32)> {
@@ -143,5 +152,177 @@ fn a_planned_zero_velocity_is_no_further_off_than_half_a_step() {
     assert!(
         (sent - asked).abs() <= step(-dq_max, dq_max, 12) / 2.0,
         "{sent}"
+    );
+}
+
+/// The velocity codes `ticks` frames send for one asked velocity, the residual carried.
+fn diffused(dq: f64, dq_max: f64, ticks: u32) -> Vec<(u16, f64)> {
+    let mut residual = 0.0;
+    (0..ticks)
+        .map(|_| {
+            let (code, carried) =
+                float_to_uint_diffused(dq, -dq_max, dq_max, 12, residual).unwrap();
+            residual = carried;
+            (code, carried)
+        })
+        .collect()
+}
+
+#[test]
+fn a_diffused_velocity_averages_to_the_asked_one_within_one_code_over_n() {
+    for [_, dq_max, _] in LIMIT_PARAM {
+        let lsb = step(-dq_max, dq_max, 12);
+        for asked in [
+            0.0,
+            -0.0,
+            0.003,
+            -0.004,
+            0.011,
+            0.02,
+            -1.234_567,
+            dq_max * 0.999,
+            dq_max,
+        ] {
+            for ticks in [1_u32, 2, 3, 10, 101, 1000] {
+                let sent = diffused(asked, dq_max, ticks);
+                let mut sum = 0.0;
+                for (code, residual) in &sent {
+                    let value = decode(*code, -dq_max, dq_max, 12);
+                    assert!(
+                        (value - asked).abs() <= lsb * (1.0 + 1e-9),
+                        "every frame within one code"
+                    );
+                    assert!(residual.abs() <= 0.5 + 1e-9, "residual within half a code");
+                    sum += value;
+                }
+                let mean = sum / f64::from(ticks);
+                let bound = lsb / f64::from(ticks) * (1.0 + 1e-9);
+                assert!(
+                    (mean - asked).abs() <= bound,
+                    "VMAX {dq_max}, {asked} over {ticks}: mean {mean}, off {}",
+                    (mean - asked).abs()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_planned_zero_alternates_around_zero_and_its_torque_ripple_is_half_a_step_times_kd() {
+    // The DM8009 at kd 5: kd times the velocity error is the torque the error holds.
+    let [_, dq_max, _] = LIMIT_PARAM[6];
+    let kd = 5.0;
+    let sent = diffused(0.0, dq_max, 8);
+    let codes: Vec<u16> = sent.iter().map(|(code, _)| *code).collect();
+    assert_eq!(codes, [2047, 2048, 2047, 2048, 2047, 2048, 2047, 2048]);
+    for (code, _) in sent {
+        let ripple = kd * decode(code, -dq_max, dq_max, 12).abs();
+        assert!(ripple <= 0.055, "{ripple} N·m");
+    }
+}
+
+#[test]
+fn a_representable_velocity_is_sent_unchanged_every_frame() {
+    let [_, dq_max, _] = LIMIT_PARAM[6];
+    let asked = decode(3000, -dq_max, dq_max, 12);
+    assert!(
+        diffused(asked, dq_max, 50)
+            .iter()
+            .all(|(code, _)| *code == 3000)
+    );
+}
+
+#[test]
+fn a_residual_passed_in_is_bounded_and_one_not_finite_dropped() {
+    let [_, dq_max, _] = LIMIT_PARAM[6];
+    let (code, carried) = float_to_uint_diffused(0.0, -dq_max, dq_max, 12, 1e9).unwrap();
+    assert_eq!(code, 2048, "a residual is clamped to one code");
+    assert!(carried.abs() <= 0.5);
+    for residual in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            float_to_uint_diffused(0.0, -dq_max, dq_max, 12, residual)
+                .unwrap()
+                .0,
+            2047
+        );
+    }
+    // At the ends of the range nothing past them is carried.
+    let (code, carried) = float_to_uint_diffused(dq_max, -dq_max, dq_max, 12, 0.9).unwrap();
+    assert_eq!((code, carried), (4095, 0.0));
+}
+
+#[derive(Default)]
+struct Capture(Vec<CanFrame>);
+
+impl CanPort for Capture {
+    fn send(&mut self, frame: &CanFrame) -> io::Result<()> {
+        self.0.push(*frame);
+        Ok(())
+    }
+
+    fn receive(&mut self) -> io::Result<Option<CanFrame>> {
+        Ok(None)
+    }
+
+    fn sleep(&mut self, _: Duration) {}
+}
+
+fn last_dq(control: &MotorControl<Capture>) -> u16 {
+    let data = control.port().0.last().unwrap().data;
+    (u16::from(data[2]) << 4) | (u16::from(data[3]) >> 4)
+}
+
+#[test]
+fn the_residual_is_per_motor_and_restarts_at_enable_disable_mode_and_limit_changes() {
+    let mut control = MotorControl::new(Capture::default());
+    control.add_motor(Motor::new(DmMotorType::DM8009, 0x01, 0x11));
+    control.add_motor(Motor::new(DmMotorType::DM8009, 0x02, 0x12));
+    let zero = |control: &mut MotorControl<Capture>, id: u16| {
+        control.send_mit(id, 10.0, 5.0, 0.0, 0.0, 0.0).unwrap();
+        last_dq(control)
+    };
+    assert_eq!(zero(&mut control, 0x01), 2047);
+    assert_eq!(
+        zero(&mut control, 0x02),
+        2047,
+        "each motor carries its own residual"
+    );
+    assert_eq!(zero(&mut control, 0x01), 2048);
+    assert_eq!(zero(&mut control, 0x01), 2047);
+    control.send_enable(0x01).unwrap();
+    assert_eq!(zero(&mut control, 0x01), 2047, "enable restarts it");
+    control.send_command(0x01, MotorCommand::Disable).unwrap();
+    assert_eq!(zero(&mut control, 0x01), 2047, "disable restarts it");
+    control.change_limit_param(0x01, 12.5, 45.0, 54.0).unwrap();
+    assert_eq!(zero(&mut control, 0x01), 2047, "a limit change restarts it");
+    let _ = control.switch_control_mode(0x01, ControlType::MIT).unwrap();
+    assert_eq!(zero(&mut control, 0x01), 2047, "a mode switch restarts it");
+    assert_eq!(
+        zero(&mut control, 0x02),
+        2048,
+        "the other motor's is untouched"
+    );
+    // A frame built but never sent leaves the residual where it was.
+    let _ = control.mit_frame(0x02, 10.0, 5.0, 0.0, 0.0, 0.0).unwrap();
+    assert_eq!(zero(&mut control, 0x02), 2047);
+}
+
+#[test]
+fn a_zero_position_and_torque_alternate_around_zero_too() {
+    // On a DM8009 a zero torque has no code (54 N m over 12 bits): sent alone it would be
+    // -0.013 N m held for good, which settles a joint short of every target.
+    let mut control = MotorControl::new(Capture::default());
+    control.add_motor(Motor::new(DmMotorType::DM8009, 0x01, 0x11));
+    let mut sent = Vec::new();
+    for _ in 0..4 {
+        control.send_mit(0x01, 10.0, 5.0, 0.0, 0.0, 0.0).unwrap();
+        let data = control.port().0.last().unwrap().data;
+        let q = (u16::from(data[0]) << 8) | u16::from(data[1]);
+        let tau = (u16::from(data[6] & 0xf) << 8) | u16::from(data[7]);
+        sent.push((q, tau));
+    }
+    assert_eq!(
+        sent,
+        [(32767, 2047), (32768, 2048), (32767, 2047), (32768, 2048)]
     );
 }

@@ -126,8 +126,13 @@ kd, torque) to the code nearest the asked value under the vendor's own decoding,
 holds each code to the vendor's or the one above it; `tests/mit_encoding.rs` holds every
 field to half a step, zero and the range midpoint to the code nearest zero, and the ends to
 their clamp. The mapping divides by `2^bits - 1`, so a symmetric range has no code for zero:
-a planned zero velocity on a DM8009 (VMAX 45) still goes out as -0.011 rad/s, the vendor's
-code; only a smaller VMAX register shrinks that step.
+sent alone, a zero velocity on a DM8009 goes out as -0.011 rad/s and a zero torque as
+-0.013 N m, held for good. So position, velocity and torque are error-diffused
+(`float_to_uint_diffused`): each motor carries their quantisation residuals into its next
+frame (reset at enable, disable, clear, a mode or a limit change), and what it is sent
+averages to what was asked, alternating between the two codes either side of a zero. The
+gains, whose ranges start at an exact zero, are only rounded. The replays allow each
+diffused code to be one below the vendor's too.
 
 ```bash
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check

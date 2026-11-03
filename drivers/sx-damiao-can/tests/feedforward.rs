@@ -79,6 +79,9 @@ fn feedforward_is_off_until_bounded() {
     chain.command(&rest).expect("plain");
     let ids: Vec<u16> = chain.axes().iter().map(|a| a.binding.bus_id).collect();
     let plain: Vec<[u8; 8]> = ids.iter().map(|id| last_mit(&bus, *id)).collect();
+    // A zero velocity alternates between the two codes either side of zero (error diffusion,
+    // `tests/mit_encoding.rs`), so the frame compared is the one two commands later.
+    chain.command(&rest).expect("plain again");
     let wanted = vec![
         Feedforward {
             velocity: 0.3,

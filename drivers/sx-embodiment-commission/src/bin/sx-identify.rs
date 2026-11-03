@@ -1135,9 +1135,8 @@ fn run() -> Result<(), String> {
         None => None,
     };
     // What each axis' gains make of it over the bindings' inertia, at the joint: omega, zeta,
-    // the planned-velocity cap (`MAX_COAST kp / kd`) and the MIT frame's DQ_MAX, for the step
-    // check.
-    let followers: Vec<(f64, f64, f64, f64)> = axes
+    // and the planned-velocity cap (`MAX_COAST kp / kd`), for the step check.
+    let followers: Vec<(f64, f64, f64)> = axes
         .iter()
         .map(|a| {
             let g = a.axis.actuator_from_joint(a.axis.zero + 1.0);
@@ -1146,8 +1145,6 @@ fn run() -> Result<(), String> {
                 (kp / j).sqrt(),
                 kd / (2.0 * (kp * j).sqrt()),
                 sx_damiao_can::chain::MAX_COAST * a.kp / a.kd,
-                sx_damiao_can::chain::motor_type(a.axis.binding.model)
-                    .map_or(f64::INFINITY, |m| m.limit_param()[1]),
             )
         })
         .collect();
@@ -1375,20 +1372,12 @@ fn run() -> Result<(), String> {
 
 /// Fit each recorded step of `joint` (its last rest tick, then the step and its hold) and
 /// print it beside the follower its gains make (`followers`: omega, zeta, planned-velocity
-/// cap, `DQ_MAX`); with `--gains damped`, refuse a step damped less than [`DAMPED_AT_LEAST`].
-/// A planned velocity as the MIT frame carries it, over the motor's `dq_max`.
-fn as_sent(velocity: f64, dq_max: f64) -> f64 {
-    use sx_damiao_can::dm_can::{float_to_uint, uint_to_float};
-    float_to_uint(velocity, -dq_max, dq_max, 12).map_or(velocity, |bits| {
-        f64::from(uint_to_float(bits, -dq_max, dq_max, 12))
-    })
-}
-
+/// cap); with `--gains damped`, refuse a step damped less than [`DAMPED_AT_LEAST`].
 fn step_check(
     args: &Args,
     joint: &str,
     names: &[String],
-    followers: &[(f64, f64, f64, f64)],
+    followers: &[(f64, f64, f64)],
     ticks: &[Tick],
     records: &[Record],
 ) -> Result<(), String> {
@@ -1396,7 +1385,7 @@ fn step_check(
         .iter()
         .position(|n| n == joint)
         .ok_or(format!("{joint} is not in the chain"))?;
-    let (omega, zeta, coast, dq_max) = followers[index];
+    let (omega, zeta, coast) = followers[index];
     let cap = args.speed.min(coast);
     let period = PERIOD.as_secs_f64();
     let mut weak = Vec::new();
@@ -1422,11 +1411,10 @@ fn step_check(
                 // What was sent, after the governor's slew (the torso's acceleration ceiling
                 // spreads a two-tick step over several), and its step speed as the planned
                 // velocity.
-                // The governor sends the speed of its step as the planned velocity, and the MIT
-                // frame carries it in 12 bits over the motor's DQ_MAX, truncated (a planned
-                // zero arrives as -0.011 rad/s on a DM8009).
+                // The governor sends the speed of its step as the planned velocity; the MIT
+                // frame error-diffuses it in 12 bits, so on average the motor gets it.
                 let target = r.sent[index];
-                let velocity = as_sent(((target - before) / period).clamp(-cap, cap), dq_max);
+                let velocity = ((target - before) / period).clamp(-cap, cap);
                 before = target;
                 Sample {
                     t: r.elapsed.saturating_sub(begin).as_secs_f64(),
