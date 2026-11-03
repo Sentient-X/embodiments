@@ -888,22 +888,30 @@ impl<P: SerialPort> DynamixelChain<P> {
         self.enabled = false;
         self.stop_pending = true;
         let ids = self.ids();
-        let keeps = |index: usize| hold.get(index).copied().unwrap_or(false);
         let mut report = StopReport::default();
+        // A held servo's goal is its present position. One that answers with an error, or not
+        // at all, is released below instead: a faulting motor is never left holding.
+        let mut keeps = vec![false; ids.len()];
         for (index, (bus_id, dxl_id)) in ids.iter().enumerate() {
-            if keeps(index) {
-                let (present, result, error) = self.ph.read4_byte_tx_rx(*dxl_id, PRESENT_POSITION);
+            if !hold.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let (present, result, error) = self.ph.read4_byte_tx_rx(*dxl_id, PRESENT_POSITION);
+            if result != CommResult::Success || error != 0 {
                 note((*bus_id, error), &mut report.faults);
-                let written = (result == CommResult::Success)
-                    .then(|| self.ph.write4_byte_tx_rx(*dxl_id, GOAL_POSITION, present));
-                match written {
-                    Some((CommResult::Success, 0)) if error == 0 => report.held.push(*bus_id),
-                    Some((CommResult::Success, error)) => {
-                        note((*bus_id, error), &mut report.faults);
-                        report.unproven.push(*bus_id);
-                    }
-                    _ => report.unproven.push(*bus_id),
+                continue;
+            }
+            match self.ph.write4_byte_tx_rx(*dxl_id, GOAL_POSITION, present) {
+                (CommResult::Success, 0) => {
+                    keeps[index] = true;
+                    report.held.push(*bus_id);
                 }
+                (CommResult::Success, error) => note((*bus_id, error), &mut report.faults),
+                _ => {}
+            }
+        }
+        for (index, (bus_id, dxl_id)) in ids.iter().enumerate() {
+            if keeps[index] {
                 continue;
             }
             let (result, error) = self.ph.write1_byte_tx_rx(*dxl_id, TORQUE_ENABLE, 0);
@@ -914,7 +922,7 @@ impl<P: SerialPort> DynamixelChain<P> {
             }
         }
         for (index, (bus_id, dxl_id)) in ids.into_iter().enumerate() {
-            if keeps(index) {
+            if keeps[index] {
                 continue;
             }
             let (data, result, error) = self.ph.read_tx_rx(dxl_id, TORQUE_ENABLE, STOP_READ_LENGTH);
@@ -932,9 +940,7 @@ impl<P: SerialPort> DynamixelChain<P> {
                 report.unproven.push(bus_id);
             }
         }
-        for (slot, held_now) in self.holding.iter_mut().enumerate() {
-            *held_now = keeps(slot) && report.held.contains(&self.servos[slot].axis.binding.bus_id);
-        }
+        self.holding.copy_from_slice(&keeps);
         self.stop_pending = !report.is_proven();
         for fault in &report.faults {
             if !self.faults.contains(fault) {

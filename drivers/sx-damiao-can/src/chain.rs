@@ -1645,6 +1645,26 @@ impl<P: CanPort> DamiaoChain<P> {
             }
         }
         let report = self.stop_report(&answered, &holds);
+        // A motor meant to hold that faulted or stayed silent is not left holding: its hold
+        // is never re-sent, and it is sent the disable (it is unproven either way).
+        let dropped: Vec<u16> = (0..self.ids.len())
+            .filter(|index| holds[*index].is_some() && !report.held.contains(&self.ids[*index]))
+            .map(|index| self.ids[index])
+            .collect();
+        if !dropped.is_empty() {
+            for (index, id) in self.ids.iter().enumerate() {
+                if dropped.contains(id) {
+                    self.holding[index] = None;
+                    self.applied[index] = Feedforward::default();
+                }
+            }
+            let _ = phase(
+                &mut self.control,
+                &every(&dropped, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+            );
+        }
         self.stop_pending = !report.is_proven();
         report
     }

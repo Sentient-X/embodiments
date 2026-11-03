@@ -1163,29 +1163,38 @@ impl<P: SerialPort> FeetechChain<P> {
             .enumerate()
             .map(|(index, servo)| (index, servo.axis.binding.bus_id, servo.scs_id()))
             .collect();
-        let keeps = |index: usize| hold.get(index).copied().unwrap_or(false);
         let mut report = StopReport::default();
+        // A held servo's goal is its present position: torque stays on and nothing moves. One
+        // that answers with an error flag (overload, overheat) or not at all is released below
+        // instead: a faulting motor is never left holding.
+        let mut keeps = vec![false; ids.len()];
         for (index, bus_id, scs_id) in &ids {
-            if keeps(*index) {
-                // Its goal where it stands now: torque stays on and nothing moves.
-                let (present, result, error) = self
-                    .sms
-                    .ph
-                    .read2_byte_tx_rx(*scs_id, SMS_STS_PRESENT_POSITION_L);
-                let written = (result == CommResult::Success).then(|| {
-                    self.sms
-                        .ph
-                        .write2_byte_tx_rx(*scs_id, SMS_STS_GOAL_POSITION_L, present)
-                });
+            if !hold.get(*index).copied().unwrap_or(false) {
+                continue;
+            }
+            let (present, result, error) = self
+                .sms
+                .ph
+                .read2_byte_tx_rx(*scs_id, SMS_STS_PRESENT_POSITION_L);
+            if result != CommResult::Success || error != 0 {
                 note(*bus_id, error, &mut report.faults);
-                match written {
-                    Some((CommResult::Success, 0)) if error == 0 => report.held.push(*bus_id),
-                    Some((CommResult::Success, error)) => {
-                        note(*bus_id, error, &mut report.faults);
-                        report.unproven.push(*bus_id);
-                    }
-                    _ => report.unproven.push(*bus_id),
+                continue;
+            }
+            match self
+                .sms
+                .ph
+                .write2_byte_tx_rx(*scs_id, SMS_STS_GOAL_POSITION_L, present)
+            {
+                (CommResult::Success, 0) => {
+                    keeps[*index] = true;
+                    report.held.push(*bus_id);
                 }
+                (CommResult::Success, error) => note(*bus_id, error, &mut report.faults),
+                _ => {}
+            }
+        }
+        for (index, bus_id, scs_id) in &ids {
+            if keeps[*index] {
                 continue;
             }
             let torque_off = self
@@ -1206,7 +1215,7 @@ impl<P: SerialPort> FeetechChain<P> {
             }
         }
         for (index, bus_id, scs_id) in ids {
-            if keeps(index) {
+            if keeps[index] {
                 continue;
             }
             let (value, result, error) =
@@ -1219,9 +1228,7 @@ impl<P: SerialPort> FeetechChain<P> {
                 report.unproven.push(bus_id);
             }
         }
-        for (slot, held_now) in self.holding.iter_mut().enumerate() {
-            *held_now = keeps(slot) && report.held.contains(&self.servos[slot].axis.binding.bus_id);
-        }
+        self.holding.copy_from_slice(&keeps);
         self.stop_pending = !report.is_proven();
         for fault in &report.faults {
             if !self.faults.contains(fault) {
