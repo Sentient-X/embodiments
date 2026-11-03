@@ -109,10 +109,74 @@ pub const GLITCH_HOLD: std::time::Duration = std::time::Duration::from_millis(20
 /// hand stays there, as a fresh contact under the gap does.
 pub const STALL_RELEASE: f64 = 0.01;
 
-/// How close each driven hand's target must be to its gripper's tool point, as the robot
-/// stands, before following starts: control starts from the robot's own pose, never by jumping
-/// to the operator's hands. The station and the headset both ask [`Teleop::may_engage`].
-pub const ENGAGE_RADIUS_M: f64 = 0.06;
+/// The operator's hands as offsets from where they took hold: a clutch. At engage (after
+/// [`Clutch::release`]) each hand's first target is taken as its gripper's tool point where
+/// the robot stands, and from then on the gripper moves as the hand moves from there: the hand's
+/// translation since, added in the robot's frame, and its turn since, applied in the robot's
+/// frame. So control starts from the robot's own pose wherever the operator's hand is, with no
+/// lining up, and a regrip anywhere re-takes it (the 6 cm match it replaces refused every
+/// resume whose hand had drifted, 2026-11-03). A hand that loses its target lets go, and takes
+/// hold afresh when it is seen again. Only an operator's hands are clutched; a program's goals
+/// are where they are. The station's follower and the headset's ghost hold one each, so both
+/// answer the same targets.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Clutch {
+    /// Per hand in [`HANDS`] order: the translation added to the hand, and the rotation applied
+    /// after the hand's own (its rotation at hold, inverted, then the gripper's).
+    held: [Option<([f64; 3], [f64; 4])>; 2],
+}
+
+impl Clutch {
+    /// Let go of both hands: the next targets take hold afresh. Every engage.
+    pub fn release(&mut self) {
+        self.held = [None; 2];
+    }
+
+    /// Whether `hand` holds on.
+    #[must_use]
+    pub fn holds(&self, hand: usize) -> bool {
+        self.held.get(hand).is_some_and(Option::is_some)
+    }
+
+    /// `targets`' hands moved onto the grippers they hold, taking hold with `tools` (each
+    /// gripper's tool point where the robot stands, [`Teleop::tool_poses`]) for a hand seen
+    /// first; a hand whose gripper has no pose is left as given.
+    pub fn apply(&mut self, tools: &[Option<Pose>; 2], targets: &mut Targets) {
+        for hand in 0..HANDS.len() {
+            let Some(target) = targets.tcp[hand] else {
+                self.held[hand] = None;
+                continue;
+            };
+            if self.held[hand].is_none() {
+                let Some(tool) = tools[hand] else { continue };
+                let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
+                let local = multiply(conjugate(target.rotation_xyzw), tool.rotation_xyzw);
+                self.held[hand] = Some((offset, local));
+            }
+            if let Some((offset, local)) = self.held[hand] {
+                targets.tcp[hand] = Some(Pose {
+                    translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
+                    rotation_xyzw: multiply(target.rotation_xyzw, local),
+                });
+            }
+        }
+    }
+}
+
+/// `a` then `b` composed as rotations: the unit quaternion `a b` (x, y, z, w).
+fn multiply([ax, ay, az, aw]: [f64; 4], [bx, by, bz, bw]: [f64; 4]) -> [f64; 4] {
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+/// The inverse of the unit quaternion `q`.
+const fn conjugate([x, y, z, w]: [f64; 4]) -> [f64; 4] {
+    [-x, -y, -z, w]
+}
 
 /// One limb of the config: a frame of the description and its task.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -625,33 +689,25 @@ impl Teleop {
         &self.grippers
     }
 
-    /// Each driven hand's distance, in metres, from its target to its gripper's tool point at
-    /// `q` (every axis, [`Teleop::model`] order); `None` for a hand with no target.
-    pub fn hand_gaps(&mut self, q: &[f64], targets: &Targets) -> [Option<f64>; 2] {
-        let mut gaps = [None; 2];
+    /// Each hand's gripper tool point at `q` (every axis, [`Teleop::model`] order), in
+    /// [`HANDS`] order; `None` for a hand this body has no gripper limb for, or a `q` of the
+    /// wrong width. What a [`Clutch`] takes hold with.
+    pub fn tool_poses(&mut self, q: &[f64]) -> [Option<Pose>; 2] {
+        let mut poses = [None; 2];
         if q.len() != self.q.len() {
-            return gaps;
+            return poses;
         }
         self.ik.body().model().poses_into(q, &mut self.frames);
         for (limb, hand) in self.hand_of.iter().enumerate() {
             let Some(hand) = *hand else { continue };
-            if let Some(target) = targets.tcp[hand] {
-                let at = self.ik.body().frame(&self.frames, limb).t;
-                let gap = (0..3)
-                    .map(|k| (target.translation_m[k] - at[k]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                gaps[hand] = Some(gap);
-            }
+            let frame = self.ik.body().frame(&self.frames, limb).to_transform();
+            let pose = sx_embodiment_drivers::kinematics::pose_of(&frame);
+            poses[hand] = Some(Pose {
+                translation_m: pose.translation_m,
+                rotation_xyzw: pose.rotation_xyzw,
+            });
         }
-        gaps
-    }
-
-    /// Whether following may start from `q`, where the robot stands: at least one hand is
-    /// driven and every driven hand's target is within [`ENGAGE_RADIUS_M`] of its gripper.
-    pub fn may_engage(&mut self, q: &[f64], targets: &Targets) -> bool {
-        let gaps = self.hand_gaps(q, targets);
-        gaps.iter().any(Option::is_some) && gaps.iter().flatten().all(|gap| *gap <= ENGAGE_RADIUS_M)
+        poses
     }
 
     /// The longest one step may take ([`crate::Ik::set_deadline`]): for an evaluation that
