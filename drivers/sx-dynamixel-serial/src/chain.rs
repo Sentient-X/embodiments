@@ -382,6 +382,8 @@ pub struct DynamixelChain<P> {
     reader: GroupSyncRead,
     /// The command's SYNC WRITE of every goal, refilled each command in buffers it keeps.
     writer: GroupSyncWrite,
+    /// Per servo, whether the last stop left it holding its present position under torque.
+    holding: Vec<bool>,
 }
 
 /// An acknowledged exchange's `(result, error)`, as the chain requires it: success, no error.
@@ -599,7 +601,9 @@ impl<P: SerialPort> DynamixelChain<P> {
             command_readings: None,
             reader: GroupSyncRead::new(GOAL_CURRENT, LIMITS_READ_LENGTH),
             writer: GroupSyncWrite::new(GOAL_POSITION, 4),
+            holding: Vec::new(),
         };
+        chain.holding = vec![false; chain.servos.len()];
         for index in 0..chain.servos.len() {
             if !chain.reader.add_param(chain.servos[index].dxl_id()) {
                 return Err(DynamixelChainError::GroupParam(
@@ -872,6 +876,82 @@ impl<P: SerialPort> DynamixelChain<P> {
 
     /// `enable_torque`: `Torque_Enable` 1 on every servo, once every servo is proven to hold
     /// its limits and holds where it rests.
+    /// A stop: every servo `hold` marks keeps torque on with its goal where it stands; every
+    /// other gets `Torque Enable` 0, whatever an earlier one answered, then is read back
+    /// (`Torque Enable` through `Hardware Error Status`) and proven released only at 0.
+    fn settle(&mut self, hold: &[bool]) -> StopReport {
+        fn note(fault: (u16, u8), faults: &mut Vec<(u16, u8)>) {
+            if fault.1 != 0 && !faults.contains(&fault) {
+                faults.push(fault);
+            }
+        }
+        self.enabled = false;
+        self.stop_pending = true;
+        let ids = self.ids();
+        let mut report = StopReport::default();
+        // A held servo's goal is its present position. One that answers with an error, or not
+        // at all, is released below instead: a faulting motor is never left holding.
+        let mut keeps = vec![false; ids.len()];
+        for (index, (bus_id, dxl_id)) in ids.iter().enumerate() {
+            if !hold.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let (present, result, error) = self.ph.read4_byte_tx_rx(*dxl_id, PRESENT_POSITION);
+            if result != CommResult::Success || error != 0 {
+                note((*bus_id, error), &mut report.faults);
+                continue;
+            }
+            match self.ph.write4_byte_tx_rx(*dxl_id, GOAL_POSITION, present) {
+                (CommResult::Success, 0) => {
+                    keeps[index] = true;
+                    report.held.push(*bus_id);
+                }
+                (CommResult::Success, error) => note((*bus_id, error), &mut report.faults),
+                _ => {}
+            }
+        }
+        for (index, (bus_id, dxl_id)) in ids.iter().enumerate() {
+            if keeps[index] {
+                continue;
+            }
+            let (result, error) = self.ph.write1_byte_tx_rx(*dxl_id, TORQUE_ENABLE, 0);
+            if result == CommResult::Success {
+                note((*bus_id, error), &mut report.faults);
+            } else {
+                report.unproven.push(*bus_id);
+            }
+        }
+        for (index, (bus_id, dxl_id)) in ids.into_iter().enumerate() {
+            if keeps[index] {
+                continue;
+            }
+            let (data, result, error) = self.ph.read_tx_rx(dxl_id, TORQUE_ENABLE, STOP_READ_LENGTH);
+            let proven = match (result, data.as_slice()) {
+                (CommResult::Success, [torque, .., hardware]) => {
+                    note(
+                        (bus_id, if *hardware != 0 { *hardware } else { error }),
+                        &mut report.faults,
+                    );
+                    *torque == 0
+                }
+                _ => false,
+            };
+            if !proven && !report.unproven.contains(&bus_id) {
+                report.unproven.push(bus_id);
+            }
+        }
+        self.holding.copy_from_slice(&keeps);
+        self.stop_pending = !report.is_proven();
+        for fault in &report.faults {
+            if !self.faults.contains(fault) {
+                self.faults.push(*fault);
+            }
+        }
+        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
+        self.command_readings = None;
+        report
+    }
+
     fn enable_torque(&mut self) -> Result<(), DynamixelChainError> {
         for index in 0..self.servos.len() {
             self.hold_limits(index, false)?;
@@ -973,6 +1053,8 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
             self.enable_torque()?;
             self.enabled = true;
         }
+        // Driven now: no servo is held where a stop left it.
+        self.holding.fill(false);
         match self.writer.tx_packet(&mut self.ph) {
             CommResult::Success => Ok(Receipt {
                 evidence: Evidence::DispatchAttempted,
@@ -987,48 +1069,37 @@ impl<P: SerialPort> ActuatorChain for DynamixelChain<P> {
     }
 
     fn stop(&mut self) -> StopReport {
-        fn note(fault: (u16, u8), faults: &mut Vec<(u16, u8)>) {
-            if fault.1 != 0 && !faults.contains(&fault) {
-                faults.push(fault);
-            }
-        }
-        self.enabled = false;
-        self.stop_pending = true;
-        let ids = self.ids();
-        let mut report = StopReport::default();
-        for (bus_id, dxl_id) in &ids {
-            let (result, error) = self.ph.write1_byte_tx_rx(*dxl_id, TORQUE_ENABLE, 0);
-            if result == CommResult::Success {
-                note((*bus_id, error), &mut report.faults);
-            } else {
-                report.unproven.push(*bus_id);
-            }
-        }
-        for (bus_id, dxl_id) in ids {
-            let (data, result, error) = self.ph.read_tx_rx(dxl_id, TORQUE_ENABLE, STOP_READ_LENGTH);
-            let proven = match (result, data.as_slice()) {
-                (CommResult::Success, [torque, .., hardware]) => {
-                    note(
-                        (bus_id, if *hardware != 0 { *hardware } else { error }),
-                        &mut report.faults,
-                    );
-                    *torque == 0
-                }
-                _ => false,
-            };
-            if !proven && !report.unproven.contains(&bus_id) {
-                report.unproven.push(bus_id);
-            }
-        }
-        self.stop_pending = !report.is_proven();
-        for fault in &report.faults {
-            if !self.faults.contains(fault) {
-                self.faults.push(*fault);
-            }
-        }
-        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
-        self.command_readings = None;
-        report
+        let none = vec![false; self.servos.len()];
+        self.settle(&none)
+    }
+
+    /// The stop above for every servo `rests` releases; each it holds that had torque on gets
+    /// its own `Present_Position` as its `Goal Position`, torque left on, and is named held
+    /// once the write is acknowledged with no error. A position servo holds itself: nothing
+    /// needs re-sending, so [`ActuatorChain::keep_holding`] only reads.
+    fn stop_holding(&mut self, rests: &[sx_embodiment_drivers::Rest]) -> StopReport {
+        let hold: Vec<bool> = (0..self.servos.len())
+            .map(|index| {
+                (self.enabled || self.holding[index])
+                    && rests.get(index).is_some_and(|rest| rest.holds())
+            })
+            .collect();
+        self.settle(&hold)
+    }
+
+    /// Every servo's `Present_Position`, read; nothing is written.
+    fn keep_holding(&mut self) -> Result<Receipt<()>, DynamixelChainError> {
+        let readings = self.present_positions();
+        let observed: Axes<f64> = readings
+            .iter()
+            .map(|reading| reading.position().unwrap_or(f64::NAN))
+            .collect();
+        self.command_readings = Some(readings);
+        Ok(Receipt {
+            evidence: Evidence::DispatchAttempted,
+            observed,
+            feedback: Axes::new(),
+        })
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.

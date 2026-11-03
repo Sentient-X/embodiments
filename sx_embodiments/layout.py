@@ -151,6 +151,13 @@ class ActuatorRating:
     times the internal gear ratio squared), which every joint the actuator drives moves on
     top of its links (``JointMotion.inertia``); ``None`` where none is recorded. Left out,
     a light link looks a hundred times lighter than it is (sx#3004).
+    ``holding_brake`` is whether the product carries a brake that holds its shaft with the
+    power off: a joint without one stays where it is unpowered only if its own friction
+    outweighs gravity there, so a stop holds it under torque instead of releasing it
+    (``sx_embodiment_drivers::rest``). False for every product rated today.
+    ``thermal_limit_celsius`` is the hottest the vendor lets the motor run (the lower of its
+    driver and coil limits), what a joint held under torque is watched against; ``None``
+    where none is recorded, never a guess.
     """
 
     peak_torque_nm: float
@@ -158,6 +165,8 @@ class ActuatorRating:
     rated_speed_rad_s: float | None = None
     rated_torque_nm: float | None = None
     armature_kg_m2: float | None = None
+    holding_brake: bool = False
+    thermal_limit_celsius: float | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
@@ -171,6 +180,9 @@ class ActuatorRating:
         armature = self.armature_kg_m2
         if armature is not None and not (math.isfinite(armature) and armature > 0.0):
             raise LayoutError("actuator", "armature must be a positive finite kg·m²")
+        limit = self.thermal_limit_celsius
+        if limit is not None and not (math.isfinite(limit) and 0.0 < limit <= 200.0):
+            raise LayoutError("actuator", "thermal limit must be a finite °C in (0, 200]")
 
 
 def rpm(revolutions_per_minute: float) -> float:
@@ -178,9 +190,22 @@ def rpm(revolutions_per_minute: float) -> float:
     return revolutions_per_minute * 2.0 * math.pi / 60.0
 
 
+#: The hottest a Damiao joint motor may run, °C. The DM-J4310-2EC V1.1 user manual
+#: (sharingwin.com/wp-content/uploads/2025/09/DM-J4310-2EC-V1.1-Gear-Motor-User-Manual-V1.0.pdf,
+#: "Protection"): the driver shuts down at 120 °C (fault 0xB) and the motor coil's protection
+#: is user-set, recommended at most 100 °C (fault 0xC); the motor leaves enable mode at either.
+#: The lower, 100, applies to the hotter of the two temperatures every answer reports. The
+#: DM4340 and DM8009 manuals describe the same driver's protections; none of ours has its
+#: ``OT_Value`` register read yet (``fleet/station/src/motor_temperature.rs``).
+DAMIAO_THERMAL_LIMIT_CELSIUS: Final = 100.0
+
 #: Every :class:`ActuatorModel`'s rating. Drivers receive it rendered into
 #: ``drivers/sx-embodiment-drivers/bindings/vocabulary.json``.
 ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
+    # No product here carries a holding brake (``holding_brake`` False): the STS3215, the
+    # DM-J4310/4340/8009(P)-2EC and the XL330/XM430 datasheets list none, and Damiao sells its
+    # braked joints as other products. Feetech and Dynamixel publish no thermal limit our
+    # command answers could be watched against (their answers carry no temperature).
     # 30 kg·cm stall at 12 V; 0.222 s per 60 deg unloaded (Feetech STS3215 datasheet), 4.72
     # rad/s. Feetech publishes no speed at rated load, so this is the unloaded figure: every
     # STS3215 port's servo approach (ServoApproach, 4 rad/s on the static upper body) is
@@ -192,20 +217,31 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
     # Inertia" 1.80E-05 kg·m², the rotor's) times 10², 1.8e-3 at the output; the bench
     # estimate (tools/sim_joint_tracking.py, BAM) is 2e-3.
     ActuatorModel.DAMIAO_DM4310: ActuatorRating(
-        7.0, rated_speed_rad_s=rpm(120.0), rated_torque_nm=3.0, armature_kg_m2=1.8e-5 * 10**2
+        7.0,
+        rated_speed_rad_s=rpm(120.0),
+        rated_torque_nm=3.0,
+        armature_kg_m2=1.8e-5 * 10**2,
+        thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
     # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded,
     # gear ratio 40:1. Armature: the same table's 2.00E-05 kg·m² rotor times 40², 0.032 at the
     # output (the bench estimate assumed 0.01; neither is measured on our motors yet).
     ActuatorModel.DAMIAO_DM4340: ActuatorRating(
-        27.0, rated_speed_rad_s=rpm(36.0), rated_torque_nm=9.0, armature_kg_m2=2.0e-5 * 40**2
+        27.0,
+        rated_speed_rad_s=rpm(36.0),
+        rated_torque_nm=9.0,
+        armature_kg_m2=2.0e-5 * 40**2,
+        thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
     # DM-J8009-2EC manual (manuals.plus/damiao/dm-j8009-2ec-servo-motor-manual): 100 rpm at
     # 24 V, 160 rpm unloaded. Damiao publishes no rotor inertia for the 8009 family (its 2025
     # catalogue and the table above stop at the 43 series): the armature is the bench
     # estimate, 0.02 kg·m² (tools/sim_joint_tracking.py, BAM).
     ActuatorModel.DAMIAO_DM8009: ActuatorRating(
-        40.0, rated_speed_rad_s=rpm(100.0), armature_kg_m2=0.02
+        40.0,
+        rated_speed_rad_s=rpm(100.0),
+        armature_kg_m2=0.02,
+        thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
     # openelab.io/products/damiao-brushless-servo-dm-j8009p and
     # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
@@ -217,6 +253,7 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         rated_speed_rad_s=rpm(100.0),
         rated_torque_nm=20.0,
         armature_kg_m2=0.02,
+        thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
     ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),

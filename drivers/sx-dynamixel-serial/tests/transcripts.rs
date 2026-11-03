@@ -799,3 +799,41 @@ fn a_steady_command_and_read_tick_allocates_nothing() {
     });
     assert!(seen.count_total > 0, "the counter sees an allocation");
 }
+
+/// A stop that holds servo 1 and releases servo 2: servo 1's `Goal Position` is written as its
+/// `Present Position`, its torque left on; servo 2 is disabled and read back as the vendor's
+/// stop does. A servo nothing drove is never held.
+#[test]
+fn a_held_stop_writes_each_held_servos_goal_where_it_stands_and_disables_the_rest() {
+    use sx_embodiment_drivers::Rest;
+    let golden = golden();
+    let read_tick = [sync_read_held(&golden)];
+    let hold = [
+        read(1, PRESENT_POSITION, &REST.to_le_bytes()),
+        write(1, GOAL_POSITION, &REST.to_le_bytes()),
+        golden.safe_stop[1].clone(),
+        golden.safe_stop[3].clone(),
+    ];
+    let mut chain = open(
+        &golden,
+        &[
+            &golden.safe_stop,
+            &positions(),
+            &enabling(&golden),
+            &read_tick,
+            &hold,
+            &positions(),
+        ],
+    );
+    let rests = [Rest::Hold { gravity: 0.0 }, Rest::Release];
+    let untouched = chain.stop_holding(&rests);
+    assert!(
+        untouched.held.is_empty() && untouched.is_proven(),
+        "{untouched:?}"
+    );
+    chain.command(&[0.0, 0.0]).expect("commanded");
+    let report = chain.stop_holding(&rests);
+    assert!(report.is_proven(), "{report:?}");
+    assert_eq!(report.held, vec![1]);
+    assert!(chain.port().expected.is_empty(), "every exchange was made");
+}

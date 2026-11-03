@@ -107,6 +107,13 @@ Consumer: the `sx` station's `chain::ChainActuator`, over `b601::open_b601`,
   disable frames. Where firmware does not report its enable state (the static upper body's
   answers state 1 enabled or not), a fault-free answer proves the stop weakly and the motor is
   named in `StopReport::unobserved` (`ProvenStop::observed_disabled` is then false).
+- **A stop that holds.** `ActuatorChain::stop_holding` takes one `Rest` per axis: each motor
+  it releases is disabled as above; each it holds, and that was under torque, gets one MIT
+  frame at where it stands once the brake ends (zero velocity, its gravity torque bounded as a
+  command's feed-forward), is named in `StopReport::held` once it answers with no fault, and
+  is held only while `keep_holding` re-sends that frame (one phase a tick, a status refresh to
+  every released motor): past the 0.75 s `TIMEOUT` without it the motor latches 0xD and the
+  arm drops (`tests/mit_dynamics.rs`). A body nothing drove since open is never held.
 - **DM4340 velocity range.** Damiao publishes 10 rad/s (`DM_CAN.py`) and 8 rad/s (its C++ SDK).
   Open reads each motor's registers, accepts either, scales that motor by what it reported,
   and records it in `limits()`.

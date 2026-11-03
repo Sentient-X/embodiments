@@ -53,6 +53,7 @@ pub mod lerobot;
 pub mod masked;
 pub mod media;
 pub mod rail;
+pub mod rest;
 pub mod serial;
 
 pub use approach::{ApproachLimit, BRING_UP_APPROACH};
@@ -100,4 +101,8 @@ pub use media::{
 pub use rail::{
     AxisDerate, DerateLimits, OVER_RAIL, OverRail, REFUSE_ABOVE, RailCheck, Rails, RailsError,
     derates,
+};
+pub use rest::{
+    Effort, GRAVITY_FLOOR, Heat, RELEASE_MARGIN, Rest, RestModel, THERMAL_WARN_MARGIN, effort,
+    falls, heat,
 };

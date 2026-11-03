@@ -466,6 +466,7 @@ fn report(step: &Value) -> StopReport {
             .map(&ids)
             .unwrap_or_default(),
         unreached: Vec::new(),
+        held: Vec::new(),
     }
 }
 

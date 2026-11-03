@@ -145,6 +145,39 @@ where
             feedback: first.feedback.into_iter().chain(second.feedback).collect(),
         })
     }
+
+    /// Two halves' hold receipts as one, a half that observed nothing padded to its width
+    /// (`NaN` observed, default feedback) so every index stays its axis.
+    fn joined(
+        &self,
+        first: Receipt<A::Feedback>,
+        second: Receipt<A::Feedback>,
+    ) -> Receipt<A::Feedback> {
+        fn padded<T: Copy + Default>(values: Axes<T>, width: usize, pad: T) -> Axes<T> {
+            if values.len() == width {
+                values
+            } else {
+                Axes::filled(pad, width)
+            }
+        }
+        let widths = (self.first.axes().len(), self.second.axes().len());
+        let evidence = if first.evidence == Evidence::BusObservedComplete {
+            second.evidence
+        } else {
+            first.evidence
+        };
+        Receipt {
+            evidence,
+            observed: padded(first.observed, widths.0, f64::NAN)
+                .into_iter()
+                .chain(padded(second.observed, widths.1, f64::NAN))
+                .collect(),
+            feedback: padded(first.feedback, widths.0, A::Feedback::default())
+                .into_iter()
+                .chain(padded(second.feedback, widths.1, A::Feedback::default()))
+                .collect(),
+        }
+    }
 }
 
 impl<A, B> ActuatorChain for Composite<A, B>
@@ -193,22 +226,26 @@ where
     }
 
     fn stop(&mut self) -> StopReport {
-        let first = self.first.stop();
-        let second = self.second.stop();
-        StopReport {
-            unproven: first.unproven.into_iter().chain(second.unproven).collect(),
-            faults: first.faults.into_iter().chain(second.faults).collect(),
-            unobserved: first
-                .unobserved
-                .into_iter()
-                .chain(second.unobserved)
-                .collect(),
-            unreached: first
-                .unreached
-                .into_iter()
-                .chain(second.unreached)
-                .collect(),
-        }
+        let mut report = self.first.stop();
+        report.absorb(self.second.stop());
+        report
+    }
+
+    /// Each half's rests to its own chain.
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        let split = self.first.axes().len().min(rests.len());
+        let (ours, theirs) = rests.split_at(split);
+        let mut report = self.first.stop_holding(ours);
+        report.absorb(self.second.stop_holding(theirs));
+        report
+    }
+
+    /// Both halves' holds, one after the other, as one receipt in native state order: an
+    /// axis whose half observes nothing reads `NaN`.
+    fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        let first = self.first.keep_holding().map_err(CompositeError::First)?;
+        let second = self.second.keep_holding().map_err(CompositeError::Second)?;
+        Ok(self.joined(first, second))
     }
 
     /// One stop after the other: on a shared link they could not overlap anyway.

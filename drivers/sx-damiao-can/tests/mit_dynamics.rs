@@ -384,3 +384,170 @@ fn the_brake_keeps_each_joints_gravity_torque_only() {
         "the hold sent {tau} N m, not the 3 N m of gravity it carried"
     );
 }
+
+/// The left shoulder loaded by `load` N m at its motor (gravity at a pose, negative: it pulls
+/// the joint down), the body commanded at rest with the feed-forward that cancels it, so it
+/// stands under torque as a session leaves it; returns the shoulder's index and its gravity
+/// torque at the joint.
+fn loaded_at_rest(rig: &mut Rig, load: f64) -> (usize, f64) {
+    use sx_embodiment_drivers::{Feedforward, FeedforwardLimit};
+    let shoulder = rig.index(SHOULDER);
+    let width = rig.governor.axes().len();
+    let id = rig.governor.axes()[shoulder].binding.bus_id;
+    let axis = rig.governor.axes()[shoulder].clone();
+    let gain = axis.actuator_from_joint(axis.zero + 1.0);
+    rig.bus
+        .state()
+        .motors
+        .get_mut(&id)
+        .expect("the shoulder")
+        .dynamics
+        .as_mut()
+        .expect("loaded")
+        .load = load;
+    rig.governor
+        .set_feedforward_limits(&vec![
+            FeedforwardLimit {
+                velocity: None,
+                torque: Some(20.0),
+            };
+            width
+        ])
+        .expect("bounds");
+    // What holds it at the joint: the motor gives `-load`, the joint `-load * gain`.
+    let gravity = -load * gain;
+    let mut ff = vec![Feedforward::default(); width];
+    ff[shoulder].torque = gravity;
+    ff[shoulder].gravity = gravity;
+    let rest = rig.governor.last_observed().expect("rest").to_vec();
+    for _ in 0..50 {
+        rig.governor.command_with(&rest, &ff).expect("standing");
+        rig.pass(MAX_STEP_INTERVAL);
+    }
+    (shoulder, gravity)
+}
+
+fn rests_holding(width: usize, index: usize, gravity: f64) -> Vec<sx_embodiment_drivers::Rest> {
+    let mut rests = vec![sx_embodiment_drivers::Rest::Release; width];
+    rests[index] = sx_embodiment_drivers::Rest::Hold { gravity };
+    rests
+}
+
+/// The 2026-11-03 defect: a stop disabled every motor, and a brakeless shoulder carrying more
+/// gravity than its friction dropped. A stop that holds it keeps it where it stopped for as
+/// long as the caller re-sends the hold, the motor's 0.75 s watchdog fed; the joints it
+/// releases are disabled as before.
+#[test]
+fn a_held_stop_keeps_a_loaded_shoulder_up_while_a_released_one_drops() {
+    let mut rig = Rig::new_at(0.25);
+    let (shoulder, gravity) = loaded_at_rest(&mut rig, -6.0);
+    let width = rig.governor.axes().len();
+    let id = rig.governor.axes()[shoulder].binding.bus_id;
+    let at_stop = rig.q(shoulder);
+    let report = rig
+        .governor
+        .stop_holding(&rests_holding(width, shoulder, gravity));
+    assert!(report.is_proven(), "{report:?}");
+    assert_eq!(report.held, vec![id], "{report:?}");
+    let mut farthest: f64 = 0.0;
+    for _ in 0..150 {
+        rig.pass(Duration::from_millis(20));
+        let receipt = rig.governor.keep_holding().expect("held");
+        assert_eq!(receipt.observed.len(), width);
+        farthest = farthest.max((rig.q(shoulder) - at_stop).abs());
+    }
+    assert!(farthest < 0.02, "held, the shoulder moved {farthest} rad");
+    let readings = rig
+        .governor
+        .command_readings()
+        .expect("the hold's readings");
+    assert!(readings[shoulder].is_fresh(), "{:?}", readings[shoulder]);
+    // Nothing else is held: every other motor answers disabled.
+    assert_eq!(rig.bus.state().motors[&id].state, 1);
+
+    // The same shoulder released drops: 6 N m of gravity on 1.2 N m of friction.
+    let mut dropped = Rig::new_at(0.25);
+    let (shoulder, _) = loaded_at_rest(&mut dropped, -6.0);
+    let at_stop = dropped.q(shoulder);
+    assert!(dropped.governor.stop().is_proven());
+    for _ in 0..50 {
+        dropped.pass(Duration::from_millis(20));
+    }
+    assert!(
+        (dropped.q(shoulder) - at_stop).abs() > 0.2,
+        "released, the shoulder stayed within {} rad",
+        (dropped.q(shoulder) - at_stop).abs()
+    );
+}
+
+/// What only brakes or a rest support close: a held arm whose holds stop coming (the station
+/// crashed, its host stalled) is dropped by the motor's own watchdog 0.75 s later.
+#[test]
+fn a_hold_nobody_re_sends_is_dropped_by_the_motors_watchdog() {
+    let mut rig = Rig::new_at(0.25);
+    let (shoulder, gravity) = loaded_at_rest(&mut rig, -6.0);
+    let width = rig.governor.axes().len();
+    let id = rig.governor.axes()[shoulder].binding.bus_id;
+    let at_stop = rig.q(shoulder);
+    let report = rig
+        .governor
+        .stop_holding(&rests_holding(width, shoulder, gravity));
+    assert_eq!(report.held, vec![id]);
+    for _ in 0..75 {
+        rig.pass(Duration::from_millis(20));
+    }
+    assert_eq!(
+        rig.bus.state().motors[&id].state,
+        sx_damiao_can::chain::COMMUNICATION_LOST
+    );
+    assert!((rig.q(shoulder) - at_stop).abs() > 0.2);
+    // The next hold reads it faulted, for the caller to release.
+    rig.governor.keep_holding().expect("answered");
+    let readings = rig.governor.command_readings().expect("readings");
+    assert!(matches!(
+        readings[shoulder],
+        sx_embodiment_drivers::AxisReading::Faulted(code) if code == sx_damiao_can::chain::COMMUNICATION_LOST
+    ));
+}
+
+/// A body nothing drove since open rests wherever gravity left it: a stop holds none of it.
+#[test]
+fn a_stop_never_holds_a_motor_that_was_not_under_torque() {
+    let mut rig = Rig::new_at(0.25);
+    let width = rig.governor.axes().len();
+    let shoulder = rig.index(SHOULDER);
+    let report = rig
+        .governor
+        .stop_holding(&rests_holding(width, shoulder, 3.0));
+    assert!(report.is_proven(), "{report:?}");
+    assert!(report.held.is_empty(), "{report:?}");
+}
+
+/// A held joint released by a later stop (its motor overheating, a deliberate Park) is
+/// disabled; the joints still held stay held.
+#[test]
+fn a_second_stop_releases_one_held_joint_and_keeps_the_rest() {
+    let mut rig = Rig::new_at(0.25);
+    let (shoulder, gravity) = loaded_at_rest(&mut rig, -6.0);
+    let width = rig.governor.axes().len();
+    let elbow = rig.index(ELBOW);
+    let mut rests = rests_holding(width, shoulder, gravity);
+    rests[elbow] = sx_embodiment_drivers::Rest::Hold { gravity: 0.0 };
+    let report = rig.governor.stop_holding(&rests);
+    assert_eq!(report.held.len(), 2, "{report:?}");
+    rests[elbow] = sx_embodiment_drivers::Rest::Release;
+    let report = rig.governor.stop_holding(&rests);
+    let ids = (
+        rig.governor.axes()[shoulder].binding.bus_id,
+        rig.governor.axes()[elbow].binding.bus_id,
+    );
+    assert_eq!(report.held, vec![ids.0], "{report:?}");
+    assert_eq!(
+        rig.bus.state().motors[&ids.1].state,
+        0,
+        "the elbow is disabled"
+    );
+    // Everything released, as a Park ends: nothing held.
+    let report = rig.governor.stop();
+    assert!(report.held.is_empty() && report.is_proven(), "{report:?}");
+}

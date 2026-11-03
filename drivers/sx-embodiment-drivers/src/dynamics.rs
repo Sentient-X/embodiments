@@ -664,6 +664,13 @@ impl Dynamics {
         &self.tree
     }
 
+    /// Each independent joint's drive friction, in [`Tree::joints`] order: zero until an
+    /// identified calibration supplies it ([`Dynamics::calibrated`]).
+    #[must_use]
+    pub fn friction(&self) -> &[JointFriction] {
+        &self.friction
+    }
+
     #[must_use]
     pub const fn gravity(&self) -> [f64; 3] {
         self.gravity

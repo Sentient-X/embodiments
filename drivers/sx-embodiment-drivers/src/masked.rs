@@ -457,6 +457,25 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
         self.inner.stop()
     }
 
+    /// The available axes' rests to `inner`; an unavailable axis is never held, it was never
+    /// enabled here.
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        let kept: Axes<crate::Rest> = self
+            .present
+            .iter()
+            .map(|index| rests.get(*index).copied().unwrap_or_default())
+            .collect();
+        self.inner.stop_holding(&kept)
+    }
+
+    /// `inner`'s holds, its receipt placed in the full vector, and the read-only axes read as
+    /// a command reads them.
+    fn keep_holding(&mut self) -> Result<Receipt<C::Feedback>, C::Error> {
+        let receipt = self.inner.keep_holding()?;
+        self.sense(SENSE_PERIOD);
+        Ok(self.spread_receipt(receipt))
+    }
+
     fn stop_budget(&self) -> Duration {
         self.inner.stop_budget()
     }
@@ -544,7 +563,13 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
         };
         // After the command's frames, so a read never delays them.
         self.sense(SENSE_PERIOD);
-        Ok(Receipt {
+        Ok(self.spread_receipt(receipt))
+    }
+
+    /// `inner`'s receipt placed in the full vector: observed `NaN` and (where set) the
+    /// unanswered feedback at each unavailable axis.
+    fn spread_receipt(&self, receipt: Receipt<C::Feedback>) -> Receipt<C::Feedback> {
+        Receipt {
             evidence: receipt.evidence,
             observed: if receipt.observed.is_empty() {
                 Axes::new()
@@ -567,7 +592,7 @@ impl<C: ActuatorChain> Masked<C, C::Feedback> {
                 }
                 _ => receipt.feedback,
             },
-        })
+        }
     }
 }
 

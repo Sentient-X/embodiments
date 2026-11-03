@@ -216,7 +216,7 @@ pub enum GovernorError<E> {
     /// The chain failed mid-command, so something may have been applied: it was stopped and
     /// the fault is latched.
     #[error("{error}; the chain was stopped and the fault is latched")]
-    Faulted { error: E, stop: StopReport },
+    Faulted { error: E, stop: Box<StopReport> },
     #[error(transparent)]
     Target(#[from] TargetError),
     #[error("no start position: the chain observes none and none was given")]
@@ -237,7 +237,7 @@ pub enum GovernorError<E> {
     Unobserved {
         expected: usize,
         found: usize,
-        stop: StopReport,
+        stop: Box<StopReport>,
     },
     #[error("a fault is latched; recover the body and clear it before commanding")]
     Latched,
@@ -327,6 +327,9 @@ pub struct Governor<C, K = MonotonicClock> {
     /// position from the chain but must not widen the interval; cleared only where the governor
     /// takes the joint up anew (open, a stop, a fault, `clear_faults`, `start_at`).
     interval: Option<(Axes<f64>, Axes<f64>)>,
+    /// Per axis, the gravity torque its last command carried: what a fault's stop holds it
+    /// with.
+    gravity: Vec<f64>,
 }
 
 impl<C: ActuatorChain> Governor<C> {
@@ -466,6 +469,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             outside: vec![None; width],
             noted: None,
             interval: None,
+            gravity: vec![0.0; width],
         })
     }
 
@@ -636,7 +640,16 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.noted = None;
         self.silent.fill(false);
         self.tripped.fill(None);
-        let stop = self.chain.stop();
+        // A fault stops the body where it is and holds it there: no joint is released here,
+        // whatever it carries, since the governor knows no model of what would fall. The
+        // caller's own stop releases those that would not ([`crate::rest`]); a joint whose
+        // motor faulted answers its hold with the fault, for the caller to release.
+        let rests: Axes<crate::Rest> = self
+            .gravity
+            .iter()
+            .map(|gravity| crate::Rest::Hold { gravity: *gravity })
+            .collect();
+        let stop = self.chain.stop_holding(&rests);
         make(stop)
     }
 }
@@ -999,6 +1012,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.brought_in = brought_in;
         self.interval = Some((lower, upper));
         let held_feedforward = self.held_feedforward(&velocity, feedforward);
+        for (kept, sent) in self.gravity.iter_mut().zip(held_feedforward.iter()) {
+            *kept = sent.gravity;
+        }
         let receipt = self.chain.command_with(&next, &held_feedforward);
         let receipt = match receipt {
             Ok(receipt) => receipt,
@@ -1008,7 +1024,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 return Err(GovernorError::Chain(error));
             }
             // Failed mid-command: something may have been applied.
-            Err(error) => return Err(self.fault(|stop| GovernorError::Faulted { error, stop })),
+            Err(error) => {
+                return Err(self.fault(|stop| GovernorError::Faulted {
+                    error,
+                    stop: Box::new(stop),
+                }));
+            }
         };
         let width = next.len();
         if receipt.observed.len() < width {
@@ -1016,7 +1037,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             return Err(self.fault(|stop| GovernorError::Unobserved {
                 expected: width,
                 found,
-                stop,
+                stop: Box::new(stop),
             }));
         }
         let fade = (-elapsed.as_secs_f64() / TRACKING_MEMORY.as_secs_f64()).exp();
@@ -1071,6 +1092,19 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     }
 }
 
+impl<C: ActuatorChain, K: Clock> Governor<C, K> {
+    /// What every stop clears: the motion in progress, so the next command starts afresh.
+    fn forget_motion(&mut self) {
+        self.held = None;
+        self.interval = None;
+        self.outside.fill(None);
+        self.noted = None;
+        self.silent.fill(false);
+        self.tripped.fill(None);
+        self.reapproached.fill(0);
+    }
+}
+
 impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     type Error = GovernorError<C::Error>;
     type Feedback = C::Feedback;
@@ -1120,14 +1154,21 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     }
 
     fn stop(&mut self) -> StopReport {
-        self.held = None;
-        self.interval = None;
-        self.outside.fill(None);
-        self.noted = None;
-        self.silent.fill(false);
-        self.tripped.fill(None);
-        self.reapproached.fill(0);
+        self.forget_motion();
         self.chain.stop()
+    }
+
+    /// A stop that holds where `rests` says: the governor forgets its motion as at any stop,
+    /// so the next command starts from where the body rests.
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        self.forget_motion();
+        self.chain.stop_holding(rests)
+    }
+
+    /// The chain's holds: nothing moves, so it passes through even while a fault is latched,
+    /// as a read does.
+    fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        self.chain.keep_holding().map_err(GovernorError::Chain)
     }
 
     fn stop_budget(&self) -> Duration {

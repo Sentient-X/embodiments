@@ -266,13 +266,56 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     fn stop(&mut self) -> StopReport {
         let mut report = StopReport::default();
         for chain in &mut self.members {
-            let stopped = chain.stop();
-            report.unproven.extend(stopped.unproven);
-            report.faults.extend(stopped.faults);
-            report.unobserved.extend(stopped.unobserved);
-            report.unreached.extend(stopped.unreached);
+            report.absorb(chain.stop());
         }
         report
+    }
+
+    /// Each chain its own slice of `rests`, whatever an earlier one answered.
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        let mut report = StopReport::default();
+        let mut rest = rests;
+        for chain in &mut self.members {
+            let (head, tail) = rest.split_at(chain.axes().len().min(rest.len()));
+            rest = tail;
+            report.absorb(chain.stop_holding(head));
+        }
+        report
+    }
+
+    /// Every chain's holds, one after the other, as one receipt in native state order; a
+    /// chain that observes nothing reads `NaN` with default feedback at its axes. A chain whose
+    /// link fails ends the exchange: the caller releases what it can no longer hold.
+    fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        let mut evidence = Evidence::BusObservedComplete;
+        let mut observed = Axes::new();
+        let mut feedback = Axes::new();
+        for (index, chain) in self.members.iter_mut().enumerate() {
+            let width = chain.axes().len();
+            let receipt = chain.keep_holding().map_err(|error| ChainsError::Chain {
+                index,
+                applied: true,
+                error,
+            })?;
+            if receipt.evidence != Evidence::BusObservedComplete {
+                evidence = receipt.evidence;
+            }
+            if receipt.observed.len() == width {
+                observed.extend_from_slice(&receipt.observed);
+            } else {
+                observed.extend((0..width).map(|_| f64::NAN));
+            }
+            if receipt.feedback.len() == width {
+                feedback.extend_from_slice(&receipt.feedback);
+            } else {
+                feedback.extend((0..width).map(|_| C::Feedback::default()));
+            }
+        }
+        Ok(Receipt {
+            evidence,
+            observed,
+            feedback,
+        })
     }
 
     /// Every chain's read, in native state order: each chain's axes whatever another answered.
@@ -406,6 +449,14 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
 
     fn stop(&mut self) -> StopReport {
         (**self).stop()
+    }
+
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        (**self).stop_holding(rests)
+    }
+
+    fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        (**self).keep_holding()
     }
 
     fn stop_budget(&self) -> Duration {

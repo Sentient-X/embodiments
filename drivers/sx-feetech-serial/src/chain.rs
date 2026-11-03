@@ -566,6 +566,8 @@ pub struct FeetechChain<P> {
     held_inside: Vec<HeldInside>,
     /// Exchanges answered corrupt or not at all and tried once more ([`Self::retried`]).
     retried: u64,
+    /// Per servo, whether the last stop left it holding its present position under torque.
+    holding: Vec<bool>,
     /// Whether an exchange may be tried once more: opening and enabling only, never a command's
     /// tick, where a repeat would only stretch the tick (a failed raise of a pulled-in servo is
     /// already tried again on the next command).
@@ -753,7 +755,9 @@ impl<P: SerialPort> FeetechChain<P> {
             held_inside: Vec::new(),
             retried: 0,
             retrying: true,
+            holding: Vec::new(),
         };
+        chain.holding = vec![false; chain.servos.len()];
         chain.is_calibrated()?;
         chain.configure()?;
         for servo in &chain.servos {
@@ -1140,6 +1144,102 @@ impl<P: SerialPort> FeetechChain<P> {
     }
 
     /// `FeetechMotorsBus.enable_torque`: `Torque_Enable` 1, then `Lock` 1, on every servo.
+    /// A stop: every servo `hold` marks keeps torque at its present position as its goal;
+    /// every other is disabled as `disable_torque` does (`feetech.py:291-294`): per servo,
+    /// `Torque_Enable` 0, then `Lock` 0 (`sms_sts.unLockEprom`), each acknowledged, on every
+    /// servo whatever an earlier one answered, then each `Torque_Enable` read back; a servo is
+    /// proven released only when it reads 0.
+    fn settle(&mut self, hold: &[bool]) -> StopReport {
+        fn note(bus_id: u16, error: u8, faults: &mut Vec<(u16, u8)>) {
+            if error != 0 && !faults.contains(&(bus_id, error)) {
+                faults.push((bus_id, error));
+            }
+        }
+        self.enabled = false;
+        self.stop_pending = true;
+        let ids: Vec<(usize, u16, u8)> = self
+            .servos
+            .iter()
+            .enumerate()
+            .map(|(index, servo)| (index, servo.axis.binding.bus_id, servo.scs_id()))
+            .collect();
+        let mut report = StopReport::default();
+        // A held servo's goal is its present position: torque stays on and nothing moves. One
+        // that answers with an error flag (overload, overheat) or not at all is released below
+        // instead: a faulting motor is never left holding.
+        let mut keeps = vec![false; ids.len()];
+        for (index, bus_id, scs_id) in &ids {
+            if !hold.get(*index).copied().unwrap_or(false) {
+                continue;
+            }
+            let (present, result, error) = self
+                .sms
+                .ph
+                .read2_byte_tx_rx(*scs_id, SMS_STS_PRESENT_POSITION_L);
+            if result != CommResult::Success || error != 0 {
+                note(*bus_id, error, &mut report.faults);
+                continue;
+            }
+            match self
+                .sms
+                .ph
+                .write2_byte_tx_rx(*scs_id, SMS_STS_GOAL_POSITION_L, present)
+            {
+                (CommResult::Success, 0) => {
+                    keeps[*index] = true;
+                    report.held.push(*bus_id);
+                }
+                (CommResult::Success, error) => note(*bus_id, error, &mut report.faults),
+                _ => {}
+            }
+        }
+        for (index, bus_id, scs_id) in &ids {
+            if keeps[*index] {
+                continue;
+            }
+            let torque_off = self
+                .sms
+                .ph
+                .write1_byte_tx_rx(*scs_id, SMS_STS_TORQUE_ENABLE, 0);
+            let unlocked = self.sms.un_lock_eprom(*scs_id);
+            let mut answered = true;
+            for (result, error) in [torque_off, unlocked] {
+                if result == CommResult::Success {
+                    note(*bus_id, error, &mut report.faults);
+                } else {
+                    answered = false;
+                }
+            }
+            if !answered {
+                report.unproven.push(*bus_id);
+            }
+        }
+        for (index, bus_id, scs_id) in ids {
+            if keeps[index] {
+                continue;
+            }
+            let (value, result, error) =
+                self.sms.ph.read1_byte_tx_rx(scs_id, SMS_STS_TORQUE_ENABLE);
+            let proven = result == CommResult::Success && value == 0;
+            if result == CommResult::Success {
+                note(bus_id, error, &mut report.faults);
+            }
+            if !proven && !report.unproven.contains(&bus_id) {
+                report.unproven.push(bus_id);
+            }
+        }
+        self.holding.copy_from_slice(&keeps);
+        self.stop_pending = !report.is_proven();
+        for fault in &report.faults {
+            if !self.faults.contains(fault) {
+                self.faults.push(*fault);
+            }
+        }
+        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
+        self.command_readings = None;
+        report
+    }
+
     fn enable_torque(&mut self) -> Result<(), FeetechChainError> {
         // Hold every servo where it is first, so enabling never drives toward a stale goal; a
         // servo resting outside its limits is given the nearest one, which the firmware would
@@ -1299,6 +1399,8 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             self.enable_torque()?;
             self.enabled = true;
         }
+        // Driven now: no servo is held where a stop left it.
+        self.holding.fill(false);
         match self.writer.tx_packet(&mut self.sms.ph) {
             CommResult::Success => {
                 let observed = self.sync_read_positions()?;
@@ -1321,57 +1423,38 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     }
 
     fn stop(&mut self) -> StopReport {
-        fn note(bus_id: u16, error: u8, faults: &mut Vec<(u16, u8)>) {
-            if error != 0 && !faults.contains(&(bus_id, error)) {
-                faults.push((bus_id, error));
-            }
-        }
-        self.enabled = false;
-        self.stop_pending = true;
-        let ids: Vec<(u16, u8)> = self
-            .servos
-            .iter()
-            .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
+        let none = vec![false; self.servos.len()];
+        self.settle(&none)
+    }
+
+    /// The stop above for every servo `rests` releases; each it holds that had torque on is
+    /// given its own `Present_Position` as its goal, torque left on, and named held once the
+    /// write is acknowledged with no error. A position servo holds itself against gravity:
+    /// there is no watchdog to feed, so [`ActuatorChain::keep_holding`] only reads.
+    fn stop_holding(&mut self, rests: &[sx_embodiment_drivers::Rest]) -> StopReport {
+        let hold: Vec<bool> = (0..self.servos.len())
+            .map(|index| {
+                (self.enabled || self.holding[index])
+                    && rests.get(index).is_some_and(|rest| rest.holds())
+            })
             .collect();
-        let mut report = StopReport::default();
-        for (bus_id, scs_id) in &ids {
-            let torque_off = self
-                .sms
-                .ph
-                .write1_byte_tx_rx(*scs_id, SMS_STS_TORQUE_ENABLE, 0);
-            let unlocked = self.sms.un_lock_eprom(*scs_id);
-            let mut answered = true;
-            for (result, error) in [torque_off, unlocked] {
-                if result == CommResult::Success {
-                    note(*bus_id, error, &mut report.faults);
-                } else {
-                    answered = false;
-                }
-            }
-            if !answered {
-                report.unproven.push(*bus_id);
-            }
-        }
-        for (bus_id, scs_id) in ids {
-            let (value, result, error) =
-                self.sms.ph.read1_byte_tx_rx(scs_id, SMS_STS_TORQUE_ENABLE);
-            let proven = result == CommResult::Success && value == 0;
-            if result == CommResult::Success {
-                note(bus_id, error, &mut report.faults);
-            }
-            if !proven && !report.unproven.contains(&bus_id) {
-                report.unproven.push(bus_id);
-            }
-        }
-        self.stop_pending = !report.is_proven();
-        for fault in &report.faults {
-            if !self.faults.contains(fault) {
-                self.faults.push(*fault);
-            }
-        }
-        self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
-        self.command_readings = None;
-        report
+        self.settle(&hold)
+    }
+
+    /// Every servo's `Present_Position`, as a command's SYNC READ would see it: nothing is
+    /// written, a held servo holds its goal on its own.
+    fn keep_holding(&mut self) -> Result<Receipt<()>, FeetechChainError> {
+        let readings = self.present_positions();
+        let observed: Axes<f64> = readings
+            .iter()
+            .map(|reading| reading.position().unwrap_or(f64::NAN))
+            .collect();
+        self.command_readings = Some(readings);
+        Ok(Receipt {
+            evidence: Evidence::DispatchAttempted,
+            observed,
+            feedback: Axes::new(),
+        })
     }
 
     /// Every servo's `Present_Position`, freshly read; see `present_positions`.

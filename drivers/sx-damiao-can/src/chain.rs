@@ -22,7 +22,11 @@
 //! once all answered or the deadline passed. Open: disable all; switch all to MIT; read every
 //! motor's `PMAX`, `VMAX` and `TMAX`; disable all and settle. The enable a command starts with:
 //! write every `TIMEOUT`; read every one back; enable all; and the command's `controlMIT` for
-//! all. Stop: disable all; ask the silent once more. Each motor's own frames keep the vendor's
+//! all. Stop: disable all; ask the silent once more. A stop that holds
+//! ([`ActuatorChain::stop_holding`]) disables only the joints its rests release and sends
+//! each held motor one MIT frame at where it stopped, with zero velocity and its gravity
+//! torque; [`ActuatorChain::keep_holding`] re-sends those frames, one phase a tick, so the
+//! motors' `TIMEOUT` watchdog never drops a held arm while the caller keeps holding it. Each motor's own frames keep the vendor's
 //! order; only the interleaving across motors and the waits differ. A frame the link refuses
 //! for a full transmit queue (`WouldBlock`, as the ZLG adapter's bounded queue does) is sent
 //! again once the bus drains, within the link's `frame_allowance`. Bring-up of the static upper
@@ -99,7 +103,7 @@ use sx_embodiment_drivers::can::{CanFrame, CanPort, LinkHealth};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
     BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit,
-    MissingReason, Receipt, StopReport, TargetError, check_reach, validate_chain,
+    MissingReason, Receipt, Rest, StopReport, TargetError, check_reach, validate_chain,
 };
 use thiserror::Error;
 
@@ -455,8 +459,12 @@ pub struct DamiaoChain<P> {
     tick: Phase,
     /// Per axis; every part off until [`DamiaoChain::set_feedforward_limits`].
     feedforward_limits: Vec<FeedforwardLimit>,
-    /// What the last command sent, at the joint, after every clamp.
+    /// What the last command sent, at the joint, after every clamp; for a held motor, its
+    /// hold's feed-forward.
     applied: Vec<Feedforward>,
+    /// Per motor, the MIT frame its hold re-sends, while a stop holds it
+    /// ([`ActuatorChain::stop_holding`]); `None` for a motor released or driven.
+    holding: Vec<Option<CanFrame>>,
 }
 
 /// How long a phase awaits its answers once its last frame is sent.
@@ -991,6 +999,7 @@ impl<P: CanPort> DamiaoChain<P> {
             tick: Phase::with_capacity(count),
             feedforward_limits: vec![FeedforwardLimit::default(); count],
             applied: vec![Feedforward::default(); count],
+            holding: vec![None; count],
         };
         if let Err(error) = chain.settle_disabled() {
             let refused = disable_all(&mut chain.control, &chain.ids, error);
@@ -1036,7 +1045,7 @@ impl<P: CanPort> DamiaoChain<P> {
     /// [`DamiaoChain::clear_fault`] for every motor of `ids` at once: a disable phase, a clear
     /// phase, then a refresh phase, each awaiting its answers so none passes for the next's.
     fn clear(&mut self, ids: &[u16]) -> Result<(), DamiaoChainError> {
-        if self.enabled {
+        if self.enabled || self.holding.iter().any(Option::is_some) {
             return Err(DamiaoChainError::ClearWhileEnabled);
         }
         let requests = every(ids, Awaits::Feedback);
@@ -1338,6 +1347,8 @@ impl<P: CanPort> DamiaoChain<P> {
         if !self.enabled {
             self.arm_and_enable()?;
         }
+        // Driven now: no motor is held where a stop left it.
+        self.holding.fill(None);
         self.command_readings = None;
         let group_size = self.control.port().batch_capacity().get();
         phase_groups_into(
@@ -1462,6 +1473,200 @@ impl<P: CanPort> DamiaoChain<P> {
             }
             self.control.port_mut().sleep(BRAKE_PERIOD);
         }
+    }
+
+    /// Each motor's hold frame and its feed-forward at the joint, where `rests` holds it and it
+    /// was `under_torque`: one MIT frame at where it stands once the brake ended (a held motor
+    /// is held exactly there), zero velocity, its gravity torque bounded as a command's
+    /// feed-forward is. `None` for every motor released, and for one with no position known.
+    fn hold_frames(
+        &self,
+        rests: &[Rest],
+        under_torque: &[bool],
+    ) -> Vec<Option<(CanFrame, Feedforward)>> {
+        let stands = self.feedback().ok();
+        let mut holds: Vec<Option<(CanFrame, Feedforward)>> = vec![None; self.ids.len()];
+        for (index, torque) in under_torque.iter().enumerate() {
+            let Some(Rest::Hold { gravity }) = rests.get(index).copied() else {
+                continue;
+            };
+            let Some(at) = stands
+                .as_ref()
+                .map(|feedback| f64::from(feedback[index].position))
+                .filter(|at| *torque && at.is_finite())
+            else {
+                continue;
+            };
+            let ((_, tau), applied) = self.actuator_feedforward(
+                index,
+                at,
+                Feedforward {
+                    velocity: 0.0,
+                    torque: gravity,
+                    gravity,
+                },
+            );
+            let motor = &self.motors[index];
+            if let Ok((frame, _)) =
+                self.control
+                    .mit_frame(self.ids[index], motor.kp, motor.kd, at, 0.0, tau)
+            {
+                holds[index] = Some((frame, applied));
+            }
+        }
+        holds
+    }
+
+    /// What each motor's answer to its stop proves: released (disabled), held (an answer to
+    /// its hold with no fault), or unproven.
+    fn stop_report(
+        &self,
+        answered: &[bool],
+        holds: &[Option<(CanFrame, Feedforward)>],
+    ) -> StopReport {
+        let mut report = StopReport::default();
+        for (index, bus_id) in self.ids.iter().copied().enumerate() {
+            let state = self
+                .control
+                .motor(bus_id)
+                .map(|motor| MotorState::from_err(motor.get_error()));
+            let holding = holds[index].is_some();
+            match (answered[index], state) {
+                (true, Ok(MotorState::Fault(code))) => {
+                    report.faults.push((bus_id, code));
+                    report.unproven.push(bus_id);
+                }
+                (true, Ok(MotorState::Enabled)) if holding => report.held.push(bus_id),
+                // Firmware that never reports its enable state answers a hold as it answers
+                // anything: with no fault, it holds.
+                (true, Ok(MotorState::Disabled))
+                    if holding && !self.motors[index].reports_enable_state =>
+                {
+                    report.held.push(bus_id);
+                }
+                (true, Ok(MotorState::Disabled)) if !holding => {}
+                (true, Ok(MotorState::Enabled))
+                    if !holding && !self.motors[index].reports_enable_state =>
+                {
+                    report.unobserved.push(bus_id);
+                }
+                _ => report.unproven.push(bus_id),
+            }
+        }
+        report
+    }
+
+    /// A stop leaving each motor as `rests` says (a missing rest releases): the brake, then a
+    /// disable phase to every motor released, up to [`STOP_ATTEMPTS`] times while the link
+    /// fails, a refresh to any that stayed silent, and one hold phase to every motor held.
+    ///
+    /// A link that failed mid-operation (the station's run 11 on 2026-10-26: the CAN link
+    /// failed during a return, and one disable phase on the failing link left every motor
+    /// unproven and enabled until its watchdog latched 0xD) is not given up on after one
+    /// phase: each attempt drains the link again and sends the disable to every motor not yet
+    /// proven disabled.
+    fn settle(&mut self, rests: &[Rest]) -> StopReport {
+        self.command_readings = None;
+        let was_enabled = self.enabled;
+        let under_torque: Vec<bool> = self
+            .holding
+            .iter()
+            .map(|held| was_enabled || held.is_some())
+            .collect();
+        if under_torque.iter().any(|torque| *torque) {
+            self.brake();
+        }
+        let holds = self.hold_frames(rests, &under_torque);
+        self.enabled = false;
+        for (index, hold) in holds.iter().enumerate() {
+            self.holding[index] = hold.map(|(frame, _)| frame);
+            self.applied[index] = hold.map(|(_, applied)| applied).unwrap_or_default();
+        }
+        let mut answered = vec![false; self.ids.len()];
+        // A held motor is not disabled: it is proven by its answer to the hold below.
+        let released: Vec<usize> = (0..self.ids.len())
+            .filter(|index| holds[*index].is_none())
+            .collect();
+        let mut drained = false;
+        for _ in 0..STOP_ATTEMPTS {
+            let pending: Vec<usize> = released.iter().copied().filter(|i| !answered[*i]).collect();
+            if pending.is_empty() {
+                break;
+            }
+            let ids: Vec<u16> = pending.iter().map(|index| self.ids[*index]).collect();
+            // Only answers to the disable frames count: whatever is already on the link (a
+            // late answer to the last command) is decoded before the phase's frames are sent.
+            let disabled = phase(
+                &mut self.control,
+                &every(&ids, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+            );
+            drained |= disabled.drained;
+            for (slot, index) in pending.into_iter().enumerate() {
+                answered[index] = disabled.drained && disabled.answered(slot);
+            }
+            // Only a link that failed is tried again; a motor that is merely silent on a
+            // working link gets the refresh below, as the vendor's driver does.
+            if disabled.drained && disabled.failure.is_none() {
+                break;
+            }
+        }
+        let silent: Vec<usize> = released.iter().copied().filter(|i| !answered[*i]).collect();
+        if drained && !silent.is_empty() {
+            let ids: Vec<u16> = silent.iter().map(|index| self.ids[*index]).collect();
+            let asked = phase(
+                &mut self.control,
+                &every(&ids, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_refresh(request.bus_id),
+            );
+            for (slot, index) in silent.into_iter().enumerate() {
+                answered[index] = asked.drained && asked.answered(slot);
+            }
+        }
+        let held: Vec<usize> = (0..self.ids.len())
+            .filter(|index| holds[*index].is_some())
+            .collect();
+        if !held.is_empty() {
+            let ids: Vec<u16> = held.iter().map(|index| self.ids[*index]).collect();
+            let frames: Vec<CanFrame> = held
+                .iter()
+                .filter_map(|index| holds[*index].map(|(frame, _)| frame))
+                .collect();
+            let asked = phase(
+                &mut self.control,
+                &every(&ids, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, slot, _| Ok(control.port_mut().send(&frames[slot])?),
+            );
+            for (slot, index) in held.iter().copied().enumerate() {
+                answered[index] = asked.drained && asked.answered(slot);
+            }
+        }
+        let report = self.stop_report(&answered, &holds);
+        // A motor meant to hold that faulted or stayed silent is not left holding: its hold
+        // is never re-sent, and it is sent the disable (it is unproven either way).
+        let dropped: Vec<u16> = (0..self.ids.len())
+            .filter(|index| holds[*index].is_some() && !report.held.contains(&self.ids[*index]))
+            .map(|index| self.ids[index])
+            .collect();
+        if !dropped.is_empty() {
+            for (index, id) in self.ids.iter().enumerate() {
+                if dropped.contains(id) {
+                    self.holding[index] = None;
+                    self.applied[index] = Feedforward::default();
+                }
+            }
+            let _ = phase(
+                &mut self.control,
+                &every(&dropped, Awaits::Feedback),
+                FEEDBACK_WAIT,
+                |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
+            );
+        }
+        self.stop_pending = !report.is_proven();
+        report
     }
 
     /// Whether every motor `counted` answers reports its joint slower than [`BRAKE_STILL`].
@@ -1678,13 +1883,13 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         );
         let asked = &self.tick;
         let link_failed = asked.failure.is_some();
-        let expected = if self.enabled {
-            MotorState::Enabled
-        } else {
-            MotorState::Disabled
-        };
         (0..self.ids.len())
             .map(|index| {
+                let expected = if self.enabled || self.holding[index].is_some() {
+                    MotorState::Enabled
+                } else {
+                    MotorState::Disabled
+                };
                 let Ok(cached) = self.control.motor(self.ids[index]) else {
                     return AxisReading::Missing(MissingReason::Unavailable);
                 };
@@ -1743,71 +1948,74 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     /// phase: each attempt drains the link again and sends the disable to every motor not yet
     /// proven disabled.
     fn stop(&mut self) -> StopReport {
-        self.command_readings = None;
-        if self.enabled {
-            self.brake();
+        let release = vec![Rest::Release; self.ids.len()];
+        self.settle(&release)
+    }
+
+    /// The stop above for every motor `rests` releases; each it holds, and that was under
+    /// torque (enabled, or held by an earlier stop), is sent one MIT frame at where it stands
+    /// once the brake ends, zero velocity, its gravity torque bounded as a command's
+    /// feed-forward is, and named held when it answers with no fault.
+    fn stop_holding(&mut self, rests: &[Rest]) -> StopReport {
+        self.settle(rests)
+    }
+
+    /// One phase: each held motor its hold frame again, every other motor a status refresh,
+    /// every answer read as a command's are. Nothing moves; a motor that faults or is silent is
+    /// the caller's to release.
+    fn keep_holding(&mut self) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
+        let holding = &self.holding;
+        phase_into(
+            &mut self.control,
+            &self.every_feedback,
+            Wait::Tick,
+            |control, index, request| match holding[index] {
+                Some(frame) => Ok(control.port_mut().send(&frame)?),
+                None => control.send_refresh(request.bus_id),
+            },
+            &mut self.tick,
+        );
+        if let Some(failure) = self.tick.failure.take() {
+            self.command_readings = None;
+            return Err(failure.into());
         }
-        self.applied.fill(Feedforward::default());
-        self.enabled = false;
-        let mut answered = vec![false; self.ids.len()];
-        let mut drained = false;
-        for _ in 0..STOP_ATTEMPTS {
-            let pending: Vec<usize> = (0..self.ids.len()).filter(|i| !answered[*i]).collect();
-            if pending.is_empty() {
-                break;
-            }
-            let ids: Vec<u16> = pending.iter().map(|index| self.ids[*index]).collect();
-            // Only answers to the disable frames count: whatever is already on the link (a
-            // late answer to the last command) is decoded before the phase's frames are sent.
-            let disabled = phase(
-                &mut self.control,
-                &every(&ids, Awaits::Feedback),
-                FEEDBACK_WAIT,
-                |control, _, request| control.send_command(request.bus_id, MotorCommand::Disable),
-            );
-            drained |= disabled.drained;
-            for (slot, index) in pending.into_iter().enumerate() {
-                answered[index] = disabled.drained && disabled.answered(slot);
-            }
-            // Only a link that failed is tried again; a motor that is merely silent on a
-            // working link gets the refresh below, as the vendor's driver does.
-            if disabled.drained && disabled.failure.is_none() {
-                break;
-            }
-        }
-        let silent: Vec<usize> = (0..self.ids.len()).filter(|i| !answered[*i]).collect();
-        if drained && !silent.is_empty() {
-            let ids: Vec<u16> = silent.iter().map(|index| self.ids[*index]).collect();
-            let asked = phase(
-                &mut self.control,
-                &every(&ids, Awaits::Feedback),
-                FEEDBACK_WAIT,
-                |control, _, request| control.send_refresh(request.bus_id),
-            );
-            for (slot, index) in silent.into_iter().enumerate() {
-                answered[index] = asked.drained && asked.answered(slot);
+        let feedback = self.feedback()?;
+        let mut observed: Axes<f64> = Axes::new();
+        let mut readings: Axes<AxisReading> = Axes::new();
+        for (index, (motor, answer)) in self.motors.iter().zip(feedback.iter()).enumerate() {
+            let Some(received) = self.tick.received[index] else {
+                observed.push(f64::NAN);
+                readings.push(AxisReading::Missing(if self.tick.before[index] > 0 {
+                    MissingReason::Stale
+                } else {
+                    MissingReason::Timeout
+                }));
+                continue;
+            };
+            let expected = if self.holding[index].is_some() {
+                MotorState::Enabled
+            } else {
+                MotorState::Disabled
+            };
+            if self.in_state(index, answer.state, expected) {
+                let position = motor.axis.joint_from_actuator(f64::from(answer.position));
+                observed.push(position);
+                readings.push(AxisReading::Fresh { position, received });
+            } else {
+                observed.push(f64::NAN);
+                readings.push(AxisReading::Faulted(match answer.state {
+                    MotorState::Fault(code) => code,
+                    MotorState::Enabled => 1,
+                    MotorState::Disabled | MotorState::Unavailable => 0,
+                }));
             }
         }
-        let mut report = StopReport::default();
-        for (index, bus_id) in self.ids.iter().copied().enumerate() {
-            let state = self
-                .control
-                .motor(bus_id)
-                .map(|motor| MotorState::from_err(motor.get_error()));
-            match (answered[index], state) {
-                (true, Ok(MotorState::Disabled)) => {}
-                (true, Ok(MotorState::Enabled)) if !self.motors[index].reports_enable_state => {
-                    report.unobserved.push(bus_id);
-                }
-                (true, Ok(MotorState::Fault(code))) => {
-                    report.faults.push((bus_id, code));
-                    report.unproven.push(bus_id);
-                }
-                _ => report.unproven.push(bus_id),
-            }
-        }
-        self.stop_pending = !report.is_proven();
-        report
+        self.command_readings = Some(readings);
+        Ok(Receipt {
+            evidence: Evidence::BusObservedComplete,
+            observed,
+            feedback,
+        })
     }
 
     /// The longest [`ActuatorChain::stop`] takes on this chain, from its own constants: the
