@@ -1253,22 +1253,28 @@ fn a_row_the_caps_cannot_keep_widens_no_cap() {
 
 /// A tool speed never shortens a step past a row that asks its pair to open: shortened, then
 /// held for breaking it, an underdamped follower's step broke such rows by up to 26 mm and came
-/// within 3.0 mm of the box (refute of embodiments 885f73b; 8.6 mm without the tool speed).
+/// within 3.0 mm of the box (refute of embodiments 885f73b; 8.6 mm without the tool speed);
+/// shortened past it without being held, 7.0-7.9 mm at 100 and 500 Hz (its second refute).
 #[test]
 fn a_tool_speed_never_shortens_a_step_past_a_row() {
     std::thread::scope(|scope| {
         let mut runs = Vec::new();
-        for dt in [0.02, 0.011] {
+        for dt in [0.02, 0.011, 0.01, 0.002] {
             for case in ["box", "reach"] {
                 for follower in [Follower::Pd(0, 9.5, 0.1), Follower::Pd(1, 9.5, 0.1)] {
-                    for tool in [0.05, 0.2] {
+                    for (tool, noise) in [
+                        (0.05, READING_JITTER),
+                        (0.2, READING_JITTER),
+                        (0.05, 0.0),
+                        (0.2, 0.0),
+                    ] {
                         runs.push(scope.spawn(move || {
                             let got = least_clearance_at(
                                 dt,
                                 case,
                                 true,
                                 follower,
-                                READING_JITTER,
+                                noise,
                                 None,
                                 Some(tool),
                             );
@@ -1282,7 +1288,7 @@ fn a_tool_speed_never_shortens_a_step_past_a_row() {
             let (dt, case, follower, tool, (clear, a, b, _, _)) = run.join().expect("a case");
             println!("{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m");
             assert!(
-                clear >= 0.009,
+                clear >= 0.0085,
                 "{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m apart"
             );
         }

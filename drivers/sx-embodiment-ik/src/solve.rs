@@ -222,8 +222,8 @@ pub enum Solve {
     Solved,
     /// Solved, with a collision row needing more than the caps allow: the acceleration cap
     /// was exceeded on that row's axes (reported [`Active::Accel`]), a pair already inside
-    /// its margin was held to come no closer, or a row gave way (never `Solved` with a row
-    /// broken).
+    /// its margin was held to come no closer, a row gave way (never `Solved` with a row
+    /// broken), or a tool's speed gave way to a row ([`Ik::set_tool_speed`]).
     Relaxed,
     /// The solver failed: every solved axis slows toward standing still within its caps.
     Held,
@@ -965,7 +965,9 @@ impl Ik {
         if !solved {
             solve = Solve::Held;
         }
-        self.bound_tool_speed(q, dt);
+        if self.bound_tool_speed(q, dt) && solve == Solve::Solved {
+            solve = Solve::Relaxed;
+        }
         // Never Solved on a broken row: a step that says its rows hold keeps every one of them
         // as it leaves (the box clamp and the tool's shortening come after the QP), or it says
         // they gave way. It is not swapped for standing still: a row that asks its pair to
@@ -1567,10 +1569,10 @@ impl Ik {
     /// Never below the scale at which a joint would slow past its acceleration cap: the
     /// governor would only slew such a step back, unchecked. The cost already asks no tool for
     /// more than its speed, so that floor binds only for a tick of a sharp slow-down.
-    fn bound_tool_speed(&mut self, q: &[f64], dt: f64) {
+    fn bound_tool_speed(&mut self, q: &[f64], dt: f64) -> bool {
         self.tool_capped.fill(false);
         if self.tool_speed.iter().all(Option::is_none) {
-            return;
+            return false;
         }
         let n = self.body.solved.len();
         let w = &mut self.work;
@@ -1589,16 +1591,21 @@ impl Ik {
         // (its bound below zero, at the measured pose) is kept by the step and broken by a
         // shorter one. Shortened past it, then held for it, a tool-speed step broke such rows by
         // up to 26 mm and cost 5.6 mm of clearance (refute of embodiments 885f73b).
+        // Keeping clear outranks the tool's speed: where a row stops the shortening, the tool
+        // moves faster than its speed and the step says so ([`Solve::Relaxed`]).
+        let mut row_floor = 0.0_f64;
         for slot in 0..w.used {
             let row = &w.rows[slot * n..(slot + 1) * n];
             let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
             let bound = w.rhs[slot];
             if closes < 0.0 && bound < 0.0 {
-                floor = floor.max(if closes <= bound { bound / closes } else { 1.0 });
+                row_floor = row_floor.max(if closes <= bound { bound / closes } else { 1.0 });
             }
         }
-        let floor = floor.min(1.0);
+        let rows_bind = row_floor > floor;
+        let floor = floor.max(row_floor).min(1.0);
         let mut scale = 1.0_f64;
+        let mut over = false;
         self.step.q.copy_from_slice(q);
         // FK is nearly linear over one tick's step: a second shortening lands within a hair of
         // the bound, and a third (rare) takes the rest.
@@ -1626,6 +1633,7 @@ impl Ik {
                     self.tool_capped[index] = true;
                 }
             }
+            over = factor < 1.0;
             let next = (scale * factor).max(floor);
             if factor >= 1.0 || next >= scale {
                 break;
@@ -1637,6 +1645,7 @@ impl Ik {
                 *value *= scale;
             }
         }
+        over && rows_bind && scale <= floor
     }
 
     /// Residuals, binding constraints and reach per limb, at the new positions.
