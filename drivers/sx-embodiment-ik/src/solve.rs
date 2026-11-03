@@ -1401,7 +1401,7 @@ impl Ik {
                     .map(|(&axis, r)| {
                         let ahead = q[axis] - w.seen_q[axis];
                         // Never more of it than the joint lags now, nor the other way.
-                        let resting = self.resting_lag[axis].clamp(ahead.min(0.0), ahead.max(0.0));
+                        let resting = self.resting_lag[axis].clamp(ahead.min(0.0) - 2.0 * READING_JITTER, ahead.max(0.0) + 2.0 * READING_JITTER);
                         let carried = MOMENTUM_S * self.measured_speed[axis];
                         r * (ahead - resting) + (r * carried).max(0.0)
                     })
