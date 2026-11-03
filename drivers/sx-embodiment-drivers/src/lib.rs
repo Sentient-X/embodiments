@@ -67,8 +67,8 @@ pub use body::{BodyBindings, BodyError, Bus, Twin};
 pub use bus_timing::BusTiming;
 pub use chain::{
     ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
-    FeedforwardLimit, MissingReason, MotorTemperature, Observe, ProvenStop, Receipt, Reports,
-    StopReport, TargetError, TrackingCeiling, check_reach, check_targets, fresh_positions,
+    FeedforwardLimit, MissingReason, Motor, MotorTemperature, Observe, ProvenStop, Receipt,
+    Reports, StopReport, TargetError, TrackingCeiling, check_reach, check_targets, fresh_positions,
 };
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};

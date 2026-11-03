@@ -279,8 +279,8 @@ fn a_jog_whose_step_is_refused_stops_where_it_is_and_never_returns() {
     .expect("runs");
     assert!(ended.failure.is_some(), "the step was refused");
     assert!(
-        matches!(ended.ending, Ending::Released { .. }),
-        "a refused run must not return: {}",
+        matches!(ended.ending, Ending::Held { .. }),
+        "a refused run must not return, and is held where it stopped: {}",
         ended.ending
     );
 }

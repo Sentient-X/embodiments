@@ -208,6 +208,15 @@ impl JointFriction {
             || self.load_external_stribeck > 0.0
     }
 
+    /// The friction a joint already sliding meets, with the drive delivering `motor` against a
+    /// load `external`, N·m: the budget with its Stribeck (breakaway) part gone. What holds a
+    /// released joint once a knock or a vibration starts it moving, so what a fall rule may
+    /// count on (`crate::rest::falls`), never the larger breakaway it shows at rest.
+    #[must_use]
+    pub fn sliding(&self, motor: f64, external: f64) -> f64 {
+        self.coulomb + (self.load_external * external - self.load_motor * motor).abs()
+    }
+
     /// The friction budget at `speed` with the drive delivering `motor` against a load
     /// `external`, N·m: the most friction can resist.
     #[must_use]

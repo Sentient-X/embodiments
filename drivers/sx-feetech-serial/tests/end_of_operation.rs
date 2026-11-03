@@ -1,8 +1,9 @@
 //! The static upper body's SO-101 neck at the end of an operation, on a simulated bus of
 //! STS3215 servos that move toward their goals at the approach limit the chain sets on them:
 //! by default the governor returns the neck to its declared home (the camera tilt's -2.2 rad
-//! included) and then disables torque; `Release` disables it in place; a neck nothing
-//! drove is not moved; and an axis that stopped answering ends in the plain stop with no motion.
+//! included) and holds it there until a person releases it; `Release` disables it in place; a
+//! neck nothing drove is not moved; and an axis that stopped answering ends held where each
+//! servo stands, with no motion.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -91,7 +92,7 @@ fn radians(bus: &SimBus, id: u8) -> f64 {
 }
 
 #[test]
-fn the_neck_returns_home_smoothly_then_disables_torque() {
+fn the_neck_returns_home_smoothly_holds_there_and_releases_on_a_persons_call() {
     let bus = resting();
     let (mut governor, clock) = neck(&bus);
     let homes: Vec<f64> = governor
@@ -117,8 +118,15 @@ fn the_neck_returns_home_smoothly_then_disables_torque() {
             "servo {id} at {} rad, home {home}",
             radians(&bus, id)
         );
-        assert_eq!(bus.state().torque(id), 0, "servo {id} disabled at home");
+        assert_eq!(bus.state().torque(id), 1, "servo {id} held at home");
     }
+    // Torque comes off only on a person's call: a second Ctrl-C, as sx-jog waits for it.
+    let released = governor.hold_until_released(&|| true, &mut || {});
+    assert!(
+        released.is_proven() && released.held.is_empty(),
+        "{released:?}"
+    );
+    assert!((1..=6).all(|id| bus.state().torque(id) == 0));
 }
 
 #[test]
@@ -136,7 +144,7 @@ fn release_disables_in_place() {
 }
 
 #[test]
-fn a_servo_that_stopped_answering_is_a_plain_stop_with_no_motion() {
+fn a_servo_that_stopped_answering_holds_the_rest_where_they_stand() {
     let bus = resting();
     let (mut governor, clock) = neck(&bus);
     let rest = governor.last_observed().expect("rest");
@@ -154,11 +162,17 @@ fn a_servo_that_stopped_answering_is_a_plain_stop_with_no_motion() {
             joint: "so101_elbow_flex_joint".into()
         }
     );
+    let _ = goals;
+    let presents: Vec<u16> = [1, 2, 4, 5, 6].iter().map(|id| bus.present(*id)).collect();
     let state = bus.state();
+    // Held where each servo stands (2026-11-04): its goal is its present position, no motion.
     assert_eq!(
-        (1..=6).map(|id| state.goal(id)).collect::<Vec<_>>(),
-        goals,
-        "no goal was written"
+        [1, 2, 4, 5, 6]
+            .iter()
+            .map(|id| state.goal(*id))
+            .collect::<Vec<_>>(),
+        presents,
+        "held where it stands"
     );
     // Only reads and the stop's own frames were written: no SYNC WRITE of a goal.
     assert!(
@@ -168,7 +182,7 @@ fn a_servo_that_stopped_answering_is_a_plain_stop_with_no_motion() {
         "a goal was sent after the axis stopped answering"
     );
     for id in [1, 2, 4, 5, 6] {
-        assert_eq!(state.torque(id), 0, "servo {id} disabled where it was");
+        assert_eq!(state.torque(id), 1, "servo {id} held where it was");
     }
 }
 
@@ -206,7 +220,7 @@ fn a_held_stop_keeps_torque_where_each_servo_stands_and_releases_the_rest() {
     let before: Vec<u16> = (1..=6).map(|id| bus.present(id)).collect();
     let report = governor.stop_holding(&rests);
     assert!(report.is_proven(), "{report:?}");
-    assert_eq!(report.held, vec![2, 3, 4, 5, 6], "{report:?}");
+    assert_eq!(ids(&report.held), vec![2, 3, 4, 5, 6], "{report:?}");
     bus.advance(Duration::from_secs(2));
     let receipt = governor.keep_holding().expect("read");
     assert_eq!(receipt.observed.len(), 6);
@@ -226,4 +240,9 @@ fn a_held_stop_keeps_torque_where_each_servo_stands_and_releases_the_rest() {
     let parked = governor.stop();
     assert!(parked.held.is_empty() && parked.is_proven(), "{parked:?}");
     assert!((1..=6).all(|id| bus.state().torque(id) == 0));
+}
+
+/// The held motors' bus addresses, in order.
+fn ids(held: &[sx_embodiment_drivers::Motor]) -> Vec<u16> {
+    held.iter().map(|motor| motor.bus_id).collect()
 }

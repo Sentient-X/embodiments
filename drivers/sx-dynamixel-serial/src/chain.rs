@@ -94,8 +94,8 @@ use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, ApproachLimit, Axes, AxisReading, BindingError,
-    BodyError, BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
-    StopReport, TargetError, fresh_positions, validate_chain,
+    BodyError, BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Motor,
+    Receipt, StopReport, TargetError, fresh_positions, validate_chain,
 };
 use thiserror::Error;
 
@@ -901,10 +901,16 @@ impl<P: SerialPort> DynamixelChain<P> {
                 note((*bus_id, error), &mut report.faults);
                 continue;
             }
+            // A servo already holding keeps its first goal: never re-targeted at its sag.
+            if self.holding[index] {
+                keeps[index] = true;
+                report.held.push(Motor::of(&self.servos[index].axis));
+                continue;
+            }
             match self.ph.write4_byte_tx_rx(*dxl_id, GOAL_POSITION, present) {
                 (CommResult::Success, 0) => {
                     keeps[index] = true;
-                    report.held.push(*bus_id);
+                    report.held.push(Motor::of(&self.servos[index].axis));
                 }
                 (CommResult::Success, error) => note((*bus_id, error), &mut report.faults),
                 _ => {}

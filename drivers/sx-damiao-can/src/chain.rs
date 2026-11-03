@@ -1490,6 +1490,13 @@ impl<P: CanPort> DamiaoChain<P> {
             let Some(Rest::Hold { gravity }) = rests.get(index).copied() else {
                 continue;
             };
+            // A motor already holding keeps its hold where it first stopped: re-targeting it
+            // at where it sagged to since would ratchet it down a little at every re-stop (the
+            // refute of 2026-11-03, when another joint is released).
+            if let Some(frame) = self.holding[index] {
+                holds[index] = Some((frame, self.applied[index]));
+                continue;
+            }
             let Some(at) = stands
                 .as_ref()
                 .map(|feedback| f64::from(feedback[index].position))
@@ -1536,13 +1543,19 @@ impl<P: CanPort> DamiaoChain<P> {
                     report.faults.push((bus_id, code));
                     report.unproven.push(bus_id);
                 }
-                (true, Ok(MotorState::Enabled)) if holding => report.held.push(bus_id),
+                (true, Ok(MotorState::Enabled)) if holding => {
+                    report
+                        .held
+                        .push(sx_embodiment_drivers::Motor::of(&self.motors[index].axis));
+                }
                 // Firmware that never reports its enable state answers a hold as it answers
                 // anything: with no fault, it holds.
                 (true, Ok(MotorState::Disabled))
                     if holding && !self.motors[index].reports_enable_state =>
                 {
-                    report.held.push(bus_id);
+                    report
+                        .held
+                        .push(sx_embodiment_drivers::Motor::of(&self.motors[index].axis));
                 }
                 (true, Ok(MotorState::Disabled)) if !holding => {}
                 (true, Ok(MotorState::Enabled))
@@ -1648,7 +1661,7 @@ impl<P: CanPort> DamiaoChain<P> {
         // A motor meant to hold that faulted or stayed silent is not left holding: its hold
         // is never re-sent, and it is sent the disable (it is unproven either way).
         let dropped: Vec<u16> = (0..self.ids.len())
-            .filter(|index| holds[*index].is_some() && !report.held.contains(&self.ids[*index]))
+            .filter(|index| holds[*index].is_some() && !report.holds(&self.motors[*index].axis))
             .map(|index| self.ids[index])
             .collect();
         if !dropped.is_empty() {
@@ -1976,7 +1989,12 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
             &mut self.tick,
         );
         if let Some(failure) = self.tick.failure.take() {
-            self.command_readings = None;
+            // Every axis of a failed link is unread: the caller's silence rule releases them.
+            self.command_readings = Some(
+                (0..self.ids.len())
+                    .map(|_| AxisReading::Missing(MissingReason::Unavailable))
+                    .collect(),
+            );
             return Err(failure.into());
         }
         let feedback = self.feedback()?;
@@ -1992,7 +2010,9 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 }));
                 continue;
             };
-            let expected = if self.holding[index].is_some() {
+            // An enabled chain's motors answer enabled (a command took the hold up), as a held
+            // motor does; only a released one answers disabled.
+            let expected = if self.enabled || self.holding[index].is_some() {
                 MotorState::Enabled
             } else {
                 MotorState::Disabled

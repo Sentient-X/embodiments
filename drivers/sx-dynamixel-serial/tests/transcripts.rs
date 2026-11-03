@@ -834,6 +834,11 @@ fn a_held_stop_writes_each_held_servos_goal_where_it_stands_and_disables_the_res
     chain.command(&[0.0, 0.0]).expect("commanded");
     let report = chain.stop_holding(&rests);
     assert!(report.is_proven(), "{report:?}");
-    assert_eq!(report.held, vec![1]);
+    assert_eq!(ids(&report.held), vec![1]);
     assert!(chain.port().expected.is_empty(), "every exchange was made");
+}
+
+/// The held motors' bus addresses, in order.
+fn ids(held: &[sx_embodiment_drivers::Motor]) -> Vec<u16> {
+    held.iter().map(|motor| motor.bus_id).collect()
 }

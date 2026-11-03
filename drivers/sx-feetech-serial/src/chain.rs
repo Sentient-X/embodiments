@@ -169,7 +169,7 @@ use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
-    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Receipt,
+    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Motor, Receipt,
     StopReport, TargetError, check_reach, fresh_positions, validate_chain,
 };
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
@@ -1180,6 +1180,13 @@ impl<P: SerialPort> FeetechChain<P> {
                 note(*bus_id, error, &mut report.faults);
                 continue;
             }
+            // A servo already holding keeps the goal it was given when it first stopped: never
+            // re-targeted at where it sagged to (the refute of 2026-11-03).
+            if self.holding[*index] {
+                keeps[*index] = true;
+                report.held.push(Motor::of(&self.servos[*index].axis));
+                continue;
+            }
             match self
                 .sms
                 .ph
@@ -1187,7 +1194,7 @@ impl<P: SerialPort> FeetechChain<P> {
             {
                 (CommResult::Success, 0) => {
                     keeps[*index] = true;
-                    report.held.push(*bus_id);
+                    report.held.push(Motor::of(&self.servos[*index].axis));
                 }
                 (CommResult::Success, error) => note(*bus_id, error, &mut report.faults),
                 _ => {}
