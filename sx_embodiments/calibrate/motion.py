@@ -58,13 +58,14 @@ SHORTEST_RAMP_S: Final = 0.1
 #: The farthest a joint may lie from the position just sent while it is not moving: what PD
 #: alone leaves a heavy joint short of its target against gravity the description lacks (the
 #: left elbow, 2026-10-26). The governor adds the speed term (:func:`tracking_bound`).
-SETTLED_TRACKING_RAD: Final = 0.2
-#: How many of the governor's longest steps (``MAX_STEP_INTERVAL``, 20 ms) of travel the
-#: tracking bound allows on top of the settled error: the step just sent leads the joint by
-#: one, the motor's own PD lags it by about another, and one more covers a late answer.
+SETTLED_TRACKING_RAD: Final = 0.3
+#: Number of trial allowance intervals of travel added to settled tracking.
+#: These100ms intervals do not change the physical governor step.
 TRACKING_PERIODS: Final = 3.0
 #: ``sx_embodiment_drivers::MAX_STEP_INTERVAL``: the longest step the governor ever takes.
 STEP_INTERVAL_S: Final = 0.02
+#: Trial tracking allowance interval only; not the physical control step.
+TRACKING_ALLOWANCE_INTERVAL_S: Final = 0.1
 #: ``sx_embodiment_drivers::governor::TRACKING_MEMORY``: how long a speed widens the bound.
 TRACKING_MEMORY_S: Final = 0.2
 
@@ -90,7 +91,7 @@ def tracking_bound(speed: float) -> float:
     """The governor's tracking bound for a joint recently stepped at ``speed`` (the step's
     speed, remembered over :data:`TRACKING_MEMORY_S`), whatever the station's loop rate: the
     at-rest bound ``AxisLimits::rated`` gives, widened as ``Governor`` widens it."""
-    return SETTLED_TRACKING_RAD + TRACKING_PERIODS * speed * STEP_INTERVAL_S
+    return SETTLED_TRACKING_RAD + TRACKING_PERIODS * speed * TRACKING_ALLOWANCE_INTERVAL_S
 
 
 def _loads(embodiment: Embodiment, joints: list[str]) -> dict[str, tuple[float, float]]:

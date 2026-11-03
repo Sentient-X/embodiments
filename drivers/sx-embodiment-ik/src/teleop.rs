@@ -57,7 +57,7 @@ pub const HANDS: [&str; 2] = ["left", "right"];
 
 /// How far a joint's reference may lead its measurement: one that strays further is held at
 /// this far; well inside the governor's tracking stop.
-pub const REFERENCE_GAP: f64 = 0.1;
+pub const REFERENCE_GAP: f64 = 0.2;
 
 /// How far ahead of the camera the gaze is turned into a look-at point: far enough that the
 /// camera's offset from the operator's eyes does not bend the gaze, near enough to stay a

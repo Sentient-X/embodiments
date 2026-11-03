@@ -100,16 +100,15 @@ pub const OUTSIDE_TOLERANCE: f64 = 0.01;
 /// pushing it in and holds it where it is.
 pub const OUTSIDE_STALL: Duration = Duration::from_secs(2);
 
-/// The farthest a joint may lie from the position just sent while it is not moving: what PD
-/// alone leaves a heavy joint short of its target against gravity its model lacks (the static
-/// upper body's left elbow, 2026-10-26). `sx_embodiments.calibrate.motion.SETTLED_TRACKING_RAD`.
-pub const SETTLED_TRACKING: f64 = 0.2;
+/// Requested trial settled tracking bound; not a hardware qualification.
+/// Python mirror: `sx_embodiments.calibrate.motion.SETTLED_TRACKING_RAD`.
+pub const SETTLED_TRACKING: f64 = 0.3;
 
-/// How many [`MAX_STEP_INTERVAL`]s of travel at the speed an axis is moving the tracking bound
-/// allows on top of its `max_tracking_error`: the step just sent leads the joint by one, the
-/// motor's own loop lags it by about another, and one more covers a late answer.
-/// `sx_embodiments.calibrate.motion.TRACKING_PERIODS`.
+/// Number of allowance intervals of travel added to settled tracking at recent speed.
+/// Python mirror: `sx_embodiments.calibrate.motion.TRACKING_PERIODS`.
 pub const TRACKING_PERIODS: f64 = 3.0;
+/// Trial tracking allowance interval only; the physical step remains [`MAX_STEP_INTERVAL`].
+pub const TRACKING_ALLOWANCE_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long a speed an axis was stepped at keeps widening its tracking bound after the step
 /// slows: the time the motor's loop takes to close the lag it built up (about `kd / kp`, 0.15 s
@@ -136,7 +135,7 @@ impl AxisLimits {
     /// What the hardware can do for `axis` (its [`crate::AxisMotion`]), at `share` of it: the
     /// speed and acceleration scaled by `share`, and a tracking bound of [`SETTLED_TRACKING`] at
     /// rest, which the governor widens by [`TRACKING_PERIODS`] steps of travel at the speed the
-    /// axis is actually stepped at (so a slow or blocked joint is held to 0.2 rad). A share
+    /// axis is actually stepped at (so a slow or blocked joint is held to the settled bound). A share
     /// is the person's runtime choice (a first run on a robot ramps 0.25, 0.5, 1); the hardware's
     /// own figures change only in the registry.
     ///
@@ -1019,7 +1018,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         for (recent, speed) in self.recent.iter_mut().zip(velocity.iter()) {
             *recent = speed.abs().max(*recent * fade);
         }
-        let step = MAX_STEP_INTERVAL.as_secs_f64();
+        let step = TRACKING_ALLOWANCE_INTERVAL.as_secs_f64();
         let strayed = receipt
             .observed
             .iter()
@@ -1402,6 +1401,30 @@ mod tests {
                 matches!(AxisLimits::rated(&axis, share), Err(LimitsError::Share(_))),
                 "{share}"
             );
+        }
+    }
+
+    #[test]
+    fn trial_allowance_uses_100_ms_without_widening_the_command_step() {
+        let clock = Manual(Rc::new(Cell::new(Instant::now())));
+        let limit = AxisLimits {
+            max_speed: 1.0,
+            max_tracking_error: SETTLED_TRACKING,
+            max_acceleration: None,
+        };
+        let mut governor =
+            Governor::with_clock(fake(true), vec![limit; 2], clock.clone()).expect("limits");
+        governor.command(&[0.0, 0.5]).expect("held");
+        governor.chain.lag = -0.7;
+        clock.advance(Duration::from_millis(20));
+        match governor.command(&[1.0, 0.5]) {
+            Err(GovernorError::Tracking {
+                commanded, limit, ..
+            }) => {
+                assert!((commanded - 0.02).abs() < 1e-9, "physical step stays20ms");
+                assert!((limit - 0.6).abs() < 1e-9, "0.3+3*1*0.100 allowance");
+            }
+            other => panic!("expected a bounded tracking fault, got {other:?}"),
         }
     }
 
