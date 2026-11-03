@@ -2299,6 +2299,19 @@ where
         self.0.stop()
     }
 
+    fn stop_holding(&mut self, rests: &[sx_embodiment_drivers::Rest]) -> StopReport {
+        self.0.stop_holding(rests)
+    }
+
+    fn keep_holding(&mut self) -> Result<Receipt<MotorFeedback>, BusError> {
+        let receipt = self.0.keep_holding().map_err(Into::into)?;
+        Ok(Receipt {
+            evidence: receipt.evidence,
+            observed: receipt.observed,
+            feedback: Answer::into_feedback(receipt.feedback, self.0.axes()),
+        })
+    }
+
     fn stop_budget(&self) -> Duration {
         self.0.stop_budget()
     }

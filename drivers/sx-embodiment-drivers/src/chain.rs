@@ -140,9 +140,22 @@ pub struct StopReport {
     /// with no answer awaited, and none proves them stopped or in any state. They are outside
     /// what this stop drives and proves; a caller must treat them as unknown, never as stopped.
     pub unreached: Vec<u16>,
+    /// Actuators left holding their joint under torque ([`crate::Rest::Hold`]), proven by an
+    /// answer to the hold with no fault: stopped (no motion), not released. Every other
+    /// actuator that is not unproven was released.
+    pub held: Vec<u16>,
 }
 
 impl StopReport {
+    /// This report with `other`'s, for a body stopped chain by chain.
+    pub fn absorb(&mut self, other: Self) {
+        self.unproven.extend(other.unproven);
+        self.faults.extend(other.faults);
+        self.unobserved.extend(other.unobserved);
+        self.unreached.extend(other.unreached);
+        self.held.extend(other.held);
+    }
+
     #[must_use]
     pub fn is_proven(&self) -> bool {
         self.unproven.is_empty()
@@ -159,6 +172,7 @@ impl StopReport {
                 faults: self.faults,
                 unobserved: self.unobserved,
                 unreached: self.unreached,
+                held: self.held,
             })
         } else {
             Err(self)
@@ -173,6 +187,7 @@ pub struct ProvenStop {
     faults: Vec<(u16, u8)>,
     unobserved: Vec<u16>,
     unreached: Vec<u16>,
+    held: Vec<u16>,
 }
 
 impl ProvenStop {
@@ -196,11 +211,17 @@ impl ProvenStop {
         &self.unreached
     }
 
-    /// Whether every actuator was observed disabled, not merely answering the disable, and no
-    /// actuator of the body is out of reach.
+    /// Actuators left holding their joint under torque ([`StopReport::held`]).
+    #[must_use]
+    pub fn held(&self) -> &[u16] {
+        &self.held
+    }
+
+    /// Whether every actuator was observed disabled, not merely answering the disable, none
+    /// is held under torque, and no actuator of the body is out of reach.
     #[must_use]
     pub fn observed_disabled(&self) -> bool {
-        self.unobserved.is_empty() && self.unreached.is_empty()
+        self.unobserved.is_empty() && self.unreached.is_empty() && self.held.is_empty()
     }
 }
 
@@ -476,8 +497,45 @@ pub trait ActuatorChain {
     }
 
     /// Disable every actuator, whatever an earlier one answered, and report what the answers
-    /// prove. The chain stays disabled until the next command.
+    /// prove. The chain stays disabled until the next command. Every axis released: what a
+    /// deliberate Park ends with once its arrival is measured, and what [`Self::stop_holding`]
+    /// is with every axis [`crate::Rest::Release`].
     fn stop(&mut self) -> StopReport;
+
+    /// Stop, leaving each axis as `rests` says (one per axis, in native state order): brake a
+    /// moving body as [`Self::stop`] does, then release every [`crate::Rest::Release`] axis and
+    /// keep every [`crate::Rest::Hold`] axis under torque at where it stopped, with zero
+    /// planned velocity and its gravity torque (bounded as a command's feed-forward is), named
+    /// in [`StopReport::held`] once an answer proves it. An actuator that was not under torque
+    /// at the stop (a body nothing drove since open, one a stop already released) is released:
+    /// it already rests wherever gravity left it. Commands are refused as after any stop until
+    /// the next command re-enables the chain. A hold is kept only while the caller re-sends it
+    /// ([`Self::keep_holding`]): a motor with a communication watchdog drops it otherwise.
+    ///
+    /// A chain whose actuators cannot hold at a stop releases every axis: its report names
+    /// none held, and the caller says so.
+    fn stop_holding(&mut self, rests: &[crate::Rest]) -> StopReport {
+        let _ = rests;
+        self.stop()
+    }
+
+    /// Re-send every held axis's hold, as its last stop established it, and read the body: one
+    /// exchange a caller repeats every control tick while the body is held. The receipt
+    /// observes every axis that answered (`NaN` where none did) and carries each actuator's
+    /// answer (temperature, torque) through [`Reports`]; [`Self::command_readings`] then reads
+    /// each axis as fresh, missing or faulted, so the caller releases a held joint whose motor
+    /// faults or stays silent. Nothing moves: every target is where its joint stopped.
+    ///
+    /// # Errors
+    ///
+    /// The link failed; the holds may not have been sent.
+    fn keep_holding(&mut self) -> Result<Receipt<Self::Feedback>, Self::Error> {
+        Ok(Receipt {
+            evidence: Evidence::DispatchAttempted,
+            observed: Axes::new(),
+            feedback: Axes::new(),
+        })
+    }
 
     /// The longest [`ActuatorChain::stop`] can take, whatever the actuators answer.
     fn stop_budget(&self) -> Duration;
@@ -565,10 +623,8 @@ mod tests {
     #[test]
     fn only_a_fully_answered_stop_is_proven() {
         let report = StopReport {
-            unproven: vec![],
             faults: vec![(3, 0xA)],
-            unobserved: vec![],
-            unreached: vec![],
+            ..StopReport::default()
         };
         let proven = report.prove().expect("every actuator answered");
         assert_eq!(proven.faults(), &[(3, 0xA)]);

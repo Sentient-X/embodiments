@@ -185,3 +185,45 @@ fn a_neck_nothing_drove_is_not_moved_at_the_end() {
     );
     assert!((1..=6).all(|id| bus.state().torque(id) == 0));
 }
+
+/// A stop that holds: the servos it holds keep torque on with their goal where they stand, so
+/// nothing moves and nothing drops; the ones it releases are disabled as before; a neck
+/// nothing drove is held by nothing.
+#[test]
+fn a_held_stop_keeps_torque_where_each_servo_stands_and_releases_the_rest() {
+    use sx_embodiment_drivers::Rest;
+    let bus = resting();
+    let (mut governor, _clock) = neck(&bus);
+    let mut rests = vec![Rest::Hold { gravity: 0.0 }; 6];
+    rests[0] = Rest::Release;
+    let untouched = governor.stop_holding(&rests);
+    assert!(
+        untouched.held.is_empty() && untouched.is_proven(),
+        "{untouched:?}"
+    );
+    let rest = governor.last_observed().expect("rest");
+    governor.command(&rest).expect("enable where it rests");
+    let before: Vec<u16> = (1..=6).map(|id| bus.present(id)).collect();
+    let report = governor.stop_holding(&rests);
+    assert!(report.is_proven(), "{report:?}");
+    assert_eq!(report.held, vec![2, 3, 4, 5, 6], "{report:?}");
+    bus.advance(Duration::from_secs(2));
+    let receipt = governor.keep_holding().expect("read");
+    assert_eq!(receipt.observed.len(), 6);
+    let after: Vec<u16> = (1..=6).map(|id| bus.present(id)).collect();
+    assert_eq!(before, after, "nothing moved");
+    assert_eq!(bus.state().torque(1), 0, "the released servo is disabled");
+    for id in 2..=6 {
+        assert_eq!(bus.state().torque(id), 1, "servo {id} holds");
+        let present = bus.present(id);
+        assert_eq!(
+            bus.state().goal(id),
+            present,
+            "servo {id} holds where it is"
+        );
+    }
+    // A Park's end releases every one.
+    let parked = governor.stop();
+    assert!(parked.held.is_empty() && parked.is_proven(), "{parked:?}");
+    assert!((1..=6).all(|id| bus.state().torque(id) == 0));
+}

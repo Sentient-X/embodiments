@@ -325,6 +325,17 @@ out) and a tracking-error bound that
 stops the chain and latches a fault when the body does not follow; the limits are the
 operator's to pass. The station drives every body through this trait and names no vendor.
 
+**A stop holds what would fall.** `ActuatorChain::stop_holding` leaves each axis as its
+`Rest` says: `Hold` keeps torque on at where the joint stopped (zero velocity, its gravity
+torque as feed-forward), re-sent by the caller every tick through `keep_holding`; `Release`
+disables it. Which one is derived, never listed per body (`sx_embodiment_drivers::rest`): a
+joint falls when released if its actuator has no holding brake (`ActuatorRating.holding_brake`,
+false for every product rated today) and the description's gravity torque at the measured pose
+is more than half its identified static friction (`RestModel`); without a model every
+brakeless joint under torque is held. A governor fault holds every joint where it is. A held
+motor is watched against its rated thermal limit and torque (`rest::heat`, `rest::effort`). A
+plain `stop` still releases everything: what a deliberate Park ends with at its rest pose.
+
 A bus crate is a translation of its vendor's own driver — the same structure, names, frames,
 clamps and command order — pinned to transcripts recorded by running that driver, with each
 departure listed in the ported module's header. A crate that composes a known body embeds the

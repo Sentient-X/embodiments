@@ -79,6 +79,16 @@ pub struct ActuatorRating {
     /// The vendor's rated output speed at its rated supply, rad/s, or `None` where none is
     /// recorded: what a description declares as the joint's `<limit velocity>`.
     pub rated_speed_rad_s: Option<f64>,
+    /// The vendor's rated (continuous) torque, N·m, or `None` where none is recorded: what a
+    /// joint held under torque at a stop may give for as long as it holds.
+    pub rated_torque_nm: Option<f64>,
+    /// Whether the product carries a brake that holds its shaft with the power off; a joint
+    /// without one may fall when its torque is released ([`crate::rest`]).
+    pub holding_brake: bool,
+    /// The hottest the vendor lets the motor run, °C (the lower of its driver and coil
+    /// limits), or `None` where none is recorded: what a joint held at a stop is watched
+    /// against.
+    pub thermal_limit_celsius: Option<f64>,
 }
 
 impl ActuatorRating {

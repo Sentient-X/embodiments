@@ -158,6 +158,9 @@ def vocabulary() -> str:
                 if rating.supply is None
                 else [rating.supply.min_volts, rating.supply.max_volts],
                 "rated_speed_rad_s": rating.rated_speed_rad_s,
+                "rated_torque_nm": rating.rated_torque_nm,
+                "holding_brake": rating.holding_brake,
+                "thermal_limit_celsius": rating.thermal_limit_celsius,
             }
             for model, rating in ((m, ACTUATOR_RATINGS[m]) for m in ActuatorModel)
         },
