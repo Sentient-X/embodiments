@@ -14,9 +14,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .parts import GripperSpec
+
+if TYPE_CHECKING:
+    from .recorded import RecordedEmbodiment
 
 
 class YubiEncoderError(Exception):
@@ -60,6 +63,34 @@ def jaw_gap_m(joint_angle_rad: float) -> float:
 class YubiVariant(StrEnum):
     STANDARD = "standard"
     PARALLEL = "parallel"
+
+    @property
+    def robot_id(self) -> str:
+        """The stable hardware class, independent of a geometry digest or unit serial."""
+        return f"yubi_{self.value}"
+
+
+def managed_yubi_recording_variant(recorded: RecordedEmbodiment) -> YubiVariant | None:
+    """Resolve the legacy managed collection cohort established in sx#1354.
+
+    The published `yubi` description carries the four-bar geometry and an empty
+    variant even though that cohort was recorded on parallel hardware. An
+    unregistered document or an explicitly named variant needs its own evidence.
+    This projection never changes the recording's geometry or content identity.
+    """
+    from . import development_embodiments
+    from .identity import EmbodimentName
+    from .recorded import historical_identities
+
+    name = EmbodimentName("yubi")
+    body = recorded.embodiment
+    if body.name != name or body.lineage.family != name or body.lineage.variant:
+        return None
+    if recorded.recorded_id == development_embodiments[
+        name
+    ].id or recorded.recorded_id in historical_identities(name):
+        return YubiVariant.PARALLEL
+    return None
 
 
 def _fence_device_id(known: str | None, device_id: str) -> str:
