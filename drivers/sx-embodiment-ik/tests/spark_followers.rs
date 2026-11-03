@@ -831,3 +831,33 @@ fn table_gains() {
     }
     worst(&table(&cases));
 }
+
+/// The bar: on the Spark's commissioned followers, nominal model, at the station's 50 Hz and the
+/// sessions' 90 Hz, with 45 and 63 ms of delay, sag and a reading's jitter, the left forearm and
+/// elbow swept past a keep-out box (the elbow on a stop or free) keep 5 mm, and no part of the
+/// arm enters the box. Main without the paced approach reached -4.48 mm here, a part 0.49 mm
+/// into the box (`Settings::approach_time_s`).
+#[test]
+fn the_sparks_arm_keeps_clear_of_a_box_it_sweeps_past() {
+    let mut cases = Vec::new();
+    for dt in [0.02, 0.011] {
+        for stopped in [true, false] {
+            for delay in [0.045, 0.063] {
+                cases.push((
+                    Scene::Box { stopped },
+                    Motor {
+                        delay,
+                        sag: 1.0,
+                        noise: READING_JITTER,
+                        ..SPARK_MOTOR
+                    },
+                    dt,
+                    None,
+                ));
+            }
+        }
+    }
+    for (line, out) in table(&cases) {
+        assert!(out.clear >= 0.005 && out.real > 0.0, "{line}");
+    }
+}
