@@ -1706,51 +1706,46 @@ fn observing_the_static_upper_body_writes_nothing_and_reads_as_the_opened_body_d
     assert_eq!(observer.axes()[silent[0]].binding.bus_id, 0x18);
 }
 
-#[test]
-fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_never_addressed() {
-    let drive = drive("sentient-static-upper-body");
-    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
-    let torso = axes
+/// Whether `frame` addresses Damiao motor `id`: a control or MIT frame on its own id, or a
+/// register or status request on `0x7FF` naming it.
+fn addresses(frame: &sx_embodiment_drivers::can::CanFrame, id: u16) -> bool {
+    frame.id == u32::from(id)
+        || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == id)
+}
+
+/// Every frame on `can` from `from` on that addresses `id`, each held to only asking: a
+/// register read or a status refresh, never a control, MIT, register-write or save frame.
+/// Returns how many there were.
+fn only_asked(can: &Sim, from: usize, id: u16) -> usize {
+    let state = can.state();
+    let addressed: Vec<_> = state.frames[from..]
         .iter()
-        .position(|axis| axis.axis.joint == "torso_joint")
-        .expect("the torso");
-    let id = axes[torso].axis.binding.bus_id;
-    assert_eq!(id, 0x1F);
-    let mut document: serde_json::Value = serde_json::json!({
+        .filter(|frame| addresses(frame, id))
+        .collect();
+    for frame in &addressed {
+        assert!(
+            sx_damiao_can::observe::only_asks(frame),
+            "a frame that does more than ask reached the read-only motor {id:#x}: {frame:x?}"
+        );
+    }
+    addressed.len()
+}
+
+/// The static upper body's commissioning on its one CAN port, `out` out of service.
+fn can_commissioning(drive: &InstanceDrive, out: &[&str]) -> Commissioning {
+    let document = serde_json::json!({
         "schema": "sx.station-commissioning/v1",
         "instance": drive.instance,
         "pod_id": "pod-a",
         "pod_revision": 3,
         "ports": {"can": "CAN"},
-        "out_of_service": [],
+        "out_of_service": out,
     });
-    // The torso motor is faulty: it never answers, and unmarked it fails the whole open.
-    let can = Sim::for_axes(&axes);
-    can.kill(id);
-    let mut bridges = Bridges {
-        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
-        ..Bridges::default()
-    };
-    let unmarked =
-        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
-    assert!(open(&drive, &unmarked, &mut bridges).is_err());
-    document["out_of_service"] = serde_json::json!(["torso_joint"]);
-    let commissioning =
-        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
-    let addressed = |frame: &sx_embodiment_drivers::can::CanFrame| {
-        frame.id == u32::from(id)
-            || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == id)
-    };
-    // Marked, it opens with all fifteen axes, the torso unavailable.
-    let sent = can.state().frames.len();
-    let body = open(&drive, &commissioning, &mut bridges).expect("opens without the torso");
-    assert_eq!(body.axes().len(), 15);
-    assert_eq!(body.axes()[torso].joint, "torso_joint");
-    assert_eq!(body.unavailable(), vec![torso]);
-    let unavailable = sx_embodiment_drivers::AxisReading::Missing(
-        sx_embodiment_drivers::MissingReason::OutOfService,
-    );
-    let mut governed = Governor::new(
+    Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning")
+}
+
+fn governed(body: Body) -> Governor<Body> {
+    Governor::new(
         body,
         vec![
             AxisLimits {
@@ -1761,7 +1756,38 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
             15
         ],
     )
-    .expect("limits");
+    .expect("limits")
+}
+
+#[test]
+fn a_joint_out_of_service_that_does_not_answer_stays_in_the_body_as_data_and_is_only_asked() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let torso = axes
+        .iter()
+        .position(|axis| axis.axis.joint == "torso_joint")
+        .expect("the torso");
+    let id = axes[torso].axis.binding.bus_id;
+    assert_eq!(id, 0x1F);
+    // The torso motor is faulty: it never answers, and unmarked it fails the whole open.
+    let can = Sim::for_axes(&axes);
+    can.kill(id);
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        ..Bridges::default()
+    };
+    assert!(open(&drive, &can_commissioning(&drive, &[]), &mut bridges).is_err());
+    let commissioning = can_commissioning(&drive, &["torso_joint"]);
+    // Marked, it opens with all fifteen axes, the torso unavailable and read out of service.
+    let sent = can.state().frames.len();
+    let body = open(&drive, &commissioning, &mut bridges).expect("opens without the torso");
+    assert_eq!(body.axes().len(), 15);
+    assert_eq!(body.axes()[torso].joint, "torso_joint");
+    assert_eq!(body.unavailable(), vec![torso]);
+    let unavailable = sx_embodiment_drivers::AxisReading::Missing(
+        sx_embodiment_drivers::MissingReason::OutOfService,
+    );
+    let mut governed = governed(body);
     let readings = governed.read_positions();
     assert_eq!(readings[torso], unavailable);
     assert!(
@@ -1770,6 +1796,13 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
             .enumerate()
             .all(|(index, reading)| index == torso || reading.is_fresh())
     );
+    // A silent read-only motor is asked again only after its back-off, not every read.
+    let asked = only_asked(&can, sent, id);
+    assert!(asked > 0, "the torso is asked, by reads only");
+    for _ in 0..3 {
+        assert_eq!(governed.read_positions()[torso], unavailable);
+    }
+    assert_eq!(only_asked(&can, sent, id), asked, "backed off");
     let rest = governed.last_observed().expect("rest");
     assert!(rest[torso].is_nan());
     // Governed commands drive the other fourteen; the torso is neither stepped nor tracked.
@@ -1777,11 +1810,8 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
     assert_eq!(receipt.observed.len(), 15);
     assert!(receipt.observed[torso].is_nan());
     assert!(governed.stop().is_proven());
-    assert!(
-        !can.state().frames[sent..].iter().any(addressed),
-        "the faulty motor is never addressed"
-    );
-    // The observer keeps the same layout, the torso unavailable in its place.
+    only_asked(&can, sent, id);
+    // The observer keeps the same layout, the torso out of service in its place.
     let mut observer = observe(
         &drive,
         &commissioning,
@@ -1792,13 +1822,195 @@ fn a_joint_out_of_service_stays_in_the_body_and_its_observer_as_data_and_is_neve
     .expect("observer");
     assert_eq!(observer.axes().len(), 15);
     assert_eq!(observer.read_positions()[torso], unavailable);
-    document["out_of_service"] = serde_json::json!(["no_such_joint"]);
-    let unknown =
-        Commissioning::parse(&document.to_string(), &drive.instance).expect("commissioning");
+    only_asked(&can, sent, id);
     assert!(matches!(
-        open(&drive, &unknown, &mut bridges),
+        open(&drive, &can_commissioning(&drive, &["no_such_joint"]), &mut bridges),
         Err(OpenError::OutOfService(joint)) if joint == "no_such_joint"
     ));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // one motor, followed through every path that opens or drives its bus
+fn a_joint_out_of_service_that_answers_is_read_fresh_and_never_sent_a_command() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let torso = axes
+        .iter()
+        .position(|axis| axis.axis.joint == "torso_joint")
+        .expect("the torso");
+    let id = axes[torso].axis.binding.bus_id;
+    let can = Sim::for_axes(&axes);
+    // Turned by hand to 0.2 rad at its motor, and it stays there: nothing moves it.
+    can.state().motors.get_mut(&id).expect("the torso motor").q = 0.2;
+    let at = axes[torso].axis.joint_from_actuator(f64::from(0.2_f32));
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), can.clone())]),
+        ..Bridges::default()
+    };
+    let commissioning = can_commissioning(&drive, &["torso_joint"]);
+    let calibrations = ServoCalibrations::new();
+    let setup = Setup {
+        commissioning: &commissioning,
+        calibrations: &calibrations,
+        options: OpenOptions::default(),
+    };
+    let measured = |reading: &sx_embodiment_drivers::AxisReading| {
+        reading
+            .position()
+            .is_some_and(|position| (position - at).abs() < 1e-3)
+    };
+    let body = open(&drive, &commissioning, &mut bridges).expect("opens");
+    assert_eq!(body.unavailable(), vec![torso], "still never commanded");
+    let mut governed = governed(body);
+    let readings = governed.read_positions();
+    assert!(
+        readings
+            .iter()
+            .all(sx_embodiment_drivers::AxisReading::is_fresh),
+        "{readings:?}"
+    );
+    assert!(measured(&readings[torso]), "{:?}", readings[torso]);
+    let rest = governed.last_observed().expect("rest");
+    assert!((rest[torso] - at).abs() < 1e-3);
+    // Commands drive the other fourteen; the torso's reading rides each receipt.
+    let mut target = rest;
+    target[torso] = at + 0.5;
+    for _ in 0..5 {
+        let receipt = governed.command(&target).expect("a governed command");
+        assert!((receipt.observed[torso] - at).abs() < 1e-3);
+    }
+    let readings = governed.command_readings().expect("the command's readings");
+    assert!(measured(&readings[torso]));
+    governed.clear_faults();
+    assert!(governed.stop().is_proven());
+    assert!(
+        (can.state().motors[&id].q - 0.2).abs() < 1e-6 && can.state().motors[&id].state == 0,
+        "never enabled, never moved"
+    );
+    // Lent, reopened, opened again after its bus went silent: the torso is only ever asked.
+    let mut body = governed.into_chain();
+    lend_port(&mut body, &drive, setup, "can").expect("lent");
+    assert!(body.stop().is_proven());
+    let mut body =
+        reopen_ports(body, &drive, setup, &["can".to_owned()], &mut bridges).expect("back");
+    assert!(measured(&body.read_positions()[torso]));
+    assert!(body.stop().is_proven());
+    drop(body);
+    can.power(false);
+    let mut opened = open_available(
+        &drive,
+        &commissioning,
+        &calibrations,
+        OpenOptions::default(),
+        &mut bridges,
+    )
+    .expect("opens with its bus unavailable");
+    assert_eq!(opened.unopened.len(), 1);
+    assert!(
+        !opened.body.stop().unreached.contains(&id),
+        "an unopened bus's stop names no read-only motor"
+    );
+    can.power(true);
+    let answered = open_unopened(
+        &mut opened.body,
+        &drive,
+        setup,
+        &["can".to_owned()],
+        &mut bridges,
+    )
+    .expect("opened live");
+    assert_eq!(answered.opened, ["can"]);
+    assert!(measured(&opened.body.read_positions()[torso]));
+    assert!(opened.body.stop().is_proven());
+    let mut observer = observe(
+        &drive,
+        &commissioning,
+        &calibrations,
+        OpenOptions::default(),
+        &mut bridges,
+    )
+    .expect("observer");
+    assert!(measured(&observer.read_positions()[torso]));
+    assert!(only_asked(&can, 0, id) > 0, "read, through every path");
+    assert!(
+        (can.state().motors[&id].q - 0.2).abs() < 1e-6 && can.state().motors[&id].state == 0,
+        "never enabled, never moved"
+    );
+}
+
+/// Each packet written to a Feetech bus that reaches servo `id`, held to only asking: one
+/// addressed to it is a `PING` or a `READ`, and no broadcast but a SYNC READ carries it.
+fn feetech_only_asked(bus: &SimBus, from: usize, id: u8) -> usize {
+    const SYNC_READ: u8 = 0x82;
+    const SYNC_WRITE: u8 = 0x83;
+    let state = bus.state();
+    let mut asked = 0;
+    for packet in &state.written[from..] {
+        if packet[2] == id {
+            assert!(
+                sx_feetech_serial::scan::is_read_only(packet),
+                "servo {id} was sent more than a read: {packet:x?}"
+            );
+            asked += 1;
+        } else if packet[2] == 0xFE && packet[4] != SYNC_READ {
+            assert_eq!(
+                packet[4], SYNC_WRITE,
+                "an unexpected broadcast: {packet:x?}"
+            );
+            let width = usize::from(packet[6]) + 1;
+            let ids = packet[7..packet.len() - 1]
+                .chunks(width)
+                .map(|group| group[0]);
+            assert!(
+                !ids.clone().any(|written| written == id),
+                "a SYNC WRITE carried servo {id}: {packet:x?}"
+            );
+        }
+    }
+    asked
+}
+
+#[test]
+fn a_serial_servo_out_of_service_is_read_on_its_bus_and_never_written() {
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let serial = probed_buses();
+    let mut bridges = Bridges {
+        buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
+        serial: serial.clone(),
+        opened: Vec::new(),
+    };
+    let neck = &serial["5A7C118709"];
+    let commissioning = static_commissioning_without(&drive, &["so101_wrist_roll_joint"]);
+    let calibrations = probed_calibrations();
+    let mut body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
+    let roll = body
+        .axes()
+        .iter()
+        .position(|axis| axis.joint == "so101_wrist_roll_joint")
+        .expect("the wrist roll");
+    assert_eq!(body.unavailable(), vec![roll]);
+    let readings = body.read_positions();
+    assert!(readings[roll].is_fresh(), "{:?}", readings[roll]);
+    let rest = body.last_observed().expect("rest");
+    assert!(rest[roll].is_finite());
+    let mut governed = Governor::new(
+        body,
+        vec![
+            AxisLimits {
+                max_speed: 0.25,
+                max_tracking_error: 0.2,
+                max_acceleration: None,
+            };
+            25
+        ],
+    )
+    .expect("limits");
+    let receipt = governed.command(&rest).expect("a governed command");
+    assert!(receipt.observed[roll].is_finite());
+    assert!(governed.stop().is_proven());
+    assert!(feetech_only_asked(neck, 0, 5) > 0, "read only");
+    assert_eq!(neck.state().torque(5), 0, "never torqued");
 }
 
 /// The static upper body's commissioning on its CAN bus with `rails` recorded.

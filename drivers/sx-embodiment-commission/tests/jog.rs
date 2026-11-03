@@ -1,6 +1,6 @@
 //! `sx-jog`'s run on the simulated static upper body, opened through the embodiment layer:
 //! the governor's slewed command is what the log records beside the target, the out-of-service
-//! torso keeps its place and is never addressed, the log is written off the tick path, and a
+//! torso keeps its place and is only ever asked (read, never commanded), the log is written off the tick path, and a
 //! finished run returns the body home before it stops it.
 
 use std::cell::Cell;
@@ -143,7 +143,13 @@ fn a_jog_logs_the_slewed_command_and_keeps_the_out_of_service_torso_in_its_place
         frame.id == u32::from(torso_id)
             || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == torso_id)
     };
-    assert!(!bus.state().frames[sent..].iter().any(addressed));
+    assert!(
+        bus.state().frames[sent..]
+            .iter()
+            .filter(|frame| addressed(frame))
+            .all(sx_damiao_can::observe::only_asks),
+        "the out-of-service torso is only asked"
+    );
     let text = String::from_utf8(sink.0.lock().expect("sink").clone()).expect("utf-8");
     let lines: Vec<Value> = text
         .lines()
@@ -198,7 +204,7 @@ fn an_ampersand_step_moves_with_the_next() {
 }
 
 #[test]
-fn a_finished_jog_returns_home_then_stops_and_never_addresses_the_torso() {
+fn a_finished_jog_returns_home_then_stops_and_never_commands_the_torso() {
     let drive = drive();
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
     let torso_id = 0x1F;
@@ -238,7 +244,13 @@ fn a_finished_jog_returns_home_then_stops_and_never_addresses_the_torso() {
         frame.id == u32::from(torso_id)
             || (frame.id == 0x7FF && u16::from_le_bytes([frame.data[0], frame.data[1]]) == torso_id)
     };
-    assert!(!bus.state().frames[sent..].iter().any(addressed));
+    assert!(
+        bus.state().frames[sent..]
+            .iter()
+            .filter(|frame| addressed(frame))
+            .all(sx_damiao_can::observe::only_asks),
+        "the out-of-service torso is only asked"
+    );
 }
 
 #[test]

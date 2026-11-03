@@ -92,7 +92,7 @@ pub use inertial::{
 };
 pub use kinematics::{Axis, Chain, ChainStep, PlacementError, Tree, TreeError, TreeJoint};
 pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout, ServedInterface};
-pub use masked::{Masked, check_available};
+pub use masked::{Masked, ReadOnly, SENSE_PERIOD, SENSE_RETRY, SENSE_RETRY_MAX, check_available};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
     MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,

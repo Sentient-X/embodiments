@@ -74,7 +74,7 @@ use sx_dynamixel_serial::observe::DynamixelObserver;
 use sx_embodiment_drivers::can::{CanPort, SharedCanPort};
 use sx_embodiment_drivers::lerobot::MotorCalibration;
 use sx_embodiment_drivers::rail::{AxisDerate, RailCheck, Rails, derates};
-use sx_embodiment_drivers::serial::SerialPort;
+use sx_embodiment_drivers::serial::{SerialPort, SharedSerialPort};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ApproachLimit, Axes, AxisReading, BodyBindings, BodyError,
     BoundAxis, ChainError, ChainFailure, Chains, ChainsError, CommandRange, Feedforward,
@@ -167,10 +167,14 @@ pub struct Commissioning {
     /// board CAN interface's name, which has none).
     pub ports: BTreeMap<String, String>,
     /// Joints whose actuator this robot does not run (a motor known faulty, removed or not yet
-    /// fitted). The actuator is never addressed, so the rest opens, and the axis keeps its
-    /// place in the body's vector as data ([`Masked`]): read as unavailable, observed as `NaN`,
-    /// never commanded, named by `ActuatorChain::unavailable`. A port whose every axis is out
-    /// of service is left closed.
+    /// fitted). The actuator is never commanded, so the rest opens, and the axis keeps its
+    /// place in the body's vector as data ([`Masked`]), named by `ActuatorChain::unavailable`.
+    /// It is still a sensor: on a bus that opens, it is read through its vendor's observer
+    /// on the same link ([`Masked::reading`]), by requests that only ask (a Damiao status
+    /// refresh and register reads, a Feetech or Dynamixel `PING` and `READ`), never enabled,
+    /// disabled, configured or sent a goal; it reads fresh when it answers and out of service
+    /// when it does not, never refusing the body. A port whose every axis is out of service is
+    /// left closed.
     pub out_of_service: BTreeSet<String>,
     /// Each power rail's measured voltage, by selector (`*`, a port, a model, or
     /// `<port>/<model>`): what derates or refuses an axis over its model's supported supply;
@@ -478,6 +482,7 @@ enum Wire {
 
 /// One bus of a body, its axes resolved for one robot instance, as its vendor's crate opens
 /// or observes it.
+#[derive(Clone)]
 enum Part {
     Damiao(Vec<DamiaoAxis>),
     Feetech {
@@ -637,22 +642,77 @@ impl Part {
     }
 }
 
-/// Where a bus's out-of-service axes sit in its whole vector.
+/// A bus's out-of-service axes, resolved as its vendor's crate reads them: the only thing
+/// this type does is observe them ([`ReadOnlyPart::observe`]), so no command path, which takes
+/// a [`Part`], can be handed one.
+#[derive(Clone)]
+struct ReadOnlyPart(Part);
+
+impl ReadOnlyPart {
+    /// Its vendor's observer of these axes on `link`, which refuses every request but a read.
+    fn observe(self, port: &str, link: Link) -> Result<BusObserver, OpenError> {
+        self.0.observe(port, link)
+    }
+}
+
+/// Where a bus's out-of-service axes sit in its whole vector, and how they are read.
 #[derive(Clone)]
 struct Mask {
     whole: Vec<BoundAxis>,
     out: Vec<usize>,
+    /// The out-of-service axes, read and never commanded; `None` when there are none.
+    read_only: Option<ReadOnlyPart>,
 }
 
 impl Mask {
-    fn of(whole: Vec<BoundAxis>, out_of_service: &BTreeSet<String>) -> Self {
+    fn of(
+        whole: Vec<BoundAxis>,
+        out_of_service: &BTreeSet<String>,
+        read_only: Option<ReadOnlyPart>,
+    ) -> Self {
         let out = whole
             .iter()
             .enumerate()
             .filter(|(_, axis)| out_of_service.contains(&axis.joint))
             .map(|(index, _)| index)
             .collect();
-        Self { whole, out }
+        Self {
+            whole,
+            out,
+            read_only,
+        }
+    }
+
+    /// `link`, and a second handle on it for the read-only axes' observer when this bus has
+    /// any: the chain and the observer take turns on one bridge.
+    fn split(&self, link: Link) -> (Link, Option<Link>) {
+        if self.read_only.is_none() {
+            return (link, None);
+        }
+        match link {
+            Link::Can(port) => {
+                let shared = SharedCanPort::new(port);
+                (
+                    Link::Can(Box::new(shared.clone())),
+                    Some(Link::Can(Box::new(shared))),
+                )
+            }
+            Link::Serial(port) => {
+                let shared = SharedSerialPort::new(port);
+                (
+                    Link::Serial(Box::new(shared.clone())),
+                    Some(Link::Serial(Box::new(shared))),
+                )
+            }
+        }
+    }
+
+    /// The read-only axes' observer on `link`; `None` when there is none to read or it does
+    /// not open (its link failed): its axes then read out of service, as they did unread, and
+    /// the bus opens all the same.
+    fn read_only_observer(&mut self, name: &str, link: Option<Link>) -> Option<BusObserver> {
+        let read_only = self.read_only.take()?;
+        read_only.observe(name, link?).ok()
     }
 
     /// A bus that did not open, as its whole vector: every axis reads
@@ -662,8 +722,15 @@ impl Mask {
     /// every stop, and its actuators are reported unreached.
     fn unopened(self, held: Option<Held>) -> Result<BusChain, OpenError> {
         let every: Vec<usize> = (0..self.whole.len()).collect();
+        // An out-of-service actuator is never sent a write, not even this disable.
         let mut unopened = Unopened {
-            ids: self.whole.iter().map(|axis| axis.binding.bus_id).collect(),
+            ids: self
+                .whole
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !self.out.contains(index))
+                .map(|(_, axis)| axis.binding.bus_id)
+                .collect(),
             held,
         };
         unopened.disable();
@@ -675,38 +742,67 @@ impl Mask {
         ))
     }
 
-    /// `chain`, which drives the bus's axes in service, as the bus's whole vector.
-    fn chain(self, chain: BusChain) -> Result<BusChain, OpenError> {
+    /// `chain`, which drives the bus's axes in service, as the bus's whole vector, its
+    /// out-of-service axes read through `read_only` ([`Mask::split`]'s second handle).
+    fn chain(
+        mut self,
+        port: &str,
+        chain: BusChain,
+        read_only: Option<Link>,
+    ) -> Result<BusChain, OpenError> {
         if self.out.is_empty() {
             return Ok(chain);
         }
-        Ok(Box::new(
-            Masked::new(chain, self.whole, &self.out)
-                .map_err(DamiaoChainError::from)?
-                .answering(|axis| MotorFeedback::unavailable(axis.binding.bus_id)),
-        ))
+        let observer = self.read_only_observer(port, read_only);
+        let masked = Masked::new(chain, self.whole, &self.out)
+            .map_err(DamiaoChainError::from)?
+            .answering(|axis| MotorFeedback::unavailable(axis.binding.bus_id));
+        Ok(Box::new(match observer {
+            Some(observer) => masked.reading(observer).map_err(DamiaoChainError::from)?,
+            None => masked,
+        }))
     }
 
-    /// `observer`, which reads the bus's axes in service, as the bus's whole vector.
-    fn observer(self, observer: BusObserver) -> Result<BusObserver, OpenError> {
+    /// `observer`, which reads the bus's axes in service, as the bus's whole vector, its
+    /// out-of-service axes read through `read_only`.
+    fn observer(
+        mut self,
+        port: &str,
+        observer: BusObserver,
+        read_only: Option<Link>,
+    ) -> Result<BusObserver, OpenError> {
         if self.out.is_empty() {
             return Ok(observer);
         }
-        Ok(Box::new(
-            Masked::observing(observer, self.whole, &self.out).map_err(DamiaoChainError::from)?,
-        ))
+        let read = self.read_only_observer(port, read_only);
+        let masked =
+            Masked::observing(observer, self.whole, &self.out).map_err(DamiaoChainError::from)?;
+        Ok(Box::new(match read {
+            Some(read) => masked.reading(read).map_err(DamiaoChainError::from)?,
+            None => masked,
+        }))
+    }
+
+    /// Open `part`'s chain on `link`, as the bus's whole vector, its out-of-service axes read
+    /// on the same link.
+    fn open(self, name: &str, bus: Part, link: Link, rails: &Rails) -> Result<BusChain, OpenError> {
+        let (link, read_only) = self.split(link);
+        let chain = bus.open(name, link, rails)?;
+        self.chain(name, chain, read_only)
     }
 }
 
-/// Keep the axes (and what is listed beside each) whose joint is in service.
+/// The axes (and what is listed beside each) whose joint is in service, then those out of
+/// service.
+#[allow(clippy::type_complexity)] // two halves of one bus, each its axes and their setups
 fn in_service<T>(
     items: impl IntoIterator<Item = (BoundAxis, T)>,
     out_of_service: &BTreeSet<String>,
-) -> (Vec<BoundAxis>, Vec<T>) {
-    items
+) -> ((Vec<BoundAxis>, Vec<T>), (Vec<BoundAxis>, Vec<T>)) {
+    let (out, kept): (Vec<_>, Vec<_>) = items
         .into_iter()
-        .filter(|(axis, _)| !out_of_service.contains(&axis.joint))
-        .unzip()
+        .partition(|(axis, _)| out_of_service.contains(&axis.joint));
+    (kept.into_iter().unzip(), out.into_iter().unzip())
 }
 
 impl Opener {
@@ -842,13 +938,14 @@ impl Opener {
                     .collect()
             };
             let whole: Vec<BoundAxis>;
+            let read_only: Option<Part>;
             let part = if kind == DAMIAO_CAN {
                 let all = self.damiao(drive, &port)?;
                 whole = all.iter().map(|motor| motor.axis.clone()).collect();
-                let motors: Vec<DamiaoAxis> = all
+                let (out, motors): (Vec<DamiaoAxis>, Vec<DamiaoAxis>) = all
                     .into_iter()
-                    .filter(|motor| !out_of_service.contains(&motor.axis.joint))
-                    .collect();
+                    .partition(|motor| out_of_service.contains(&motor.axis.joint));
+                read_only = (!out.is_empty()).then_some(Part::Damiao(out));
                 (!motors.is_empty()).then_some(Part::Damiao(motors))
             } else if kind == FEETECH_SERIAL {
                 let bus = self.configured(drive, &port)?;
@@ -858,7 +955,14 @@ impl Opener {
                 bus.renamed(calibrated.iter_mut())?;
                 let setups = body.setups_with(bus.approach, &drive.embodiment, &port)?;
                 whole = calibrated.clone();
-                let (axes, setups) = in_service(calibrated.into_iter().zip(setups), out_of_service);
+                let ((axes, setups), (out, out_setups)) =
+                    in_service(calibrated.into_iter().zip(setups), out_of_service);
+                read_only = (!out.is_empty()).then(|| Part::Feetech {
+                    baud: body.baud,
+                    calibrations: supplied(&out),
+                    axes: out,
+                    setups: out_setups,
+                });
                 (!axes.is_empty()).then(|| Part::Feetech {
                     baud: body.baud,
                     calibrations: supplied(&axes),
@@ -871,10 +975,16 @@ impl Opener {
                 let mut calibrated = body.axes(bus.bindings.clone())?;
                 bus.renamed(calibrated.iter_mut())?;
                 whole = calibrated.clone();
-                let (axes, setups) = in_service(
+                let ((axes, setups), (out, out_setups)) = in_service(
                     calibrated.into_iter().zip(body.servos.iter().copied()),
                     out_of_service,
                 );
+                read_only = (!out.is_empty()).then(|| Part::Dynamixel {
+                    baud: body.baud,
+                    calibrations: supplied(&out),
+                    axes: out,
+                    setups: out_setups,
+                });
                 (!axes.is_empty()).then(|| Part::Dynamixel {
                     baud: body.baud,
                     calibrations: supplied(&axes),
@@ -885,7 +995,11 @@ impl Opener {
                 return Err(unopened(&port, kind));
             };
             match part {
-                Some(part) => parts.push((port, part, Mask::of(whole, out_of_service))),
+                Some(part) => parts.push((
+                    port,
+                    part,
+                    Mask::of(whole, out_of_service, read_only.map(ReadOnlyPart)),
+                )),
                 None => closed.push(port),
             }
         }
@@ -1100,7 +1214,7 @@ pub fn open_with(
     }
     let mut chains: Vec<BusChain> = Vec::with_capacity(plan.parts.len());
     for (port, part, mask, link) in plan.links(commissioning, source, false)? {
-        chains.push(mask.chain(part.open(&port, link?, &commissioning.rails)?)?);
+        chains.push(mask.open(&port, part, link?, &commissioning.rails)?);
     }
     Ok(Chains::new(chains))
 }
@@ -1192,9 +1306,12 @@ fn open_or_silent(
     };
     let wire = bus.wire();
     let held = bus.held_kind();
+    let (link, read_only) = mask.split(link);
     match bus.open(port, link, &commissioning.rails) {
-        Ok(chain) => Ok((mask.chain(chain)?, None)),
+        Ok(chain) => Ok((mask.chain(port, chain, read_only)?, None)),
         Err(error) if error.is_chain_silence() => {
+            // The bridge closes with its last handle, before it is opened again.
+            drop(read_only);
             let held = match (wire, held) {
                 // The chain dropped its bridge with it: open it again and keep it.
                 (Wire::Serial { baud }, Some(kind)) => {
@@ -1707,7 +1824,7 @@ pub fn reopen_ports(
         .collect::<Result<_, _>>()?;
     let links = open_links(&serials, source, false)?;
     for ((index, port, part, mask), link) in reopened.into_iter().zip(links) {
-        chains[index] = Some(mask.chain(part.open(&port, link?, &after.commissioning.rails)?)?);
+        chains[index] = Some(mask.open(&port, part, link?, &after.commissioning.rails)?);
     }
     Ok(Chains::new(chains.into_iter().flatten().collect()))
 }
@@ -1815,7 +1932,9 @@ pub fn observe(
     let plan = plan(drive, commissioning, calibrations, options)?;
     let mut buses: Vec<BusObserver> = Vec::with_capacity(plan.parts.len());
     for (port, part, mask, link) in plan.links(commissioning, source, false)? {
-        buses.push(mask.observer(part.observe(&port, link?)?)?);
+        let (link, read_only) = mask.split(link?);
+        let observer = part.observe(&port, link)?;
+        buses.push(mask.observer(&port, observer, read_only)?);
     }
     let axes = buses
         .iter()
