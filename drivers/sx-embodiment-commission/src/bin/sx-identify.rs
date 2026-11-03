@@ -1232,7 +1232,7 @@ fn run() -> Result<(), String> {
     let mut segment_start = Instant::now();
     let mut last: Option<Record> = None;
     // Where each axis last answered: the model's input, carried over a tick whose answer came
-    // late (NaN in the receipt and the CSV; the governor tolerates one in a row per axis).
+    // late (NaN in the receipt and the CSV; the governor holds a silent axis).
     let mut answered = [0.0; MAX_AXES];
     answered[..width].copy_from_slice(&rest);
     realtime_loop();

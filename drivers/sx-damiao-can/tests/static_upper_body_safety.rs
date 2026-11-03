@@ -512,8 +512,8 @@ fn a_fault_that_persists_after_its_clear_still_refuses_the_open() {
 }
 
 #[test]
-fn a_late_answer_to_a_command_is_a_stale_reading_and_two_in_a_row_stop_the_governor() {
-    use sx_embodiment_drivers::{AxisReading, GovernorError, MissingReason};
+fn a_late_answer_to_a_command_is_a_stale_reading_and_a_silent_motor_is_held_not_stopped() {
+    use sx_embodiment_drivers::{AxisReading, MissingReason};
     let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
     let bus = Sim::for_axes(&axes);
     let elbow = index_of("right_elbow_pitch_joint");
@@ -545,13 +545,23 @@ fn a_late_answer_to_a_command_is_a_stale_reading_and_two_in_a_row_stop_the_gover
     bus.state().dead.remove(&id);
     let receipt = governed.command(&rest).expect("it answers again");
     assert!((receipt.observed[elbow] - rest[elbow]).abs() < 1e-3);
-    // Two misses in a row stop the chain and latch the fault.
+    // Silent for many commands: held where it was last sent, never latched (owner 11-03: one
+    // missed reading must not end a session); the other motors keep being commanded.
     bus.kill(id);
-    governed.command(&rest).expect("the first miss");
-    assert!(matches!(
-        governed.command(&rest),
-        Err(GovernorError::Unanswered { ref joint, ticks: 2, .. }) if joint == "right_elbow_pitch_joint"
-    ));
+    let mut away = rest;
+    away[elbow] -= 0.3;
+    // The command its answer first misses still steps it: silence is known from that receipt.
+    let receipt = governed.command(&away).expect("the first miss");
+    assert!(receipt.observed[elbow].is_nan());
+    let held = governed.sent().expect("sent")[elbow];
+    for _ in 0..50 {
+        let receipt = governed
+            .command(&away)
+            .expect("a silent motor is held, not stopped");
+        assert!(receipt.observed[elbow].is_nan());
+        assert!((governed.sent().expect("sent")[elbow] - held).abs() < 1e-12);
+    }
+    assert!(!governed.is_latched());
 }
 
 #[test]

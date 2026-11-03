@@ -193,9 +193,10 @@ fn a_stalled_host_leaves_a_joint_at_top_speed_within_two_coasts_of_its_last_posi
     }
 }
 
-/// A joint blocked while moving slowly (a hand, the coffee machine) stops by about the at-rest
-/// 0.2 rad, so it pushes with no more than `kp` times that (6.4 N m on the elbow), whatever it
-/// could do at speed.
+/// A joint blocked while moving slowly (a hand, the coffee machine) is caught by about the
+/// at-rest 0.2 rad, so it pushes with no more than `kp` times that (6.4 N m on the elbow),
+/// whatever it could do at speed: pulled back to where it stands the first time, and stopped
+/// when it is pushed past the bound again within `TRACKING_REPEAT`.
 #[test]
 fn a_slow_joint_that_is_blocked_stops_at_the_at_rest_bound() {
     let mut rig = Rig::new();
@@ -210,23 +211,31 @@ fn a_slow_joint_that_is_blocked_stops_at_the_at_rest_bound() {
         .and_then(|motor| motor.dynamics.as_mut())
         .expect("a loaded motor")
         .inertia = 1e9;
-    let limit = (0..250)
-        .find_map(|_| {
-            rig.pass(MAX_STEP_INTERVAL);
-            target[elbow] -= 0.1 * MAX_STEP_INTERVAL.as_secs_f64();
-            match rig.governor.command(&target) {
-                Ok(_) => None,
-                Err(GovernorError::Tracking { joint, limit, .. }) => {
-                    assert_eq!(joint, ELBOW);
-                    Some(limit)
+    let mut caught = None;
+    let latched = (0..250).any(|_| {
+        rig.pass(MAX_STEP_INTERVAL);
+        target[elbow] -= 0.1 * MAX_STEP_INTERVAL.as_secs_f64();
+        let before = rig.governor.sent().expect("sent")[elbow];
+        match rig.governor.command(&target) {
+            Ok(_) => {
+                if caught.is_none() && rig.governor.pulled_back() == Some(elbow) {
+                    // Pulled back to where it stands: how far the step led it is the error.
+                    caught = Some((before - rig.governor.sent().expect("sent")[elbow]).abs());
                 }
-                Err(other) => panic!("{other}"),
+                false
             }
-        })
-        .expect("a blocked joint is stopped");
+            Err(GovernorError::Tracking { joint, .. }) => {
+                assert_eq!(joint, ELBOW);
+                true
+            }
+            Err(other) => panic!("{other}"),
+        }
+    });
+    assert!(latched, "a blocked joint is stopped");
+    let caught = caught.expect("pulled back before it latched");
     assert!(
-        limit < 0.21,
-        "a blocked joint creeping at 0.1 rad/s stopped only at {limit} rad"
+        caught < 0.21,
+        "a blocked joint creeping at 0.1 rad/s was caught only at {caught} rad"
     );
 }
 
@@ -272,8 +281,7 @@ fn a_stop_at_speed_brakes_before_it_disables() {
     );
 }
 
-/// A stop with one motor silent (the Spark's most common fault, and what an `Unanswered`
-/// governor fault stops for) still brakes every motor that answers: the moving shoulder is held
+/// A stop with one motor silent (the Spark's most common fault) still brakes every motor that answers: the moving shoulder is held
 /// over several phases and stops within `MAX_COAST`; the silent motor is reported unproven.
 #[test]
 fn a_stop_with_a_silent_motor_still_brakes_the_others() {

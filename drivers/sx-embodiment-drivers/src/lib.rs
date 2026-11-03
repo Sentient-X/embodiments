@@ -81,8 +81,8 @@ pub use ending::{
     RETURN_SLACK, RETURN_SPEED_SHARE, RETURN_TOLERANCE, Return, ReturnFailure,
 };
 pub use governor::{
-    AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_MISSED_IN_A_ROW,
-    MAX_STEP_INTERVAL, MonotonicClock,
+    AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
+    TRACKING_REPEAT,
 };
 pub use holder::{Holder, Process, holder_of};
 pub use host_needs::{HOST_NEEDS_SCHEMA, HostNeed, HostNeeds};
