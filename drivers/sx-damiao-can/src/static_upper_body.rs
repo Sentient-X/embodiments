@@ -68,27 +68,34 @@ pub const STATIC_UPPER_BODY: DamiaoBody = DamiaoBody {
 };
 
 /// PROPOSED, not commissioned: [`STATIC_UPPER_BODY`] with its torso and shoulders damped toward
-/// a damping ratio of 0.5. Nothing opens a robot with it. `sx-identify --gains damped --part
-/// step:<joint>` applies it to one run and fits each step's natural frequency and damping
-/// ratio, so a person at the robot can see it on the real arm before it replaces
+/// a damping ratio of 0.5. No station opens a robot with it; only `sx-identify --gains damped
+/// --part step:<joint> --move`, a person's run at the robot, drives it, and fits each step's
+/// natural frequency and damping ratio, so the arm shows them before they replace
 /// [`STATIC_UPPER_BODY`]'s.
 ///
 /// Why. The commissioned shoulders follow at zeta 0.10-0.12 and the torso at 0.063 (their gains
-/// over the registry inertia; act-sim identifies the same within 0.5 % in omega, 4 % in zeta).
-/// They ring, and with the Spark's 26-63 ms transport delay main's solve brought the left elbow
-/// 4.5 mm inside its 10 mm margin at 90 Hz, and a part 0.49 mm into a keep-out box at 50 Hz
-/// (embodiments `tests/spark_followers.rs` `table_gains`, 2026-11-03). With these gains:
-/// 7.98 / 7.94 mm at 90 / 50 Hz, no part inside a box over the 0.8-1.25x inertia band. The desk
-/// path tracks at 17.6 mm rms (commissioned 13.8), and act-sim passes as it does today.
+/// over the registry inertia; a step on act-sim's motor model reads them back within 1 % in
+/// omega and 7 % in zeta, `sx-embodiment-commission` `tests/damped_gains.rs`). They ring. With
+/// the Spark's 26-63 ms transport delay and the caps the station applies, main's solve brought
+/// the left elbow 4.5 mm inside its 10 mm margin at 90 Hz, and a part 0.49 mm into a keep-out
+/// box at 50 Hz (embodiments `tests/spark_followers.rs` `table_gains`, 2026-11-03). With these
+/// gains: 7.98 / 7.94 mm at 90 / 50 Hz, no part inside a box over the 0.8-1.25x inertia band.
+/// The desk path tracks at 17.6 mm rms (commissioned 13.8), and act-sim passes as it does today.
+/// They do not bring a tool speed within its cap (the command 19-24x, the real tool 15-18x at
+/// 0.05 m/s): that overspeed is the rows'.
 ///
 /// How. The MIT frame carries kd only up to 5 ([`crate::dm_can`]). So each joint's kd is
 /// `2 zeta sqrt(kp J)` (J the joint's inertia from the bindings, kp unchanged) where that fits.
 /// Where it does not, kp is lowered to `(5 / (2 zeta))^2 / J`: the left shoulder pitch to 60.0
-/// and roll to 55.0, the torso to 15.8 (its acceleration ceiling `0.1 kp / J` drops from 2.5 to
-/// 1.0 rad/s^2; the shoulders' speed and acceleration ceilings stay within 5 %). Peak torque is
-/// unchanged: kd 5 at the shoulders' 1.2 rad/s ceiling is 6 N m of the DM8009P's 40. Zeta 0.7
-/// would need kp about halved (shoulders 28-32, torso 8.1): the same clearance, desk tracking at
-/// 25 mm rms, the ceilings 29 % lower, and act-sim's station-clock chunks test fails.
+/// and roll to 55.0, the torso to 15.8. The torso's acceleration ceiling `0.1 kp / J` drops from
+/// 2.5 to 1.0 rad/s^2 and the left roll's by 10 %; the shoulders' speed ceilings stay within 5 %.
+/// Peak torque is unchanged: kd 5 at the shoulders' 1.2 rad/s ceiling is 6 N m of the DM8009P's
+/// 40. The planned-velocity cap `MAX_COAST kp / kd` now equals the shoulders' top speed, so a
+/// stalled host's coast doubles, 0.05 to 0.10 rad (within the chain's `2 MAX_COAST` bound). At
+/// kd 5 the MIT frame's truncated velocity (a planned zero arrives as -0.011 rad/s on a DM8009)
+/// holds the torso 3.5 mrad off. Zeta 0.7 would need kp about halved (shoulders 28-32, torso
+/// 8.1): the same clearance, desk tracking at 25 mm rms, the ceilings 29 % lower, and act-sim's
+/// station-clock chunks test fails.
 pub const STATIC_UPPER_BODY_DAMPED: DamiaoBody = DamiaoBody {
     joints: &[
         JointGains::new("torso_joint", 15.8, 5.0),
