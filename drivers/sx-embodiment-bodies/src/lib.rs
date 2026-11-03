@@ -46,7 +46,9 @@
 //! drive (a servo recalibrated, an axis out of or back in service, new rails) and names the
 //! buses that open differently; [`reopen_ports`] closes just those bridges and opens them
 //! again, keeping every other bus open; [`lend_port`] closes one bus for another process (a
-//! calibration tool) and keeps its axes as unavailable data until it is reopened. A change of
+//! calibration tool) and keeps its axes as unavailable data until it is reopened, and
+//! [`close_silent`] does the same for a CAN bus whose motors' power was cut while the body ran,
+//! which [`probe_unopened`] then asks and [`open_unopened`] opens again. A change of
 //! which body it is (another instance, another
 //! set of open ports, a port on another bridge) is [`OpenError::NotInPlace`]: it is opened anew.
 //!
@@ -1855,6 +1857,48 @@ pub fn lend_port(
     setup: Setup,
     port: &str,
 ) -> Result<(), OpenError> {
+    let (index, _, mask) = open_part(body, drive, setup, port)?;
+    // Dropping the chain given back closes its bridge.
+    drop(body.replace(index, mask.unopened(None)?));
+    Ok(())
+}
+
+/// `body`, opened from `drive` with `setup`, with `port`'s CAN bus, every motor of which stopped
+/// answering while the body ran (the motors' power was cut), closed into it as a bus that did
+/// not open ([`open_available`]): its chain is dropped, closing its bridge (no powered motor is
+/// on it), and its axes keep their place in the vector as unavailable data, never commanded,
+/// reported unreached by every stop. [`probe_unopened`] asks it from then on, and
+/// [`open_unopened`] opens it into the body again, disabled, once it answers. Only a bus the
+/// probe asks is closed: a serial bus that went silent stays open and is read again as its
+/// servos answer. Nothing here sends the bus a frame; the caller decides the silence.
+///
+/// # Errors
+///
+/// [`OpenError::NotInPlace`] when `port` is not one of `body`'s open buses or is not a CAN bus,
+/// and what planning `setup` refuses; `body` is given back untouched with any.
+pub fn close_silent(
+    body: &mut Body,
+    drive: &InstanceDrive,
+    setup: Setup,
+    port: &str,
+) -> Result<(), OpenError> {
+    let (index, bus, mask) = open_part(body, drive, setup, port)?;
+    if bus.wire() != Wire::Can {
+        return Err(OpenError::NotInPlace(format!(
+            "{port} is a serial bus: it stays open and is read again as its servos answer"
+        )));
+    }
+    drop(body.replace(index, mask.unopened(None)?));
+    Ok(())
+}
+
+/// The index, part and mask of `port`'s bus in `body`, opened from `drive` with `setup`.
+fn open_part(
+    body: &Body,
+    drive: &InstanceDrive,
+    setup: Setup,
+    port: &str,
+) -> Result<(usize, Part, Mask), OpenError> {
     let plan = plan(
         drive,
         setup.commissioning,
@@ -1868,19 +1912,12 @@ pub fn lend_port(
             plan.parts.len()
         )));
     }
-    let Some((index, (_, _, mask))) = plan
-        .parts
+    plan.parts
         .into_iter()
         .enumerate()
         .find(|(_, (name, _, _))| name == port)
-    else {
-        return Err(OpenError::NotInPlace(format!(
-            "{port} is not an open bus of this body"
-        )));
-    };
-    // Dropping the chain given back closes its bridge.
-    drop(body.replace(index, mask.unopened(None)?));
-    Ok(())
+        .map(|(index, (_, part, mask))| (index, part, mask))
+        .ok_or_else(|| OpenError::NotInPlace(format!("{port} is not an open bus of this body")))
 }
 
 /// One bus read only, behind the one observing surface every bus shares.
