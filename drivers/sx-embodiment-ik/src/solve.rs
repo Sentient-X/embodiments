@@ -277,15 +277,17 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// Where even keeping every tool's speed has no step (the acceleration caps carry a joint on),
+/// a tool's speed gives way a tenth as far as the pairs' rows do for the same slack.
+const TOOL_GIVES: f64 = 0.1;
 /// The directions a tool's speed is kept along ([`Ik::tool_rows`]): the cube's faces, edges
 /// and corners, unit length.
-/// Where even that has no step (the acceleration caps carry a joint on), a tool's speed gives
-/// way a tenth as far as the pairs' rows do for the same slack.
-const TOOL_GIVES: f64 = 0.1;
 const TOOL_DIRECTIONS: usize = 26;
-/// The share of a tick's tool move each direction is held to, so that no move between the
-/// directions exceeds it: the cosine of the widest angle between any move and its nearest
-/// direction (0.886 over 200,000 sampled moves, held to 0.88).
+/// The share of a tick's tool move each direction is held to, so no move between two
+/// directions exceeds it (0.886, the widest angle's cosine, exactly from the polytope's
+/// vertices). A free move runs at 0.88-1.0 of its speed, 7-10 % slower than before. Held to
+/// 0.95, a 0.2 m/s tool ran 1.34x at 90 Hz and its arm came within 8.2 mm (9.4 at 0.88);
+/// turned to face the asked move each tick, act-sim's press missed by 43 mm.
 const POLYTOPE_INSIDE: f64 = 0.88;
 const TOOL_UNITS: [V3; TOOL_DIRECTIONS] = {
     let mut units = [[0.0; 3]; TOOL_DIRECTIONS];
@@ -428,6 +430,7 @@ pub struct Ik {
     tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
     /// Per limb, whether its tool speed bound this tick.
     tool_capped: Vec<bool>,
+
     /// Per axis, where the next step must leave it ([`Ik::set_window`]).
     window: Vec<[f64; 2]>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
@@ -617,6 +620,7 @@ impl Ik {
             velocity: vec![0.0; n],
             tool_speed: vec![None; limbs],
             tool_capped: vec![false; limbs],
+
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
@@ -986,8 +990,14 @@ impl Ik {
         if iterations.is_none() && self.work.used > 0 && deadline.is_none_or(|d| Instant::now() < d)
         {
             // The pairs give way first, every tool held to its speed; then the tools too.
+            let tools = (0..self.work.used)
+                .any(|slot| matches!(self.work.row_active[slot], Active::ToolSpeed { .. }));
             for tool_hard in [true, false] {
                 if iterations.is_some() || deadline.is_some_and(|d| Instant::now() >= d) {
+                    break;
+                }
+                // With no tool's speed in the rows the two retries are one.
+                if !tool_hard && !tools {
                     break;
                 }
                 self.work.tool_hard = tool_hard;
@@ -1484,9 +1494,7 @@ impl Ik {
     /// Each speed-bound limb's tool point kept within its speed this tick, in the QP itself, so
     /// the step that keeps the pairs clear is found within it rather than shortened after:
     /// its linearised move along each of [`TOOL_DIRECTIONS`] directions no further than the
-    /// speed allows (the polytope holds the sphere; a move between two directions may exceed
-    /// it by under 8 %, which the shortening takes). A direction no step in the box reaches,
-    /// no row.
+    /// speed allows ([`POLYTOPE_INSIDE`]). A direction no step in the box reaches, no row.
     fn tool_rows(&mut self, dt: f64) {
         let body = &self.body;
         let n = body.solved.len();
@@ -1518,7 +1526,11 @@ impl Ik {
                 for (column, &axis) in body.solved.iter().enumerate() {
                     row[column] = dot(direction, w.jv[axis]);
                 }
-                let rhs = POLYTOPE_INSIDE.mul_add(most, -dot(direction, offset));
+                // Never asked back toward where the tool was last commanded: standing still is
+                // within its speed.
+                let rhs = POLYTOPE_INSIDE
+                    .mul_add(most, -dot(direction, offset))
+                    .max(0.0);
                 let reach: f64 = (0..n)
                     .map(|j| (row[j] * w.lower[j]).max(row[j] * w.upper[j]))
                     .sum();
