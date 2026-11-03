@@ -1229,6 +1229,10 @@ fn a_row_the_caps_cannot_keep_widens_no_cap() {
             (0.002, "box", Follower::Pd(0, 9.5, 0.1), 0.0),
             (0.004, "reach", Follower::Pd(0, 9.5, 0.15), 0.0),
             (0.011, "reach", Follower::Pd(1, 9.5, 0.1), READING_JITTER),
+            // With the approach paced by its room (`Settings::approach_time_s`) the three above
+            // keep their rows inside the caps; these two still need more.
+            (0.002, "reach", Follower::Pd(0, 9.5, 0.1), 0.0),
+            (0.02, "reach", Follower::Pd(3, 9.5, 0.1), READING_JITTER),
         ]
         .into_iter()
         .map(|(dt, case, follower, noise)| {

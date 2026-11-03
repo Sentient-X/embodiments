@@ -85,6 +85,18 @@ pub struct Settings {
     pub influence_m: f64,
     /// The share of a pair's full braking capability its approach is planned with.
     pub braking_share: f64,
+    /// A pair closes no faster than its room over this, seconds: the command slows as it nears
+    /// the margin, so that a real arm trailing it can still stop within the margin. An arm
+    /// stops later than its command by its transport delay and its follower's lag. On the
+    /// static upper body that is 26-63 ms of delay plus the shoulders' ringing at zeta 0.1. With
+    /// only the braking rows (acceleration caps, no lag), main's arms reached 4.5 mm into the
+    /// margin of a box beside the forearm at 90 Hz, and a part 0.49 mm into it at 50 Hz, on those
+    /// followers under the caps the station applies (-8.0 mm and a part 5 mm in at 1.25x their
+    /// speed). At 0.3 s: 8.77 / 8.76 mm nominal at 90 / 50 Hz, 1.73 mm at worst (main 1.67 in that
+    /// case), no part inside a box; 0.2 s left -0.62 mm nominal, and 0.4 s fails `follow_lag`
+    /// (embodiments `tests/spark_followers.rs`, 2026-11-03). At 250 and 500 Hz the 1.25x
+    /// follower still reaches -20 / -45 mm (main -114 / -119). Zero: no bound.
+    pub approach_time_s: f64,
     /// The most any axis moves in one tick, whatever its speed cap: the QP is a
     /// linearisation, and a collision row is only as true as the step is short. Each axis's
     /// step is its cap times the tick ([`Caps`]), so this binds only above 3 rad/s at a 10 ms
@@ -117,6 +129,7 @@ impl Default for Settings {
             collision_margin_m: 0.01,
             influence_m: 0.2,
             braking_share: 0.5,
+            approach_time_s: 0.3,
             max_step_rad: 0.03,
             max_error_m: 0.1,
             max_error_rad: 0.5,
@@ -1359,6 +1372,9 @@ impl Ik {
             // linearisation is least true.
             let room = (distance - s.collision_margin_m).max(0.0);
             let mut rhs = braking(room, s.braking_share * capability, dt).min(0.5 * room);
+            if s.approach_time_s > 0.0 {
+                rhs = rhs.min(room * dt / s.approach_time_s);
+            }
             if candidate.measured {
                 // From where it was measured the body still makes its way to its command (a
                 // following joint's lead, wherever it closes the pair), then the step: all of it
