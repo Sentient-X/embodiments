@@ -127,6 +127,11 @@ pub struct RobotParkedPose {
     pub configuration_sha256: String,
     /// The authorized person's physical support verification; parsing cannot prove it true.
     pub verification_reference: String,
+    /// Each out-of-service joint's measured reading when the pose was attested (its motor
+    /// read-only): what the pose's value for that joint is checked against, since nothing
+    /// commands the joint there. Empty for a robot with every joint in service.
+    #[serde(default)]
+    pub held_readings: BTreeMap<String, f64>,
 }
 
 fn unique_pose_joints<'de, D>(deserializer: D) -> Result<BTreeMap<String, f64>, D::Error>
