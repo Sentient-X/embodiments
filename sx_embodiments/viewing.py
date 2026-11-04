@@ -101,7 +101,7 @@ class VirtualGripper:
     When the operator holds only controllers, each hand drives a gripper whose tool frame
     sits ``ahead_m`` ahead of the controller's grip origin along its pointing ray (WebXR
     ``targetRaySpace`` -z), with x (the fingers) along that ray and the jaw opening horizontal.
-    It is drawn with every link that moves rigidly with the body's tool frame (``tcp_frames``):
+    It is drawn with every link that moves rigidly with the body's tool point (``tcp_frames``):
     the subtree below the last actuated joint above it, so the wrist plates, motor mount and
     camera that carry the jaw are drawn with it. That tool frame lands on the operator's.
     """

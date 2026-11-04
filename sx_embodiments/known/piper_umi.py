@@ -8,7 +8,7 @@ left/right mesh source URLs have not been supplied; none are fabricated here.
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import packaged_asset
-from ..compose import EmbodimentDefinition, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
@@ -66,6 +66,9 @@ PIPER_UMI_SPEC = EmbodimentDefinition(
     name=EmbodimentName("piper-umi"),
     label="Piper UMI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
+    # The root is the recording's room, which the Quest converter writes x right, y ahead, z up
+    # (sxd umico quest.py); the floating hands are placed in it.
+    front=Direction.POS_Y,
     lineage=Lineage(family="piper-umi", revision="supplied-cad-v6-holder-tracking"),
     build=Build.of(PIPER_UMI_MODULE),
     extra_assets=PIPER_UMI_ASSETS,

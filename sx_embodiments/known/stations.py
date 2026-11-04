@@ -6,6 +6,7 @@ from ..assembly import INSPECTION_NOTE, Frame, MountJoint, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionMethod, CollectionSetup
 from ..compose import (
+    Direction,
     EmbodimentDefinition,
     RootMount,
     leader_component,
@@ -80,6 +81,7 @@ PIPERX_STATION_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("piperx-station"),
     label="PiperX leader-follower station",
     kind=EmbodimentKind.TELEOP_STATION,
+    front=Direction.POS_X,
     lineage=Lineage(family="piper", variant="piperx"),
     build=PIPER_STATION_BUILD,
     extra_assets=(PIPER_SOURCE_URDF, PIPER_STATION_URDF),

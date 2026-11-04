@@ -62,6 +62,7 @@ from ..assets import (
     packaged_asset,
 )
 from ..compose import (
+    Direction,
     EmbodimentDefinition,
     MountedOn,
     RootMount,
@@ -289,7 +290,7 @@ REALSENSE_D435_COLOR: Final = CameraSpec(
 HEAD_CAMERA: Final = Frame(
     "head_camera_color_optical",
     "camera_link",
-    Pose(rpy=(-math.pi / 2, 0.0, -math.pi / 2)),
+    Pose(),
     preview_kind="camera",
     preview_label="Head camera",
     camera_optical=True,
@@ -508,7 +509,7 @@ HEAD_INFRARED_FRAMES: Final = tuple(
     Frame(
         f"head_camera_{name}_optical",
         "camera_link",
-        Pose((0.0, offset, 0.0), (-math.pi / 2, 0.0, -math.pi / 2)),
+        Pose((0.0, offset, 0.0)),
         preview_kind="camera",
         preview_label=label,
         camera_optical=True,
@@ -569,6 +570,7 @@ SENTIENT_HUMANOID_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid", variant="upper-body"),
     build=SENTIENT_HUMANOID_UPPER_BODY_BUILD,
+    front=Direction.POS_X,
     extra_assets=(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
@@ -585,6 +587,7 @@ SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid", variant="upper-body-grippers"),
     build=SENTIENT_HUMANOID_UPPER_BODY_GRIPPERS_BUILD,
+    front=Direction.POS_X,
     extra_assets=(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(
@@ -605,6 +608,7 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="sentient-humanoid"),
     build=SENTIENT_HUMANOID_BUILD,
+    front=Direction.POS_X,
     extra_assets=(
         SENTIENT_HUMANOID_SOURCE_URDF,
         _generated(

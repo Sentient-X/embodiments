@@ -16,6 +16,7 @@ from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
     Component,
+    Direction,
     EmbodimentDefinition,
     MountKind,
     RootMount,
@@ -195,6 +196,7 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("panda_omron"),
     label="Franka Panda on Omron LD mobile base",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="panda", variant="omron"),
     build=Build(
         robot="panda_omron",
@@ -253,6 +255,7 @@ FRANKA_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("franka"),
     label="Franka Panda (fixed base)",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="panda"),
     build=Build.of(PANDA_MODULE),
     # Footprint measured from the menagerie link0 collision geometry (xy AABB).

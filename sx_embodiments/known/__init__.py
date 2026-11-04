@@ -9,7 +9,7 @@ from typing import Final
 from sx_contracts.assets import AssetIntegrityError
 
 from ..assets import AssetAudience, PackagedAsset, audience
-from ..compose import EmbodimentDefinition
+from ..compose import Direction, EmbodimentDefinition
 from ..embodiment import Embodiment, embodiment_from_definition, packaged_assets
 from ..errors import CompositionError, UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
@@ -171,28 +171,32 @@ class EmbodimentRegistry(Mapping[str, Embodiment]):
         return len(self._definitions)
 
 
-def viewing_of(name: str) -> Viewing:
-    """The viewing facts ``name``'s registry module declares, the default when it declares
-    none; raises `UnknownEmbodimentError` for a name no registry holds."""
+def _definition_of(name: str) -> EmbodimentDefinition:
     key = EmbodimentName(name)
     definition = _DEFINITIONS.get(key)
     if definition is None and key in DEVELOPMENT_EMBODIMENTS:
         definition = DEVELOPMENT_EMBODIMENTS[key].spec
     if definition is None:
         raise UnknownEmbodimentError(name)
-    return definition.viewing
+    return definition
+
+
+def viewing_of(name: str) -> Viewing:
+    """The viewing facts ``name``'s registry module declares, the default when it declares
+    none; raises `UnknownEmbodimentError` for a name no registry holds."""
+    return _definition_of(name).viewing
 
 
 def recorded_streams_of(name: str) -> RecordedStreams:
     """What a capture rig's recording names ``name``'s devices and measured coordinates; none
     for a body no rig records. Raises `UnknownEmbodimentError` for a name no registry holds."""
-    key = EmbodimentName(name)
-    definition = _DEFINITIONS.get(key)
-    if definition is None and key in DEVELOPMENT_EMBODIMENTS:
-        definition = DEVELOPMENT_EMBODIMENTS[key].spec
-    if definition is None:
-        raise UnknownEmbodimentError(name)
-    return definition.recorded_streams
+    return _definition_of(name).recorded_streams
+
+
+def front_of(name: str) -> Direction | None:
+    """The front ``name``'s registry module declares along its root link, ``None`` when it
+    declares none; raises `UnknownEmbodimentError` for a name no registry holds."""
+    return _definition_of(name).front
 
 
 def collection_definitions() -> tuple[EmbodimentDefinition, ...]:

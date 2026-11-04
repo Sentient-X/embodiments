@@ -157,6 +157,7 @@ from ..assembly import INSPECTION_NOTE, Frame, MountJoint, Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
+    Direction,
     EmbodimentDefinition,
     RootMount,
     body_component,
@@ -332,6 +333,7 @@ B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm"),
     build=Build.of(B601_DM_MODULE),
+    front=Direction.POS_X,
     extra_assets=(B601_DM_URDF,),
     # rates unbound: the pod's capture fps is a per-session parameter, not a hardware rate
 )
@@ -409,6 +411,7 @@ BIMANUAL_B601_DM_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="rebot-b601", variant="dm-bimanual"),
     build=BIMANUAL_B601_DM_BUILD,
+    front=Direction.POS_X,
     extra_assets=(B601_DM_SOURCE_URDF, BIMANUAL_B601_DM_URDF),
 )
 
@@ -447,5 +450,6 @@ B601_DM_STATION_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.TELEOP_STATION,
     lineage=Lineage(family="rebot-b601", variant="dm-station"),
     build=B601_DM_STATION_BUILD,
+    front=Direction.POS_X,
     extra_assets=(B601_DM_SOURCE_URDF, B601_DM_STATION_URDF),
 )

@@ -6,7 +6,7 @@ from sx_contracts import ComponentId
 
 from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
@@ -189,6 +189,7 @@ RBY1_SPEC: Final = EmbodimentDefinition(
     ),
     label="Rainbow Robotics RBY1-M v1.3",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="rby1", variant="m", revision="1.3"),
     build=Build.of(RBY1_MODULE),
 )

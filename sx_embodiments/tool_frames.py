@@ -49,9 +49,10 @@ from .collision_proxies import (
 )
 from .compose import Component, ComponentRole
 from .embodiment import Embodiment
+from .frames import tools as body_tools
 from .kinematics import Kinematics
 from .layout import Bounds, Unbounded
-from .parts import ChainSpec, DeviceSpec, GraspKind, GripperSpec, Limb
+from .parts import DeviceSpec, GraspKind, GripperSpec
 
 Vec3 = tuple[float, float, float]
 _Floats = npt.NDArray[np.float64]
@@ -140,37 +141,25 @@ def tool_frames(embodiment: Embodiment) -> tuple[ToolFrame, ...]:
     mounts = {component.instance: component.mount.frame for component in embodiment.components}
     meshes: dict[str, list[tuple[_Floats, _Floats]]] | None = None
     tools: list[ToolFrame] = []
-    for component in embodiment.components:
-        if component.role is not ComponentRole.BODY:
-            continue
+    for component, frame in body_tools(embodiment):
         part = component.part
         if isinstance(part, GripperSpec):
             if meshes is None:
                 meshes = _collision_meshes(embodiment, embodiment.urdf_bytes)
             tools.append(_gripper(component, part, kinematics, joints, mounts, meshes))
-        elif isinstance(part, ChainSpec) and component.limb is Limb.ARM:
-            if (tool := _flange(embodiment, component, part, joints)) is not None:
-                tools.append(tool)
+        else:
+            tools.append(_flange(embodiment, component, frame))
     return tuple(tools)
 
 
-def _flange(
-    embodiment: Embodiment,
-    arm: Component,
-    part: ChainSpec,
-    joints: dict[tuple[str, str], str],
-) -> ToolFrame | None:
-    """An arm's flange tool, or ``None`` when a gripper rides on the arm."""
+def _flange(embodiment: Embodiment, arm: Component, frame: str) -> ToolFrame:
+    """An arm's flange tool: an arm that carries no gripper (:func:`~.frames.tools`)."""
     carried = [
         component
         for component in embodiment.components
         if getattr(component.mount, "parent", None) == arm.instance
         and component.role is ComponentRole.BODY
     ]
-    if any(isinstance(component.part, GripperSpec) for component in carried):
-        return None
-    last = joints[(arm.instance, part.layout.axes[-1].name)]
-    frame = Kinematics.of(embodiment.urdf_bytes).joints[last].child
     devices = [c.instance for c in carried if isinstance(c.part, DeviceSpec)]
     if devices:
         return ToolFrame(

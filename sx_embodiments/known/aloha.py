@@ -4,7 +4,7 @@ from typing import Final, Literal
 
 from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Slot, Socket
@@ -135,4 +135,5 @@ ALOHA_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="aloha", variant="2"),
     build=Build.of(ALOHA_MODULE),
+    front=Direction.POS_X,
 )

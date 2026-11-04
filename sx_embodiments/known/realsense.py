@@ -9,12 +9,12 @@ reliable for modelling. A module carries a camera stream only when its optics ar
 unit's intrinsics are its calibration and the registry pins no model-nominal profile for these.
 """
 
-import math
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ..assembly import OPTICAL_RPY
 from ..compose import RootMount, sensor_component
 from ..mechanical import InterfaceId, Module, ModuleId
 from ..parts import CameraSpec
@@ -72,15 +72,20 @@ _MODELS: Final[Mapping[str, tuple[str, _Geometry]]] = {
     ),
 }
 
-_OPTICAL: Final = f"{-math.pi / 2!r} 0 {-math.pi / 2!r}"
-
 
 def _number(value: float) -> str:
     return repr(float(value)).removesuffix(".0")
 
 
-def _fixed(robot: ET.Element, parent: str, child: str, xyz: str, rpy: str = "0 0 0") -> None:
-    ET.SubElement(robot, "link", {"name": child})
+def _fixed(
+    robot: ET.Element,
+    parent: str,
+    child: str,
+    xyz: str,
+    rpy: str = "0 0 0",
+    attributes: dict[str, str] | None = None,
+) -> None:
+    ET.SubElement(robot, "link", {"name": child, **(attributes or {})})
     joint = ET.SubElement(robot, "joint", {"name": f"{child}_joint", "type": "fixed"})
     ET.SubElement(joint, "origin", {"xyz": xyz, "rpy": rpy})
     ET.SubElement(joint, "parent", {"link": parent})
@@ -135,7 +140,14 @@ def _description(model: str, geometry: _Geometry) -> bytes:
     }
     for stream, offset in offsets.items():
         _fixed(robot, "camera_link", f"{stream}_frame", f"0 {_number(offset)} 0")
-        _fixed(robot, f"{stream}_frame", f"{stream}_optical_frame", "0 0 0", _OPTICAL)
+        _fixed(
+            robot,
+            f"{stream}_frame",
+            f"{stream}_optical_frame",
+            "0 0 0",
+            " ".join(_number(v) for v in OPTICAL_RPY),
+            {"data-frame-convention": "camera_optical"},
+        )
     ET.indent(robot, space="  ")
     return ET.tostring(robot, encoding="utf-8", xml_declaration=True) + b"\n"
 
