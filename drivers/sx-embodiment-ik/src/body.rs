@@ -218,6 +218,31 @@ impl Body {
     pub fn frame(&self, frames: &Frames, index: usize) -> Rigid {
         frames.links[self.limbs[index].frame]
     }
+
+    /// Limb `index`'s Jacobian at `frames`: per axis ([`Model::axes`] order), the linear
+    /// velocity of its frame's origin and its angular velocity, both in the root frame, per
+    /// unit speed of that axis (zero for an axis that does not move it). The solver's own
+    /// rows, for evaluation: how much of a joint motion moves the tool, and how much is the
+    /// limb's null space.
+    ///
+    /// # Panics
+    ///
+    /// When `linear` or `angular` is shorter than [`Model::axes`].
+    pub fn jacobian(
+        &self,
+        frames: &Frames,
+        index: usize,
+        linear: &mut [Vec3],
+        angular: &mut [Vec3],
+    ) {
+        let width = self.model.axes().len();
+        linear[..width].iter_mut().for_each(|v| *v = [0.0; 3]);
+        angular[..width].iter_mut().for_each(|v| *v = [0.0; 3]);
+        let frame = self.limbs[index].frame;
+        self.model
+            .point_jacobian(frames, frame, frames.links[frame].t, linear);
+        self.model.angular_jacobian(frames, frame, angular);
+    }
 }
 
 pub(crate) fn world(frames: &Frames, capsule: &Capsule) -> (Vec3, Vec3) {
