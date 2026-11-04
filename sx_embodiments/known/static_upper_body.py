@@ -471,6 +471,7 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-static-upper-body"),
     label="Sentient static upper body",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="sentient-static-upper-body"),
     build=Build.of(STATIC_UPPER_BODY_MODULE),
     # The xy box of base_link's collision hull (meshes/collision/base_link.stl, x and y within

@@ -16,9 +16,11 @@ A pack is a directory of three files, generated from the body's composed descrip
   as the others do). A description with no visual at all is drawn from its collision
   geometry. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
-  count, the body's gripper tool frames by side, and ``tools``, each tool's grip
-  (:mod:`sx_embodiments.tool_frames`: its frame, and its jaws' closing line, approach and grasp
-  point, or why it has none); and, when the body declares them
+  count, ``tcp_frames`` (each side's tool point, :func:`tcp_frames`), ``tools``, each tool's
+  grip (:mod:`sx_embodiments.tool_frames`: its frame, and its jaws' closing line, approach and
+  grasp point, or why it has none), and ``frames``, every link's axes and roles
+  (:mod:`sx_embodiments.frames`), which a reader takes in place of a link's name; and, when
+  the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
   side), ``mount`` (the base mount's frame, kind and edge, as ``collision.json``'s
   ``support``, and that surface's height above the floor) and ``virtual_gripper`` (the body's
@@ -55,9 +57,10 @@ from .assets import PACKAGE_URI_PREFIX, description_asset_uri
 from .collision_proxies import support_document
 from .embodiment import Embodiment
 from .errors import EmbodimentError
-from .kinematics import Transform, from_xyz_rpy
+from .frames import body_frames, sides
+from .kinematics import Kinematics, Transform, from_xyz_rpy
 from .materialize import materialize
-from .tool_frames import tool_frames
+from .tool_frames import Jaws, ToolFrame, tool_frames
 from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
@@ -70,8 +73,8 @@ COLLISION_FILE: Final = "collision.json"
 #: URDF Z-up to glTF Y-up: -90 deg about x, as glTF's (x, y, z, w).
 URDF_TO_GLTF: Final = (-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
 NEUTRAL_RGBA: Final = (0.7, 0.7, 0.7, 1.0)
-_SIDES: Final = ("left", "right")
-_TCP_SUFFIXES: Final = ("gripper_tcp", "gripper_tip")
+#: How far a tool point link may lie from its tool's grasp point, metres.
+_TOOL_POINT_M: Final = 0.01
 _CYLINDER_SEGMENTS: Final = 32
 _SPHERE_RINGS: Final = 12
 _SPHERE_SEGMENTS: Final = 24
@@ -820,14 +823,38 @@ def _glb(
 # --- the pack -------------------------------------------------------------------------------
 
 
-def tcp_frames(links: list[str]) -> dict[str, str]:
-    """The body's gripper tool frames by side: ``<side>_gripper_tcp``, else ``_gripper_tip``."""
+def tcp_frames(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str, str]:
+    """Each side's tool point: the description link at a tool's grasp point, by the side of the
+    body the tool is on (:func:`~sx_embodiments.frames.sides`).
+
+    A tool point is the link riding rigidly with a tool's frame whose origin lies nearest its
+    grasp point, within :data:`_TOOL_POINT_M`; a tool without jaws, or whose grasp point no link
+    marks, has none. Nothing is read from a link's name.
+    """
+    kinematics = Kinematics.of(embodiment.urdf_bytes)
+    jawed = [tool for tool in tools if isinstance(tool.grip, Jaws)]
+    placed = sides(embodiment, [tool.frame for tool in jawed])
     frames: dict[str, str] = {}
-    for side in _SIDES:
-        for suffix in _TCP_SUFFIXES:
-            if f"{side}_{suffix}" in links:
-                frames[side] = f"{side}_{suffix}"
-                break
+    for tool in jawed:
+        assert isinstance(tool.grip, Jaws)
+        point = np.asarray(tool.grip.grasp_point_m, dtype=np.float64)
+        candidates: list[tuple[float, str]] = []
+        for link in sorted(kinematics.links):
+            if kinematics.is_rigid(tool.frame, link):
+                pose = kinematics.pose(tool.frame, link)
+                origin = np.asarray((pose[3], pose[7], pose[11]), dtype=np.float64)
+                candidates.append((float(np.linalg.norm(origin - point)), link))
+        if not candidates or (nearest := min(candidates))[0] > _TOOL_POINT_M:
+            continue
+        direction = placed.get(tool.frame)
+        if direction is None:
+            continue
+        if direction.value in frames:
+            raise RenderPackError(
+                f"{embodiment.name}: two tool points on the {direction.value}: "
+                f"{frames[direction.value]}, {nearest[1]}"
+            )
+        frames[direction.value] = nearest[1]
     return frames
 
 
@@ -855,7 +882,9 @@ def _rigid_with(urdf: bytes, tcp: str) -> set[str]:
     return drawn
 
 
-def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict[str, JsonValue]:
+def _viewing(
+    viewing: Viewing, links: list[str], embodiment: Embodiment, tools: tuple[ToolFrame, ...]
+) -> dict[str, JsonValue]:
     frames = [device.frame for device in viewing.tracking]
     if missing := sorted(set(frames) - set(links)):
         raise RenderPackError(f"{embodiment.name}: viewing names links it lacks: {missing}")
@@ -871,7 +900,7 @@ def _viewing(viewing: Viewing, links: list[str], embodiment: Embodiment) -> dict
             "floor_to_frame_m": viewing.mount.floor_to_frame_m,
         }
     if viewing.virtual_gripper is not None:
-        frames = tcp_frames(links)
+        frames = tcp_frames(embodiment, tools)
         if set(frames) != {"left", "right"}:
             raise RenderPackError(f"{embodiment.name}: a virtual gripper needs both tool frames")
         drawn = {side: _rigid_with(embodiment.urdf_bytes, frame) for side, frame in frames.items()}
@@ -919,6 +948,7 @@ def build(
             f"{embodiment.name}: {sum(triangles.values())} triangles exceed {triangle_budget}"
         )
     key = name or str(embodiment.name)
+    tools = tool_frames(embodiment)
     document: dict[str, JsonValue] = {
         "schema": SCHEMA,
         "embodiment_id": key,
@@ -927,12 +957,13 @@ def build(
         "glb_sha256": hashlib.sha256(glb).hexdigest(),
         "links": [{"name": link, "triangles": triangles[link]} for link in links],
         "triangles": sum(triangles.values()),
-        "tcp_frames": tcp_frames(links),
-        "tools": [tool.to_json() for tool in tool_frames(embodiment)],
+        "tcp_frames": tcp_frames(embodiment, tools),
+        "tools": [tool.to_json() for tool in tools],
+        "frames": [frame.to_json() for frame in body_frames(embodiment)],
         "generated_by": GENERATOR,
     }
     if viewing is not None:
-        document.update(_viewing(viewing, links, embodiment))
+        document.update(_viewing(viewing, links, embodiment, tools))
     from .collision_proxies import proxies
 
     return RenderPack(key, urdf, glb, canonical_bytes(document), proxies(embodiment, name=key))

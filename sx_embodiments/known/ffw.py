@@ -28,7 +28,7 @@ from typing import Final, Literal
 
 from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
@@ -198,4 +198,5 @@ FFW_BG2_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="ffw", variant="bg2-rev4"),
     build=Build.of(FFW_BG2_MODULE),
+    front=Direction.POS_X,
 )

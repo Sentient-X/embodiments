@@ -5,7 +5,7 @@ from typing import Final, Literal
 from sx_contracts import ComponentId
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
@@ -160,4 +160,5 @@ UNITREE_G1_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="unitree-g1", variant="29dof"),
     build=Build.of(UNITREE_G1_MODULE),
+    front=Direction.POS_X,
 )

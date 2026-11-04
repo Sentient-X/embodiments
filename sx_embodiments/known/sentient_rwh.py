@@ -50,6 +50,7 @@ from typing import Final
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
+    Direction,
     EmbodimentDefinition,
     MountedOn,
     MountKind,
@@ -144,6 +145,8 @@ SENTIENT_RWH_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("sentient-rwh"),
     label="Sentient RWH (rugged wheeled humanoid)",
     kind=EmbodimentKind.ROBOT,
+    # The root's x runs to the body's right (its right arm sits at +x, its left at -x).
+    front=Direction.POS_Y,
     lineage=Lineage(family="sentient-rwh"),
     build=Build.of(SENTIENT_RWH_MODULE),
     # Footprint measured as the xy AABB of the chassis AND the four wheels' collision

@@ -9,7 +9,7 @@ dependencies = ["sx-contracts>=0.1.0"]
 
 [project.optional-dependencies]
 capture = ["pyserial>=3.5,<4"]
-render = ["numpy>=2.1", "scipy>=1.13"]
+render = ["numpy>=2.1", "scipy>=1.13", "sx-geometry>=0.1.0"]
 calibrate = [
     "numpy>=2.1",
     "opencv-python-headless>=4.13,<4.14",
@@ -20,6 +20,7 @@ calibrate = [
 # `sx-contracts` is resolved only by the private `sx` superproject's one lock and trusted
 # pin-advance gate. It is intentionally not published or mirrored here; see README.md.
 sx-contracts = { workspace = true }
+sx-geometry = { workspace = true }
 
 [dependency-groups]
 dev = [

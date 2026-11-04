@@ -4,7 +4,8 @@ Two optional extras widen it for one tree each: ``capture`` lets ``encoder_seria
 serial port, ``calibrate`` lets the solvers under ``calibrate/`` use NumPy, SciPy and OpenCV,
 and ``render`` lets ``render_pack.py`` use NumPy and the ``collision_proxies.py`` it fits
 use NumPy and SciPy (its convex pieces), as ``tool_frames.py`` reading the jaws from that
-geometry uses NumPy. Nothing else in the package may import them,
+geometry uses NumPy and ``frames.py`` (each frame's axes and roles) the frames kernel,
+``sx_geometry``. Nothing else in the package may import them,
 so the registry stays importable bare.
 """
 
@@ -21,6 +22,7 @@ _EXTRAS = {
     "render_pack.py": frozenset({"numpy"}),
     "collision_proxies.py": frozenset({"numpy", "scipy"}),
     "tool_frames.py": frozenset({"numpy"}),
+    "frames.py": frozenset({"numpy", "sx_geometry"}),
 }
 
 # The sanctioned environment reads live in assets.py alone: the local-tree override,

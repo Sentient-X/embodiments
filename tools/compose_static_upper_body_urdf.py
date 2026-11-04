@@ -47,14 +47,14 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import ConvexHull  # pyright: ignore[reportMissingTypeStubs]  # no stubs
 
-from sx_embodiments.assembly import Pose
+from sx_embodiments.assembly import OPTICAL_RPY, Pose
 from sx_embodiments.assets import PACKAGE_URI_PREFIX
 from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_LEFT_ARM,
     STATIC_UPPER_BODY_RIGHT_ARM,
     STATIC_UPPER_BODY_TORSO,
 )
-from sx_embodiments.known.zed import EYES, OPTICAL_RPY, eye_offset, optical_frame
+from sx_embodiments.known.zed import EYES, eye_offset, optical_frame
 from sx_embodiments.layout import ACTUATOR_RATINGS, DirectDrive
 
 ROOT = Path(__file__).resolve().parents[1]

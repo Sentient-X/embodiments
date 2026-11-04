@@ -61,8 +61,6 @@ Eye = Literal["left", "right"]
 EYES: Final[tuple[Eye, Eye]] = ("left", "right")
 #: Each eye's optical centre from the device centre along the baseline, metres.
 ZED_2I_EYE_OFFSET_M: Final = 0.060
-#: From a ROS body frame (x forward, y left, z up) to the optical convention.
-OPTICAL_RPY: Final = (-math.pi / 2, 0.0, -math.pi / 2)
 #: The declared eye raster and rate (HD720 at 30 fps).
 ZED_2I_EYE_WIDTH: Final = 1280
 ZED_2I_EYE_HEIGHT: Final = 720

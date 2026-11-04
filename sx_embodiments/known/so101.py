@@ -13,7 +13,7 @@ from typing import Final
 
 from ..assembly import INSPECTION_NOTE, Pose
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import ActuatorBinding, ActuatorBus, ActuatorFeedback, ActuatorModel, CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Placed, Socket
@@ -121,6 +121,7 @@ SO101_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("so101"),
     label="SO-101 (single arm)",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="so101"),
     build=Build.of(SO101_MODULE),
     extra_assets=(SO101_URDF,),
@@ -142,6 +143,7 @@ BIMANUAL_SO101_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("bimanual-so101"),
     label="Bimanual SO-101",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="so101", variant="bimanual"),
     build=BIMANUAL_SO101_BUILD,
     extra_assets=(SO101_SOURCE_URDF, BIMANUAL_SO101_URDF),

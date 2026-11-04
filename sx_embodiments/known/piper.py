@@ -13,6 +13,7 @@ from ..assembly import Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
+    Direction,
     EmbodimentDefinition,
     MountKind,
     RootMount,
@@ -129,6 +130,7 @@ PIPER_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("piper"),
     label="Agilex Piper",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="piper"),
     build=Build.of(PIPER_MODULE),
     extra_assets=(PIPER_URDF,),

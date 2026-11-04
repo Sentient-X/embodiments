@@ -336,6 +336,12 @@ class EmbodimentDefinition:
     #: (`sx_embodiments.recorded_streams`), outside the revision's identity like ``viewing``;
     #: the registry test resolves them against the built body.
     recorded_streams: RecordedStreams = field(default_factory=RecordedStreams)
+    #: Which way the body faces: its front, along its description's root link, whose z is up
+    #: (`sx_embodiments.frames.root_axes`). ``POS_X`` is a ROS REP-103 base; a root whose x
+    #: points to the body's right faces ``POS_Y``. Never assumed: a body that declares none
+    #: has no facing, and ``tests/test_frames.py`` holds every registered body to declare one
+    #: its geometry agrees with. Outside the revision's identity like ``viewing``.
+    front: Direction | None = None
     attachments: tuple[Component, ...] = field(init=False)
 
     def __post_init__(self) -> None:

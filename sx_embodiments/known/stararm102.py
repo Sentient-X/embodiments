@@ -12,7 +12,7 @@ from typing import Final
 from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 
 from ..assets import packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit, UndocumentedDrive, VendorReadout
 from ..mechanical import Build, Module, ModuleId
@@ -91,6 +91,7 @@ STARARM102_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("stararm102-ld"),
     label="StarArm102-LD leader (development kinematics)",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="stararm102", variant="ld"),
     build=Build.of(STARARM102_MODULE),
     extra_assets=(STARARM102_URDF,),

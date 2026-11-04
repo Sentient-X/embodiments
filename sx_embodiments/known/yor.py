@@ -3,7 +3,7 @@
 from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
-from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, MountedOn, RootMount, body_component
 from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
@@ -109,6 +109,7 @@ YOR_SPEC: Final = EmbodimentDefinition(
     ),
     label="YOR bimanual mobile robot",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="yor"),
     build=Build.of(YOR_MODULE),
 )

@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import cast
+from typing import Final, cast
 
 from .assets import PackagedAsset
 from .compose import Component, MountedOn, RootMount
@@ -242,12 +242,21 @@ class Member:
         return ET.fromstring(data)
 
 
+#: An optical frame (RDF: x image-right, y image-down, z along the view) on its camera's body
+#: frame (FLU, as every link is), as URDF ``rpy``. The frames kernel computes it,
+#: ``URDF_RPY.angles(basis(FLU, RDF))``, and ``tests/test_frames.py`` pins this to that, so
+#: the registry renders it without NumPy. Nothing else in the registry writes the rotation.
+OPTICAL_RPY: Final = (-math.pi / 2, 0.0, -math.pi / 2)
+
+
 @dataclass(frozen=True, slots=True)
 class Frame:
     """A named link at a nominal pose on ``parent``: a camera mount or a leader site.
 
     ``camera_optical`` declares the link a camera's optical frame (z along the view, x right,
-    y down), the convention every declared camera's frame must carry.
+    y down), the convention every declared camera's frame must carry. Its ``pose`` places the
+    camera's body (x along the view, z up) and the optical axes turn from it by
+    :data:`OPTICAL_RPY`; a camera turned on its link mounts on a link turned the same way.
     """
 
     name: str
@@ -257,6 +266,17 @@ class Frame:
     preview_kind: str | None = None
     preview_label: str | None = None
     camera_optical: bool = False
+
+    def __post_init__(self) -> None:
+        if self.camera_optical and any(self.pose.rpy):
+            raise CompositionError(
+                self.name, "an optical frame's rotation follows from its axes; give it none"
+            )
+
+    @property
+    def placement(self) -> Pose:
+        """The link's pose on ``parent``: an optical frame's turned to its axes."""
+        return replace(self.pose, rpy=OPTICAL_RPY) if self.camera_optical else self.pose
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,7 +376,7 @@ class Assembly:
                 parent=frame.parent,
                 child=frame.name,
                 name=f"{frame.parent}_to_{frame.name}",
-                pose=frame.pose,
+                pose=frame.placement,
                 joint=frame.joint,
             )
         _require_unique_names(self.robot, robot)

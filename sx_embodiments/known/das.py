@@ -19,6 +19,7 @@ from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 from ..assets import packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
+    Direction,
     EmbodimentDefinition,
     OperatorMount,
     OperatorSite,
@@ -245,6 +246,9 @@ DAS_UMI_V4_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="das-umi", revision="v4"),
     build=Build.of(DAS_UMI_V4_MODULE),
+    # The Quest head frame's x runs to the wearer's right and y ahead (the left camera sits at
+    # -x, both look along +y): the converter's right-forward-up head (sxd umico quest.py).
+    front=Direction.POS_Y,
     extra_assets=(DAS_UMI_V4_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
     operator_mounts=(
         OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),
@@ -291,6 +295,9 @@ QUEST_EGO_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.CAPTURE_RIG,
     lineage=Lineage(family="quest-ego"),
     build=Build.of(QUEST_EGO_MODULE),
+    # The Quest head frame's x runs to the wearer's right and y ahead (the left camera sits at
+    # -x, both look along +y): the converter's right-forward-up head (sxd umico quest.py).
+    front=Direction.POS_Y,
     extra_assets=(QUEST_EGO_URDF, QUEST3_HEADSET_MESH, QUEST3_HEADSET_LICENSE),
     operator_mounts=(OperatorMount(OperatorSite.HEAD, "quest3s_head", "quest3s_head"),),
 )

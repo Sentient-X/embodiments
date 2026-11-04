@@ -33,6 +33,7 @@ from sx_contracts.assets import AssetFormat, AssetProvenance, AssetRole
 from ..assets import PackagedAsset, packaged_asset
 from ..collection import CollectionDevice, CollectionDeviceKind, CollectionMethod, CollectionSetup
 from ..compose import (
+    Direction,
     EmbodimentDefinition,
     OperatorMount,
     OperatorSite,
@@ -333,6 +334,9 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("yubi"),
     label="YUBI bimanual handheld capture rig",
     kind=EmbodimentKind.CAPTURE_RIG,
+    # The root is the recording's room, which the Quest converter writes x right, y ahead, z up
+    # (sxd umico quest.py); the floating hands are placed in it.
+    front=Direction.POS_Y,
     lineage=Lineage(family="yubi", revision="description7-sx1"),
     build=Build.of(YUBI_MODULE),
     extra_assets=(YUBI_HANDS_URDF, *YUBI_MESHES),

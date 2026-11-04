@@ -222,8 +222,8 @@ its own frame (box, cylinder, sphere and capsule tessellated; STL, OBJ and COLLA
 COLLADA with its node transforms, unit, up axis and material colours; decimated to a triangle
 budget; URDF colours win); a description with no visual at all is drawn from its collision
 geometry, so every body the registry describes draws (`tests/test_render_pack_every_body.py`); and
-`pack.json`, both digests, per-link triangle counts and the gripper tool frames by side. A viewer
-sets each link node to its pose in the root frame. `sx_embodiment_drivers::kinematics::Tree`
+`pack.json`, both digests, per-link triangle counts, the tool points by side and every link's
+axes and roles. A viewer sets each link node to its pose in the root frame. `sx_embodiment_drivers::kinematics::Tree`
 parses the URDF once, lists the joints that place it with kinds and limits (`Tree::joints`), and answers every link's pose (`Tree::link_poses`), mimics folded onto their
 leader, so a headset needs only joint positions. `tools/render_packs.py` renders the committed
 packs under `render_packs/` (the static upper body at 150k triangles, the YUBI hands at 60k) and
@@ -255,6 +255,20 @@ largest-component-positive and a single jaw's from the fixed jaw to the moving o
 the line between their open fingertips within a degree. `pack.json` carries the tools, and
 `sx_embodiment_ik::Body::tool(frame)` states one in any frame riding rigidly below its own (a
 `*_gripper_tcp`), with `Jaws::closing_normal_to` for a solve's own approach.
+
+Every frame of a body declares its axes and its roles (`sx_embodiments.frames`, the `render`
+extra, over the frames kernel `sx_geometry.frames`). A body's registry module declares which way
+it faces, its `front` along the root link (`POS_X` for a REP-103 base; the RWH, the Quest head
+and the Quest room face `POS_Y`), so the root link's axes are the body's facing (`FLU`, `RFU`).
+Every other link is `FLU` on its own facing, and a link the description marks `camera_optical`
+is `RDF`, turned from its camera's body by the one computed `assembly.OPTICAL_RPY`. Roles come
+from the component graph, never a name: `tool` (each tool's frame, as above), `head` (a head
+chain's last link), `view` (a camera's frame) and `sensor` (any other sensor's). `pack.json`
+carries every link's axes and roles as `frames`, and `tcp_frames` (each side's tool point: the
+link at a jawed tool's grasp point, on the side `frames.sides` places it) instead of a
+`*_gripper_tcp` suffix. `tests/test_frames.py` holds every body in both registries to declare a
+front its geometry agrees with (two tools part along its left; a camera not on a tool looks
+ahead, upright), every camera to be a `view` on an `RDF` frame and every tool a `tool` frame.
 
 A `RobotInstance` (`sx_embodiments.instance`, `sx.robot-instance/v1`) is one physical robot:
 a content-addressed body, the serial unit in each of its slots (each non-camera component,

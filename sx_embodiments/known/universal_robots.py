@@ -3,7 +3,7 @@
 from typing import Final
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, PackagedAsset, packaged_asset
-from ..compose import EmbodimentDefinition, RootMount, body_component
+from ..compose import Direction, EmbodimentDefinition, RootMount, body_component
 from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
@@ -109,6 +109,7 @@ UR5E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur5e"),
     label="Universal Robots UR5e",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="universal-robots", variant="ur5e"),
     build=Build.of(UR5E_MODULE),
 )
@@ -116,6 +117,7 @@ UR10E_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("ur10e"),
     label="Universal Robots UR10e",
     kind=EmbodimentKind.ROBOT,
+    front=Direction.POS_X,
     lineage=Lineage(family="universal-robots", variant="ur10e"),
     build=Build.of(UR10E_MODULE),
 )
