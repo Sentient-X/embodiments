@@ -21,7 +21,9 @@ a role from a link's name (``*_gripper_tcp``, ``ZED_camera``):
 
 * :attr:`FrameRole.TOOL`: a tool's frame, the one :mod:`~sx_embodiments.tool_frames` states its
   grip in: a gripper's mount frame, or the last link of an arm that carries no gripper.
-* :attr:`FrameRole.HEAD`: the last link of a chain serving the head limb.
+* :attr:`FrameRole.HEAD`: the last link of a chain serving the head limb: where the head
+  ends, with that link's own axes. The head looks through its ``VIEW`` frames (along their z),
+  not along ``HEAD``'s x (the static upper body's ``camera_link`` x points up at rest).
 * :attr:`FrameRole.VIEW`: a camera's frame (always optical).
 * :attr:`FrameRole.SENSOR`: any other sensor's frame (an inertial unit, a force-torque cell).
 

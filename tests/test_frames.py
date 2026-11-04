@@ -139,6 +139,20 @@ def test_two_tools_are_on_two_sides(name: str) -> None:
         assert sorted(found.values()) == [Direction.LEFT, Direction.RIGHT], found
 
 
+@pytest.mark.parametrize("name", list(BODIES))
+def test_sides_agree_with_the_vendors_names(name: str) -> None:
+    """The front's sign, which the two-tool check above cannot see (a body facing backwards
+    swaps left and right): where a body's sources name a tool's component ``left``/``right``,
+    the side the declared front gives it agrees. The names are evidence here, never the rule
+    (``sides`` reads none); a disagreement means a wrong front or a mislabelled source."""
+    body = _body(name)
+    by_frame = {frame: component.instance for component, frame in tools(body)}
+    for frame, direction in sides(body, list(by_frame)).items():
+        named = next((s for s in ("left", "right") if by_frame[frame].startswith(s)), None)
+        if named is not None:
+            assert direction.value == named, (name, by_frame[frame], direction)
+
+
 def test_the_optical_rotation_is_the_kernels() -> None:
     """The one optical rpy the registry writes is the rotation the two axes imply."""
     computed = frames_kernel.URDF_RPY.angles(frames_kernel.basis(FLU, RDF))
