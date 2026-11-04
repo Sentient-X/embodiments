@@ -22,6 +22,7 @@ use thiserror::Error;
 
 use crate::inertial::InertialSensor;
 use crate::kinematics::Chain;
+use sx_frames::Pose;
 
 /// The schema `media_document` renders.
 pub const MEDIA_SCHEMA: &str = "sx.media-plan/v3";
@@ -38,7 +39,7 @@ pub(crate) fn is_placed(
     root_from_mount.is_none() != moves_with.is_empty()
         && chain.is_well_formed()
         && chain.joints() == moves_with
-        && root_from_mount.is_none_or(crate::inertial::is_rigid)
+        && root_from_mount.is_none_or(|pose| pose.is_rigid(1e-6))
 }
 
 /// Whether `name` is a track, microphone or inertial sensor name (`sx_embodiments.media.TRACK_NAME`): it names
@@ -124,14 +125,6 @@ pub struct View {
     pub moves_with: Vec<String>,
     /// Every joint from the root down to the mount, which [`Chain::pose`] places it by.
     pub chain: Chain,
-}
-
-/// A rigid pose: translation in metres and a unit quaternion (x, y, z, w).
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Pose {
-    pub translation_m: [f64; 3],
-    pub rotation_xyzw: [f64; 4],
 }
 
 /// One fitted microphone.
@@ -353,6 +346,36 @@ mod tests {
     fn plan(key: &str) -> String {
         let fixtures: serde_json::Value = serde_json::from_str(FIXTURE).expect("fixture");
         fixtures[key].to_string()
+    }
+
+    /// Every pose the Python renderer wrote reads into the kernel's `Pose` and writes back as
+    /// the same `{"translation_m": [..], "rotation_xyzw": [..]}` bytes, every number intact.
+    #[test]
+    fn a_rendered_pose_keeps_its_bytes() {
+        fn walk(value: &serde_json::Value, poses: &mut Vec<serde_json::Value>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    if map.contains_key("rotation_xyzw") {
+                        poses.push(value.clone());
+                    }
+                    map.values().for_each(|v| walk(v, poses));
+                }
+                serde_json::Value::Array(items) => items.iter().for_each(|v| walk(v, poses)),
+                _ => {}
+            }
+        }
+        let fixtures: serde_json::Value = serde_json::from_str(FIXTURE).expect("fixture");
+        let mut poses = Vec::new();
+        walk(&fixtures, &mut poses);
+        assert!(poses.len() >= 5, "{}", poses.len());
+        for value in poses {
+            let rendered = format!(
+                r#"{{"translation_m":{},"rotation_xyzw":{}}}"#,
+                value["translation_m"], value["rotation_xyzw"]
+            );
+            let pose: Pose = serde_json::from_str(&rendered).expect("a rendered pose");
+            assert_eq!(serde_json::to_string(&pose).expect("json"), rendered);
+        }
     }
 
     fn instance(document: &str) -> String {

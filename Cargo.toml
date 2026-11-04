@@ -17,6 +17,7 @@ members = [
     "drivers/sx-embodiment-bodies",
     "drivers/sx-embodiment-commission",
     "drivers/sx-embodiment-ik",
+    "drivers/sx-frames",
 ]
 
 [workspace.package]
@@ -32,6 +33,7 @@ publish = false
 sx-yubi = { path = "drivers/sx-yubi" }
 sx-embodiment-drivers = { path = "drivers/sx-embodiment-drivers" }
 sx-realtime = { path = "drivers/sx-realtime" }
+sx-frames = { path = "drivers/sx-frames" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -47,4 +49,7 @@ pedantic = { level = "deny", priority = -1 }
 # The teleop solve's tests drive thousands of steps a case: unoptimised they took 170 s of the
 # gate and, their floats rounded differently from release, measured different clearances.
 [profile.dev.package.sx-embodiment-ik]
+opt-level = 3
+
+[profile.dev.package.sx-frames]
 opt-level = 3

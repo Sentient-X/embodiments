@@ -2,8 +2,10 @@
 
 use sx_embodiment_drivers::kinematics::Tree;
 
+use sx_frames::linalg::Vec3;
+use sx_frames::{Pose, Rigid};
+
 use crate::geometry::{Capsule, Proxies};
-use crate::math::{Iso, V3};
 use crate::model::{Frames, Model};
 use crate::tool::{ToolFrame, parse_tools};
 use crate::{IkError, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_PACK, STATIC_UPPER_BODY_URDF};
@@ -28,10 +30,8 @@ pub struct Limb {
 /// One tick's ask of a limb, in the root frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Target {
-    Pose {
-        translation_m: [f64; 3],
-        rotation_xyzw: [f64; 4],
-    },
+    /// Reach a whole pose: the tool frame in the root frame.
+    Pose(Pose),
     LookAt {
         point_m: [f64; 3],
     },
@@ -215,12 +215,12 @@ impl Body {
 
     /// The frame of limb `index` at `q`.
     #[must_use]
-    pub fn frame(&self, frames: &Frames, index: usize) -> Iso {
+    pub fn frame(&self, frames: &Frames, index: usize) -> Rigid {
         frames.links[self.limbs[index].frame]
     }
 }
 
-pub(crate) fn world(frames: &Frames, capsule: &Capsule) -> (V3, V3) {
+pub(crate) fn world(frames: &Frames, capsule: &Capsule) -> (Vec3, Vec3) {
     let pose = &frames.links[capsule.link];
     (pose.apply(capsule.a), pose.apply(capsule.b))
 }

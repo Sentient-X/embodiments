@@ -4,21 +4,22 @@
 //! apart inside a bracket's corner (the static upper body's folded neck rests 1.5 mm clear);
 //! the pieces follow the part's concavities, so only a contact they cannot rule out stands.
 
-use crate::math::{Iso, V3, add, dot, mat_vec, norm, scale, sub, transpose};
+use sx_frames::Rigid;
+use sx_frames::linalg::{Vec3, add, dot, mat_vec, norm, scale, sub, transpose};
 
 /// One convex piece of a link, in the link's frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
     pub link: usize,
-    pub points: Vec<V3>,
+    pub points: Vec<Vec3>,
     /// A ball containing every point: pieces too far apart are never compared.
-    pub centre: V3,
+    pub centre: Vec3,
     pub radius: f64,
 }
 
 impl Piece {
     #[must_use]
-    pub fn new(link: usize, points: Vec<V3>) -> Self {
+    pub fn new(link: usize, points: Vec<Vec3>) -> Self {
         let count = points.len().max(1);
         #[allow(clippy::cast_precision_loss)]
         let centre = scale(
@@ -38,7 +39,7 @@ impl Piece {
     }
 
     /// The piece's farthest point along `direction` (root frame), placed by `pose`.
-    fn support(&self, pose: &Iso, direction: V3) -> V3 {
+    fn support(&self, pose: &Rigid, direction: Vec3) -> Vec3 {
         let local = mat_vec(&transpose(&pose.r), direction);
         let mut best = self.points[0];
         let mut reach = dot(best, local);
@@ -56,7 +57,12 @@ impl Piece {
 /// The closest approach of two pieces placed by their poses: the distance and a closest point
 /// on each, or `None` when they touch or overlap (no separation to measure).
 #[must_use]
-pub fn piece_distance(a: &Piece, pose_a: &Iso, b: &Piece, pose_b: &Iso) -> Option<(f64, V3, V3)> {
+pub fn piece_distance(
+    a: &Piece,
+    pose_a: &Rigid,
+    b: &Piece,
+    pose_b: &Rigid,
+) -> Option<(f64, Vec3, Vec3)> {
     match gjk(a, pose_a, b, pose_b, f64::INFINITY) {
         Gjk::Apart(found) => Some(found),
         Gjk::Overlap | Gjk::Beyond => None,
@@ -70,14 +76,14 @@ enum Gjk {
     /// They are at least the limit apart (proved by a separating direction).
     Beyond,
     /// Their distance and a closest point on each.
-    Apart((f64, V3, V3)),
+    Apart((f64, Vec3, Vec3)),
 }
 
 /// GJK distance between two placed pieces, stopping as soon as a separating direction proves
 /// them at least `limit` apart.
-fn gjk(a: &Piece, pose_a: &Iso, b: &Piece, pose_b: &Iso, limit: f64) -> Gjk {
+fn gjk(a: &Piece, pose_a: &Rigid, b: &Piece, pose_b: &Rigid, limit: f64) -> Gjk {
     // Simplex vertices of the difference a - b, each with the points it came from.
-    let mut simplex: [(V3, V3, V3); 4] = [([0.0; 3], [0.0; 3], [0.0; 3]); 4];
+    let mut simplex: [(Vec3, Vec3, Vec3); 4] = [([0.0; 3], [0.0; 3], [0.0; 3]); 4];
     let mut size = 0;
     let first = sub(pose_a.apply(a.centre), pose_b.apply(b.centre));
     let start = if norm(first) > 1e-12 {
@@ -152,9 +158,9 @@ fn gjk(a: &Piece, pose_a: &Iso, b: &Piece, pose_b: &Iso, limit: f64) -> Gjk {
 /// The point of the simplex closest to the origin, which vertices it is a combination of (a
 /// bit mask) and their weights; every face of up to four vertices is tried. No allocation:
 /// it runs inside a control tick.
-fn closest_on_simplex(simplex: &[(V3, V3, V3)]) -> Option<(V3, u8, [f64; 4])> {
+fn closest_on_simplex(simplex: &[(Vec3, Vec3, Vec3)]) -> Option<(Vec3, u8, [f64; 4])> {
     let n = simplex.len();
-    let mut best: Option<(f64, V3, u8, [f64; 4])> = None;
+    let mut best: Option<(f64, Vec3, u8, [f64; 4])> = None;
     for mask in 1_u8..(1 << n) {
         let mut indices = [0_usize; 4];
         let mut count = 0;
@@ -186,7 +192,7 @@ fn closest_on_simplex(simplex: &[(V3, V3, V3)]) -> Option<(V3, u8, [f64; 4])> {
 
 /// The weights (summing to one) of the point of the affine hull of `indices`' vertices
 /// closest to the origin, or `None` for a degenerate face.
-fn affine_weights(simplex: &[(V3, V3, V3)], indices: &[usize]) -> Option<[f64; 4]> {
+fn affine_weights(simplex: &[(Vec3, Vec3, Vec3)], indices: &[usize]) -> Option<[f64; 4]> {
     let origin = simplex[indices[0]].0;
     let k = indices.len() - 1;
     let mut edges = [[0.0; 3]; 3];
@@ -253,10 +259,10 @@ fn solve(m: &[[f64; 3]; 3], rhs: &[f64; 3], k: usize) -> Option<[f64; 3]> {
 pub fn link_distance(
     pieces: &[Piece],
     of_a: &[usize],
-    pose_a: &Iso,
+    pose_a: &Rigid,
     of_b: &[usize],
-    pose_b: &Iso,
-) -> Option<(f64, V3, V3)> {
+    pose_b: &Rigid,
+) -> Option<(f64, Vec3, Vec3)> {
     if of_a.is_empty() || of_b.is_empty() {
         return None;
     }
@@ -298,7 +304,7 @@ pub fn link_distance(
 mod tests {
     use super::*;
 
-    fn cube(link: usize, centre: V3, half: f64) -> Piece {
+    fn cube(link: usize, centre: Vec3, half: f64) -> Piece {
         let mut points = Vec::new();
         for x in [-half, half] {
             for y in [-half, half] {
@@ -315,11 +321,11 @@ mod tests {
         let a = cube(0, [0.0; 3], 0.5);
         let b = cube(1, [2.0, 0.3, 0.0], 0.5);
         let (d, on_a, on_b) =
-            piece_distance(&a, &Iso::IDENTITY, &b, &Iso::IDENTITY).expect("apart");
+            piece_distance(&a, &Rigid::IDENTITY, &b, &Rigid::IDENTITY).expect("apart");
         assert!((d - 1.0).abs() < 1e-9, "{d}");
         assert!((on_a[0] - 0.5).abs() < 1e-9 && (on_b[0] - 1.5).abs() < 1e-9);
         let overlapping = cube(1, [0.9, 0.0, 0.0], 0.5);
-        assert!(piece_distance(&a, &Iso::IDENTITY, &overlapping, &Iso::IDENTITY).is_none());
+        assert!(piece_distance(&a, &Rigid::IDENTITY, &overlapping, &Rigid::IDENTITY).is_none());
     }
 
     #[test]
@@ -327,16 +333,16 @@ mod tests {
         let a = cube(0, [0.0; 3], 0.5);
         let b = cube(1, [0.0; 3], 0.5);
         // b turned 45 deg about z and moved along x: its edge faces a's face.
-        let turn = crate::math::about([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_4);
-        let pose_b = Iso {
+        let turn = sx_frames::about([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_4);
+        let pose_b = Rigid {
             r: turn,
             t: [0.5 + 0.5 * 2.0_f64.sqrt() + 0.25, 0.0, 0.0],
         };
-        let (d, ..) = piece_distance(&a, &Iso::IDENTITY, &b, &pose_b).expect("apart");
+        let (d, ..) = piece_distance(&a, &Rigid::IDENTITY, &b, &pose_b).expect("apart");
         assert!((d - 0.25).abs() < 1e-9, "{d}");
         let pieces = vec![a.clone(), cube(0, [5.0, 5.0, 5.0], 0.1), b];
         let (d, ..) =
-            link_distance(&pieces, &[0, 1], &Iso::IDENTITY, &[2], &pose_b).expect("apart");
+            link_distance(&pieces, &[0, 1], &Rigid::IDENTITY, &[2], &pose_b).expect("apart");
         assert!((d - 0.25).abs() < 1e-9, "{d}");
     }
 }

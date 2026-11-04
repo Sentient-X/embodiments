@@ -13,6 +13,7 @@
 )]
 
 use sx_embodiment_ik::{Body, Caps, Ik, Settings, Target};
+use sx_frames::{Pose, QuaternionLayout};
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
 /// the clock, and run on a loaded machine.
@@ -37,14 +38,14 @@ fn a_steady_state_tick_allocates_nothing() {
     for tick in 0..400 {
         let t = f64::from(tick) * 0.01;
         let targets = [
-            Some(Target::Pose {
+            Some(Target::Pose(Pose {
                 translation_m: [0.35 + 0.1 * t.sin(), 0.22, 0.12 + 0.05 * t.cos()],
-                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
-            }),
-            Some(Target::Pose {
+                rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, 0.0, 1.0]),
+            })),
+            Some(Target::Pose(Pose {
                 translation_m: [0.4, -0.15 - 0.1 * t.sin(), 0.1],
-                rotation_xyzw: [0.0, 0.2, 0.0, 1.0],
-            }),
+                rotation: QuaternionLayout::Xyzw.read([0.0, 0.2, 0.0, 1.0]),
+            })),
             Some(Target::LookAt {
                 point_m: [0.6, 0.2 * t.sin(), 0.05],
             }),
@@ -77,14 +78,14 @@ fn a_measured_tick_with_windows_allocates_nothing() {
     for tick in 0..400 {
         let t = f64::from(tick) * 0.01;
         let targets = [
-            Some(Target::Pose {
+            Some(Target::Pose(Pose {
                 translation_m: [0.35 + 0.1 * t.sin(), 0.22, 0.12 + 0.05 * t.cos()],
-                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
-            }),
-            Some(Target::Pose {
+                rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, 0.0, 1.0]),
+            })),
+            Some(Target::Pose(Pose {
                 translation_m: [0.4, -0.15 - 0.1 * t.sin(), 0.1],
-                rotation_xyzw: [0.0, 0.2, 0.0, 1.0],
-            }),
+                rotation: QuaternionLayout::Xyzw.read([0.0, 0.2, 0.0, 1.0]),
+            })),
             Some(Target::LookAt {
                 point_m: [0.6, 0.2 * t.sin(), 0.05],
             }),

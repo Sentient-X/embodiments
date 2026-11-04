@@ -96,7 +96,7 @@ pub use layout::{LAYOUT_SCHEMA, LayoutControl, LayoutError, RobotLayout, ServedI
 pub use masked::{Masked, ReadOnly, SENSE_PERIOD, SENSE_RETRY, SENSE_RETRY_MAX, check_available};
 pub use media::{
     AudioChunk, AudioSource, CaptureError, CapturedAt, Exposure, FrameSource, I420Image,
-    MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Pose, Track, View, is_track_name,
+    MEDIA_SCHEMA, MediaPlan, MediaPlanError, Microphone, Track, View, is_track_name,
 };
 pub use rail::{
     AxisDerate, DerateLimits, OVER_RAIL, OverRail, REFUSE_ABOVE, RailCheck, Rails, RailsError,

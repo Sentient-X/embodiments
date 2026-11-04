@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use crate::IkError;
 use crate::hull::Piece;
-use crate::math::{V3, add, dot, mat_vec, norm, scale, sub};
 use crate::model::Model;
+use sx_frames::linalg::{Vec3, add, dot, mat_vec, norm, scale, sub};
 
 pub const PROXIES_SCHEMA: &str = "sx.collision-proxies/v4";
 
@@ -62,7 +62,7 @@ enum Direction {
 }
 
 impl Direction {
-    const fn unit(self) -> V3 {
+    const fn unit(self) -> Vec3 {
         match self {
             Self::PosX => [1.0, 0.0, 0.0],
             Self::NegX => [-1.0, 0.0, 0.0],
@@ -76,8 +76,8 @@ impl Direction {
 #[serde(deny_unknown_fields)]
 struct CapsuleDocument {
     link: String,
-    a: V3,
-    b: V3,
+    a: Vec3,
+    b: Vec3,
     radius: f64,
 }
 
@@ -85,7 +85,7 @@ struct CapsuleDocument {
 #[serde(deny_unknown_fields)]
 struct HullDocument {
     link: String,
-    points: Vec<V3>,
+    points: Vec<Vec3>,
 }
 
 #[derive(Deserialize)]
@@ -99,16 +99,16 @@ struct Ignored {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Capsule {
     pub link: usize,
-    pub a: V3,
-    pub b: V3,
+    pub a: Vec3,
+    pub b: Vec3,
     pub radius: f64,
 }
 
 /// An axis-aligned box in the root frame: a table, a wall, a machine.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Obstacle {
-    pub min: V3,
-    pub max: V3,
+    pub min: Vec3,
+    pub max: Vec3,
 }
 
 /// The body's proxies and the capsule pairs a self-collision check compares.
@@ -273,7 +273,7 @@ fn rigid(model: &Model, a: usize, b: usize) -> bool {
 /// The closest points of segments `p0`-`p1` and `q0`-`q1` (Ericson, *Real-Time Collision
 /// Detection* 5.1.9).
 #[must_use]
-pub fn closest_segments(p0: V3, p1: V3, q0: V3, q1: V3) -> (V3, V3) {
+pub fn closest_segments(p0: Vec3, p1: Vec3, q0: Vec3, q1: Vec3) -> (Vec3, Vec3) {
     let (d1, d2, r) = (sub(p1, p0), sub(q1, q0), sub(p0, q0));
     let (a, e, f) = (dot(d1, d1), dot(d2, d2), dot(d2, r));
     let tiny = 1e-18;
@@ -308,7 +308,7 @@ pub fn closest_segments(p0: V3, p1: V3, q0: V3, q1: V3) -> (V3, V3) {
 
 /// The signed distance from `p` to `obstacle` (negative inside) and the outward direction.
 #[must_use]
-pub fn box_distance(obstacle: &Obstacle, p: V3) -> (f64, V3) {
+pub fn box_distance(obstacle: &Obstacle, p: Vec3) -> (f64, Vec3) {
     let clamped = [
         p[0].clamp(obstacle.min[0], obstacle.max[0]),
         p[1].clamp(obstacle.min[1], obstacle.max[1]),
@@ -339,7 +339,7 @@ pub fn box_distance(obstacle: &Obstacle, p: V3) -> (f64, V3) {
 /// The point of segment `a`-`b` nearest `obstacle` (signed distance is convex along a
 /// segment, so a fixed golden-section search finds it), its signed distance and direction.
 #[must_use]
-pub fn segment_box(obstacle: &Obstacle, a: V3, b: V3) -> (V3, f64, V3) {
+pub fn segment_box(obstacle: &Obstacle, a: Vec3, b: Vec3) -> (Vec3, f64, Vec3) {
     const STEPS: usize = 40;
     let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
     let at = |s: f64| add(a, scale(sub(b, a), s));

@@ -59,7 +59,6 @@
 mod body;
 mod geometry;
 pub mod hull;
-mod math;
 mod model;
 pub mod placement;
 mod qp;
@@ -74,7 +73,6 @@ pub use body::{Body, Limb, Target, Task};
 pub use geometry::{
     Capsule, Obstacle, PROXIES_SCHEMA, Proxies, box_distance, closest_segments, segment_box,
 };
-pub use math::Iso;
 pub use model::{Frames, Model};
 pub use solve::{
     Active, Caps, Clearance, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings,

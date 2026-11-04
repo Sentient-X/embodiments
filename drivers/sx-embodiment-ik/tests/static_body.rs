@@ -16,6 +16,7 @@ use sx_embodiment_drivers::kinematics::Tree;
 use sx_embodiment_ik::{
     Active, Body, Caps, Ik, Reach, STATIC_UPPER_BODY_URDF, Settings, Solve, Target,
 };
+use sx_frames::{Pose, QuaternionLayout};
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
 /// the clock, and run on a loaded machine.
@@ -104,14 +105,7 @@ fn rest(ik: &Ik) -> Vec<f64> {
 fn pose_targets(ik: &Ik, q: &[f64]) -> Vec<Option<Target>> {
     let frames = ik.body().model().poses(q);
     (0..2)
-        .map(|limb| {
-            let pose = ik.body().frame(&frames, limb).to_transform();
-            let p = sx_embodiment_drivers::kinematics::pose_of(&pose);
-            Some(Target::Pose {
-                translation_m: p.translation_m,
-                rotation_xyzw: p.rotation_xyzw,
-            })
-        })
+        .map(|limb| Some(Target::Pose(ik.body().frame(&frames, limb).pose())))
         .chain([Some(Target::LookAt {
             point_m: [0.6, 0.0, 0.1],
         })])
@@ -141,7 +135,7 @@ fn forward_kinematics_is_the_trees() {
             })
             .expect("poses");
         for (a, b) in ours.links.iter().zip(&theirs) {
-            for (x, y) in a.to_transform().iter().zip(b) {
+            for (x, y) in a.to_row_major().iter().zip(b) {
                 assert!((x - y).abs() < 1e-12, "{x} != {y}");
             }
         }
@@ -166,10 +160,10 @@ fn the_declared_table_ends_at_the_edge_and_the_arms_reach_below_it_in_front() {
     let solve = |ik: &mut Ik, x: f64, z: f64| {
         let mut q = rest(ik);
         let at = |y: f64| {
-            Some(Target::Pose {
+            Some(Target::Pose(Pose {
                 translation_m: [x, y, z],
-                rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
-            })
+                rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, 0.0, 1.0]),
+            }))
         };
         let targets = [at(0.2), at(-0.2), None];
         for _ in 0..400 {
@@ -231,19 +225,19 @@ fn limits_speed_and_acceleration_hold_and_no_proxy_penetrates_under_random_targe
             });
             (0..2)
                 .map(|_| {
-                    Some(Target::Pose {
+                    Some(Target::Pose(Pose {
                         translation_m: [
                             rng.uniform(-1.0, 1.0),
                             rng.uniform(-1.0, 1.0),
                             rng.uniform(-0.6, 1.0),
                         ],
-                        rotation_xyzw: [
+                        rotation: QuaternionLayout::Xyzw.read([
                             rng.uniform(-1.0, 1.0),
                             rng.uniform(-1.0, 1.0),
                             rng.uniform(-1.0, 1.0),
                             rng.uniform(-1.0, 1.0),
-                        ],
-                    })
+                        ]),
+                    }))
                 })
                 .chain([look])
                 .collect()
@@ -326,10 +320,10 @@ fn reachable_targets_converge_within_millimetres() {
 fn an_unreachable_target_degrades_and_says_so() {
     let mut ik = ghost();
     let mut q = rest(&ik);
-    let far = Some(Target::Pose {
+    let far = Some(Target::Pose(Pose {
         translation_m: [1.5, 0.3, 0.2],
-        rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
-    });
+        rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, 0.0, 1.0]),
+    }));
     let mut last = None;
     for _ in 0..300 {
         let step = ik
@@ -548,7 +542,7 @@ fn a_small_hand_move_is_a_small_joint_move() {
         let hold = [hold[0], hold[1], None];
         let mut targets = hold;
         for target in &mut targets[..2] {
-            if let Some(Target::Pose { translation_m, .. }) = target {
+            if let Some(Target::Pose(Pose { translation_m, .. })) = target {
                 for (t, s) in translation_m.iter_mut().zip(shift) {
                     *t += s;
                 }

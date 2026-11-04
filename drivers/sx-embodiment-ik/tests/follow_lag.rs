@@ -26,8 +26,9 @@
 use std::collections::BTreeMap;
 use std::f64::consts::TAU;
 
-use sx_embodiment_ik::teleop::{Pose, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use sx_frames::{Pose, QuaternionLayout};
 
 const DT: f64 = 0.01;
 const SECONDS: f64 = 8.0;
@@ -95,7 +96,7 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
         .expect("left");
     let tool = |q: &[f64]| body.frame(&body.model().poses(q), left);
     let start = tool(&rest);
-    let start_q = sx_embodiment_drivers::kinematics::pose_of(&start.to_transform()).rotation_xyzw;
+    let start_q = start.pose().rotation;
     let mut teleop =
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
     // Answers, not the clock: a debug build or a loaded host past the station's 4 ms budget
@@ -113,7 +114,8 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
         let (offset, roll) = path(tick as f64 * DT);
         let target = Pose {
             translation_m: [0, 1, 2].map(|k| start.t[k] + offset[k]),
-            rotation_xyzw: turned_about_x(roll, start_q),
+            rotation: QuaternionLayout::Xyzw
+                .read(turned_about_x(roll, QuaternionLayout::Xyzw.write(start_q))),
         };
         let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
         let targets = Targets {

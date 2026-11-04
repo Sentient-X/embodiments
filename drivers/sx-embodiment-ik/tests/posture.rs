@@ -11,7 +11,8 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::Body;
-use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_frames::{Pose, QuaternionLayout};
 
 const DT: f64 = 0.02;
 const TOOL_SPEED: f64 = 0.15;
@@ -130,7 +131,7 @@ fn run_holding(posture: BTreeMap<String, f64>, free_roll: bool) -> Run {
         targets.free_roll[0] = free_roll;
         targets.tcp[0] = Some(Pose {
             translation_m: [0, 1, 2].map(|k| start.t[k] + (goal[k] - start.t[k]) * fraction),
-            rotation_xyzw: quaternion,
+            rotation: QuaternionLayout::Xyzw.read(quaternion),
         });
         let given = if step == 0 { &measured } else { &free };
         let answer = teleop
@@ -273,7 +274,7 @@ fn a_target_rolled_about_the_approach_axis_turns_the_wrist_only_when_the_roll_is
         targets.free_roll[0] = free_roll;
         targets.tcp[0] = Some(Pose {
             translation_m: start.t,
-            rotation_xyzw: rotation,
+            rotation: QuaternionLayout::Xyzw.read(rotation),
         });
         let (mut travel, mut residual) = (0.0, (0.0, 0.0));
         teleop.reset();
@@ -333,7 +334,7 @@ fn a_free_roll_on_a_limb_with_no_approach_axis_is_refused() {
     targets.free_roll[0] = true;
     targets.tcp[0] = Some(Pose {
         translation_m: [0.4, 0.1, 0.2],
-        rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+        rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, 0.0, 1.0]),
     });
     let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
     assert!(

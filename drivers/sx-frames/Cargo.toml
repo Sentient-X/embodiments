@@ -1,0 +1,19 @@
+[package]
+name = "sx-frames"
+description = "The frames kernel in Rust: axes, computed basis changes, checked transforms between declared frames, the one ingest, quaternion and Euler codecs; fixed-size and allocation-free"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+allocation-counter = "0.8"
+
+[lints]
+workspace = true

@@ -6,11 +6,10 @@ use std::time::{Duration, Instant};
 use crate::IkError;
 use crate::body::{Body, Target, Task, world};
 use crate::geometry::{Obstacle, closest_segments, segment_box};
-use crate::math::{
-    V3, cross, dot, from_quaternion, log, mat_mul, mat_vec, norm, scale, sub, transpose,
-};
 use crate::model::Frames;
 use crate::qp::Qp;
+use sx_frames::linalg::{Vec3, cross, dot, mat_mul, mat_vec, norm, scale, sub, transpose};
+use sx_frames::{QuaternionLayout, matrix_rotation_vector};
 
 /// Per-axis speed (unit/s) and acceleration (unit/s^2) caps, in [`crate::Model::axes`] order.
 #[derive(Clone, Debug, PartialEq)]
@@ -307,9 +306,9 @@ enum Pair {
     Capsules {
         i: usize,
         j: usize,
-        x: V3,
-        y: V3,
-        direction: V3,
+        x: Vec3,
+        y: Vec3,
+        direction: Vec3,
     },
     /// A capsule and an obstacle.
     Scene(usize, usize),
@@ -333,9 +332,9 @@ struct Workspace {
     seen: Frames,
     /// Per axis, where it was measured, or where the step starts when it was not.
     seen_q: Vec<f64>,
-    jv: Vec<V3>,
-    jw: Vec<V3>,
-    jp: Vec<V3>,
+    jv: Vec<Vec3>,
+    jw: Vec<Vec3>,
+    jp: Vec<Vec3>,
     h: Vec<f64>,
     g: Vec<f64>,
     task: Vec<f64>,
@@ -867,18 +866,13 @@ impl Ik {
         for (limb, target) in self.body.limbs.iter().zip(targets) {
             let fits = match (limb.task, target) {
                 (_, None) => true,
-                (
-                    Task::Pose,
-                    Some(Target::Pose {
-                        translation_m,
-                        rotation_xyzw,
-                    }),
-                ) => {
-                    translation_m
+                (Task::Pose, Some(Target::Pose(target))) => {
+                    target
+                        .translation_m
                         .iter()
-                        .chain(rotation_xyzw)
+                        .chain(&QuaternionLayout::Xyzw.write(target.rotation))
                         .all(|v| v.is_finite())
-                        && rotation_xyzw.iter().map(|v| v * v).sum::<f64>() > 1e-12
+                        && target.rotation.norm_squared() > 1e-12
                 }
                 (Task::LookAt { .. }, Some(Target::LookAt { point_m })) => {
                     point_m.iter().all(|v| v.is_finite())
@@ -1029,20 +1023,14 @@ impl Ik {
             body.model
                 .angular_jacobian(&w.frames, limb.frame, &mut w.jw);
             match (limb.task, target) {
-                (
-                    Task::Pose,
-                    Target::Pose {
-                        translation_m,
-                        rotation_xyzw,
-                    },
-                ) => {
+                (Task::Pose, Target::Pose(target)) => {
                     // Each error is closed no faster than the limb can still stop on it (as a
                     // collision row's approach is): asking for the whole error in one tick
                     // overshoots against the acceleration caps, and the overshoot wanders
                     // the arm's free direction tick after tick.
-                    let e_p = sub(*translation_m, pose.t);
-                    let goal = from_quaternion(*rotation_xyzw);
-                    let e_r = log(&mat_mul(&goal, &transpose(&pose.r)));
+                    let e_p = sub(target.translation_m, pose.t);
+                    let goal = target.rotation.matrix();
+                    let e_r = matrix_rotation_vector(&mat_mul(&goal, &transpose(&pose.r)));
                     let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
@@ -1700,16 +1688,10 @@ impl Ik {
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let pose = w.after.links[limb.frame];
             let (residual_m, residual_rad) = match (limb.task, target) {
-                (
-                    _,
-                    Some(Target::Pose {
-                        translation_m,
-                        rotation_xyzw,
-                    }),
-                ) => (
-                    norm(sub(*translation_m, pose.t)),
-                    norm(log(&mat_mul(
-                        &from_quaternion(*rotation_xyzw),
+                (_, Some(Target::Pose(target))) => (
+                    norm(sub(target.translation_m, pose.t)),
+                    norm(matrix_rotation_vector(&mat_mul(
+                        &target.rotation.matrix(),
                         &transpose(&pose.r),
                     ))),
                 ),
@@ -1815,7 +1797,7 @@ fn capsule_distance(
     i: usize,
     j: usize,
     refine_below: f64,
-) -> (f64, V3, V3, V3, bool) {
+) -> (f64, Vec3, Vec3, Vec3, bool) {
     let (p, c) = (&body.proxies.capsules[i], &body.proxies.capsules[j]);
     let (pa, pb) = world(frames, p);
     let (qa, qb) = world(frames, c);
@@ -1852,10 +1834,10 @@ fn capsule_distance(
 fn point_row(
     body: &Body,
     frames: &Frames,
-    scratch: &mut [V3],
+    scratch: &mut [Vec3],
     link: usize,
-    point: V3,
-    direction: V3,
+    point: Vec3,
+    direction: Vec3,
     sign: f64,
     row: &mut [f64],
 ) {
@@ -1879,7 +1861,7 @@ fn point_row(
 /// What hides `tool` from the body's first camera at `frames`: the proxy the line of sight
 /// passes through, short of its last [`Settings::sight_tool_m`] (the tool itself). Proxies
 /// on the camera's own neck (`skip`) never stand between it and what it sees.
-fn hidden(body: &Body, frames: &Frames, skip: &[bool], tool: V3, s: &Settings) -> Option<usize> {
+fn hidden(body: &Body, frames: &Frames, skip: &[bool], tool: Vec3, s: &Settings) -> Option<usize> {
     let camera = body
         .limbs
         .iter()
@@ -1930,7 +1912,7 @@ fn least_squares(h: &mut [f64], g: &mut [f64], row: &[f64], target: f64, weight:
 /// them. The bare cross product vanishes at 180 degrees too, so a frame facing straight away
 /// from its target never turned (a neck folded behind the hands on the bench); there, any
 /// axis across `f` turns it.
-fn pointing_error(f: V3, u: V3) -> V3 {
+fn pointing_error(f: Vec3, u: Vec3) -> Vec3 {
     let sine = cross(f, u);
     let (s_norm, cosine) = (norm(sine), dot(f, u));
     let angle = s_norm.atan2(cosine);
@@ -1945,7 +1927,7 @@ fn pointing_error(f: V3, u: V3) -> V3 {
 }
 
 /// Two unit vectors across unit `a` and across each other.
-fn across(a: V3) -> [V3; 2] {
+fn across(a: Vec3) -> [Vec3; 2] {
     let other = if a[0].abs() < 0.9 {
         [1.0, 0.0, 0.0]
     } else {
@@ -1967,10 +1949,10 @@ fn across(a: V3) -> [V3; 2] {
 /// `d` is large and the approach slows instead.
 #[allow(clippy::too_many_arguments)]
 fn approach(
-    e_p: V3,
-    e_r: V3,
-    jv: &[V3],
-    jw: &[V3],
+    e_p: Vec3,
+    e_r: Vec3,
+    jv: &[Vec3],
+    jw: &[Vec3],
     solved: &[usize],
     caps: &Caps,
     s: &Settings,
@@ -2023,8 +2005,8 @@ fn approach(
 /// one tick closes, no more than the neck can still stop on along its damped least-squares
 /// direction.
 fn pointing_approach(
-    e: V3,
-    jl: &[V3],
+    e: Vec3,
+    jl: &[Vec3],
     solved: &[usize],
     caps: &Caps,
     s: &Settings,
@@ -2063,7 +2045,7 @@ fn pointing_approach(
 /// (`max_error_m`, `max_error_rad`), and together, weighed as the solve weighs them, to `most`
 /// metres when the tool has a speed ([`Ik::set_tool_speed`]): a turn left behind is not caught
 /// up faster than the tool may move, nor dragging the tool point with it.
-fn within_tool_speed(e_p: V3, e_r: V3, most: Option<f64>, s: &Settings) -> (V3, V3) {
+fn within_tool_speed(e_p: Vec3, e_r: Vec3, most: Option<f64>, s: &Settings) -> (Vec3, Vec3) {
     let (e_p, e_r) = (
         clamp_norm(e_p, s.max_error_m),
         clamp_norm(e_r, s.max_error_rad),
@@ -2110,7 +2092,7 @@ fn cholesky_solve(m: &mut [[f64; 6]; 6], b: &mut [f64; 6]) {
     }
 }
 
-fn clamp_norm(v: V3, most: f64) -> V3 {
+fn clamp_norm(v: Vec3, most: f64) -> Vec3 {
     let length = norm(v);
     if length > most {
         scale(v, most / length)
@@ -2135,17 +2117,13 @@ fn deadline_after(budget: Duration) -> Option<Instant> {
 mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
-    use crate::teleop::{Pose, Targets, Teleop, TeleopConfig};
+    use crate::teleop::{Targets, Teleop, TeleopConfig};
     use crate::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve};
+    use sx_frames::Pose;
 
     fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
         let body = teleop.ik().body();
-        let frame = body.frame(&body.model().poses(q), hand).to_transform();
-        let p = sx_embodiment_drivers::kinematics::pose_of(&frame);
-        Pose {
-            translation_m: p.translation_m,
-            rotation_xyzw: p.rotation_xyzw,
-        }
+        body.frame(&body.model().poses(q), hand).pose()
     }
 
     /// The right hand reaching for the left one, a follower two ticks behind its commands, at
@@ -2191,7 +2169,7 @@ mod tests {
                     Some(Pose {
                         translation_m: [0, 1, 2]
                             .map(|k| left0.translation_m[k] + [0.03, 0.0, -0.04][k]),
-                        rotation_xyzw: left0.rotation_xyzw,
+                        rotation: left0.rotation,
                     }),
                     None,
                 ],
@@ -2200,7 +2178,7 @@ mod tests {
             if t >= 1.0 {
                 targets.tcp[1] = Some(Pose {
                     translation_m: solve.model().poses(&real).links[left_tcp].t,
-                    rotation_xyzw: right0.rotation_xyzw,
+                    rotation: right0.rotation,
                 });
             }
             let step = solve

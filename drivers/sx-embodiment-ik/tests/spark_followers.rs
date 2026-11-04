@@ -30,10 +30,11 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use sx_embodiment_ik::teleop::{Pose, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{
     READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
 };
+use sx_frames::Pose;
 
 const SUBSTEPS: usize = 20;
 
@@ -275,11 +276,7 @@ fn link(teleop: &Teleop, name: &str) -> usize {
 
 fn pose_at(teleop: &Teleop, q: &[f64], name: &str) -> Pose {
     let frame = teleop.model().poses(q).links[link(teleop, name)];
-    let p = sx_embodiment_drivers::kinematics::pose_of(&frame.to_transform());
-    Pose {
-        translation_m: frame.t,
-        rotation_xyzw: p.rotation_xyzw,
-    }
+    frame.pose()
 }
 
 fn base(obstacles: Vec<[f64; 6]>, m: &Motor) -> (Teleop, Vec<f64>) {
@@ -417,13 +414,13 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
         let mut targets = Targets::default();
         let at = |offset: [f64; 3]| Pose {
             translation_m: [0, 1, 2].map(|k| left0.translation_m[k] + offset[k]),
-            rotation_xyzw: left0.rotation_xyzw,
+            rotation: left0.rotation,
         };
         let toward_right = |k: f64| Pose {
             translation_m: [0, 1, 2].map(|i| {
                 left0.translation_m[i] + k * (right0.translation_m[i] - left0.translation_m[i])
             }),
-            rotation_xyzw: left0.rotation_xyzw,
+            rotation: left0.rotation,
         };
         let since = (t - turn).max(0.0);
         targets.tcp[0] = Some(match scene {
@@ -468,7 +465,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
         if matches!(scene, Scene::Reach { .. }) && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: pose_at(&teleop, &real, "left_gripper_tcp").translation_m,
-                rotation_xyzw: right0.rotation_xyzw,
+                rotation: right0.rotation,
             });
         }
         targets.tool_speed_m_s = [tool_speed; 2];
