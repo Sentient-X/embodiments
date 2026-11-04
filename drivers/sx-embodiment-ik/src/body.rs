@@ -243,6 +243,146 @@ impl Body {
             .point_jacobian(frames, frame, frames.links[frame].t, linear);
         self.model.angular_jacobian(frames, frame, angular);
     }
+
+    /// How fast limb `index`'s frame can move along unit `direction` (root frame) at `frames`,
+    /// m/s, with each axis at most `speed[axis]` rad/s (indices into [`Model::axes`]; 0 for an
+    /// axis held still): the tool speed the joints deliver at this pose, not a constant.
+    ///
+    /// The joints move as the solve's damped least-squares answer `d = J' (J J' + damping
+    /// I)^-1 u` for the frame's origin's rows `J`, so the frame moves along `u` at
+    /// `min_i speed_i / |d_i|`. Near a singularity the weak direction is slow, and so is this.
+    #[must_use]
+    pub fn tool_speed_along(
+        &self,
+        frames: &Frames,
+        index: usize,
+        speed: &[f64],
+        direction: Vec3,
+    ) -> f64 {
+        let rows = self.response(frames, index, speed, false);
+        along(&rows, speed, direction)
+    }
+
+    /// How fast limb `index`'s frame can move (m/s) and turn (rad/s) at `frames` in its fastest
+    /// direction, each axis at most `speed[axis]` rad/s ([`Body::tool_speed_along`] over the 26
+    /// directions of a cube's faces, edges and corners). A program's tool asked to go faster
+    /// than this is asked for what no joint can give; slower directions are held by the joints'
+    /// own caps in the solve.
+    #[must_use]
+    pub fn tool_capability(&self, frames: &Frames, index: usize, speed: &[f64]) -> ToolCapability {
+        let fastest = |angular: bool| {
+            let rows = self.response(frames, index, speed, angular);
+            let mut best = 0.0_f64;
+            for x in -1..=1_i32 {
+                for y in -1..=1_i32 {
+                    for z in -1..=1_i32 {
+                        if x == 0 && y == 0 && z == 0 {
+                            continue;
+                        }
+                        let u = [f64::from(x), f64::from(y), f64::from(z)];
+                        let length = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+                        best = best.max(along(&rows, speed, u.map(|v| v / length)));
+                    }
+                }
+            }
+            if best.is_finite() { best } else { 0.0 }
+        };
+        ToolCapability {
+            linear_m_s: fastest(false),
+            angular_rad_s: fastest(true),
+        }
+    }
+
+    /// Per axis that moves limb `index` and may (`speed` above 0): the row `b_i` of
+    /// `J' (J J' + damping I)^-1` for its linear (or `angular`) rows `J`.
+    fn response(
+        &self,
+        frames: &Frames,
+        index: usize,
+        speed: &[f64],
+        angular: bool,
+    ) -> Vec<(usize, Vec3)> {
+        let limb = &self.limbs[index];
+        let mut j = vec![[0.0; 3]; self.model.axes().len()];
+        if angular {
+            self.model.angular_jacobian(frames, limb.frame, &mut j);
+        } else {
+            let origin = frames.links[limb.frame].t;
+            self.model
+                .point_jacobian(frames, limb.frame, origin, &mut j);
+        }
+        let moving: Vec<usize> = limb
+            .axes
+            .iter()
+            .copied()
+            .filter(|&axis| speed.get(axis).is_some_and(|s| *s > 0.0))
+            .collect();
+        let mut m = [[0.0; 3]; 3];
+        for (a, line) in m.iter_mut().enumerate() {
+            for (b, cell) in line.iter_mut().enumerate() {
+                *cell = moving.iter().map(|&axis| j[axis][a] * j[axis][b]).sum();
+            }
+            line[a] += CAPABILITY_DAMPING;
+        }
+        let Some(inverse) = inverse3(&m) else {
+            return Vec::new();
+        };
+        moving
+            .iter()
+            .map(|&axis| {
+                let b = [0, 1, 2].map(|k| (0..3).map(|a| j[axis][a] * inverse[a][k]).sum::<f64>());
+                (axis, b)
+            })
+            .collect()
+    }
+}
+
+/// The speed along unit `u` at which the first axis of `rows` ([`Body::response`]) reaches its
+/// cap; 0 where nothing moves.
+fn along(rows: &[(usize, Vec3)], speed: &[f64], u: Vec3) -> f64 {
+    let most = rows
+        .iter()
+        .map(|(axis, b)| (b[0] * u[0] + b[1] * u[1] + b[2] * u[2]).abs() / speed[*axis])
+        .fold(0.0, f64::max);
+    if most > 1e-12 { 1.0 / most } else { 0.0 }
+}
+
+/// The damped least-squares damping [`Body::tool_speed_along`] answers with: the solve's own
+/// (`Settings::damping`).
+const CAPABILITY_DAMPING: f64 = 1e-4;
+
+/// How fast a limb's frame can move and turn in its fastest direction ([`Body::tool_capability`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolCapability {
+    pub linear_m_s: f64,
+    pub angular_rad_s: f64,
+}
+
+fn inverse3(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let c =
+        |r0: usize, c0: usize, r1: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
+    let det = m[0][0] * c(1, 1, 2, 2) - m[0][1] * c(1, 0, 2, 2) + m[0][2] * c(1, 0, 2, 1);
+    if det.abs() < 1e-18 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    Some([
+        [
+            c(1, 1, 2, 2) * inv,
+            -c(0, 1, 2, 2) * inv,
+            c(0, 1, 1, 2) * inv,
+        ],
+        [
+            -c(1, 0, 2, 2) * inv,
+            c(0, 0, 2, 2) * inv,
+            -c(0, 0, 1, 2) * inv,
+        ],
+        [
+            c(1, 0, 2, 1) * inv,
+            -c(0, 0, 2, 1) * inv,
+            c(0, 0, 1, 1) * inv,
+        ],
+    ])
 }
 
 pub(crate) fn world(frames: &Frames, capsule: &Capsule) -> (Vec3, Vec3) {

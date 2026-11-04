@@ -735,3 +735,92 @@ fn a_reading_that_jumps_is_no_speed() {
         );
     }
 }
+
+/// The tool speed a pose allows ([`Body::tool_speed_along`]) is the speed the solve moves the
+/// tool at along it: a 10 cm jump of the left hand from its Ready pose along each of +-x and
+/// +-y peaks within 20 % of it (a 10 cm jump is short of full speed on +x), and never above it by more than the QP's own slack over the
+/// damped least-squares answer (5 %). Its fastest direction ([`Body::tool_capability`]) is no
+/// slower than any one direction.
+#[test]
+fn the_tool_speed_a_pose_allows_is_the_speed_the_solve_reaches() {
+    let body = Body::static_upper_body();
+    let axes = body.model().axes();
+    let index = |name: &str| axes.iter().position(|a| a.name == name).expect(name);
+    let mut q = vec![0.0; axes.len()];
+    for (joint, value) in [
+        ("left_shoulder_pitch_joint", -0.15),
+        ("left_shoulder_roll_joint", 0.15),
+        ("left_elbow_pitch_joint", -0.3),
+        ("left_wrist_pitch_joint", 0.2),
+        ("right_shoulder_pitch_joint", 0.15),
+        ("right_shoulder_roll_joint", -0.15),
+        ("right_elbow_pitch_joint", 0.3),
+        ("right_wrist_pitch_joint", -0.2),
+    ] {
+        q[index(joint)] = value;
+    }
+    // The governed caps of 2026-11-04 at share 1 (rad/s, rad/s^2), the torso held.
+    let cap = |name: &str| -> (f64, f64) {
+        if name == "torso_joint" {
+            (0.0, 1.0)
+        } else if name.contains("shoulder") {
+            (1.16, 13.5)
+        } else if name.contains("upper_arm") {
+            (0.96, 15.4)
+        } else if name.contains("elbow") || name.contains("forearm") {
+            (1.22, 19.6)
+        } else if name.contains("wrist") {
+            (3.22, 89.9)
+        } else {
+            (3.0, 16.0)
+        }
+    };
+    let speed: Vec<f64> = axes.iter().map(|a| cap(&a.name).0).collect();
+    let solve_caps = Caps {
+        speed: speed.iter().map(|s| s.max(1e-6)).collect(),
+        accel: axes.iter().map(|a| cap(&a.name).1).collect(),
+    };
+    let start = body.model().poses(&q);
+    let fastest = body.tool_capability(&start, 0, &speed);
+    let dt = 0.01;
+    for u in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]] {
+        let allowed = body.tool_speed_along(&start, 0, &speed, u);
+        assert!(
+            allowed > 0.1 && allowed <= fastest.linear_m_s,
+            "{u:?}: {allowed}"
+        );
+        let mut ik = Ik::new(body.clone(), solve_caps.clone(), settings(), Vec::new()).expect("ik");
+        let mut held = q.clone();
+        ik.reset();
+        let from = body.frame(&start, 0).pose();
+        let target = Pose {
+            translation_m: [0, 1, 2].map(|k| from.translation_m[k] + 0.1 * u[k]),
+            rotation: from.rotation,
+        };
+        let right = body.frame(&start, 1).pose();
+        let mut peak = 0.0_f64;
+        let mut tool = from.translation_m;
+        for _ in 0..100 {
+            let step = ik
+                .step(
+                    &held,
+                    &ALL[..held.len()],
+                    &[Some(Target::Pose(target)), Some(Target::Pose(right)), None],
+                    dt,
+                )
+                .expect("a step");
+            held.copy_from_slice(&step.q);
+            let now = body.frame(&body.model().poses(&held), 0).t;
+            let moved = (0..3)
+                .map(|k| (now[k] - tool[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            peak = peak.max(moved / dt);
+            tool = now;
+        }
+        assert!(
+            peak <= allowed * 1.05 && peak >= allowed * 0.8,
+            "{u:?}: the solve peaked at {peak:.3} m/s, the pose allows {allowed:.3}"
+        );
+    }
+}
