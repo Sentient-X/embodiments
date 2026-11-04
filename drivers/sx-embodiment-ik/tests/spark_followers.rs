@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{
-    READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
+    READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve, ToolSpeed,
 };
 use sx_frames::Pose;
 
@@ -468,7 +468,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
                 rotation: right0.rotation,
             });
         }
-        targets.tool_speed_m_s = [tool_speed; 2];
+        targets.tool_speed = [tool_speed.map(linear); 2];
         let measured: Vec<Option<f64>> = real.iter().map(|x| Some(x + m.noise * rnd())).collect();
         let before = teleop.model().poses(&reference);
         let step = teleop
@@ -856,5 +856,13 @@ fn the_sparks_arm_keeps_clear_of_a_box_it_sweeps_past() {
     }
     for (line, out) in table(&cases) {
         assert!(out.clear >= 0.005 && out.real > 0.0, "{line}");
+    }
+}
+
+/// A tool speed bounding only the tool point's motion, `m_s`; its turn is the joints' to bound.
+fn linear(m_s: f64) -> ToolSpeed {
+    ToolSpeed {
+        m_s,
+        rad_s: f64::INFINITY,
     }
 }

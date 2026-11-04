@@ -10,7 +10,7 @@ use sx_embodiment_ik::teleop::{
     TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{
-    Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
+    Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve, ToolSpeed,
 };
 use sx_frames::{Pose, QuaternionLayout};
 
@@ -349,17 +349,18 @@ fn turned(turn: [f64; 4], rotation: [f64; 4]) -> [f64; 4] {
     ]
 }
 
-/// Hands given a tool speed move their tool points no faster than that, every tick, however far
-/// their targets and however much they must turn on the way, and end as near them as without
-/// one; without one they go as fast as the joints allow, which let act-sim's tipped grasp reach
-/// 0.55 m/s against a 0.288 m/s goal (2026-10-31). Both hands and the head are driven, so the
-/// torso is free and carries both arms: the whole step is shortened, never one limb's columns
-/// (which rescaled the shared torso under the other hand, and broke the rows it held). The
-/// joints accelerate as act-sim's do (a twentieth of a second to full speed), where holding the
-/// tool never needs a joint to slow past its cap; past that the cap gives way to the joints'.
+/// Hands given a tool speed move and turn their tools no faster than that, every tick, however
+/// far their targets and however much they must turn on the way, and end as near them as
+/// without one; without one they go as fast as the joints allow, which let act-sim's tipped
+/// grasp reach 0.55 m/s against a 0.288 m/s goal (2026-10-31). Both hands and the head are
+/// driven, so the torso is free and carries both arms: the whole step is shortened, never one
+/// limb's columns (which rescaled the shared torso under the other hand, and broke the rows it
+/// held). The joints accelerate as act-sim's do (a twentieth of a second to full speed), where
+/// holding the tool never needs a joint to slow past its cap; past that the cap gives way to
+/// the joints'.
 #[test]
 fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
-    let peak = |speed: Option<f64>| {
+    let peak = |speed: Option<ToolSpeed>| {
         let mut solve = Teleop::new(
             STATIC_UPPER_BODY_URDF,
             STATIC_UPPER_BODY_COLLISION,
@@ -389,7 +390,7 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
         };
         let targets = Targets {
             tcp: [Some(target(from[0], -0.04)), Some(target(from[1], 0.04))],
-            tool_speed_m_s: [speed, speed],
+            tool_speed: [speed; 2],
             head: Some(from[0]),
             ..Targets::default()
         };
@@ -397,33 +398,43 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
         let (measured, available) = (vec![None; width], vec![true; width]);
         solve.reset();
         let mut fastest = 0.0_f64;
-        let mut last = [from[0].translation_m, from[1].translation_m];
+        let mut turned = 0.0_f64;
+        let mut last = from;
         for _ in 0..800 {
             let step = solve
                 .step(&q, &measured, &available, &targets, DT)
                 .expect("a step");
             q.copy_from_slice(&step.q);
             for (hand, last) in last.iter_mut().enumerate() {
-                let now = tcp(&solve, &q, hand).translation_m;
+                let now = tcp(&solve, &q, hand);
                 let moved = (0..3)
-                    .map(|k| (now[k] - last[k]).powi(2))
+                    .map(|k| (now.translation_m[k] - last.translation_m[k]).powi(2))
                     .sum::<f64>()
                     .sqrt();
                 fastest = fastest.max(moved / DT);
+                turned = turned.max(now.rotation.angle_to(last.rotation) / DT);
                 *last = now;
             }
         }
         let goal = targets.tcp[0].expect("left").translation_m;
         let off = (0..3)
-            .map(|k| (last[0][k] - goal[k]).powi(2))
+            .map(|k| (last[0].translation_m[k] - goal[k]).powi(2))
             .sum::<f64>()
             .sqrt();
-        (fastest, off)
+        (fastest, turned, off)
     };
-    let (free, free_off) = peak(None);
-    let (capped, off) = peak(Some(0.05));
+    let (free, free_turn, free_off) = peak(None);
+    let (capped, turned, off) = peak(Some(ToolSpeed {
+        m_s: 0.05,
+        rad_s: 0.1,
+    }));
     assert!(free > 0.1, "unbounded, the joints go faster: {free} m/s");
+    assert!(
+        free_turn > 0.2,
+        "unbounded, they turn faster: {free_turn} rad/s"
+    );
     assert!(capped <= 0.05 * (1.0 + 1e-5), "{capped} m/s against 0.05");
+    assert!(turned <= 0.1 * (1.0 + 1e-5), "{turned} rad/s against 0.1");
     // It ends as near its target as the unbounded hand does, only later.
     assert!(off <= free_off + 0.001, "{off} m off, unbounded {free_off}");
 }
@@ -961,10 +972,13 @@ fn least_clearance(
     noise: f64,
     glitch: Option<(&str, f64)>,
 ) -> (f64, String, String, f64, u32) {
-    least_clearance_at(dt, case, stopped, follower, noise, glitch, None)
+    let (clear, a, b, lurch, relaxed, _) =
+        least_clearance_at(dt, case, stopped, follower, noise, glitch, None);
+    (clear, a, b, lurch, relaxed)
 }
 
-/// [`least_clearance`] with both hands' tool points held to `tool_speed` m/s.
+/// [`least_clearance`] with both hands' tool points held to `tool_speed` m/s, and the
+/// fastest either hand's commanded tool point moved in a tick, m/s.
 #[allow(clippy::too_many_lines)] // one scene, one follower, one loop
 fn least_clearance_at(
     dt: f64,
@@ -974,7 +988,7 @@ fn least_clearance_at(
     noise: f64,
     glitch: Option<(&str, f64)>,
     tool_speed: Option<f64>,
-) -> (f64, String, String, f64, u32) {
+) -> (f64, String, String, f64, u32, f64) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
@@ -1047,6 +1061,7 @@ fn least_clearance_at(
         .map(|(axis, _)| axis)
         .collect();
     let mut was_stalled = vec![false; rest.len()];
+    let mut fastest = 0.0_f64;
     solve.reset();
     for tick in 0_u32.. {
         let t = f64::from(tick) * dt;
@@ -1083,7 +1098,7 @@ fn least_clearance_at(
             ],
             ..Targets::default()
         };
-        targets.tool_speed_m_s = [tool_speed; 2];
+        targets.tool_speed = [tool_speed.map(linear); 2];
         if case == "reach" && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: solve.model().poses(&real).links[left_tcp].t,
@@ -1094,6 +1109,10 @@ fn least_clearance_at(
             .step(&q, &measured, &available, &targets, dt)
             .expect("a step");
         relaxed += u32::from(step.solve == Solve::Relaxed);
+        // A joint stalling or let go jumps its command to where it stands: no motion of the arm.
+        let stall_change = arms
+            .iter()
+            .any(|&axis| step.stalled[axis] != was_stalled[axis]);
         // How far past its acceleration cap any arm or torso joint's command turned this tick
         // (a stalled joint's jump to where it stands, or its release, is not a turn).
         for axis in arms.iter().copied() {
@@ -1106,6 +1125,16 @@ fn least_clearance_at(
         }
         before.copy_from_slice(&q);
         q.copy_from_slice(&step.q);
+        for hand in 0..2 {
+            let (from, to) = (tcp(&solve, &before, hand), tcp(&solve, &q, hand));
+            let moved = (0..3)
+                .map(|k| (to.translation_m[k] - from.translation_m[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if tick > 0 && !stall_change {
+                fastest = fastest.max(moved / dt);
+            }
+        }
         sent.push_back(q.clone());
         let command = sent.pop_front().expect("a command");
         match follower {
@@ -1136,8 +1165,12 @@ fn least_clearance_at(
             }
         }
     }
-    (least.0, least.1, least.2, lurch, relaxed)
+    (least.0, least.1, least.2, lurch, relaxed, fastest)
 }
+
+/// How far past its speed a tool may be commanded where a joint at its acceleration cap stops
+/// the shortening: the speed's fixed faces' furthest corner (1.128) and the linearisation.
+const WITHIN_A_CORNER: f64 = 1.2;
 
 /// The collision margin less a millimetre: a step's linearisation.
 const MARGIN_WITHIN_A_MILLIMETRE: f64 = 0.009;
@@ -1317,6 +1350,11 @@ fn a_row_the_caps_cannot_keep_widens_no_cap() {
 /// held for breaking it, an underdamped follower's step broke such rows by up to 26 mm and came
 /// within 3.0 mm of the box (refute of embodiments 885f73b; 8.6 mm without the tool speed);
 /// shortened past it without being held, 7.0-7.9 mm at 100 and 500 Hz (its second refute).
+/// Nor does a row give the tool its joints' speed: with the tool's speed only a shortening
+/// after the solve, a row asking a lagging arm's command back moved it at up to 1.16 m/s
+/// against 0.2 here (act-sim's 1 m/s burst, 2026-11-04). Held as a cap in the solve, the most
+/// is 0.232: within the speed but where a joint at its acceleration cap stops the shortening
+/// of a step the speed's faces let through at a corner.
 #[test]
 fn a_tool_speed_never_shortens_a_step_past_a_row() {
     std::thread::scope(|scope| {
@@ -1347,11 +1385,19 @@ fn a_tool_speed_never_shortens_a_step_past_a_row() {
             }
         }
         for run in runs {
-            let (dt, case, follower, tool, (clear, a, b, _, _)) = run.join().expect("a case");
-            println!("{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m");
+            let (dt, case, follower, tool, (clear, a, b, _, _, fastest)) =
+                run.join().expect("a case");
+            println!(
+                "{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m, \
+                 tool at {fastest} m/s"
+            );
             assert!(
                 clear >= 0.0085,
                 "{case} at {dt} s, {follower:?}, tool {tool} m/s: {a} and {b} {clear} m apart"
+            );
+            assert!(
+                fastest <= tool * WITHIN_A_CORNER,
+                "{case} at {dt} s, {follower:?}: tool at {fastest} m/s against {tool}"
             );
         }
     });
@@ -1396,4 +1442,12 @@ fn clearance_table() {
             println!("{}", run.join().expect("a case"));
         }
     });
+}
+
+/// A tool speed bounding only the tool point's motion, `m_s`; its turn is the joints' to bound.
+fn linear(m_s: f64) -> ToolSpeed {
+    ToolSpeed {
+        m_s,
+        rad_s: f64::INFINITY,
+    }
 }
