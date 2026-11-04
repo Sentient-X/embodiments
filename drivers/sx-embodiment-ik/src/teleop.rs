@@ -48,7 +48,9 @@ use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
-use crate::solve::{Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve};
+use crate::solve::{
+    Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, ToolSpeed,
+};
 
 /// The config's schema, written in every config and refused when another.
 pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
@@ -276,10 +278,10 @@ pub struct Targets {
     /// by `tcp`'s rotation) and let the roll about it float: a grasp or a press whose roll
     /// does not matter.
     pub free_roll: [bool; 2],
-    /// Per hand: the most its tool point may move, m/s ([`crate::Ik::set_tool_speed`]): a
-    /// program's goal at its linear speed. `None`: as fast as the joints' caps allow (an
-    /// operator's hands, whose own motion is the speed).
-    pub tool_speed_m_s: [Option<f64>; 2],
+    /// Per hand: the most its tool may move and turn ([`crate::Ik::set_tool_speed`]): a
+    /// program's goal or timed plan at the robot's caps. `None`: as fast as the joints' caps
+    /// allow (an operator's hands, whose own motion is the speed).
+    pub tool_speed: [Option<ToolSpeed>; 2],
     /// The operator's head when they look through the robot (remote): its local +x is the
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
@@ -726,7 +728,7 @@ impl Teleop {
     /// puts the tool, not from where the reference was held back to; at engage (`seeded`)
     /// there is no last command, only the measurement.
     fn bound_tools(&mut self, reference: &[f64], targets: &Targets, seeded: bool) {
-        let from_last = !seeded && targets.tool_speed_m_s.iter().any(Option::is_some);
+        let from_last = !seeded && targets.tool_speed.iter().any(Option::is_some);
         if from_last {
             self.ik
                 .body()
@@ -734,10 +736,10 @@ impl Teleop {
                 .poses_into(reference, &mut self.frames);
         }
         for (limb, hand) in self.hand_of.iter().enumerate() {
-            let speed = hand.and_then(|hand| targets.tool_speed_m_s[hand]);
+            let speed = hand.and_then(|hand| targets.tool_speed[hand]);
             let from = speed
                 .filter(|_| from_last)
-                .map(|_| self.ik.body().frame(&self.frames, limb).t);
+                .map(|_| self.ik.body().frame(&self.frames, limb));
             self.ik.set_tool_speed(limb, speed, from);
         }
     }

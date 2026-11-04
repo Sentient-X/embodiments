@@ -76,7 +76,7 @@ pub use geometry::{
 pub use model::{Frames, Model};
 pub use solve::{
     Active, Caps, Clearance, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings,
-    Solve, Step,
+    Solve, Step, ToolSpeed,
 };
 pub use tool::{Grip, JawKind, Jaws, NoJawsReason, ToolFrame};
 

@@ -9,7 +9,7 @@ use crate::geometry::{Obstacle, closest_segments, segment_box};
 use crate::model::Frames;
 use crate::qp::Qp;
 use sx_frames::linalg::{Vec3, cross, dot, mat_mul, mat_vec, norm, scale, sub, transpose};
-use sx_frames::{QuaternionLayout, matrix_rotation_vector};
+use sx_frames::{Matrix3, QuaternionLayout, Rigid, matrix_rotation_vector};
 
 /// Per-axis speed (unit/s) and acceleration (unit/s^2) caps, in [`crate::Model::axes`] order.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +52,50 @@ impl Caps {
         self
     }
 }
+
+/// The most a limb's tool may move ([`Ik::set_tool_speed`]): its point, m/s, and its turn,
+/// rad/s. Each is a cap of the step, as a joint's speed is: rows give way before it does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolSpeed {
+    pub m_s: f64,
+    /// `f64::INFINITY`: the turn is bounded only by the joints' caps.
+    pub rad_s: f64,
+}
+
+/// The tool's speed rows ([`Ik::set_tool_speed`]): its linearised motion held within the
+/// polytope whose faces are normal to these 26 directions (each axis, each pair of axes, all
+/// three), each face at the speed. It holds the whole ball of the speed, so no direction is
+/// slowed below it; its furthest vertices reach 1.128 of it, which the forward-kinematics check
+/// ([`Ik::bound_tool_speed`]) takes back. Fixed in the root frame, so a step that kept it last
+/// tick keeps it this tick at the same velocity.
+const TOOL_DIRECTIONS: [[i8; 3]; 26] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+    [1, 1, 0],
+    [1, -1, 0],
+    [-1, 1, 0],
+    [-1, -1, 0],
+    [1, 0, 1],
+    [1, 0, -1],
+    [-1, 0, 1],
+    [-1, 0, -1],
+    [0, 1, 1],
+    [0, 1, -1],
+    [0, -1, 1],
+    [0, -1, -1],
+    [1, 1, 1],
+    [1, 1, -1],
+    [1, -1, 1],
+    [1, -1, -1],
+    [-1, 1, 1],
+    [-1, 1, -1],
+    [-1, -1, 1],
+    [-1, -1, -1],
+];
 
 /// The solver's weights and margins.
 #[derive(Clone, Debug, PartialEq)]
@@ -355,6 +399,9 @@ struct Workspace {
     row_measured: Vec<bool>,
     row_binds: Vec<bool>,
     used: usize,
+    /// The rows `..collisions` keep pairs clear; the rest hold tools to their speed
+    /// ([`Ik::set_tool_speed`]), never given way.
+    collisions: usize,
     unit: Vec<f64>,
     answer: Vec<f64>,
     column_active: Vec<Option<Active>>,
@@ -397,10 +444,14 @@ pub struct Ik {
     sight_skip: Vec<bool>,
     /// Last commanded velocity per solved column.
     velocity: Vec<f64>,
-    /// Per limb, the most its tool point may move, m/s, and from where ([`Ik::set_tool_speed`]).
-    tool_speed: Vec<Option<(f64, Option<[f64; 3]>)>>,
+    /// Per limb, the most its tool may move, and from where ([`Ik::set_tool_speed`]).
+    tool_speed: Vec<Option<(ToolSpeed, Option<Rigid>)>>,
     /// Per limb, whether its tool speed bound this tick.
     tool_capped: Vec<bool>,
+    /// Per limb, its tool's motion this tick as the cost asks it, and as the last step moved
+    /// it (point, metres; turn, a rotation vector): the speed rows' own directions.
+    tool_asked: Vec<(Vec3, Vec3)>,
+    tool_moved: Vec<(Vec3, Vec3)>,
     /// Per axis, where the next step must leave it ([`Ik::set_window`]).
     window: Vec<[f64; 2]>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
@@ -516,7 +567,9 @@ impl Ik {
         // want of room. With 32 rows the closest pairs crowded the rest out, arm against arm (up
         // to 86 rows wanted), and the step still said Solved with a dropped row broken by up to
         // 15 mm of its closing (2026-11-03).
-        let k = 4 * (body.proxies.pairs.len() + scene_pairs.len());
+        // And per limb, a tool's speed: its point's and its turn's faces.
+        let k = 4 * (body.proxies.pairs.len() + scene_pairs.len())
+            + 2 * (TOOL_DIRECTIONS.len() + 2) * body.limbs.len();
         // One column more than the solved axes: the rows' slack ([`Ik::solve_qp`]).
         let qp = Qp::new(n + 1, k);
         // Twice: the pairs at the commanded positions and at the measured ones.
@@ -547,6 +600,7 @@ impl Ik {
             row_measured: vec![false; k],
             row_binds: vec![false; k],
             used: 0,
+            collisions: 0,
             unit: vec![1.0; n],
             answer: vec![0.0; n],
             column_active: vec![None; n],
@@ -588,6 +642,8 @@ impl Ik {
             velocity: vec![0.0; n],
             tool_speed: vec![None; limbs],
             tool_capped: vec![false; limbs],
+            tool_asked: vec![([0.0; 3], [0.0; 3]); limbs],
+            tool_moved: vec![([0.0; 3], [0.0; 3]); limbs],
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
@@ -645,6 +701,7 @@ impl Ik {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
+        self.tool_moved.fill(([0.0; 3], [0.0; 3]));
         self.anchored = self.preferred.is_some();
     }
 
@@ -727,22 +784,36 @@ impl Ik {
         w.still[column] - slope / curvature
     }
 
-    /// The most `limb`'s tool point (a pose limb's frame origin) may move from now on, m/s;
-    /// `None`: as fast as its joints' caps allow. A step asks the tool no further than this in
-    /// a tick, its turn counted in (weighed by [`Settings::orientation_m_per_rad`]), and an
-    /// answer whose tool point would move further by forward kinematics is shortened, the
-    /// whole step at once, so a goal at a linear speed lags its target rather than catching up
-    /// faster (act-sim 2026-10-31: 0.55 m/s against a 0.288 m/s goal, catching up to a tipped
-    /// grasp). It gives way only where holding it would need a joint to slow past its
-    /// acceleration cap, which the governor would not do either. `from` is where the tool was
-    /// last commanded, when the step's positions are not (a teleoperation reference held back
-    /// toward a lagging joint): the bound holds from there. A limb out of range or a speed not
-    /// positive and finite clears it.
-    pub fn set_tool_speed(&mut self, limb: usize, speed_m_s: Option<f64>, from: Option<[f64; 3]>) {
+    /// The most `limb`'s tool (a pose limb's frame: its origin, the tool point, and its turn)
+    /// may move from now on; `None`: as fast as its joints' caps allow. Each step keeps the
+    /// tool's motion within both, as it keeps each joint within its speed: the QP holds the
+    /// tool's linearised motion inside a polytope around the speed ([`TOOL_DIRECTIONS`]), and
+    /// collision rows give way before it does, so a step that keeps a pair clear finds a way
+    /// within the tool's speed or keeps the pair as nearly as it can (act-sim 2026-11-04: an
+    /// elastic step opening a measured pair moved the tool point at 1 m/s and turned it at
+    /// 1.9 rad/s against 0.288 m/s and 0.96 rad/s). The answer is then checked by forward
+    /// kinematics and the whole step shortened where the linearisation was off. The cost asks
+    /// no more of the error than both allow, so a goal at a linear speed lags its target rather
+    /// than catching up faster (act-sim 2026-10-31: 0.55 m/s against a 0.288 m/s goal).
+    /// `from` is where the tool was last commanded, when the step's positions are not (a
+    /// teleoperation reference held back toward a lagging joint): the forward-kinematics check
+    /// holds from there. A limb out of range or a linear speed not positive and finite clears
+    /// it; a turn not positive is the same as none.
+    pub fn set_tool_speed(&mut self, limb: usize, speed: Option<ToolSpeed>, from: Option<Rigid>) {
         if let Some(slot) = self.tool_speed.get_mut(limb) {
-            *slot = speed_m_s
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .map(|speed| (speed, from.filter(|p| p.iter().all(|v| v.is_finite()))));
+            *slot = speed.filter(|v| v.m_s.is_finite() && v.m_s > 0.0).map(|v| {
+                let rad_s = if v.rad_s > 0.0 {
+                    v.rad_s
+                } else {
+                    f64::INFINITY
+                };
+                let from = from.filter(|f| {
+                    f.t.iter()
+                        .chain(f.r.iter().flatten())
+                        .all(|v| v.is_finite())
+                });
+                (ToolSpeed { m_s: v.m_s, rad_s }, from)
+            });
         }
     }
 
@@ -942,6 +1013,7 @@ impl Ik {
         }
         self.body.model.poses_into(&w.seen_q, &mut w.seen);
         self.collision_rows(q, dt);
+        self.tool_rows(targets, dt);
         let mut solve = self.keep_feasible(false);
         let mut iterations = self.solve_qp(dt, deadline, false);
         // No step inside the caps keeps every row: the rows give way, as little as they can,
@@ -1011,8 +1083,9 @@ impl Ik {
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let Some(target) = target else { continue };
             // No more of the error than the tool may move this tick: its point and its turn
-            // together, the turn weighed as the solve weighs it (orientation_m_per_rad).
-            let most = self.tool_speed[index].map(|(speed, _)| speed * dt);
+            // together, the turn weighed as the solve weighs it (orientation_m_per_rad), and the
+            // turn within its own cap.
+            let most = self.tool_speed[index].map(|(speed, _)| (speed.m_s * dt, speed.rad_s * dt));
             let pose = w.frames.links[limb.frame];
             for &axis in &body.solved {
                 w.jv[axis] = [0.0; 3];
@@ -1034,6 +1107,7 @@ impl Ik {
                     let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
+                    self.tool_asked[index] = (e_p, e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
@@ -1058,6 +1132,7 @@ impl Ik {
                     let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
+                    self.tool_asked[index] = (e_p, e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
@@ -1441,7 +1516,7 @@ impl Ik {
                 .map(|j| (row[j] * w.lower[j]).min(row[j] * w.upper[j]))
                 .sum()
         };
-        for slot in 0..w.used {
+        for slot in 0..w.collisions {
             if w.row_measured[slot] {
                 continue;
             }
@@ -1461,7 +1536,7 @@ impl Ik {
                 solve = Solve::Relaxed;
             }
         }
-        for slot in 0..w.used {
+        for slot in 0..w.collisions {
             if w.row_measured[slot] {
                 if all {
                     w.rhs[slot] = w.rhs[slot].max(0.0);
@@ -1490,7 +1565,7 @@ impl Ik {
     fn rows_kept(&self) -> bool {
         let n = self.body.solved.len();
         let w = &self.work;
-        (0..w.used).all(|slot| {
+        (0..w.collisions).all(|slot| {
             let row = &w.rows[slot * n..(slot + 1) * n];
             let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
             closes <= w.rhs[slot] + ROW_KEPT_M
@@ -1552,7 +1627,8 @@ impl Ik {
             for j in 0..n {
                 qp.r[slot * m + j] *= scale;
             }
-            qp.r[slot * m + n] = -1.0;
+            // A tool's speed borrows no slack: rows give way before it does.
+            qp.r[slot * m + n] = if slot < w.collisions { -1.0 } else { 0.0 };
             qp.rhs[slot] = w.rhs[slot] * scale;
         }
         let iterations = qp.solve(self.settings.max_iterations, deadline).ok()?;
@@ -1560,6 +1636,73 @@ impl Ik {
             w.answer[j] = qp.x[j] * w.unit[j];
         }
         Some(iterations)
+    }
+
+    /// Each speed-bound tool's rows ([`Ik::set_tool_speed`]), after the collision rows: its
+    /// point's linearised motion within its speed along each of [`TOOL_DIRECTIONS`], and its
+    /// turn the same within its turn. A face the box cannot keep (a joint already moving faster
+    /// than its acceleration cap can slow) is set where the box leaves it, as the governor
+    /// would: the step is as slow as the joints can make it, never held for a face no step
+    /// reaches.
+    fn tool_rows(&mut self, targets: &[Option<Target>], dt: f64) {
+        let body = &self.body;
+        let w = &mut self.work;
+        let n = body.solved.len();
+        w.collisions = w.used;
+        for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
+            let (Some((speed, _)), Some(_), Task::Pose) =
+                (self.tool_speed[index], target, limb.task)
+            else {
+                continue;
+            };
+            let pose = w.frames.links[limb.frame];
+            for &axis in &body.solved {
+                w.jv[axis] = [0.0; 3];
+                w.jw[axis] = [0.0; 3];
+            }
+            body.model
+                .point_jacobian(&w.frames, limb.frame, pose.t, &mut w.jv);
+            body.model
+                .angular_jacobian(&w.frames, limb.frame, &mut w.jw);
+            let (asked, moved) = (self.tool_asked[index], self.tool_moved[index]);
+            for (most, angular) in [(speed.m_s * dt, false), (speed.rad_s * dt, true)] {
+                if !most.is_finite() {
+                    continue;
+                }
+                // The fixed faces, then one along the motion asked and one along the last
+                // step's: each face at the speed, wherever it points, holds the whole ball, so
+                // these take back the fixed faces' corners just where the tool is going.
+                let along = if angular {
+                    [asked.1, moved.1]
+                } else {
+                    [asked.0, moved.0]
+                };
+                let fixed = TOOL_DIRECTIONS.iter().map(|d| d.map(f64::from));
+                for u in fixed.chain(along) {
+                    let length = norm(u);
+                    if length < 1e-12 {
+                        continue;
+                    }
+                    let u = scale(u, 1.0 / length);
+                    let slot = w.used;
+                    let row = &mut w.rows[slot * n..(slot + 1) * n];
+                    for (value, &axis) in row.iter_mut().zip(&body.solved) {
+                        *value = dot(u, if angular { w.jw[axis] } else { w.jv[axis] });
+                    }
+                    let (least, reach) = (0..n).fold((0.0, 0.0), |(least, reach), j| {
+                        let (a, b) = (row[j] * w.lower[j], row[j] * w.upper[j]);
+                        (least + a.min(b), reach + a.max(b))
+                    });
+                    if reach <= most {
+                        continue; // no step inside the box moves it that far this way
+                    }
+                    w.rhs[slot] = most.max(least);
+                    w.row_active[slot] = Active::ToolSpeed { limb: index };
+                    w.row_measured[slot] = false;
+                    w.used += 1;
+                }
+            }
+        }
     }
 
     /// Shorten the whole step until every speed-bound tool point moves no further than its
@@ -1598,7 +1741,14 @@ impl Ik {
         // Keeping clear outranks the tool's speed: where a row stops the shortening, the tool
         // moves faster than its speed and the step says so ([`Solve::Relaxed`]).
         let mut row_floor = 0.0_f64;
-        for slot in 0..w.used {
+        for slot in 0..w.collisions {
+            // A row at the measured pose (or a stuck joint's copy) is not the command's own
+            // clearance: it asks the command back toward a lagging arm, and never outranks a
+            // cap ([`Ik::keep_feasible`]). Letting it stop the shortening moved the tool point
+            // at 1 m/s while it pulled the command back (act-sim, 2026-11-04).
+            if w.row_measured[slot] {
+                continue;
+            }
             let row = &w.rows[slot * n..(slot + 1) * n];
             let closes: f64 = row.iter().zip(&w.still[..n]).map(|(a, b)| a * b).sum();
             let bound = w.rhs[slot];
@@ -1626,14 +1776,22 @@ impl Ik {
                 if !matches!(limb.task, Task::Pose) {
                     continue;
                 }
-                let most = speed * dt;
-                let start = w.frames.links[limb.frame].t;
+                let (most, most_rad) = (speed.m_s * dt, speed.rad_s * dt);
+                let start = w.frames.links[limb.frame];
                 let from = from
-                    .filter(|from| norm(sub(*from, start)) <= most)
-                    .unwrap_or(start);
-                let moved = norm(sub(w.after.links[limb.frame].t, from));
+                    .filter(|from| {
+                        norm(sub(from.t, start.t)) <= most && turn(&from.r, &start.r) <= most_rad
+                    })
+                    .map_or((start.t, start.r), |from| (from.t, from.r));
+                let after = w.after.links[limb.frame];
+                let moved = norm(sub(after.t, from.0));
                 if moved > most * (1.0 + 1e-6) {
                     factor = factor.min(most / moved);
+                    self.tool_capped[index] = true;
+                }
+                let turned = turn(&after.r, &from.1);
+                if turned > most_rad * (1.0 + 1e-6) {
+                    factor = factor.min(most_rad / turned);
                     self.tool_capped[index] = true;
                 }
             }
@@ -1687,6 +1845,11 @@ impl Ik {
         }
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
             let pose = w.after.links[limb.frame];
+            let start = w.frames.links[limb.frame];
+            self.tool_moved[index] = (
+                sub(pose.t, start.t),
+                matrix_rotation_vector(&mat_mul(&pose.r, &transpose(&start.r))),
+            );
             let (residual_m, residual_rad) = match (limb.task, target) {
                 (_, Some(Target::Pose(target))) => (
                     norm(sub(target.translation_m, pose.t)),
@@ -2041,23 +2204,39 @@ fn pointing_approach(
     length.min(braking(length, s.braking_share * accel, dt)) / length
 }
 
+/// The angle between two rotations, radians.
+fn turn(a: &Matrix3, b: &Matrix3) -> f64 {
+    let trace: f64 = (0..3)
+        .map(|i| (0..3).map(|k| a[i][k] * b[i][k]).sum::<f64>())
+        .sum();
+    ((trace - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
+}
+
 /// One tick's position and orientation error, each held to the most one tick closes
-/// (`max_error_m`, `max_error_rad`), and together, weighed as the solve weighs them, to `most`
-/// metres when the tool has a speed ([`Ik::set_tool_speed`]): a turn left behind is not caught
-/// up faster than the tool may move, nor dragging the tool point with it.
-fn within_tool_speed(e_p: Vec3, e_r: Vec3, most: Option<f64>, s: &Settings) -> (Vec3, Vec3) {
+/// (`max_error_m`, `max_error_rad`), and, when the tool has a speed ([`Ik::set_tool_speed`]),
+/// together, weighed as the solve weighs them, to its `most` metres and the turn to its `most`
+/// radians, both shortened alike: a turn left behind is not caught up faster than the tool may
+/// move or turn, nor dragging the tool point with it.
+fn within_tool_speed(e_p: Vec3, e_r: Vec3, most: Option<(f64, f64)>, s: &Settings) -> (Vec3, Vec3) {
     let (e_p, e_r) = (
         clamp_norm(e_p, s.max_error_m),
         clamp_norm(e_r, s.max_error_rad),
     );
-    let Some(most) = most else {
+    let Some((most_m, most_rad)) = most else {
         return (e_p, e_r);
     };
     let weighed = norm(e_p).hypot(s.orientation_m_per_rad * norm(e_r));
-    if weighed <= most {
+    let turned = norm(e_r);
+    let mut share = 1.0_f64;
+    if weighed > most_m {
+        share = share.min(most_m / weighed);
+    }
+    if turned > most_rad {
+        share = share.min(most_rad / turned);
+    }
+    if share >= 1.0 {
         return (e_p, e_r);
     }
-    let share = most / weighed;
     (scale(e_p, share), scale(e_r, share))
 }
 
