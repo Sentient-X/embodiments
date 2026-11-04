@@ -24,17 +24,41 @@ A RealSense holds one camera unit per imager, each with its own intrinsics, so a
 The ``DISTO`` terms are the rational model, OpenCV's ``k1, k2, p1, p2, k3, k4, k5, k6`` (the
 ZED SDK's ``disto`` order); the per-resolution five are that model's numerator alone, digit for
 digit, so they are read only from a file that has no ``DISTO``, as the plumb-bob model it then
-is. The ``STEREO`` translation is ``Baseline, TY, TZ`` in millimetres and its rotation the
-Rodrigues vector ``RX, CV, RZ`` of the resolution, as Stereolabs' ``zed-open-capture`` reads
-them (``examples/include/calibration.hpp`` at ``93739154``).
+is. The ``STEREO`` translation is ``Baseline, TY, TZ`` in millimetres, the right eye's position
+in the left eye's frame, and ``RX, CV, RZ`` of the resolution is the Rodrigues vector of OpenCV's
+stereo ``R``, which takes a point from the left eye's frame into the right's, as Stereolabs'
+``zed-open-capture`` hands it to ``cv::stereoRectify`` (``examples/include/calibration.hpp`` at
+``93739154``). The right eye's orientation in the left's frame is therefore that rotation's
+inverse. Measured on SN 30371653's own pair (2026-11-04, 169 SIFT matches that survive a
+fundamental-matrix RANSAC): rectified by this reading the matches' rows differ by 0.57 px at the
+median; read as the right eye's own orientation they differ by 4.97 px, and unrectified by
+33 px (its eyes' principal points sit 36 px apart vertically).
+
+**Commissioning a stereo camera.** Reading a unit's factory record is a commissioning step, run
+once per unit and never at robot run time::
+
+    python -m sx_embodiments.factory_intrinsics zed --serial 30371653 \
+        --body sentient-static-upper-body --left head_left --right head_right --out ./calibration
+
+fetches the record by serial (or reads ``--record``), keeps it as ``<serial>.conf`` and writes
+the left eye, the right eye and the right eye's pose in the left's, each an
+``sx.calibration/v1`` document named by its content digest (``<calibration id>.json``), at the
+raster the body declares for the two cameras. Fleet carries those documents in the robot's
+directory (``AssignStationRobot.camera_calibrations``); the instance selects them, so the
+station's media plan serves the unit's lens and the pair's measured geometry.
 """
 
 from __future__ import annotations
 
+import argparse
 import configparser
+import json
 import math
-from collections.abc import Mapping
+import sys
+import urllib.request
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Literal, cast
 
 from sx_contracts.identity import JsonObject, content_digest, stream_blob
@@ -49,8 +73,12 @@ from .calibration import (
     RigidCalibration,
     RigidReference,
     UnitSerial,
+    calibration_id,
+    calibration_to_dict,
     matrix_from_pose,
 )
+from .embodiment import Embodiment
+from .errors import EmbodimentError
 
 FACTORY_SCHEMA: Final = "sx.factory-intrinsics/v1"
 _FIELDS: Final = frozenset(
@@ -274,7 +302,9 @@ def zed_factory_calibration(
     left, right = eye("LEFT"), eye("RIGHT")
     stereo = _ini_section(ini, "STEREO")
     translation = tuple(_ini_number(stereo, key) / 1000.0 for key in ("Baseline", "TY", "TZ"))
-    rodrigues = tuple(_ini_number(stereo, f"{key}_{resolution}") for key in ("RX", "CV", "RZ"))
+    # OpenCV's R takes the left eye's points into the right's: the right eye's orientation in
+    # the left's frame is its inverse, the same axis turned the other way.
+    rodrigues = tuple(-_ini_number(stereo, f"{key}_{resolution}") for key in ("RX", "CV", "RZ"))
     return StereoFactoryCalibration(
         left=left,
         right=right,
@@ -291,3 +321,93 @@ def zed_factory_calibration(
             measurement=measurement,
         ),
     )
+
+
+#: Where Stereolabs publishes a ZED's factory record, by serial.
+ZED_RECORD_URL: Final = "https://calib.stereolabs.com/?SN={serial}"
+
+
+def fetch_zed_record(serial: str) -> bytes:
+    """The factory record Stereolabs publishes for ZED ``serial``: a commissioning step's read,
+    never a robot's at run time."""
+    if not serial.isdecimal():
+        raise CalibrationError(f"{serial!r} is not a ZED serial")
+    with urllib.request.urlopen(ZED_RECORD_URL.format(serial=serial), timeout=30) as answer:
+        return cast("bytes", answer.read())
+
+
+def zed_pair_calibration(
+    body: Embodiment, left: str, right: str, record: bytes, serial: str
+) -> StereoFactoryCalibration:
+    """A ZED's factory record for ``body``'s stereo pair ``left``, ``right``: each eye at the
+    raster the body declares for it, and the right eye's optical frame in the left's."""
+    bindings = {binding.name: binding for binding in body.cameras}
+    missing = sorted({left, right} - set(bindings))
+    if missing:
+        raise CalibrationError(f"{body.name} declares no camera {missing}")
+    optics = bindings[left].camera.optics
+    factory = zed_factory_calibration(
+        record,
+        serial,
+        optics.width,
+        optics.height,
+        (bindings[left].frame, bindings[right].frame),
+    )
+    return factory
+
+
+def _body(key: str) -> Embodiment:
+    from . import development_embodiments, embodiments
+
+    for registry in (embodiments, development_embodiments):
+        try:
+            return registry[key]
+        except EmbodimentError:
+            continue
+    raise CalibrationError(f"no registered or development body {key!r}")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="python -m sx_embodiments.factory_intrinsics",
+        description="Read a stereo camera unit's factory calibration into sx.calibration/v1.",
+    )
+    commands = parser.add_subparsers(dest="vendor", required=True)
+    zed = commands.add_parser("zed", help="a Stereolabs ZED, by serial")
+    zed.add_argument("--serial", required=True)
+    zed.add_argument("--body", required=True, help="the body the unit is placed in, by name")
+    zed.add_argument("--left", default="head_left", help="the body's left-eye camera")
+    zed.add_argument("--right", default="head_right", help="the body's right-eye camera")
+    zed.add_argument("--record", type=Path, help="a saved record instead of fetching it")
+    zed.add_argument("--out", type=Path, required=True, help="where the documents are written")
+    arguments = parser.parse_args(argv)
+    record = (
+        arguments.record.read_bytes()
+        if arguments.record is not None
+        else fetch_zed_record(arguments.serial)
+    )
+    try:
+        factory = zed_pair_calibration(
+            _body(arguments.body), arguments.left, arguments.right, record, arguments.serial
+        )
+    except CalibrationError as error:
+        raise SystemExit(str(error)) from error
+    arguments.out.mkdir(parents=True, exist_ok=True)
+    (arguments.out / f"{arguments.serial}.conf").write_bytes(record)
+    written: dict[str, str] = {}
+    for name, calibration in (
+        (arguments.left, factory.left),
+        (arguments.right, factory.right),
+        (f"{arguments.left}->{arguments.right}", factory.left_from_right),
+    ):
+        identity = str(calibration_id(calibration))
+        (arguments.out / f"{identity}.json").write_text(
+            json.dumps(calibration_to_dict(calibration), indent=2, sort_keys=True) + "\n"
+        )
+        written[name] = f"{identity}.json"
+    json.dump({"record": f"{arguments.serial}.conf", "calibrations": written}, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()
