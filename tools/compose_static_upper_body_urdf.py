@@ -378,7 +378,7 @@ def _hull(points: Vec) -> tuple[Vec, NDArray[np.int32]]:
         face = [index[i] for i in simplex]
         a, b, c = vertices[face]
         if np.dot(np.cross(b - a, c - a), a - centre) < 0:
-            face = [face[0], face[2], face[1]]
+            face[1], face[2] = face[2], face[1]  # wind it outward
         faces.append(face)
     return np.round(vertices, 7), np.array(sorted(faces), dtype=np.int32)
 

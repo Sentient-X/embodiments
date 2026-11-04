@@ -161,6 +161,26 @@ def test_the_optical_rotation_is_the_kernels() -> None:
     )
 
 
+def test_the_two_written_quarter_turns_are_the_rotations_their_axes_imply() -> None:
+    """Two quaternions stay written out because their bytes are identity: the ZED module's mount
+    is inside every ZED body's id and the glTF root rotation inside the committed ``pack.glb``,
+    while the kernel's ``mat_to_quat`` lands one ulp from the square root of a half (and, for
+    the ZED, on the other hemisphere). Each is pinned here to the rotation its axes imply."""
+    from sx_geometry import quat_to_mat
+
+    from sx_embodiments.known.zed import zed_2i_imu
+    from sx_embodiments.render_pack import URDF_TO_GLTF
+
+    xyzw = frames_kernel.QuaternionLayout.XYZW
+    _, mount = zed_2i_imu().mount_from_sensor
+    # ZED frame FLU; the module's x is down, y towards the right eye and z out of the back.
+    module = frames_kernel.Axes.parse("DRB")
+    assert np.allclose(quat_to_mat(xyzw.read(mount)), frames_kernel.basis(FLU, module), atol=1e-15)
+    # The render pack's root: the Z-up world's +y read as glTF's forward.
+    expected = frames_kernel.basis(frames_kernel.RUB, frames_kernel.RFU)
+    assert np.allclose(quat_to_mat(xyzw.read(URDF_TO_GLTF)), expected, atol=1e-15)
+
+
 def test_an_optical_frame_takes_its_rotation_from_its_axes() -> None:
     frame = Frame("eye_optical", "eye", Pose((0.0, 0.01, 0.0)), camera_optical=True)
     assert frame.placement == Pose((0.0, 0.01, 0.0), OPTICAL_RPY)
