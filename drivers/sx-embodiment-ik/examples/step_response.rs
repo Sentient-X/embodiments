@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 
 const DT: f64 = 0.01;
@@ -87,14 +87,7 @@ fn main() {
     q = best.1;
     println!("start clearance {:.3} m", solve.ik().clearance(&q).0);
     let frames = body.model().poses(&q);
-    let tcp = |hand: usize| {
-        let p =
-            sx_embodiment_drivers::kinematics::pose_of(&body.frame(&frames, hand).to_transform());
-        Pose {
-            translation_m: p.translation_m,
-            rotation_xyzw: p.rotation_xyzw,
-        }
-    };
+    let tcp = |hand: usize| body.frame(&frames, hand).pose();
     let (left, right) = (tcp(0), tcp(1));
     let mut target = left;
     for (axis, by) in target.translation_m.iter_mut().zip(shift) {

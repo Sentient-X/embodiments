@@ -6,12 +6,13 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    Clutch, GLITCH_HOLD, HANDS, Pose, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets,
-    Teleop, TeleopConfig, TeleopStep,
+    Clutch, GLITCH_HOLD, HANDS, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
+    TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{
     Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
 };
+use sx_frames::{Pose, QuaternionLayout};
 
 const DT: f64 = 0.01;
 
@@ -99,12 +100,7 @@ fn camera_forward(teleop: &Teleop, q: &[f64]) -> ([f64; 3], [f64; 3]) {
 
 fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
     let body = teleop.ik().body();
-    let frame = body.frame(&body.model().poses(q), hand).to_transform();
-    let p = sx_embodiment_drivers::kinematics::pose_of(&frame);
-    Pose {
-        translation_m: p.translation_m,
-        rotation_xyzw: p.rotation_xyzw,
-    }
+    body.frame(&body.model().poses(q), hand).pose()
 }
 
 #[test]
@@ -129,7 +125,7 @@ fn gaze_turns_the_camera_to_the_head_and_holds_the_rest() {
     let yaw = f0[1].atan2(f0[0]) + 0.5;
     let gaze = Pose {
         translation_m: [0.0, 0.0, 1.0],
-        rotation_xyzw: [0.0, 0.0, (yaw / 2.0).sin(), (yaw / 2.0).cos()],
+        rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, (yaw / 2.0).sin(), (yaw / 2.0).cos()]),
     };
     let targets = Targets {
         head: Some(gaze),
@@ -284,7 +280,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     ];
     let hand = Pose {
         translation_m: [0.3, -0.2, 0.9],
-        rotation_xyzw: quarter,
+        rotation: QuaternionLayout::Xyzw.read(quarter),
     };
     let mut clutch = Clutch::default();
     let mut targets = Targets {
@@ -294,13 +290,18 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     clutch.apply(&tools, &mut targets);
     let held = targets.tcp[0].expect("left");
     assert!((0..3).all(|k| (held.translation_m[k] - left.translation_m[k]).abs() < 1e-12));
-    assert!(angle(held.rotation_xyzw, left.rotation_xyzw) < 1e-9);
+    assert!(
+        angle(
+            QuaternionLayout::Xyzw.write(held.rotation),
+            QuaternionLayout::Xyzw.write(left.rotation)
+        ) < 1e-9
+    );
     assert!(clutch.holds(0) && !clutch.holds(1));
     // The hand moves 5 cm up and turns 0.2 rad about the robot's z: the gripper does the same.
     let turn = [0.0, 0.0, 0.1_f64.sin(), 0.1_f64.cos()];
     let moved = Pose {
         translation_m: [0.3, -0.2, 0.95],
-        rotation_xyzw: turned(turn, quarter),
+        rotation: QuaternionLayout::Xyzw.read(turned(turn, quarter)),
     };
     let mut targets = Targets {
         tcp: [Some(moved), None],
@@ -309,7 +310,12 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     clutch.apply(&tools, &mut targets);
     let followed = targets.tcp[0].expect("left");
     assert!((followed.translation_m[2] - (left.translation_m[2] + 0.05)).abs() < 1e-12);
-    assert!((angle(followed.rotation_xyzw, turned(turn, left.rotation_xyzw))) < 1e-9);
+    assert!(
+        (angle(
+            QuaternionLayout::Xyzw.write(followed.rotation),
+            turned(turn, QuaternionLayout::Xyzw.write(left.rotation))
+        )) < 1e-9
+    );
     // The hand drops out of tracking: it lets go, and takes hold afresh where it is seen next.
     let mut gone = Targets::default();
     clutch.apply(&tools, &mut gone);
@@ -376,7 +382,10 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
                 from.translation_m[1] + dy,
                 from.translation_m[2] - 0.04,
             ],
-            rotation_xyzw: turned([0.0, half.sin(), 0.0, half.cos()], from.rotation_xyzw),
+            rotation: QuaternionLayout::Xyzw.read(turned(
+                [0.0, half.sin(), 0.0, half.cos()],
+                QuaternionLayout::Xyzw.write(from.rotation),
+            )),
         };
         let targets = Targets {
             tcp: [Some(target(from[0], -0.04)), Some(target(from[1], 0.04))],
@@ -453,7 +462,7 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
                     from.translation_m[1],
                     from.translation_m[2] + dz,
                 ],
-                rotation_xyzw: from.rotation_xyzw,
+                rotation: from.rotation,
             }),
             None,
         ],
@@ -561,7 +570,7 @@ fn a_blocked_joint_stalls_through_a_readings_jitter() {
                         from.translation_m[1],
                         from.translation_m[2] - 0.08,
                     ],
-                    rotation_xyzw: from.rotation_xyzw,
+                    rotation: from.rotation,
                 }),
                 None,
             ],
@@ -635,7 +644,7 @@ fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
                     from.translation_m[1],
                     from.translation_m[2] - 0.08,
                 ],
-                rotation_xyzw: from.rotation_xyzw,
+                rotation: from.rotation,
             }),
             None,
         ],
@@ -760,7 +769,7 @@ fn hold_the_elbow(
             tcp: [
                 Some(Pose {
                     translation_m: [0, 1, 2].map(|k| from.translation_m[k] + offset[k]),
-                    rotation_xyzw: from.rotation_xyzw,
+                    rotation: from.rotation,
                 }),
                 None,
             ],
@@ -1063,7 +1072,7 @@ fn least_clearance_at(
                 Some(Pose {
                     translation_m: [0, 1, 2]
                         .map(|k| left0.translation_m[k] + [INTO[0], inward, INTO[2]][k]),
-                    rotation_xyzw: left0.rotation_xyzw,
+                    rotation: left0.rotation,
                 }),
                 None,
             ],
@@ -1073,7 +1082,7 @@ fn least_clearance_at(
         if case == "reach" && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: solve.model().poses(&real).links[left_tcp].t,
-                rotation_xyzw: right0.rotation_xyzw,
+                rotation: right0.rotation,
             });
         }
         let step = solve

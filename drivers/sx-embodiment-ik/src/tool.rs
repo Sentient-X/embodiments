@@ -6,7 +6,7 @@
 use serde::Deserialize;
 
 use crate::IkError;
-use crate::math::{dot, mat_vec, norm, scale, sub, transpose};
+use sx_frames::linalg::{dot, mat_vec, norm, scale, sub, transpose};
 
 /// How a gripper's jaws meet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -123,7 +123,7 @@ impl ToolFrame {
                 grasp_point_m: mat_vec(
                     &into,
                     sub(
-                        crate::math::add(mat_vec(r_own, jaws.grasp_point_m), t_own),
+                        sx_frames::linalg::add(mat_vec(r_own, jaws.grasp_point_m), t_own),
                         t_new,
                     ),
                 ),

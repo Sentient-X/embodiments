@@ -9,10 +9,11 @@
 
 use std::collections::BTreeMap;
 
-use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{
     Body, Caps, Ik, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Settings, Target,
 };
+use sx_frames::{Pose, QuaternionLayout};
 
 const DT: f64 = 0.01;
 
@@ -97,12 +98,7 @@ fn camera(body: &Body, q: &[f64]) -> ([[f64; 3]; 3], [f64; 3]) {
 }
 
 fn tcp(body: &Body, q: &[f64], hand: usize) -> Pose {
-    let frame = body.frame(&body.model().poses(q), hand).to_transform();
-    let p = sx_embodiment_drivers::kinematics::pose_of(&frame);
-    Pose {
-        translation_m: p.translation_m,
-        rotation_xyzw: p.rotation_xyzw,
-    }
+    body.frame(&body.model().poses(q), hand).pose()
 }
 
 fn angle(forward: [f64; 3], from: [f64; 3], to: [f64; 3]) -> f64 {
@@ -159,7 +155,7 @@ fn only_the_neck_turns_the_camera() {
     );
     let gaze = Pose {
         translation_m: [0.0, 0.0, 1.0],
-        rotation_xyzw: [-sy * sp, cy * sp, sy * cp, cy * cp],
+        rotation: QuaternionLayout::Xyzw.read([-sy * sp, cy * sp, sy * cp, cy * cp]),
     };
     let targets = Targets {
         tcp: [Some(left), Some(right)],
@@ -214,10 +210,7 @@ fn a_hand_behind_an_arm_is_reported_with_the_link_hiding_it() {
         let targets: Vec<Option<Target>> = [0, 1]
             .map(|hand| {
                 let p = tcp(&body, &q, hand);
-                Some(Target::Pose {
-                    translation_m: p.translation_m,
-                    rotation_xyzw: p.rotation_xyzw,
-                })
+                Some(Target::Pose(p))
             })
             .into_iter()
             .chain([None])

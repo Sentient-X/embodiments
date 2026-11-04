@@ -35,6 +35,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 use sx_embodiment_ik::{Active, Body, Caps, Ik, Reach, Settings, Target};
+use sx_frames::{Pose, Quaternion, QuaternionLayout};
 
 /// Every axis available.
 const ALL: [bool; 64] = [true; 64];
@@ -42,8 +43,7 @@ const ALL: [bool; 64] = [true; 64];
 const DT: f64 = 0.01;
 const SETTLE_S: f64 = 2.0;
 
-type V3 = [f64; 3];
-type Q = [f64; 4];
+type Vec3 = [f64; 3];
 
 fn settings() -> Settings {
     // The replay scores answers, not the clock of a shared laptop.
@@ -69,37 +69,15 @@ fn series<const N: usize>(v: &Value) -> Vec<[f64; N]> {
         .collect()
 }
 
-fn q_mul(a: Q, b: Q) -> Q {
-    let [ax, ay, az, aw] = a;
-    let [bx, by, bz, bw] = b;
-    [
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    ]
+/// A series of xyzw quaternions.
+fn quaternions(v: &Value) -> Vec<Quaternion> {
+    series::<4>(v)
+        .into_iter()
+        .map(|q| QuaternionLayout::Xyzw.read(q))
+        .collect()
 }
 
-fn q_rotate(q: Q, v: V3) -> V3 {
-    let p = q_mul(
-        q_mul(q, [v[0], v[1], v[2], 0.0]),
-        [-q[0], -q[1], -q[2], q[3]],
-    );
-    [p[0], p[1], p[2]]
-}
-
-fn nlerp(a: Q, b: Q, s: f64) -> Q {
-    let sign = if a.iter().zip(&b).map(|(x, y)| x * y).sum::<f64>() < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let q: Vec<f64> = (0..4).map(|k| a[k] * (1.0 - s) + sign * b[k] * s).collect();
-    let n = q.iter().map(|v| v * v).sum::<f64>().sqrt();
-    [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
-}
-
-fn lerp(a: V3, b: V3, s: f64) -> V3 {
+fn lerp(a: Vec3, b: Vec3, s: f64) -> Vec3 {
     [
         a[0] + (b[0] - a[0]) * s,
         a[1] + (b[1] - a[1]) * s,
@@ -109,13 +87,13 @@ fn lerp(a: V3, b: V3, s: f64) -> V3 {
 
 /// The fixed placement: robot_from_operator as a yaw quaternion and a translation.
 struct Placement {
-    rotation: Q,
-    translation: V3,
+    rotation: Quaternion,
+    translation: Vec3,
 }
 
 impl Placement {
-    fn point(&self, p: V3) -> V3 {
-        let r = q_rotate(self.rotation, p);
+    fn point(&self, p: Vec3) -> Vec3 {
+        let r = self.rotation.rotate(p);
         [
             r[0] + self.translation[0],
             r[1] + self.translation[1],
@@ -192,15 +170,15 @@ fn main() {
         let hands = [
             (
                 series::<3>(&episode["left"]["p"]),
-                series::<4>(&episode["left"]["q"]),
+                quaternions(&episode["left"]["q"]),
             ),
             (
                 series::<3>(&episode["right"]["p"]),
-                series::<4>(&episode["right"]["q"]),
+                quaternions(&episode["right"]["q"]),
             ),
         ];
         let head_p = series::<3>(&episode["head"]["p"]);
-        let head_q = series::<4>(&episode["head"]["q"]);
+        let head_q = quaternions(&episode["head"]["q"]);
         // The operator's mean eye point and heading (the view ray, +z of the RDF head frame,
         // flattened).
         let count = head_p.len() as f64;
@@ -208,12 +186,13 @@ fn main() {
         let eye = [mean(0), mean(1), mean(2)];
         let (mut fx, mut fy) = (0.0, 0.0);
         for q in &head_q {
-            let f = q_rotate(*q, [0.0, 0.0, 1.0]);
+            let f = q.rotate([0.0, 0.0, 1.0]);
             fx += f[0];
             fy += f[1];
         }
         let yaw = fy.atan2(fx);
-        let rotation = [0.0, 0.0, (-yaw / 2.0).sin(), (-yaw / 2.0).cos()];
+        let rotation =
+            QuaternionLayout::Xyzw.read([0.0, 0.0, (-yaw / 2.0).sin(), (-yaw / 2.0).cos()]);
         let mut ik = Ik::new(
             station_body.clone(),
             station_caps.clone(),
@@ -233,7 +212,7 @@ fn main() {
             let frames = station_body.model().poses(&rest);
             station_body.frame(&frames, 2).t
         };
-        let turned = q_rotate(rotation, eye);
+        let turned = rotation.rotate(eye);
         let placement = Placement {
             rotation,
             translation: [zed[0] - turned[0], zed[1] - turned[1], zed[2] - turned[2]],
@@ -254,18 +233,16 @@ fn main() {
             let mut targets = [None, None, None];
             for (side, (p, r)) in hands.iter().enumerate() {
                 let position = placement.point(lerp(p[sample], p[sample + 1], s));
-                let orientation = q_mul(rotation, nlerp(r[sample], r[sample + 1], s));
-                targets[side] = Some(Target::Pose {
+                let orientation = rotation * r[sample].slerp(r[sample + 1], s);
+                targets[side] = Some(Target::Pose(Pose {
                     translation_m: position,
-                    rotation_xyzw: orientation,
-                });
+                    rotation: orientation,
+                }));
             }
-            let view = q_rotate(
-                rotation,
-                q_rotate(
-                    nlerp(head_q[sample], head_q[sample + 1], s),
-                    [0.0, 0.0, 1.0],
-                ),
+            let view = rotation.rotate(
+                head_q[sample]
+                    .slerp(head_q[sample + 1], s)
+                    .rotate([0.0, 0.0, 1.0]),
             );
             let head = placement.point(lerp(head_p[sample], head_p[sample + 1], s));
             targets[2] = Some(Target::LookAt {

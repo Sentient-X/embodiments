@@ -3,15 +3,16 @@
 
 use sx_embodiment_drivers::kinematics::{Axis, JointType, Tree, TreeJoint};
 
-use crate::math::{Iso, V3, about, add, cross, mat_vec, scale, sub};
+use sx_frames::linalg::{Vec3, add, cross, mat_vec, scale, sub};
+use sx_frames::{Rigid, about};
 
 #[derive(Clone, Debug)]
 struct Joint {
     kind: JointType,
     parent: usize,
     child: usize,
-    origin: Iso,
-    axis: V3,
+    origin: Rigid,
+    axis: Vec3,
     /// Index into [`Model::axes`], `None` for a fixed joint.
     leader: Option<usize>,
     multiplier: f64,
@@ -41,9 +42,9 @@ pub struct Model {
 /// Every link's pose in the root frame, and each joint's axis there.
 #[derive(Clone, Debug)]
 pub struct Frames {
-    pub links: Vec<Iso>,
+    pub links: Vec<Rigid>,
     /// Per joint, its axis in the root frame (the child link's rotation applied).
-    axes: Vec<V3>,
+    axes: Vec<Vec3>,
 }
 
 impl Model {
@@ -59,7 +60,7 @@ impl Model {
                 kind: j.kind,
                 parent: j.parent,
                 child: j.child,
-                origin: Iso::from_transform(&j.origin),
+                origin: Rigid::from_row_major(&j.origin),
                 axis: j.axis,
                 leader: if j.kind == JointType::Fixed {
                     None
@@ -127,7 +128,7 @@ impl Model {
     #[must_use]
     pub fn poses(&self, q: &[f64]) -> Frames {
         let mut frames = Frames {
-            links: vec![Iso::IDENTITY; self.links.len()],
+            links: vec![Rigid::IDENTITY; self.links.len()],
             axes: vec![[0.0; 3]; self.joints.len()],
         };
         self.poses_into(q, &mut frames);
@@ -137,19 +138,19 @@ impl Model {
     /// [`Model::poses`] into frames made by it, without allocating.
     pub fn poses_into(&self, q: &[f64], frames: &mut Frames) {
         let Frames { links, axes } = frames;
-        links[self.root] = Iso::IDENTITY;
+        links[self.root] = Rigid::IDENTITY;
         for (index, joint) in self.joints.iter().enumerate() {
             let local = match joint.leader {
                 None => joint.origin,
                 Some(axis) => {
                     let x = joint.multiplier.mul_add(q[axis], joint.offset);
                     let motion = if joint.kind == JointType::Prismatic {
-                        Iso {
-                            r: crate::math::I3,
+                        Rigid {
+                            r: sx_frames::linalg::I3,
                             t: scale(joint.axis, x),
                         }
                     } else {
-                        Iso {
+                        Rigid {
                             r: about(joint.axis, x),
                             t: [0.0; 3],
                         }
@@ -165,7 +166,13 @@ impl Model {
 
     /// The linear velocity of `point` (root frame), riding `link`, per unit speed of each
     /// axis: `out[axis]`, accumulated into (so mimics and shared axes add).
-    pub(crate) fn point_jacobian(&self, frames: &Frames, link: usize, point: V3, out: &mut [V3]) {
+    pub(crate) fn point_jacobian(
+        &self,
+        frames: &Frames,
+        link: usize,
+        point: Vec3,
+        out: &mut [Vec3],
+    ) {
         for term in &self.above[link] {
             let joint = &self.joints[term.joint];
             let z = frames.axes[term.joint];
@@ -179,7 +186,7 @@ impl Model {
     }
 
     /// The angular velocity of `link` per unit speed of each axis, accumulated into `out`.
-    pub(crate) fn angular_jacobian(&self, frames: &Frames, link: usize, out: &mut [V3]) {
+    pub(crate) fn angular_jacobian(&self, frames: &Frames, link: usize, out: &mut [Vec3]) {
         for term in &self.above[link] {
             if self.joints[term.joint].kind != JointType::Prismatic {
                 out[term.axis] = add(

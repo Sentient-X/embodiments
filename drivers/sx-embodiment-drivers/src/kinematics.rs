@@ -12,7 +12,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::dynamics::LinkInertia;
-use crate::media::Pose;
+use sx_frames::{Pose, Rigid};
 
 /// A row-major 4x4 rigid transform in metres.
 pub type Transform = [f64; 16];
@@ -122,7 +122,7 @@ impl Chain {
     ///
     /// As [`Chain::transform`].
     pub fn pose(&self, position: impl Fn(&str) -> Option<f64>) -> Result<Pose, PlacementError> {
-        Ok(pose_of(&self.transform(position)?))
+        Ok(Rigid::from_row_major(&self.transform(position)?).pose())
     }
 
     /// The independent joints whose positions place the mount, chain order, root first.
@@ -229,48 +229,6 @@ pub(crate) fn along([x, y, z]: [f64; 3], distance: f64) -> Transform {
         0.0,
         1.0,
     ]
-}
-
-/// A rigid transform as translation and unit quaternion (x, y, z, w) with `w >= 0`, the
-/// conversion `sx_embodiments.media` renders a fixed mount's pose with.
-#[must_use]
-#[allow(clippy::many_single_char_names)] // the matrix-to-quaternion formula's own names
-pub fn pose_of(m: &Transform) -> Pose {
-    let at = |row: usize, column: usize| m[row * 4 + column];
-    let trace = at(0, 0) + at(1, 1) + at(2, 2);
-    let (mut w, mut x, mut y, mut z);
-    if trace > 0.0 {
-        let s = (trace + 1.0).sqrt() * 2.0;
-        w = 0.25 * s;
-        x = (at(2, 1) - at(1, 2)) / s;
-        y = (at(0, 2) - at(2, 0)) / s;
-        z = (at(1, 0) - at(0, 1)) / s;
-    } else if at(0, 0) > at(1, 1) && at(0, 0) > at(2, 2) {
-        let s = (1.0 + at(0, 0) - at(1, 1) - at(2, 2)).sqrt() * 2.0;
-        w = (at(2, 1) - at(1, 2)) / s;
-        x = 0.25 * s;
-        y = (at(0, 1) + at(1, 0)) / s;
-        z = (at(0, 2) + at(2, 0)) / s;
-    } else if at(1, 1) > at(2, 2) {
-        let s = (1.0 + at(1, 1) - at(0, 0) - at(2, 2)).sqrt() * 2.0;
-        w = (at(0, 2) - at(2, 0)) / s;
-        x = (at(0, 1) + at(1, 0)) / s;
-        y = 0.25 * s;
-        z = (at(1, 2) + at(2, 1)) / s;
-    } else {
-        let s = (1.0 + at(2, 2) - at(0, 0) - at(1, 1)).sqrt() * 2.0;
-        w = (at(1, 0) - at(0, 1)) / s;
-        x = (at(0, 2) + at(2, 0)) / s;
-        y = (at(1, 2) + at(2, 1)) / s;
-        z = 0.25 * s;
-    }
-    if w < 0.0 {
-        (w, x, y, z) = (-w, -x, -y, -z);
-    }
-    Pose {
-        translation_m: [at(0, 3), at(1, 3), at(2, 3)],
-        rotation_xyzw: [x, y, z, w],
-    }
 }
 
 /// A description cannot be read as a joint tree.
@@ -724,6 +682,7 @@ mod tests {
     use super::*;
     use crate::media::MediaPlan;
     use std::collections::HashMap;
+    use sx_frames::QuaternionLayout;
 
     const PLANS: &str = include_str!("../tests/fixtures/media-plans.json");
     const POSES: &str = include_str!("../tests/fixtures/media-poses.json");
@@ -767,7 +726,11 @@ mod tests {
                 for (got, want) in pose.translation_m.iter().zip(sample.translation_m) {
                     assert!((got - want).abs() < 1e-9, "{key}: {got} != {want}");
                 }
-                for (got, want) in pose.rotation_xyzw.iter().zip(sample.rotation_xyzw) {
+                for (got, want) in QuaternionLayout::Xyzw
+                    .write(pose.rotation)
+                    .iter()
+                    .zip(sample.rotation_xyzw)
+                {
                     assert!((got - want).abs() < 1e-9, "{key}: {got} != {want}");
                 }
             }
@@ -783,7 +746,11 @@ mod tests {
             for (got, want) in pose.translation_m.iter().zip(fixed.translation_m) {
                 assert!((got - want).abs() < 1e-12);
             }
-            for (got, want) in pose.rotation_xyzw.iter().zip(fixed.rotation_xyzw) {
+            for (got, want) in QuaternionLayout::Xyzw
+                .write(pose.rotation)
+                .iter()
+                .zip(QuaternionLayout::Xyzw.write(fixed.rotation))
+            {
                 assert!((got - want).abs() < 1e-12);
             }
         }

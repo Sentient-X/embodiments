@@ -42,6 +42,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use sx_frames::{Pose, Quaternion};
 
 use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
@@ -123,7 +124,7 @@ pub const STALL_RELEASE: f64 = 0.01;
 pub struct Clutch {
     /// Per hand in [`HANDS`] order: the translation added to the hand, and the rotation applied
     /// after the hand's own (its rotation at hold, inverted, then the gripper's).
-    held: [Option<([f64; 3], [f64; 4])>; 2],
+    held: [Option<([f64; 3], Quaternion)>; 2],
 }
 
 impl Clutch {
@@ -150,32 +151,17 @@ impl Clutch {
             if self.held[hand].is_none() {
                 let Some(tool) = tools[hand] else { continue };
                 let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
-                let local = multiply(conjugate(target.rotation_xyzw), tool.rotation_xyzw);
+                let local = target.rotation.conjugate() * tool.rotation;
                 self.held[hand] = Some((offset, local));
             }
             if let Some((offset, local)) = self.held[hand] {
                 targets.tcp[hand] = Some(Pose {
                     translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
-                    rotation_xyzw: multiply(target.rotation_xyzw, local),
+                    rotation: target.rotation * local,
                 });
             }
         }
     }
-}
-
-/// `a` then `b` composed as rotations: the unit quaternion `a b` (x, y, z, w).
-fn multiply([ax, ay, az, aw]: [f64; 4], [bx, by, bz, bw]: [f64; 4]) -> [f64; 4] {
-    [
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    ]
-}
-
-/// The inverse of the unit quaternion `q`.
-const fn conjugate([x, y, z, w]: [f64; 4]) -> [f64; 4] {
-    [-x, -y, -z, w]
 }
 
 /// One limb of the config: a frame of the description and its task.
@@ -277,13 +263,6 @@ impl TeleopConfig {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("a teleop config serialises")
     }
-}
-
-/// A rigid pose in the robot's root frame: metres and a unit quaternion (x, y, z, w).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Pose {
-    pub translation_m: [f64; 3],
-    pub rotation_xyzw: [f64; 4],
 }
 
 /// One tick's ask, the operator's intent as the solve takes it.
@@ -700,12 +679,7 @@ impl Teleop {
         self.ik.body().model().poses_into(q, &mut self.frames);
         for (limb, hand) in self.hand_of.iter().enumerate() {
             let Some(hand) = *hand else { continue };
-            let frame = self.ik.body().frame(&self.frames, limb).to_transform();
-            let pose = sx_embodiment_drivers::kinematics::pose_of(&frame);
-            poses[hand] = Some(Pose {
-                translation_m: pose.translation_m,
-                rotation_xyzw: pose.rotation_xyzw,
-            });
+            poses[hand] = Some(self.ik.body().frame(&self.frames, limb).pose());
         }
         poses
     }
@@ -733,17 +707,14 @@ impl Teleop {
             };
             *slot = match (targets.tcp[hand], targets.free_roll[hand]) {
                 (None, _) => None,
-                (Some(p), false) => Some(Target::Pose {
-                    translation_m: p.translation_m,
-                    rotation_xyzw: p.rotation_xyzw,
-                }),
+                (Some(p), false) => Some(Target::Pose(p)),
                 (Some(p), true) => {
                     let axis = self.approach[limb]
                         .ok_or_else(|| IkError::Target(HANDS[hand].to_owned()))?;
                     Some(Target::Axis {
                         translation_m: p.translation_m,
                         axis,
-                        toward: rotate(p.rotation_xyzw, axis),
+                        toward: p.rotation.rotate(axis),
                     })
                 }
             };
@@ -1072,7 +1043,7 @@ impl Teleop {
             self.wanted[head] = if let Some(gaze) = targets.head {
                 self.ik.body().model().poses_into(&self.q, &mut self.frames);
                 let camera = self.ik.body().frame(&self.frames, head);
-                let forward = rotate(gaze.rotation_xyzw, [1.0, 0.0, 0.0]);
+                let forward = gaze.rotation.rotate([1.0, 0.0, 0.0]);
                 Some(Target::LookAt {
                     point_m: [0, 1, 2].map(|k| GAZE_DISTANCE_M.mul_add(forward[k], camera.t[k])),
                 })
@@ -1162,20 +1133,4 @@ impl Teleop {
         }
         Ok(&self.step)
     }
-}
-
-/// `v` rotated by the unit quaternion `xyzw`.
-fn rotate([x, y, z, w]: [f64; 4], v: [f64; 3]) -> [f64; 3] {
-    // v + 2w (u x v) + 2 u x (u x v), u = (x, y, z).
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
-    };
-    let u = [x, y, z];
-    let uv = cross(u, v);
-    let uuv = cross(u, uv);
-    [0, 1, 2].map(|k| 2.0f64.mul_add(w.mul_add(uv[k], uuv[k]), v[k]))
 }

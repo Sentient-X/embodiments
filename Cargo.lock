@@ -1263,6 +1263,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sx-frames",
  "thiserror 2.0.21",
 ]
 
@@ -1274,6 +1275,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sx-embodiment-drivers",
+ "sx-frames",
  "thiserror 2.0.21",
 ]
 
@@ -1287,6 +1289,16 @@ dependencies = [
  "sha2",
  "sx-embodiment-drivers",
  "sx-feetech-serial",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sx-frames"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

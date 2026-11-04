@@ -19,14 +19,14 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use sx_embodiment_ik::teleop::{Pose, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
+use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+use sx_frames::{Pose, Quaternion, QuaternionLayout};
 
 const DT: f64 = 0.01;
 const FPS: f64 = 30.0;
 
-type V3 = [f64; 3];
-type Q = [f64; 4];
+type Vec3 = [f64; 3];
 
 fn series<const N: usize>(v: &Value) -> Vec<[f64; N]> {
     v.as_array()
@@ -42,76 +42,16 @@ fn series<const N: usize>(v: &Value) -> Vec<[f64; N]> {
         .collect()
 }
 
-fn q_mul(a: Q, b: Q) -> Q {
-    let [ax, ay, az, aw] = a;
-    let [bx, by, bz, bw] = b;
-    [
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    ]
+/// A series of xyzw quaternions.
+fn quaternions(v: &Value) -> Vec<Quaternion> {
+    series::<4>(v)
+        .into_iter()
+        .map(|q| QuaternionLayout::Xyzw.read(q))
+        .collect()
 }
 
-fn q_rotate(q: Q, v: V3) -> V3 {
-    let p = q_mul(
-        q_mul(q, [v[0], v[1], v[2], 0.0]),
-        [-q[0], -q[1], -q[2], q[3]],
-    );
-    [p[0], p[1], p[2]]
-}
-
-fn nlerp(a: Q, b: Q, s: f64) -> Q {
-    let sign = if a.iter().zip(&b).map(|(x, y)| x * y).sum::<f64>() < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let q: Vec<f64> = (0..4).map(|k| a[k] * (1.0 - s) + sign * b[k] * s).collect();
-    let n = q.iter().map(|v| v * v).sum::<f64>().sqrt();
-    [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
-}
-
-fn lerp(a: V3, b: V3, s: f64) -> V3 {
+fn lerp(a: Vec3, b: Vec3, s: f64) -> Vec3 {
     [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * s)
-}
-
-/// A rotation matrix's quaternion, xyzw.
-fn quaternion(r: &[[f64; 3]; 3]) -> Q {
-    let trace = r[0][0] + r[1][1] + r[2][2];
-    if trace > 0.0 {
-        let s = (trace + 1.0).sqrt() * 2.0;
-        [
-            (r[2][1] - r[1][2]) / s,
-            (r[0][2] - r[2][0]) / s,
-            (r[1][0] - r[0][1]) / s,
-            0.25 * s,
-        ]
-    } else if r[0][0] > r[1][1] && r[0][0] > r[2][2] {
-        let s = (1.0 + r[0][0] - r[1][1] - r[2][2]).sqrt() * 2.0;
-        [
-            0.25 * s,
-            (r[0][1] + r[1][0]) / s,
-            (r[0][2] + r[2][0]) / s,
-            (r[2][1] - r[1][2]) / s,
-        ]
-    } else if r[1][1] > r[2][2] {
-        let s = (1.0 + r[1][1] - r[0][0] - r[2][2]).sqrt() * 2.0;
-        [
-            (r[0][1] + r[1][0]) / s,
-            0.25 * s,
-            (r[1][2] + r[2][1]) / s,
-            (r[0][2] - r[2][0]) / s,
-        ]
-    } else {
-        let s = (1.0 + r[2][2] - r[0][0] - r[1][1]).sqrt() * 2.0;
-        [
-            (r[0][2] + r[2][0]) / s,
-            (r[1][2] + r[2][1]) / s,
-            0.25 * s,
-            (r[1][0] - r[0][1]) / s,
-        ]
-    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -134,11 +74,11 @@ fn main() {
     let hands = [
         (
             series::<3>(&episode["left"]["p"]),
-            series::<4>(&episode["left"]["q"]),
+            quaternions(&episode["left"]["q"]),
         ),
         (
             series::<3>(&episode["right"]["p"]),
-            series::<4>(&episode["right"]["q"]),
+            quaternions(&episode["right"]["q"]),
         ),
     ];
     let jaws: [Vec<f64>; 2] = ["jaw_left", "jaw_right"].map(|key| {
@@ -150,7 +90,7 @@ fn main() {
             .collect()
     });
     let head_p = series::<3>(&episode["head"]["p"]);
-    let head_q = series::<4>(&episode["head"]["q"]);
+    let head_q = quaternions(&episode["head"]["q"]);
 
     let body = Body::static_upper_body();
     let mut speed = BTreeMap::new();
@@ -187,18 +127,18 @@ fn main() {
 
     // `replay`'s placement: the mean eye on the ZED, the mean heading along +x.
     let count = head_p.len() as f64;
-    let eye: V3 = [0, 1, 2].map(|k| head_p.iter().map(|p| p[k]).sum::<f64>() / count);
+    let eye: Vec3 = [0, 1, 2].map(|k| head_p.iter().map(|p| p[k]).sum::<f64>() / count);
     let (mut fx, mut fy) = (0.0, 0.0);
     for q in &head_q {
-        let f = q_rotate(*q, [0.0, 0.0, 1.0]);
+        let f = q.rotate([0.0, 0.0, 1.0]);
         fx += f[0];
         fy += f[1];
     }
     let yaw = fy.atan2(fx);
-    let rotation = [0.0, 0.0, (-yaw / 2.0).sin(), (-yaw / 2.0).cos()];
-    let turned = q_rotate(rotation, eye);
-    let place = |p: V3| {
-        let r = q_rotate(rotation, p);
+    let rotation = QuaternionLayout::Xyzw.read([0.0, 0.0, (-yaw / 2.0).sin(), (-yaw / 2.0).cos()]);
+    let turned = rotation.rotate(eye);
+    let place = |p: Vec3| {
+        let r = rotation.rotate(p);
         [0, 1, 2].map(|k| r[k] + zed[k] - turned[k])
     };
 
@@ -220,7 +160,7 @@ fn main() {
         for (side, (p, r)) in hands.iter().enumerate() {
             targets.tcp[side] = Some(Pose {
                 translation_m: place(lerp(p[sample], p[sample + 1], s)),
-                rotation_xyzw: q_mul(rotation, nlerp(r[sample], r[sample + 1], s)),
+                rotation: rotation * r[sample].slerp(r[sample + 1], s),
             });
             let jaw = &jaws[side];
             targets.gripper_width_m[side] = Some(jaw[sample] + (jaw[sample + 1] - jaw[sample]) * s);
@@ -236,7 +176,7 @@ fn main() {
                 .links
                 .iter()
                 .map(|iso| {
-                    let quat = quaternion(&iso.r);
+                    let quat = QuaternionLayout::Xyzw.write(Quaternion::from_matrix(&iso.r));
                     vec![
                         iso.t[0], iso.t[1], iso.t[2], quat[0], quat[1], quat[2], quat[3],
                     ]

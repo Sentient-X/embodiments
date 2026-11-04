@@ -24,7 +24,9 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::kinematics::Chain;
-use crate::media::{CaptureError, CapturedAt, Pose};
+use crate::media::{CaptureError, CapturedAt};
+use sx_frames::Pose;
+use sx_frames::linalg::{norm, scale};
 
 /// The fastest rate a plan may declare for an inertial sensor.
 pub const MAX_INERTIAL_HZ: f64 = 10_000.0;
@@ -79,7 +81,7 @@ impl InertialSensor {
             && self.measures.iter().all(|quantity| seen.insert(*quantity))
             && seen.contains(&InertialQuantity::Acceleration)
             && seen.contains(&InertialQuantity::AngularVelocity)
-            && is_rigid(&self.mount_from_sensor)
+            && self.mount_from_sensor.is_rigid(1e-6)
             && crate::media::is_placed(self.root_from_mount.as_ref(), &self.moves_with, &self.chain)
     }
 
@@ -92,49 +94,8 @@ impl InertialSensor {
     /// A vector on the sensor's axes, on the mount link's.
     #[must_use]
     pub fn in_mount(&self, vector: [f64; 3]) -> [f64; 3] {
-        rotate(self.mount_from_sensor.rotation_xyzw, vector)
+        self.mount_from_sensor.rotation.rotate(vector)
     }
-}
-
-/// Whether a pose is finite with a unit quaternion.
-pub(crate) fn is_rigid(pose: &Pose) -> bool {
-    let norm: f64 = pose.rotation_xyzw.iter().map(|value| value * value).sum();
-    pose.translation_m
-        .iter()
-        .chain(&pose.rotation_xyzw)
-        .all(|value| value.is_finite())
-        && (norm.sqrt() - 1.0).abs() <= 1e-6
-}
-
-/// `vector` rotated by the unit quaternion `(x, y, z, w)`.
-#[must_use]
-pub fn rotate(rotation_xyzw: [f64; 4], vector: [f64; 3]) -> [f64; 3] {
-    // v' = v + 2w (q x v) + 2 q x (q x v), q the vector part.
-    let axis = [rotation_xyzw[0], rotation_xyzw[1], rotation_xyzw[2]];
-    let twice = scale(cross(axis, vector), 2.0);
-    let turned = cross(axis, twice);
-    let real = rotation_xyzw[3];
-    [
-        vector[0] + real * twice[0] + turned[0],
-        vector[1] + real * twice[1] + turned[1],
-        vector[2] + real * twice[2] + turned[2],
-    ]
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn scale(v: [f64; 3], by: f64) -> [f64; 3] {
-    [v[0] * by, v[1] * by, v[2] * by]
-}
-
-fn norm(v: [f64; 3]) -> f64 {
-    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
 /// One reading of an inertial sensor, on its own axes.
@@ -301,10 +262,10 @@ mod tests {
     #[test]
     fn a_quarter_turn_about_y_takes_x_down_and_z_forward() {
         let half = 0.5_f64.sqrt();
-        let quarter = [0.0, half, 0.0, half];
-        assert!(close(rotate(quarter, [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]));
-        assert!(close(rotate(quarter, [0.0, 0.0, 1.0]), [1.0, 0.0, 0.0]));
-        assert!(close(rotate(quarter, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]));
+        let quarter = sx_frames::QuaternionLayout::Xyzw.read([0.0, half, 0.0, half]);
+        assert!(close(quarter.rotate([1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]));
+        assert!(close(quarter.rotate([0.0, 0.0, 1.0]), [1.0, 0.0, 0.0]));
+        assert!(close(quarter.rotate([0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]));
     }
 
     #[test]
