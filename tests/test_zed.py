@@ -2,6 +2,7 @@
 
 import configparser
 import io
+import json
 import math
 from pathlib import Path
 from typing import cast
@@ -13,14 +14,17 @@ from sx_embodiments import development_embodiments
 from sx_embodiments.calibration import (
     CalibrationError,
     CalibrationMethod,
+    CameraUnitCalibration,
     EvidenceKind,
+    RigidCalibration,
     UnitSerial,
     calibration_from_dict,
+    calibration_id,
     calibration_to_dict,
 )
 from sx_embodiments.cameras import camera_label
 from sx_embodiments.embodiment import Embodiment
-from sx_embodiments.factory_intrinsics import zed_factory_calibration
+from sx_embodiments.factory_intrinsics import main, zed_factory_calibration
 from sx_embodiments.instance import RobotInstance, Slot, SlotKind, resolve
 from sx_embodiments.kinematics import JointType, Kinematics
 from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_RIG
@@ -64,6 +68,12 @@ def test_the_factory_record_is_each_eyes_rational_lens_and_the_right_eyes_pose()
     assert translation == pytest.approx((0.11978192582188, 7.648505802632155e-06))
     # The eyes are parallel to a quarter degree.
     assert math.degrees(math.acos(stereo.parent_from_child[0])) < 0.3
+    # The right eye's orientation is the inverse of OpenCV's left-to-right R: Rodrigues
+    # (RX, CV, RZ) = (0.004377, 0.003809, 0.000230) turns the left eye's points into the right's,
+    # so the right eye's own z axis, seen from the left, leans by -CV about y and +RX about x.
+    rotation = stereo.parent_from_child
+    assert rotation[2] == pytest.approx(-0.0038090118, abs=1e-6)  # x component of right's z
+    assert rotation[6] == pytest.approx(0.0043769801, abs=1e-6)  # y component of right's z
     vga = zed_factory_calibration(document, "30371653", 672, 376, FRAMES).left
     assert vga.image_from_camera[0] == 265.73560657716
 
@@ -167,3 +177,68 @@ def test_the_nominal_eye_is_the_lens_over_the_binned_pixel_and_close_to_the_unit
     factory = zed_factory_calibration(FIXTURE.read_bytes(), "30371653", 1280, 720, FRAMES)
     unit_fx, _, _, _, unit_fy, *_ = factory.left.image_from_camera
     assert abs(unit_fx / fx - 1) < 0.015 and abs(unit_fy / fy - 1) < 0.015
+
+
+def test_the_factory_pair_places_the_right_eye_by_its_measured_geometry() -> None:
+    """With the pair's measured extrinsics selected, the right eye rides the left eye's chain
+    and then exactly the factory's left_from_right; without them, its own link."""
+    body = _body()
+    factory = zed_factory_calibration(FIXTURE.read_bytes(), "30371653", 1280, 720, FRAMES)
+    units = {
+        Slot(SlotKind.CAMERA, f"head_{eye}"): UnitSerial(f"30371653/{eye}")
+        for eye in ("left", "right")
+    }
+
+    def views(*calibrations: object) -> list[dict[str, object]]:
+        chosen = cast("tuple[CameraUnitCalibration | RigidCalibration, ...]", calibrations)
+        instance = RobotInstance.of(body.id, units, chosen)
+        plan = media_document(body, resolve(body, instance, chosen), STATIC_UPPER_BODY_RIG)
+        return cast(
+            "list[dict[str, object]]", cast("list[dict[str, object]]", plan["tracks"])[0]["views"]
+        )
+
+    left, right = views(factory.left, factory.right, factory.left_from_right)
+    assert right["mount_frame"] == FRAMES[1]
+    left_chain = cast("list[dict[str, object]]", left["chain"])
+    right_chain = cast("list[dict[str, object]]", right["chain"])
+    assert right_chain[:-1] == left_chain
+    assert right_chain[-1]["type"] == "fixed"
+    assert right_chain[-1]["origin"] == list(factory.left_from_right.parent_from_child)
+    assert right["moves_with"] == left["moves_with"]
+    assert right["image_from_camera"] == list(factory.right.image_from_camera)
+    assert right["distortion_model"] == "rational_polynomial"
+    # The baseline the two placements differ by is the factory's 119.78 mm.
+    origin = cast("list[float]", right_chain[-1]["origin"])
+    assert math.dist((0, 0, 0), (origin[3], origin[7], origin[11])) == pytest.approx(
+        0.11979, abs=1e-5
+    )
+
+    _, nominal = views(factory.left, factory.right)
+    nominal_chain = cast("list[dict[str, object]]", nominal["chain"])
+    assert nominal_chain[-1]["joint"] != right_chain[-1]["joint"]
+    assert nominal_chain[:-1] == left_chain[:-1]
+
+
+def test_commissioning_writes_the_pairs_documents_named_by_their_digest(tmp_path: Path) -> None:
+    main(
+        [
+            "zed",
+            "--serial",
+            "30371653",
+            "--body",
+            "sentient-static-upper-body",
+            "--record",
+            str(FIXTURE),
+            "--out",
+            str(tmp_path),
+        ]
+    )
+    assert (tmp_path / "30371653.conf").read_bytes() == FIXTURE.read_bytes()
+    documents = sorted(tmp_path.glob("*.json"))
+    assert len(documents) == 3
+    kinds = set()
+    for path in documents:
+        calibration = calibration_from_dict(json.loads(path.read_text()))
+        assert path.name == f"{calibration_id(calibration)}.json"
+        kinds.add(calibration_to_dict(calibration)["kind"])
+    assert kinds == {"camera_unit", "rigid"}

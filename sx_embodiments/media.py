@@ -17,6 +17,14 @@ positions place it instead, and its pose at capture is the chain evaluated at th
 that instant: ``sx_embodiment_drivers::kinematics`` composes the rendered chain exactly as
 :meth:`~sx_embodiments.kinematics.Kinematics.pose` does, so the station never reads a URDF.
 
+A camera whose frame the instance's selected absolute rigid calibration measures from another
+frame (a stereo camera's right eye from its left, by the unit's factory or checkerboard
+extrinsics, :func:`~sx_embodiments.factory_intrinsics.zed_factory_calibration`) is placed by
+that measurement rather than by the description: its chain is the other frame's, then one
+fixed step ``parent_from_child``. A stereo unit's two eyes then differ by exactly its measured
+baseline and rotation, whether the plan publishes them as one track or two, so whoever
+rectifies the pair from the frames' extrinsics rectifies by the unit's own geometry.
+
 Every declared inertial sensor (:class:`~sx_embodiments.parts.InertialSpec`) is listed under
 ``inertial`` with the same placement, its sensing axes at ``mount_from_sensor`` in its mount link,
 and the unit the instance placed in its component slot (the device serial a driver opens it by).
@@ -34,10 +42,11 @@ from typing import Final
 
 from sx_contracts.identity import JsonValue
 
+from .calibration import RigidReference, matrix_from_pose
 from .embodiment import Embodiment
 from .errors import EmbodimentSchemaError
 from .instance import InstanceError, ResolvedCamera, ResolvedInstance, Slot, SlotKind
-from .kinematics import Joint, JointType, Kinematics, KinematicsError, Transform
+from .kinematics import Joint, JointType, Kinematics, KinematicsError, Transform, compose
 from .parts import InertialSpec
 
 MEDIA_SCHEMA: Final = "sx.media-plan/v3"
@@ -228,8 +237,17 @@ def _translation_rotation(
     return (m(0, 3), m(1, 3), m(2, 3)), (x, y, z, w)
 
 
-def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue]:
+def _view(
+    embodiment: Embodiment,
+    camera: ResolvedCamera,
+    measured: Mapping[str, tuple[str, Transform]],
+) -> dict[str, JsonValue]:
+    """One camera's view. A camera whose frame a selected absolute rigid calibration measures
+    from another of the body's frames (a stereo pair's right eye from its left) is placed by
+    that measurement instead of by its own link (``measured``: parent frame and
+    ``parent_from_child`` by child frame)."""
     binding = next(binding for binding in embodiment.cameras if binding.name == camera.name)
+    measured_from = measured.get(binding.frame)
     optics = camera.nominal
     measured = camera.calibration
     view: dict[str, JsonValue] = {
@@ -253,7 +271,9 @@ def _view(embodiment: Embodiment, camera: ResolvedCamera) -> dict[str, JsonValue
         "unit": None if camera.unit is None else str(camera.unit),
         "calibration": None if camera.measured is None else str(camera.measured),
     }
-    return view | _placement(embodiment, binding.frame)
+    if measured_from is None:
+        return view | _placement(embodiment, binding.frame)
+    return view | _measured_placement(embodiment, binding.frame, *measured_from)
 
 
 def _pose(
@@ -272,6 +292,29 @@ def _placement(embodiment: Embodiment, frame: str) -> dict[str, JsonValue]:
         "root_from_mount": None if mount.pose is None else _pose(mount.pose),
         "moves_with": list(mount.moves_with),
         "chain": [_step(step) for step in mount.chain],
+    }
+
+
+def _measured_placement(
+    embodiment: Embodiment, frame: str, parent: str, parent_from_frame: Transform
+) -> dict[str, JsonValue]:
+    """``frame`` placed by a measurement from ``parent``: ``parent``'s chain, then one fixed step
+    ``parent_from_frame``; its pose, when rigid, composed the same way."""
+    mount = mount_pose(embodiment.urdf_bytes, parent)
+    step = ChainStep(
+        f"{parent}_to_{frame}_measured", JointType.FIXED, parent_from_frame, (1.0, 0.0, 0.0), None
+    )
+    pose = (
+        None
+        if mount.pose is None
+        else _translation_rotation(compose(matrix_from_pose(*mount.pose), parent_from_frame))
+    )
+    return {
+        "mount_frame": frame,
+        "root_frame": mount.root_frame,
+        "root_from_mount": None if pose is None else _pose(pose),
+        "moves_with": list(mount.moves_with),
+        "chain": [_step(step) for step in (*mount.chain, step)],
     }
 
 
@@ -328,6 +371,14 @@ def media_document(
         raise InstanceError("the instance is of a different embodiment")
     cameras = {camera.name: camera for camera in resolved.cameras}
     bindings = {binding.name: binding for binding in embodiment.cameras}
+    measured = {
+        frame.calibration.child_frame: (
+            frame.calibration.parent_frame,
+            frame.calibration.parent_from_child,
+        )
+        for frame in resolved.frames
+        if frame.calibration.reference is RigidReference.ABSOLUTE
+    }
     paired: set[str] = set()
     names: set[str] = set()
     tracks: list[JsonValue] = []
@@ -354,8 +405,8 @@ def media_document(
                 "track": pair.track,
                 "fps": left.fps,
                 "views": [
-                    _view(embodiment, cameras[pair.left]),
-                    _view(embodiment, cameras[pair.right]),
+                    _view(embodiment, cameras[pair.left], measured),
+                    _view(embodiment, cameras[pair.right], measured),
                 ],
             }
         )
@@ -368,7 +419,7 @@ def media_document(
             {
                 "track": camera.name,
                 "fps": bindings[camera.name].camera.fps,
-                "views": [_view(embodiment, camera)],
+                "views": [_view(embodiment, camera, measured)],
             }
         )
         names.add(camera.name)
