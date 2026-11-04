@@ -82,8 +82,6 @@ pub struct Settings {
     pub collision_margin_m: f64,
     /// Pairs closer than this are candidates for a collision row.
     pub influence_m: f64,
-    /// The share of a pair's full braking capability its approach is planned with.
-    pub braking_share: f64,
     /// A pair closes no faster than its room over this, seconds: the command slows as it nears
     /// the margin, so that a real arm trailing it can still stop within the margin. An arm
     /// stops later than its command by its transport delay and its follower's lag. On the
@@ -127,7 +125,6 @@ impl Default for Settings {
             limit_margin_rad: 0.01,
             collision_margin_m: 0.01,
             influence_m: 0.2,
-            braking_share: 0.5,
             approach_time_s: 0.3,
             max_step_rad: 0.03,
             max_error_m: 0.1,
@@ -1359,7 +1356,7 @@ impl Ik {
             // Never more than half the room in one tick either: a long step is where the
             // linearisation is least true.
             let room = (distance - s.collision_margin_m).max(0.0);
-            let mut rhs = braking(room, s.braking_share * capability, dt).min(0.5 * room);
+            let mut rhs = braking(room, capability, dt).min(0.5 * room);
             if s.approach_time_s > 0.0 {
                 rhs = rhs.min(room * dt / s.approach_time_s);
             }
@@ -1939,7 +1936,10 @@ fn across(a: Vec3) -> [Vec3; 2] {
 }
 
 /// The share of a pose error one tick closes, along the error's own straight line: no more
-/// than the limb can still stop on, as a collision row's approach is planned.
+/// than the limb can still stop on at its full acceleration caps (the time-optimal approach:
+/// full acceleration, then full braking onto the target), as a collision row's approach is
+/// planned. Until 2026-11-04 it planned on half the caps, which held a 10 cm hand jump to
+/// 0.4-1.4 s on the static upper body for no physical reason.
 ///
 /// The joint motion per unit of the error is its damped least-squares direction
 /// `d = A' (A A' + damping I)^-1 e/|e|` over the task rows `A = [Jv; rho Jw]`, the QP's own
@@ -1997,7 +1997,7 @@ fn approach(
     if !accel.is_finite() {
         return 1.0;
     }
-    length.min(braking(length, s.braking_share * accel, dt)) / length
+    length.min(braking(length, accel, dt)) / length
 }
 
 /// [`approach`] for a camera's pointing error `e` (radians) over its rows `jl` (per axis, the
@@ -2038,7 +2038,7 @@ fn pointing_approach(
     if !accel.is_finite() {
         return 1.0;
     }
-    length.min(braking(length, s.braking_share * accel, dt)) / length
+    length.min(braking(length, accel, dt)) / length
 }
 
 /// One tick's position and orientation error, each held to the most one tick closes

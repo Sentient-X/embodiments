@@ -69,7 +69,7 @@ pub mod tool;
 use sx_embodiment_drivers::kinematics::TreeError;
 use thiserror::Error;
 
-pub use body::{Body, Limb, Target, Task};
+pub use body::{Body, Limb, Target, Task, ToolCapability};
 pub use geometry::{
     Capsule, Obstacle, PROXIES_SCHEMA, Proxies, box_distance, closest_segments, segment_box,
 };
