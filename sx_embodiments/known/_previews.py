@@ -109,11 +109,11 @@ PREVIEWS: Final[dict[EmbodimentId, PackagedAsset]] = {
         ),
     ),
     EmbodimentId(
-        "6d21b329e04f7fa1af380db2fd97ea5264af6f3d69445cdb9af9c82038f23c06"
+        "cbca4b2aadad07ca547d63b6a6d53391fdb2f0478015cd7b663bbd62d6a2c17b"
     ): packaged_asset(
-        relpath="official/previews/c76ad4f8a10702d04788450f8795fb3eeb5aba4ed4ed328120664362566493b7.webp",
-        sha256="344ec4b77c00df69646b3f079f4f8a08db3d5dd44e40f621433554608e6914ee",
-        size_bytes=3538,
+        relpath="official/previews/cbca4b2aadad07ca547d63b6a6d53391fdb2f0478015cd7b663bbd62d6a2c17b.webp",
+        sha256="9e4187eacfb1d5c8e8e32d47c0b3eb56eb51a5f2e68e61fa8f7aa49f20927fcb",
+        size_bytes=3298,
         format=AssetFormat.OTHER,
         role=AssetRole.OTHER,
         media_type="image/webp",

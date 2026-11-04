@@ -207,7 +207,7 @@
   <joint name="Slider_1" type="prismatic">
     <axis xyz="0 0 1" />
     <limit lower="0" upper="0.208000" effort="100" velocity="10" />
-    <origin xyz="-0.509400 -0.209550 0.000317" rpy="3.14159230718 1.57079600033 0" />
+    <origin xyz="-0.509400 -0.209550 0.000317" rpy="0 1.57079600033 -3.14159230718" />
     <parent link="base_profile_short" />
     <child link="Lift_Middle" />
   </joint>
@@ -251,13 +251,13 @@
     </visual>
   </link>
   <joint name="Lift_Top_to_left_arm_link0" type="fixed">
-    <origin xyz="-0.005 -0.0925 0.0575" rpy="0.7854 0 3.14" />
+    <origin xyz="-0.005 -0.0925 0.0575" rpy="-0.785399365863 -0.00112617798371 3.14046647903" />
     <parent link="Lift_Top" />
     <child link="left_arm_link0" />
   </joint>
   <link name="left_arm_link0">
     <inertial>
-      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965751904985 -0.000714269628734 1.5764233274" />
+      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965752417407 -0.000714270008312 1.57642385882" />
       <mass value="1.02" />
       <inertia ixx="0.00282612" iyy="0.00269117" izz="0.000879394" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -280,7 +280,7 @@
   </joint>
   <link name="left_arm_link1">
     <inertial>
-      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975743905 0.0451293629087 -0.00296542943264" />
+      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975739996 0.045129361141 -0.00296542931645" />
       <mass value="0.71" />
       <inertia ixx="0.000489262" iyy="0.000439887" izz="0.000404551" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -297,13 +297,13 @@
   <joint name="left_arm_joint2" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="0" upper="3.13" effort="100" velocity="10" />
-    <origin xyz="0 0 0" rpy="1.57079970425 -0.135899890111 3.14158533936" />
+    <origin xyz="0 0 0" rpy="1.57079965953 -0.135899884053 3.14158533936" />
     <parent link="left_arm_link1" />
     <child link="left_arm_link2" />
   </joint>
   <link name="left_arm_link2">
     <inertial>
-      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457578972 0.0718617599512 1.59803864256" />
+      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457675429 0.0718618292079 1.59803960678" />
       <mass value="1.17" />
       <inertia ixx="0.0679032" iyy="0.067745" izz="0.00111966" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -320,13 +320,13 @@
   <joint name="left_arm_joint3" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-2.965" upper="0" effort="100" velocity="10" />
-    <origin xyz="0.28503 0 0" rpy="0 0 -1.7938990818" />
+    <origin xyz="0.28503 0 0" rpy="0 0 -1.79389989675" />
     <parent link="left_arm_link2" />
     <child link="left_arm_link3" />
   </joint>
   <link name="left_arm_link3">
     <inertial>
-      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.5708241612 0.0273181067184 0.123352501639" />
+      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.57082409598 0.027318104937 0.123352493615" />
       <mass value="0.5" />
       <inertia ixx="0.0138227" iyy="0.0138032" izz="0.000244685" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -343,13 +343,13 @@
   <joint name="left_arm_joint4" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-1.74" upper="1.74" effort="100" velocity="10" />
-    <origin xyz="-0.021984 -0.25075 0" rpy="1.57079977413 0 0" />
+    <origin xyz="-0.021984 -0.25075 0" rpy="1.57080056944 0 0" />
     <parent link="left_arm_link3" />
     <child link="left_arm_link4" />
   </joint>
   <link name="left_arm_link4">
     <inertial>
-      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476492845 0.22355782891 1.53022260235" />
+      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476496676 0.223557830639 1.53022261014" />
       <mass value="0.38" />
       <inertia ixx="0.000191586" iyy="0.000185052" izz="0.000152863" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -366,13 +366,13 @@
   <joint name="left_arm_joint5" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-1.2" upper="1.2" effort="100" velocity="10" />
-    <origin xyz="0 0 0" rpy="-1.57079977413 0 0" />
+    <origin xyz="0 0 0" rpy="-1.57080056944 0 0" />
     <parent link="left_arm_link4" />
     <child link="left_arm_link5" />
   </joint>
   <link name="left_arm_link5">
     <inertial>
-      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.5637616277 0.00377983257731 1.43794226806e-05" />
+      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.56376061797 0.00377982876063 1.4379408161e-05" />
       <mass value="0.383" />
       <inertia ixx="0.00166169" iyy="0.00164328" izz="0.000185028" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -389,13 +389,13 @@
   <joint name="left_arm_joint6" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-3" upper="3" effort="100" velocity="10" />
-    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57079977413 0 0" />
+    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57080056944 0 0" />
     <parent link="left_arm_link5" />
     <child link="left_arm_link6" />
   </joint>
   <link name="left_arm_link6">
     <inertial>
-      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 0" />
+      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 1.57079632679" />
       <mass value="0.0069909" />
       <inertia ixx="1.06739e-06" iyy="5.73016e-07" izz="5.73016e-07" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -410,13 +410,13 @@
     </visual>
   </link>
   <joint name="left_arm_link6_to_left_arm_gripper_base" type="fixed">
-    <origin xyz="0.0275 0.01875 0.0798" rpy="3.14 -1.57 0" />
+    <origin xyz="0.0275 0.01875 0.0798" rpy="2.03444355531 1.5690156861 -1.10714846414" />
     <parent link="left_arm_link6" />
     <child link="left_arm_gripper_base" />
   </joint>
   <link name="left_arm_gripper_base">
     <inertial>
-      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578689204 0.0137929430409 0.00157838995994" />
+      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578652196 0.0137929403904 0.00157838965662" />
       <mass value="0.45" />
       <inertia ixx="0.000929442" iyy="0.000714469" izz="0.000394318" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -447,19 +447,19 @@
     </visual>
   </link>
   <joint name="left_arm_iphone_body_to_left_arm_camera_body" type="fixed">
-    <origin xyz="0.0 -0.036 0.1" rpy="-0.2617993878 3.14159265359 0.0" />
+    <origin xyz="0.0 -0.036 0.1" rpy="-2.87979326579 -1.99775780631e-13 3.14159265359" />
     <parent link="left_arm_iphone_body" />
     <child link="left_arm_camera_body" />
   </joint>
   <link name="left_arm_camera_body" />
   <joint name="Lift_Top_to_right_arm_link0" type="fixed">
-    <origin xyz="-0.005 0.0925 0.0575" rpy="-0.7854 0 3.14" />
+    <origin xyz="-0.005 0.0925 0.0575" rpy="0.785399365863 0.00112617798371 3.14046647903" />
     <parent link="Lift_Top" />
     <child link="right_arm_link0" />
   </joint>
   <link name="right_arm_link0">
     <inertial>
-      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965751904985 -0.000714269628734 1.5764233274" />
+      <origin xyz="-0.00473641 2.56829e-05 0.0414515" rpy="0.0965752417407 -0.000714270008312 1.57642385882" />
       <mass value="1.02" />
       <inertia ixx="0.00282612" iyy="0.00269117" izz="0.000879394" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -482,7 +482,7 @@
   </joint>
   <link name="right_arm_link1">
     <inertial>
-      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975743905 0.0451293629087 -0.00296542943264" />
+      <origin xyz="0.000121505 0.000104632 -0.00438597" rpy="1.63975739996 0.045129361141 -0.00296542931645" />
       <mass value="0.71" />
       <inertia ixx="0.000489262" iyy="0.000439887" izz="0.000404551" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -499,13 +499,13 @@
   <joint name="right_arm_joint2" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="0" upper="3.13" effort="100" velocity="10" />
-    <origin xyz="0 0 0" rpy="1.57079970425 -0.135899890111 3.14158533936" />
+    <origin xyz="0 0 0" rpy="1.57079965953 -0.135899884053 3.14158533936" />
     <parent link="right_arm_link1" />
     <child link="right_arm_link2" />
   </joint>
   <link name="right_arm_link2">
     <inertial>
-      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457578972 0.0718617599512 1.59803864256" />
+      <origin xyz="0.198666 -0.0109269 0.00142122" rpy="1.57457675429 0.0718618292079 1.59803960678" />
       <mass value="1.17" />
       <inertia ixx="0.0679032" iyy="0.067745" izz="0.00111966" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -522,13 +522,13 @@
   <joint name="right_arm_joint3" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-2.965" upper="0" effort="100" velocity="10" />
-    <origin xyz="0.28503 0 0" rpy="0 0 -1.7938990818" />
+    <origin xyz="0.28503 0 0" rpy="0 0 -1.79389989675" />
     <parent link="right_arm_link2" />
     <child link="right_arm_link3" />
   </joint>
   <link name="right_arm_link3">
     <inertial>
-      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.5708241612 0.0273181067184 0.123352501639" />
+      <origin xyz="-0.0202738 -0.133915 -0.000458683" rpy="1.57082409598 0.027318104937 0.123352493615" />
       <mass value="0.5" />
       <inertia ixx="0.0138227" iyy="0.0138032" izz="0.000244685" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -545,13 +545,13 @@
   <joint name="right_arm_joint4" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-1.74" upper="1.74" effort="100" velocity="10" />
-    <origin xyz="-0.021984 -0.25075 0" rpy="1.57079977413 0 0" />
+    <origin xyz="-0.021984 -0.25075 0" rpy="1.57080056944 0 0" />
     <parent link="right_arm_link3" />
     <child link="right_arm_link4" />
   </joint>
   <link name="right_arm_link4">
     <inertial>
-      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476492845 0.22355782891 1.53022260235" />
+      <origin xyz="-9.66636e-05 0.000876064 -0.00496881" rpy="-0.0491476496676 0.223557830639 1.53022261014" />
       <mass value="0.38" />
       <inertia ixx="0.000191586" iyy="0.000185052" izz="0.000152863" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -568,13 +568,13 @@
   <joint name="right_arm_joint5" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-1.2" upper="1.2" effort="100" velocity="10" />
-    <origin xyz="0 0 0" rpy="-1.57079977413 0 0" />
+    <origin xyz="0 0 0" rpy="-1.57080056944 0 0" />
     <parent link="right_arm_link4" />
     <child link="right_arm_link5" />
   </joint>
   <link name="right_arm_link5">
     <inertial>
-      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.5637616277 0.00377983257731 1.43794226806e-05" />
+      <origin xyz="-4.10554e-05 -0.0566487 -0.00372058" rpy="1.56376061797 0.00377982876063 1.4379408161e-05" />
       <mass value="0.383" />
       <inertia ixx="0.00166169" iyy="0.00164328" izz="0.000185028" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -591,13 +591,13 @@
   <joint name="right_arm_joint6" type="revolute">
     <axis xyz="0 0 1" />
     <limit lower="-3" upper="3" effort="100" velocity="10" />
-    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57079977413 0 0" />
+    <origin xyz="8.8259e-05 -0.091 0" rpy="1.57080056944 0 0" />
     <parent link="right_arm_link5" />
     <child link="right_arm_link6" />
   </joint>
   <link name="right_arm_link6">
     <inertial>
-      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 0" />
+      <origin xyz="-8.82591e-05 9.05984e-06 -0.002" rpy="0 -1.57079632679 1.57079632679" />
       <mass value="0.0069909" />
       <inertia ixx="1.06739e-06" iyy="5.73016e-07" izz="5.73016e-07" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -612,13 +612,13 @@
     </visual>
   </link>
   <joint name="right_arm_link6_to_right_arm_gripper_base" type="fixed">
-    <origin xyz="0.0275 0.01875 0.0798" rpy="3.14 -1.57 0" />
+    <origin xyz="0.0275 0.01875 0.0798" rpy="2.03444355531 1.5690156861 -1.10714846414" />
     <parent link="right_arm_link6" />
     <child link="right_arm_gripper_base" />
   </joint>
   <link name="right_arm_gripper_base">
     <inertial>
-      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578689204 0.0137929430409 0.00157838995994" />
+      <origin xyz="-0.000183807 8.05033e-05 0.0321437" rpy="0.000192578652196 0.0137929403904 0.00157838965662" />
       <mass value="0.45" />
       <inertia ixx="0.000929442" iyy="0.000714469" izz="0.000394318" ixy="0" ixz="0" iyz="0" />
     </inertial>
@@ -649,7 +649,7 @@
     </visual>
   </link>
   <joint name="right_arm_iphone_body_to_right_arm_camera_body" type="fixed">
-    <origin xyz="0.0 -0.036 0.1" rpy="-0.2617993878 3.14159265359 0.0" />
+    <origin xyz="0.0 -0.036 0.1" rpy="-2.87979326579 -1.99775780631e-13 3.14159265359" />
     <parent link="right_arm_iphone_body" />
     <child link="right_arm_camera_body" />
   </joint>

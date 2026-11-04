@@ -4,7 +4,7 @@ from typing import Final, Literal
 
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import EmbodimentDefinition, MountedOn, RootMount, body_component
-from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
+from ..identity import EmbodimentId, EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, Module, ModuleId
 from ..parts import ChainSpec, Limb, MobileBaseSpec
@@ -26,8 +26,8 @@ YOR_MJCF: Final = packaged_asset(
 )
 YOR_URDF: Final = packaged_asset(
     relpath="official/yor/yor.urdf",
-    sha256="b5242242eb182ac80af88c1ccafbf042adc82e72112519867bb4e808cf63ce38",
-    size_bytes=24400,
+    sha256="3cfea922617d2c488a9076cc002b80ad551c8922e039cab3c78481c30b603c69",
+    size_bytes=24584,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -35,7 +35,7 @@ YOR_URDF: Final = packaged_asset(
         revision="2cc6dd2edcc7aa6d7f3d58e08bce7d2075d80cb6",
         path="robot/yor-description/robot.mjcf",
         license_id="MIT",
-        generator="sx-embodiments mjcf_to_urdf v1",
+        generator="sx-embodiments mjcf_to_urdf v2",
     ),
     media_type="application/xml",
 )
@@ -100,6 +100,13 @@ YOR_MODULE: Final = Module(
 
 YOR_SPEC: Final = EmbodimentDefinition(
     name=EmbodimentName("yor"),
+    # Its schema-15 publication and the schema-16 body before mjcf_to_urdf v2: v1 copied
+    # MJCF's intrinsic xyz euler into URDF's fixed-axis rpy, which turned the arm mounts,
+    # grippers and wrist cameras. The joints and their wiring did not change.
+    earlier_revisions=(
+        EmbodimentId("c76ad4f8a10702d04788450f8795fb3eeb5aba4ed4ed328120664362566493b7"),
+        EmbodimentId("6d21b329e04f7fa1af380db2fd97ea5264af6f3d69445cdb9af9c82038f23c06"),
+    ),
     label="YOR bimanual mobile robot",
     kind=EmbodimentKind.ROBOT,
     lineage=Lineage(family="yor"),

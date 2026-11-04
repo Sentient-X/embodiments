@@ -46,6 +46,10 @@ VENDORED_LICENCES: Final[Mapping[str, str]] = {
     "menagerie/i2rt_yam": "MIT",
     # This repository's own record of MENAGERIE_REVISION, under the package's licence.
     "menagerie/menagerie.commit": "Apache-2.0",
+    # YOR's URDF as mjcf_to_urdf v1 projected it (MJCF euler copied into rpy unconverted),
+    # kept so the recordings that name that revision keep resolving. The official/ tree
+    # holds several licences, so this superseded revision names its own: YOR's MIT.
+    "official/_by_digest/b5242242eb182ac80af88c1ccafbf042adc82e72112519867bb4e808cf63ce38": "MIT",
 }
 """Licences of tree files that no embodiment declaration reaches, by file or directory.
 
