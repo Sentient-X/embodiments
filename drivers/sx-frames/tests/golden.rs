@@ -5,8 +5,8 @@
 
 use serde_json::Value;
 use sx_frames::{
-    Axes, Direction, EulerSequence, Frames, Handedness, Matrix3, NAMED_AXES, Quaternion,
-    QuaternionLayout, Source, basis, recorded,
+    Axes, Direction, EulerSequence, Frames, Handedness, Matrix3, NAMED_AXES, QuaternionLayout,
+    Source, basis, basis_quaternion, recorded,
 };
 
 const TOLERANCE: f64 = 1e-11;
@@ -98,7 +98,7 @@ fn every_basis_change() {
         let what = format!("{parent}<-{child}");
         let got = basis(parent, child).expect("right-handed");
         close_matrix(&got, &matrix(&case["parent_from_child"]), &what);
-        let q = Quaternion::from_matrix(&got).canonical();
+        let q = basis_quaternion(parent, child).expect("right-handed");
         close(
             &QuaternionLayout::Xyzw.write(q),
             &vec4(&case["rotation_xyzw"]),

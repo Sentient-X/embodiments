@@ -8,7 +8,7 @@
 use std::fmt;
 
 use crate::FrameError;
-use crate::axes::{Axes, Handedness, basis_unchecked};
+use crate::axes::{Axes, Handedness, basis_unchecked, snap_basis};
 use crate::linalg::{Matrix3, Vec3, mat_mul, mat_vec, negate, scale, transpose};
 use crate::pose::Pose;
 use crate::rotation::Quaternion;
@@ -185,7 +185,10 @@ impl Transform {
     /// [`FrameError::SelfEdge`] when both are one frame.
     #[inline]
     pub fn between(parent: Frame, child: Frame) -> Result<Self, FrameError> {
-        let rotation = Quaternion::from_matrix(&basis_unchecked(parent.axes, child.axes));
+        let rotation = snap_basis(Quaternion::from_matrix(&basis_unchecked(
+            parent.axes,
+            child.axes,
+        )));
         Self::new(
             parent,
             child,

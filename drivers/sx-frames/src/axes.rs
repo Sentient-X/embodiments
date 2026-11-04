@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::FrameError;
 use crate::linalg::{Matrix3, mat_mul, transpose};
+use crate::rotation::Quaternion;
 
 /// A physical direction relative to the facing of the thing a frame is attached to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -241,4 +242,43 @@ pub(crate) fn basis_unchecked(parent: Axes, child: Axes) -> Matrix3 {
         &transpose(&parent.facing_from_axes()),
         &child.facing_from_axes(),
     )
+}
+
+/// `parent_from_child` of [`basis`] as an exact quaternion, the Python kernel's
+/// `basis_quaternion` bit for bit.
+///
+/// A basis change is a signed permutation, so each quaternion component is exactly `0`,
+/// `±1/2`, `±sqrt(1/2)` or `±1`. Shepperd's `(m21 - m12) / s` lands one ulp off some of them,
+/// so the components are snapped to those values (the literals this replaces used them), then
+/// given the kernel `Pose`'s one sign (the first non-zero of `(w, x, y, z)` positive).
+///
+/// # Errors
+///
+/// [`FrameError::LeftHanded`] when either is left-handed.
+pub fn basis_quaternion(parent: Axes, child: Axes) -> Result<Quaternion, FrameError> {
+    let matrix = basis(parent, child)?;
+    Ok(snap_basis(Quaternion::from_matrix(&matrix)))
+}
+
+pub(crate) fn snap_basis(q: Quaternion) -> Quaternion {
+    const EXACT: [f64; 4] = [0.0, 0.5, std::f64::consts::FRAC_1_SQRT_2, 1.0];
+    let snap = |value: f64| {
+        let nearest = EXACT
+            .into_iter()
+            .min_by(|a, b| (value.abs() - a).abs().total_cmp(&(value.abs() - b).abs()))
+            .unwrap_or(0.0);
+        // An exact zero is +0.0, as the Python Pose stores it.
+        if nearest == 0.0 {
+            0.0
+        } else {
+            nearest.copysign(value)
+        }
+    };
+    Quaternion {
+        x: snap(q.x),
+        y: snap(q.y),
+        z: snap(q.z),
+        w: snap(q.w),
+    }
+    .canonical()
 }

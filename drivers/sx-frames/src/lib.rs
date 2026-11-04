@@ -25,7 +25,10 @@ pub mod linalg;
 mod pose;
 mod rotation;
 
-pub use axes::{Axes, Direction, FLU, Handedness, LUF, NAMED_AXES, RDF, RFU, RUB, UNITY, basis};
+pub use axes::{
+    Axes, Direction, FLU, Handedness, LUF, NAMED_AXES, RDF, RFU, RUB, UNITY, basis,
+    basis_quaternion,
+};
 pub use frame::{Authority, Frame, FrameId, Frames, LengthUnit, Source, Transform, recorded};
 pub use linalg::{Matrix3, Vec3};
 pub use pose::{Pose, Rigid};
