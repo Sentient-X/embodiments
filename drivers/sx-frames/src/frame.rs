@@ -25,7 +25,9 @@ impl FrameId {
 }
 
 /// A declared frame: its id and its axes. Inside the system every frame is right-handed, so a
-/// `Frame` cannot hold left-handed axes.
+/// `Frame` cannot hold left-handed axes. An id means something only within the [`Frames`] that
+/// declared it: one robot, episode or delivery keeps one registry, and frames from two are never
+/// composed (Python compares names; here the registry makes the name an id).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Frame {
     id: FrameId,

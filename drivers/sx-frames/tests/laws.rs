@@ -273,3 +273,110 @@ fn the_tick_never_allocates() {
     });
     assert_eq!(counts.count_total, 0, "{counts:?}");
 }
+
+#[test]
+fn from_matrix_keeps_w_non_negative_and_canonical_is_the_python_sign() {
+    for angle in [0.3, 2.0, 3.0, 3.1, 4.0, 5.5, 6.2] {
+        for axis in [[0.0, 0.0, 1.0], [0.6, -0.8, 0.0], [-0.48, 0.6, 0.64]] {
+            let r = rotation_vector_matrix(axis.map(|v| v * angle));
+            let q = Quaternion::from_matrix(&r);
+            assert!(q.w >= 0.0, "{angle} {axis:?}: {q:?}");
+            assert!(close(q.matrix().as_flattened(), r.as_flattened(), 1e-12));
+        }
+    }
+    // A half turn has w = 0: the first non-zero of (w, x, y, z) decides, as in the Python Pose.
+    let half = Quaternion {
+        x: -1.0,
+        y: 0.0,
+        z: 0.0,
+        w: 0.0,
+    };
+    assert_eq!(half.canonical().x, 1.0);
+    let negative = QuaternionLayout::Xyzw.read([0.1, 0.2, 0.3, -0.9]);
+    assert_eq!(
+        QuaternionLayout::Xyzw.write(negative.canonical()),
+        [-0.1, -0.2, -0.3, 0.9]
+    );
+}
+
+#[test]
+fn expressed_parent_is_the_computed_sibling_edge_first() {
+    let mut frames = Frames::new();
+    let world = frames.declare("world", FLU).expect("world");
+    let world_rfu = frames.declare("world_rfu", RFU).expect("world_rfu");
+    let head = frames.declare("head", RDF).expect("head");
+    let edge = Transform::new(
+        world,
+        head,
+        Pose {
+            translation_m: [0.4, -0.2, 1.5],
+            rotation: QuaternionLayout::Xyzw
+                .read([0.1, 0.2, 0.3, 0.9])
+                .normalized(),
+        },
+        Authority::Recorded,
+    )
+    .expect("edge");
+    let moved = edge.expressed(Some(world_rfu), None).expect("sibling");
+    assert_eq!((moved.parent(), moved.child()), (world_rfu, head));
+    // RFU from FLU: x_rfu = -y_flu, y_rfu = x_flu.
+    let point = [0.3, 0.1, -0.2];
+    let flu = edge.apply(point);
+    assert!(close(
+        &moved.apply(point),
+        &[-flu[1], flu[0], flu[2]],
+        1e-12
+    ));
+}
+
+#[test]
+fn recorded_scales_its_unit() {
+    let mut frames = Frames::new();
+    let room = frames.declare("room", FLU).expect("room");
+    let tag = frames.declare("tag", FLU).expect("tag");
+    let source = Source {
+        unit: sx_frames::LengthUnit::Millimetre,
+        ..Source::new(FLU)
+    };
+    let edge = recorded(
+        room,
+        tag,
+        [1000.0, -250.0, 5.0],
+        &sx_frames::linalg::I3,
+        source,
+    )
+    .expect("ingest");
+    assert!(close(
+        &edge.pose().translation_m,
+        &[1.0, -0.25, 0.005],
+        1e-15
+    ));
+}
+
+#[test]
+fn euler_angles_survive_gimbal_lock() {
+    for sequence in [URDF_RPY, MUJOCO_EULER] {
+        for pitch in [std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2] {
+            let r = sequence.matrix([0.4, pitch, -0.7]);
+            let angles = sequence.angles(&r).expect("Tait-Bryan");
+            assert!(
+                close(
+                    sequence.matrix(angles).as_flattened(),
+                    r.as_flattened(),
+                    1e-9
+                ),
+                "{sequence:?} {pitch}: {angles:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rotation_vectors_near_a_half_turn_keep_their_axis_sign() {
+    let angle = std::f64::consts::PI - 1e-6;
+    for axis in [[0.48, -0.6, 0.64], [-0.8, 0.0, 0.6], [0.0, 0.6, -0.8]] {
+        let v = axis.map(|a| a * angle);
+        let back = matrix_rotation_vector(&rotation_vector_matrix(v));
+        assert!(close(&back, &v, 1e-6), "{v:?} -> {back:?}");
+    }
+}
