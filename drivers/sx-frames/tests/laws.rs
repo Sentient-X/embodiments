@@ -380,3 +380,82 @@ fn rotation_vectors_near_a_half_turn_keep_their_axis_sign() {
         assert!(close(&back, &v, 1e-6), "{v:?} -> {back:?}");
     }
 }
+
+/// `Transform.between` in the Python kernel (frames-worlds' exact basis quaternions), printed
+/// with `repr`: the Rust answer must be the same bits, not just close.
+#[test]
+fn basis_quaternions_are_the_python_bits() {
+    const S: f64 = std::f64::consts::FRAC_1_SQRT_2;
+    let python: [(&str, &str, [f64; 4]); 20] = [
+        ("FLU", "RDF", [-0.5, 0.5, -0.5, 0.5]),
+        ("FLU", "RUB", [0.5, -0.5, -0.5, 0.5]),
+        ("FLU", "RFU", [0.0, 0.0, -S, S]),
+        ("FLU", "LUF", [0.5, 0.5, 0.5, 0.5]),
+        ("RDF", "FLU", [0.5, -0.5, 0.5, 0.5]),
+        ("RDF", "RUB", [1.0, 0.0, 0.0, 0.0]),
+        ("RDF", "RFU", [S, 0.0, 0.0, S]),
+        ("RDF", "LUF", [0.0, 0.0, 1.0, 0.0]),
+        ("RUB", "FLU", [-0.5, 0.5, 0.5, 0.5]),
+        ("RUB", "RDF", [1.0, 0.0, 0.0, 0.0]),
+        ("RUB", "RFU", [-S, 0.0, 0.0, S]),
+        ("RUB", "LUF", [0.0, 1.0, 0.0, 0.0]),
+        ("RFU", "FLU", [0.0, 0.0, S, S]),
+        ("RFU", "RDF", [-S, 0.0, 0.0, S]),
+        ("RFU", "RUB", [S, 0.0, 0.0, S]),
+        ("RFU", "LUF", [0.0, S, S, 0.0]),
+        ("LUF", "FLU", [-0.5, -0.5, -0.5, 0.5]),
+        ("LUF", "RDF", [0.0, 0.0, 1.0, 0.0]),
+        ("LUF", "RUB", [0.0, 1.0, 0.0, 0.0]),
+        ("LUF", "RFU", [0.0, S, S, 0.0]),
+    ];
+    assert_eq!(S, 0.5_f64.sqrt());
+    let axes = |name: &str| {
+        sx_frames::NAMED_AXES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map_or_else(|| panic!("{name}"), |(_, axes)| *axes)
+    };
+    for (parent, child, want) in python {
+        let got = QuaternionLayout::Xyzw
+            .write(sx_frames::basis_quaternion(axes(parent), axes(child)).expect("right-handed"));
+        assert_eq!(
+            got.map(f64::to_bits),
+            want.map(f64::to_bits),
+            "{parent}<-{child}: {got:?}"
+        );
+        let mut frames = Frames::new();
+        let between = Transform::between(
+            frames.declare("p", axes(parent)).expect("p"),
+            frames.declare("c", axes(child)).expect("c"),
+        )
+        .expect("edge");
+        let got = QuaternionLayout::Xyzw.write(between.pose().rotation);
+        assert_eq!(
+            got.map(f64::to_bits),
+            want.map(f64::to_bits),
+            "between {parent}<-{child}"
+        );
+    }
+}
+
+/// frames-worlds found Python's `matrix_rotation_vector` answering 2π − θ about the reversed
+/// axis when Shepperd gave w < 0. This kernel reads the angle from the trace (always in
+/// [0, π]); a rotation vector of norm 3.0 must come back as itself.
+#[test]
+fn a_rotation_vector_of_norm_three_comes_back_as_itself() {
+    for axis in [
+        [1.0, 0.0, 0.0],
+        [0.0, -0.6, 0.8],
+        [0.48, 0.6, -0.64],
+        [-0.8, 0.36, 0.48],
+    ] {
+        let v = axis.map(|a| a * 3.0);
+        let back = matrix_rotation_vector(&rotation_vector_matrix(v));
+        assert!(close(&back, &v, 1e-12), "{v:?} -> {back:?}");
+        assert!((sx_frames::linalg::norm(back) - 3.0).abs() < 1e-12);
+        // Also through a quaternion whose w Shepperd may leave negative-going.
+        let q = Quaternion::from_matrix(&rotation_vector_matrix(v));
+        let again = matrix_rotation_vector(&q.matrix());
+        assert!(close(&again, &v, 1e-12), "{v:?} -> {again:?}");
+    }
+}
