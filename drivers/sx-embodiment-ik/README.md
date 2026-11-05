@@ -22,6 +22,11 @@ let step = ik.step(&q_measured, &available, &[left, right, look], dt)?;
   acceleration caps and wanders the free direction: a 3 cm hand move costs at most about
   1.5x its least-norm joint motion, and holding still moves nothing
   (`a_small_hand_move_is_a_small_joint_move`).
+- **Smoothness in the null space** (`Settings::smoothness`): the change of the step from the
+  last, only in the motion that moves no driven tool, weighted by how far each joint swings
+  the tools. A redundant elbow carries on instead of shivering; the tools' own motion is never
+  smoothed, so tracking and speed are untouched (a 10 cm jump, 0.5 m/s sweeps and 1-2 Hz sines
+  keep their time to the tick; null-space jerk 8-83 % lower on every redundant registry body).
 - **Hard constraints:** joint limits with braking, speed and acceleration caps, a 0.01 rad
   per-tick step, and self and table collision. The table is the body's own: its base mount
   declares it in `collision.json` (`support`, the mount frame's z = 0 plane, solid below
@@ -53,6 +58,13 @@ Real-time shape:
 - A steady-state tick allocates nothing (`tests/allocation.rs`) and logs nothing.
 - A tick runs at most `max_iterations` (40) and stops at `Settings::deadline` (4 ms) with
   `Solve::Held`.
+
+How fluid and how quick it is, before and after a change (`tests/fluid.rs`): every registry
+body with a tool frame (`tests/fixtures/registry.json`, rendered by
+`tools/render_ik_registry.py`) follows a scripted tremor, and `table_station`,
+`table_tick_time` print the station's jump, sweep, sine and tremor numbers and each body's tick
+time. `examples/trace.rs` writes one scripted operator trace through the station's solve for a
+side-by-side film (sx `.agents/skills/motion-solver`).
 
 `examples/replay.rs` replays recorded YUBI operator trajectories into the static upper
 body.
