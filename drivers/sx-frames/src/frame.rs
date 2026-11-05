@@ -396,3 +396,23 @@ pub fn recorded(
         source.authority,
     )
 }
+
+/// The numbers a source writes for an edge: [`recorded`]'s inverse, for a consumer that takes
+/// poses in a source's own axes (a Unity scene the headset draws). Returns the translation in
+/// the source's unit and the orientation as a matrix in the source's coordinates, so
+/// `recorded(edge.parent(), edge.child(), t, &r, source)` is `edge` again; a left-handed source
+/// is reflected exactly once, here as there.
+///
+/// # Errors
+///
+/// [`FrameError::MixedHandedness`] when `space` and `local` differ in handedness.
+pub fn unrecorded(edge: &Transform, source: Source) -> Result<(Vec3, Matrix3), FrameError> {
+    let (a, b, sign) = source.proper_pair(edge.parent, edge.child)?;
+    let a_inverse = transpose(&a);
+    let position = mat_vec(&a_inverse, scale(edge.pose.translation_m, sign));
+    let rotation = mat_mul(
+        &mat_mul(&a_inverse, &edge.pose.rotation.matrix()),
+        &transpose(&b),
+    );
+    Ok((scale(position, 1.0 / source.unit.metres()), rotation))
+}
