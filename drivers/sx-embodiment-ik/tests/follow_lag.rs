@@ -172,12 +172,19 @@ fn an_operators_hand_is_followed_no_worse_than_today() {
     // 141.4 mm rms, 210.3 mm peak.
     type Case = (Path, &'static str, &'static str, f64, f64, f64, f64, f64);
     let cases: [Case; 4] = [
-        (desk, "desk", "act-sim-like", 9.5, 0.2, 40.0, 6.5, 11.5),
-        (desk, "desk", "stiff", 30.0, 0.7, 30.0, 4.4, 9.5),
-        (vr, "vr", "act-sim-like", 9.5, 0.2, 190.0, 86.7, 123.5),
+        // 50 ms, 7.4 mm rms, 13.1 mm peak since the operator's tremor filter (2026-11-06,
+        // `smoothing::OneEuro::TOOL`): a 2 mm tremor's commanded shake 0.77 -> 0.17 mm for
+        // 10 ms more on this desk path (40 ms, 6.5 mm, 11.5 mm before).
+        (desk, "desk", "act-sim-like", 9.5, 0.2, 50.0, 7.4, 13.1),
+        // 40 ms, 5.1 mm, 7.1 mm since the tremor filter (30 ms, 4.4 mm, 9.5 mm before).
+        (desk, "desk", "stiff", 30.0, 0.7, 40.0, 5.1, 9.5),
+        // The VR path is followed closer since the tremor filter (a smoothed target is caught
+        // sooner): 190 -> 120 ms, 86.7 -> 75.8 mm rms, 123.5 -> 119.3 mm peak.
+        (vr, "vr", "act-sim-like", 9.5, 0.2, 120.0, 75.8, 119.3),
         // 150 ms, 67.3 mm rms since #209 (embodiments#208): 140 / 66.1 passed only within the
         // tenth of margin.
-        (vr, "vr", "stiff", 30.0, 0.7, 150.0, 67.3, 86.5),
+        // 80 ms, 45.1 mm rms, 63.8 mm peak since the tremor filter.
+        (vr, "vr", "stiff", 30.0, 0.7, 80.0, 45.1, 63.8),
     ];
     for (path, name, motor, omega, zeta, delay, rms, peak) in cases {
         let got = follow(path, omega, zeta);

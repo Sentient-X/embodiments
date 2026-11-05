@@ -105,6 +105,12 @@ fn rotated(pose: &Pose, by: [f64; 3]) -> Pose {
     }
 }
 
+/// The targets the solve took (the operator's hands filtered, `Teleop::taken`).
+fn taken_targets(solve: &Teleop) -> Option<[Pose; 2]> {
+    let taken = solve.taken();
+    Some([taken.tcp[0]?, taken.tcp[1]?])
+}
+
 fn document(pose: &Pose) -> [f64; 7] {
     let [x, y, z, w] = QuaternionLayout::Xyzw.write(pose.rotation);
     let t = pose.translation_m;
@@ -162,12 +168,15 @@ fn main() {
             .expect("a step");
         let took_us = began.elapsed().as_secs_f64() * 1e6;
         q.copy_from_slice(&step.q);
+        let solve_state = format!("{:?}", step.solve);
+        let taken = taken_targets(&solve).unwrap_or(targets);
         ticks.push(json!({
             "t": t,
             "q": q,
             "target": {"left": document(&targets[0]), "right": document(&targets[1])},
+            "taken": {"left": document(&taken[0]), "right": document(&taken[1])},
             "width": widths,
-            "solve": format!("{:?}", step.solve),
+            "solve": solve_state,
             "took_us": took_us,
         }));
     }

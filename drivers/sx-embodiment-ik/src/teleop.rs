@@ -36,6 +36,12 @@
 //!   turns it ([`Ik`] owns that).
 //! - **grippers**: each hand's gripper width moves its fingers, linear between the fingertips'
 //!   closed and open distance ([`Gripper`]).
+//! - **tremor**: an operator's hand (a tool target with no [`Targets::tool_speed`]) passes a
+//!   One-Euro filter ([`crate::smoothing`], [`Teleop::set_input_filter`]) on its whole pose
+//!   before anything reads it, so the station and the headset's ghost filter it identically and
+//!   it is the only tremor filter between the operator and the robot. A program's goal (a tool
+//!   speed) is smooth by construction and passes as given. Each hand's filter starts afresh at
+//!   [`Teleop::reset`] and whenever the hand stops being driven.
 //!
 //! Nothing here allocates per step after [`Teleop::new`], and nothing reads a clock.
 
@@ -48,6 +54,7 @@ use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
+use crate::smoothing::{OneEuro, PoseFilter};
 use crate::solve::{
     Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, ToolSpeed,
 };
@@ -451,6 +458,13 @@ pub struct Teleop {
     /// Per stalled axis: how far its targets have asked it back since they last asked it on,
     /// radians ([`STALL_RELEASE`]).
     asked_back: Vec<f64>,
+    /// The operator's tremor filter ([`Teleop::set_input_filter`]), each hand's state, and the
+    /// solve's own clock for it (the sum of its ticks).
+    input_filter: Option<OneEuro>,
+    filters: [PoseFilter; 2],
+    clock_s: f64,
+    /// The last step's targets as the solve took them, the operator's hands filtered.
+    taken: Targets,
     /// Per axis: where it stood when it stalled, the reference it is held at: stiff there, so
     /// it neither pushes on what stopped it nor sags away from it under a load.
     hold: Vec<f64>,
@@ -643,7 +657,47 @@ impl Teleop {
             refused: vec![0; width],
             gated: vec![None; width],
             steady: vec![f64::NAN; width],
+            input_filter: Some(OneEuro::TOOL),
+            filters: [PoseFilter::default(); 2],
+            clock_s: 0.0,
+            taken: Targets::default(),
         })
+    }
+
+    /// The filter an operator's tool targets pass (default [`OneEuro::TOOL`]); `None` passes
+    /// them as given (a measurement of the filter itself). Each hand's filter starts afresh.
+    pub fn set_input_filter(&mut self, filter: Option<OneEuro>) {
+        self.input_filter = filter;
+        self.filters = [PoseFilter::default(); 2];
+    }
+
+    /// The last step's targets as the solve took them: the operator's hands with their tremor
+    /// filtered out. A ghost draws these to show what the robot follows.
+    #[must_use]
+    pub const fn taken(&self) -> &Targets {
+        &self.taken
+    }
+
+    /// `targets` with each operator hand's tremor filtered out (see the module docs).
+    fn filtered(&mut self, targets: &Targets, dt: f64) -> Targets {
+        if dt.is_finite() && dt > 0.0 {
+            self.clock_s += dt;
+        }
+        let mut out = *targets;
+        for (hand, filter) in self.filters.iter_mut().enumerate() {
+            match (
+                targets.tcp[hand],
+                targets.tool_speed[hand],
+                self.input_filter,
+            ) {
+                (Some(pose), None, Some(params)) => {
+                    out.tcp[hand] = Some(filter.filter(&params, self.clock_s, pose));
+                }
+                _ => filter.reset(),
+            }
+        }
+        self.taken = out;
+        out
     }
 
     /// The config this solve was built from.
@@ -697,6 +751,7 @@ impl Teleop {
     pub fn reset(&mut self) {
         self.ik.reset();
         self.seed = true;
+        self.filters = [PoseFilter::default(); 2];
     }
 
     /// Each hand's target as the solve takes it: its whole pose, or with its roll free only
@@ -1026,6 +1081,12 @@ impl Teleop {
                 return Err(IkError::Positions { expected, given });
             }
         }
+        if !(dt.is_finite() && dt > 0.0) {
+            return Err(IkError::Tick(dt));
+        }
+        // Filtered once the step is taken: a refused step leaves the filter and `taken` as
+        // they were.
+        let targets = &self.filtered(targets, dt);
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
         let mut gated = std::mem::take(&mut self.gated);

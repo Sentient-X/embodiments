@@ -605,7 +605,42 @@ fn shifted(from: &Pose, by: [f64; 3]) -> Pose {
 #[test]
 #[ignore = "a table: cargo test --release --test fluid table_station -- --ignored --nocapture"]
 fn table_station() {
-    let mut station = Station::new();
+    let tuned = std::env::var("SX_ONE_EURO")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .filter_map(|x| x.trim().parse().ok())
+                .collect::<Vec<f64>>()
+        })
+        .and_then(|v| match v[..] {
+            [
+                min_cutoff_hz,
+                beta_per_m_s,
+                beta_per_rad_s,
+                derivative_cutoff_hz,
+            ] => Some(sx_embodiment_ik::smoothing::OneEuro {
+                min_cutoff_hz,
+                beta_per_m_s,
+                beta_per_rad_s,
+                derivative_cutoff_hz,
+            }),
+            _ => None,
+        })
+        .unwrap_or(sx_embodiment_ik::smoothing::OneEuro::TOOL);
+    let filters = if std::env::var("SX_ONE_EURO").is_ok() {
+        vec![Some(tuned)]
+    } else {
+        vec![None, Some(tuned)]
+    };
+    for filter in filters {
+        println!("\n== the operator's tremor filter: {filter:?}");
+        let mut station = Station::new();
+        station.solve.set_input_filter(filter);
+        station_table(&mut station);
+    }
+}
+
+fn station_table(station: &mut Station) {
     // A 10 cm jump each way: time to within 5 mm and 1 mm.
     let mut closing = Vec::new();
     for (k, sign) in [

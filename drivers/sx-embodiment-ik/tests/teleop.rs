@@ -750,6 +750,9 @@ fn hold_the_elbow(
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
     // Answers, not the clock: a debug build past the station's budget would hold steps.
     solve.set_deadline(std::time::Duration::from_secs(3600));
+    // The stall rules on the targets as scripted: a hand turning back at once, which no
+    // operator's hand does, would reach the solve through the tremor filter over 100 ms later.
+    solve.set_input_filter(None);
     let rest: Vec<f64> = solve
         .model()
         .axes()
