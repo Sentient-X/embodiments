@@ -24,6 +24,10 @@
 //!   ticks a speed or acceleration cap bound, reference re-seeds, and the felt latency split into
 //!   transport, tick queueing, solve and follower.
 //!
+//! `synth` also runs the tremor rows again with the station's intake filter
+//! ([`sx_embodiment_ik::smoothing::OneEuro::TOOL`], marked `1e`), and prints the filter's own lag
+//! on a 0.5 m/s sweep and how much of a still hand's 10 Hz tremor it passes (`one-euro` line).
+//!
 //! Synthetic operator: a hand moving 8 cm by 5 cm over 4 s, the other still, sampled at the
 //! headset's 90 Hz; tremor of 2 mm at 8-12 Hz (three random-phase sines per axis) and 0.3 deg;
 //! the network either ideal (145 ms constant) or LiveKit-like: 145 ms plus exponential jitter
@@ -46,6 +50,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
+use sx_embodiment_ik::smoothing::{OneEuro, PoseFilter};
 use sx_embodiment_ik::teleop::{REFERENCE_GAP, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_embodiment_ik::{
     Active, Body, Frames, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
@@ -779,6 +784,8 @@ struct Scenario {
     jump: bool,
     /// Reading noise, rad (uniform +-).
     noise: f64,
+    /// The station's intake filter on each tool target ([`OneEuro::TOOL`]).
+    filtered: bool,
 }
 
 fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
@@ -824,6 +831,7 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
         network: false,
         jump: false,
         noise: 0.0,
+        filtered: false,
     };
     let clean = Scenario {
         name: "clean",
@@ -861,10 +869,72 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
             jump: true,
             ..clean
         },
+        Scenario {
+            name: "tremor 2mm 1e",
+            filtered: true,
+            ..tremor
+        },
+        Scenario {
+            name: "tremor 1mm 1e",
+            tremor_m: 0.001,
+            tremor_rad: 0.15_f64.to_radians(),
+            filtered: true,
+            ..clean
+        },
+        Scenario {
+            name: "tremor+network 1e",
+            network: true,
+            filtered: true,
+            ..tremor
+        },
     ];
     for scenario in scenarios {
         run(body, &config, dt, scenario);
     }
+    one_euro();
+}
+
+/// The intake filter alone: its lag on a 0.5 m/s sweep at the headset's 90 Hz (once under way,
+/// and how long it takes to get under 10 ms), and the share of a still hand's 2 mm 10 Hz tremor
+/// it passes.
+fn one_euro() {
+    let dt = 1.0 / 90.0;
+    let at = |x: f64| Pose {
+        translation_m: [x, 0.0, 0.0],
+        rotation: Quaternion::IDENTITY,
+    };
+    let mut filter = PoseFilter::default();
+    let mut settled = None;
+    let mut lag_ms = 0.0;
+    for i in 0..90 {
+        let t = f64::from(i) * dt;
+        let out = filter.filter(&OneEuro::TOOL, t, at(0.5 * t));
+        lag_ms = (0.5 * t - out.translation_m[0]) / 0.5 * 1000.0;
+        if lag_ms < 10.0 && i > 0 && settled.is_none() {
+            settled = Some(t * 1000.0);
+        }
+    }
+    let mut filter = PoseFilter::default();
+    let (mut raw, mut out) = (0.0_f64, 0.0_f64);
+    for i in 0..900 {
+        let t = f64::from(i) * dt;
+        let x = 0.002 * (2.0 * std::f64::consts::PI * 10.0 * t).sin();
+        let y = filter.filter(&OneEuro::TOOL, t, at(x)).translation_m[0];
+        if t > 2.0 {
+            raw = raw.max(x.abs());
+            out = out.max(y.abs());
+        }
+    }
+    let p = OneEuro::TOOL;
+    println!(
+        "\none-euro (min {} Hz, beta {}/m/s, {}/rad/s, d {} Hz): 0.5 m/s sweep lags {lag_ms:.1} ms after 1 s, under 10 ms from {:.0} ms; a still hand's 10 Hz tremor passes {:.0} %",
+        p.min_cutoff_hz,
+        p.beta_per_m_s,
+        p.beta_per_rad_s,
+        p.derivative_cutoff_hz,
+        settled.unwrap_or(f64::NAN),
+        100.0 * out / raw
+    );
 }
 
 fn start_pose(solve: &Teleop, body: &Body) -> Vec<f64> {
@@ -1004,6 +1074,8 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
     };
     let mut extra = Extra::default();
     let mut newest: Option<usize> = None;
+    let mut filters = [PoseFilter::default(); 2];
+    let mut filtered_newest: Option<(usize, Targets)> = None;
     let mut arrived_targets: Vec<[[f64; 3]; 2]> = Vec::new();
     let mut jump_closed: Option<f64> = None;
     solve.reset();
@@ -1020,7 +1092,21 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
             }
         }
         let Some(current) = newest else { continue };
-        let (sent, arrival, targets, smooth) = packets[current];
+        let (sent, arrival, mut targets, smooth) = packets[current];
+        if scenario.filtered {
+            // The station's intake: each newly kept intent's tool targets through the filter,
+            // timed by when they were read.
+            if filtered_newest.is_none_or(|(at, _)| at != current) {
+                for hand in HANDS {
+                    targets.tcp[hand] = targets.tcp[hand]
+                        .map(|pose| filters[hand].filter(&OneEuro::TOOL, sent, pose));
+                }
+                filtered_newest = Some((current, targets));
+            }
+            if let Some((_, kept)) = filtered_newest {
+                targets = kept;
+            }
+        }
         if now - arrival > 0.25 {
             continue; // stale: the station holds (counted by the tick histogram)
         }

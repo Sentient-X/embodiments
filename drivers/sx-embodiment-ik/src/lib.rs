@@ -62,6 +62,7 @@ pub mod hull;
 mod model;
 pub mod placement;
 mod qp;
+pub mod smoothing;
 mod solve;
 pub mod teleop;
 pub mod tool;
