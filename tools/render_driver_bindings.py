@@ -87,7 +87,7 @@ from sx_embodiments.media import (
     media_document,
     mount_pose_at,
 )
-from sx_embodiments.parts import ChainSpec
+from sx_embodiments.parts import ChainSpec, GripperSpec
 from sx_embodiments.rendered import same_rendering
 from sx_embodiments.successor import superseded_ids
 
@@ -330,6 +330,17 @@ def declared_homes(robot: Embodiment) -> tuple[dict[tuple[str, str], float], set
     return homes, chains
 
 
+def gripper_instances(robot: Embodiment) -> set[str]:
+    """The component instances that are grippers (a :class:`GripperSpec` part): their joints
+    are rendered ``"gripper": true``, so a driver reads a finger that stops short of its
+    command as closed on something (a stall), never as a fault."""
+    return {
+        str(component.instance)
+        for component in robot.components
+        if isinstance(component.part, GripperSpec)
+    }
+
+
 #: Each body's serial-servo approach limits, by port: driver settings outside its identity.
 SERVO_APPROACH: dict[str, dict[BusPort, ServoApproach]] = {
     "sentient-static-upper-body": STATIC_UPPER_BODY_SERVO_APPROACH,
@@ -391,6 +402,7 @@ def bases(name: str) -> dict[str, dict[str, str]]:
 def document(name: str) -> dict[str, object]:
     robot = registered(name)
     homes, chains = declared_homes(robot)
+    grippers = gripper_instances(robot)
     twins = bases(name)
     motions = joint_motion(
         robot, SERVO_APPROACH.get(name), MASS_MARGIN.get(name), SPEED_CAP.get(name)
@@ -417,6 +429,8 @@ def document(name: str) -> dict[str, object]:
         }
         if home is not None:
             entry["home"] = home
+        if str(coordinate.instance) in grippers:
+            entry["gripper"] = True
         if driven.joint in twins:
             entry["of"] = twins[driven.joint]
         motion = motions[driven.joint]

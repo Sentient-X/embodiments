@@ -100,6 +100,9 @@ struct Axis {
     /// The chain's declared home for this joint; absent where its part declares none.
     #[serde(default)]
     home: Option<f64>,
+    /// Whether the joint is a finger of a part the registry declares a gripper.
+    #[serde(default)]
+    gripper: bool,
     #[serde(default)]
     of: Option<Twin>,
     /// The fastest the hardware moves this joint (`sx_embodiments.calibrate.motion`), and the
@@ -268,6 +271,7 @@ impl BodyBindings {
                     zero: UNCALIBRATED_ZERO,
                     direction: UNCALIBRATED_DIRECTION,
                     home: axis.home,
+                    gripper: axis.gripper,
                     motion,
                 })
             })

@@ -301,6 +301,7 @@ mod tests {
             zero: 0.0,
             direction: 1,
             home: None,
+            gripper: false,
             motion: crate::binding::AxisMotion {
                 speed: 1.0,
                 acceleration: 10.0,

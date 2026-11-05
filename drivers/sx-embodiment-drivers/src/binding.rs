@@ -249,6 +249,11 @@ pub struct BoundAxis {
     /// chain's declared `home` (`ChainSpec.home`); `None` where its part declares none (a
     /// gripper's finger), and such a joint stays where it is.
     pub home: Option<f64>,
+    /// Whether the joint is a finger of a part the registry declares a gripper
+    /// (`sx_embodiments.parts.GripperSpec`, rendered `"gripper": true`): a finger that stops
+    /// short of its command has closed on something or is blocked, a stall the governor holds
+    /// with bounded force, never a tracking fault ([`crate::Governor`]).
+    pub gripper: bool,
     /// How fast the hardware moves this joint.
     pub motion: AxisMotion,
 }
@@ -406,6 +411,7 @@ mod tests {
             zero: 0.25,
             direction: UNCALIBRATED_DIRECTION,
             home: Some(0.0),
+            gripper: false,
             motion: AxisMotion {
                 speed: 1.0,
                 acceleration: 10.0,

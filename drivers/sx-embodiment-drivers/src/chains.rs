@@ -591,6 +591,7 @@ mod tests {
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
                 home: None,
+                gripper: false,
                 motion: crate::binding::AxisMotion {
                     speed: 1.0,
                     acceleration: 10.0,
