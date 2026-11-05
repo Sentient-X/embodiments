@@ -822,22 +822,65 @@ fn in_service<T>(
     (kept.into_iter().unzip(), out.into_iter().unzip())
 }
 
+/// The registry's bindings document and body a drive assigned `embodiment` opens as.
+fn registered(embodiment: &str) -> Result<(&'static str, BodyBindings), OpenError> {
+    for document in registry()? {
+        let body = BodyBindings::parse(document)?;
+        if body.is(embodiment) {
+            return Ok((document.as_str(), body));
+        }
+    }
+    Err(OpenError::Body(embodiment.to_owned()))
+}
+
+/// The registered body a drive assigned `embodiment` opens as: the body whose id it is, or one
+/// of whose earlier ids (`supersedes`, which drive exactly as it) it is. `id` on the answer is
+/// the body's current id, what the opened body is read as: a consumer bound to a revision (a
+/// tool-point check) compares that, never the stored assignment's id, so a robot still assigned
+/// an earlier id is the body it opens as.
+///
+/// # Errors
+///
+/// [`OpenError::Body`] when no registered body is `embodiment`.
+pub fn registered_body(embodiment: &str) -> Result<BodyBindings, OpenError> {
+    registered(embodiment).map(|(_, body)| body)
+}
+
+/// A robot still assigned an earlier id of a body opens as that body, read as its current id;
+/// an id no body is or supersedes resolves to nothing.
+#[cfg(test)]
+mod resolution {
+    use super::*;
+
+    #[test]
+    fn an_earlier_id_resolves_to_the_body_it_opens_as() {
+        let current =
+            registered_body("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402")
+                .expect("the static upper body");
+        assert_eq!(current.embodiment, "sentient-static-upper-body");
+        assert!(!current.supersedes.is_empty(), "it supersedes earlier ids");
+        for earlier in &current.supersedes {
+            let resolved = registered_body(earlier).expect("an earlier id opens");
+            assert_eq!(resolved.id, current.id, "{earlier}");
+        }
+        assert!(matches!(
+            registered_body(&"0".repeat(64)),
+            Err(OpenError::Body(_))
+        ));
+    }
+}
+
 impl Opener {
     /// The body `drive` names, from the registry's bindings (every driven body's): the one
     /// source a body opens from. The B601-DM's arm and gripper bridges are its own opener's,
     /// which the registry does not carry yet.
     fn of(drive: &InstanceDrive) -> Result<Self, OpenError> {
-        for document in registry()? {
-            let body = BodyBindings::parse(document)?;
-            if body.is(&drive.embodiment) {
-                return Ok(if body.embodiment == b601::EMBODIMENT {
-                    Self::B601(document.as_str())
-                } else {
-                    Self::Buses(document.as_str())
-                });
-            }
-        }
-        Err(OpenError::Body(drive.embodiment.clone()))
+        let (document, body) = registered(&drive.embodiment)?;
+        Ok(if body.embodiment == b601::EMBODIMENT {
+            Self::B601(document)
+        } else {
+            Self::Buses(document)
+        })
     }
 
     /// The bus on `port`, calibrated for `drive`, as the body whose configuration drives it.
