@@ -1031,8 +1031,16 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
     solve.set_input_filter(scenario.filtered.then(input_filter));
     // The follower's lag the horizon leads, when `SX_FOLLOWER_LAG` names one (seconds, every
     // joint): this harness's follower reads its command 4 ticks late.
-    if let Some(lag) = std::env::var("SX_FOLLOWER_LAG").ok().and_then(|v| v.parse::<f64>().ok()) {
-        let names: Vec<String> = solve.model().axes().iter().map(|a| a.name.clone()).collect();
+    if let Some(lag) = std::env::var("SX_FOLLOWER_LAG")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
+        let names: Vec<String> = solve
+            .model()
+            .axes()
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
         for name in names {
             solve.set_follower_lag(&name, lag);
         }

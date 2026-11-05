@@ -782,28 +782,59 @@ fn table_follower_lag() {
     const LAG_S: f64 = 0.04;
     for modelled in [0.0, LAG_S] {
         let mut station = Station::new();
-        let names: Vec<String> = station.solve.model().axes().iter().map(|a| a.name.clone()).collect();
+        let names: Vec<String> = station
+            .solve
+            .model()
+            .axes()
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
         for name in &names {
             station.solve.set_follower_lag(name, modelled);
         }
         let runs: [(&str, Box<dyn Fn(f64, &Pose) -> Pose>); 3] = [
-            ("sweep 0.5 m/s", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.5 * t.min(0.3), 0.0]))),
-            ("sine 1 Hz", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * t).sin(), 0.0]))),
-            ("sine 2 Hz", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * 2.0 * t).sin(), 0.0]))),
+            (
+                "sweep 0.5 m/s",
+                Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.5 * t.min(0.3), 0.0])),
+            ),
+            (
+                "sine 1 Hz",
+                Box::new(|t: f64, from: &Pose| {
+                    shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * t).sin(), 0.0])
+                }),
+            ),
+            (
+                "sine 2 Hz",
+                Box::new(|t: f64, from: &Pose| {
+                    shifted(
+                        from,
+                        [0.0, 0.03 * (std::f64::consts::TAU * 2.0 * t).sin(), 0.0],
+                    )
+                }),
+            ),
         ];
         for (name, left) in runs {
             let mut command = station.ready.clone();
             let mut actual = station.ready.clone();
-            let (from, right) = (pose(&station.body, &command, 0), pose(&station.body, &command, 1));
+            let (from, right) = (
+                pose(&station.body, &command, 0),
+                pose(&station.body, &command, 1),
+            );
             let available = vec![true; command.len()];
             station.solve.reset();
             let mut errors = Vec::new();
             for tick in 1..=300 {
                 let t = f64::from(tick) * DT;
                 let target = left(t, &from);
-                let targets = Targets { tcp: [Some(target), Some(right)], ..Targets::default() };
+                let targets = Targets {
+                    tcp: [Some(target), Some(right)],
+                    ..Targets::default()
+                };
                 let measured: Vec<Option<f64>> = actual.iter().map(|v| Some(*v)).collect();
-                let step = station.solve.step(&command, &measured, &available, &targets, DT).expect("a step");
+                let step = station
+                    .solve
+                    .step(&command, &measured, &available, &targets, DT)
+                    .expect("a step");
                 command.copy_from_slice(&step.q);
                 let blend = 1.0 - (-DT / LAG_S).exp();
                 for (a, c) in actual.iter_mut().zip(&command) {
@@ -813,7 +844,10 @@ fn table_follower_lag() {
                     errors.push(distance(&target, &pose(&station.body, &actual, 0)));
                 }
             }
-            println!("lag modelled {modelled:.2} s, {name}: measured tool to target RMS {:.1} mm", rms(&errors) * 1e3);
+            println!(
+                "lag modelled {modelled:.2} s, {name}: measured tool to target RMS {:.1} mm",
+                rms(&errors) * 1e3
+            );
         }
     }
 }

@@ -759,7 +759,14 @@ impl Teleop {
     /// How far `joint`'s follower lags its command, seconds ([`Ik::set_follower_lag`]): the
     /// solve leads it. An unknown joint is ignored.
     pub fn set_follower_lag(&mut self, joint: &str, seconds: f64) {
-        if let Some(axis) = self.ik.body().model().axes().iter().position(|a| a.name == joint) {
+        if let Some(axis) = self
+            .ik
+            .body()
+            .model()
+            .axes()
+            .iter()
+            .position(|a| a.name == joint)
+        {
             self.ik.set_follower_lag(axis, seconds);
         }
     }

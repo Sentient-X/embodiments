@@ -930,7 +930,11 @@ impl Ik {
     /// positive: it is where it is sent.
     pub fn set_follower_lag(&mut self, axis: usize, seconds: f64) {
         if let Some(slot) = self.follower_lag.get_mut(axis) {
-            *slot = if seconds.is_finite() && seconds > 0.0 { seconds } else { 0.0 };
+            *slot = if seconds.is_finite() && seconds > 0.0 {
+                seconds
+            } else {
+                0.0
+            };
         }
     }
 
@@ -1273,11 +1277,27 @@ impl Ik {
                         [0, 1, 2].map(|k| v[k].mul_add(times[1], e_p[k])),
                         [0, 1, 2].map(|k| turning[k].mul_add(times[1], e_r[k])),
                     );
-                    for k in 0..3 {
-                        fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
-                        horizon_row(w, n, e_p[k], v[k], 1.0, times);
-                        fill(&mut w.task, &body.solved, |axis| w.jw[axis][k]);
-                        horizon_row(w, n, e_r[k], turning[k], rho2, times);
+                    match self.tool_speed[index] {
+                        // A goal at a speed is planned at it: each knot asks no more of the
+                        // error than the tool may close by then, so the plan never builds a
+                        // speed the step's own cap would have to take back.
+                        Some((speed, _)) => {
+                            let at = times.map(|t| within_speed(e_p, e_r, speed, t, s));
+                            for k in 0..3 {
+                                fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
+                                horizon_row_at(w, n, at.map(|(p, _)| p[k]), 0.0, 1.0);
+                                fill(&mut w.task, &body.solved, |axis| w.jw[axis][k]);
+                                horizon_row_at(w, n, at.map(|(_, r)| r[k]), 0.0, rho2);
+                            }
+                        }
+                        None => {
+                            for k in 0..3 {
+                                fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
+                                horizon_row(w, n, e_p[k], v[k], 1.0, times);
+                                fill(&mut w.task, &body.solved, |axis| w.jw[axis][k]);
+                                horizon_row(w, n, e_r[k], turning[k], rho2, times);
+                            }
+                        }
                     }
                 }
                 (
@@ -1294,10 +1314,8 @@ impl Ik {
                     let u = scale(*toward, 1.0 / norm(*toward));
                     let e_p = sub(*translation_m, pose.t);
                     let e_r = pointing_error(a, u);
-                    self.tool_asked[index] = (
-                        [0, 1, 2].map(|k| v[k].mul_add(times[1], e_p[k])),
-                        e_r,
-                    );
+                    self.tool_asked[index] =
+                        ([0, 1, 2].map(|k| v[k].mul_add(times[1], e_p[k])), e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
                         horizon_row(w, n, e_p[k], v[k], 1.0, times);
@@ -2451,22 +2469,64 @@ fn fill(out: &mut [f64], solved: &[usize], value: impl Fn(usize) -> f64) {
     }
 }
 
-/// Keep `w.task` (times the square root of `weight`) as a task row, with its target at each
-/// of `times` (the end of the tick and of each knot) moving at `velocity` from `error` now.
-fn horizon_row(w: &mut Workspace, n: usize, error: f64, velocity: f64, weight: f64, times: [f64; 3]) {
+/// The part of a pose error (`e_p` metres, `e_r` a rotation vector) a tool at `speed` closes in
+/// `t` seconds: both shortened alike, the turn weighed as the solve weighs it, the turn also
+/// within its own cap.
+fn within_speed(e_p: Vec3, e_r: Vec3, speed: ToolSpeed, t: f64, s: &Settings) -> (Vec3, Vec3) {
+    let weighed = norm(e_p).hypot(s.orientation_m_per_rad * norm(e_r));
+    let mut share = 1.0_f64;
+    if weighed > speed.m_s * t {
+        share = share.min(speed.m_s * t / weighed);
+    }
+    if norm(e_r) > speed.rad_s * t {
+        share = share.min(speed.rad_s * t / norm(e_r));
+    }
+    (scale(e_p, share), scale(e_r, share))
+}
+
+/// [`horizon_row`] with its target given at each time.
+fn horizon_row_at(w: &mut Workspace, n: usize, targets: [f64; 3], velocity: f64, weight: f64) {
     let count = w.task_count;
     if (count + 1) * n > w.task_rows.len() {
         return;
     }
     let root = weight.sqrt();
-    for (slot, value) in w.task_rows[count * n..(count + 1) * n].iter_mut().zip(&w.task) {
+    for (slot, value) in w.task_rows[count * n..(count + 1) * n]
+        .iter_mut()
+        .zip(&w.task)
+    {
+        *slot = root * value;
+    }
+    w.task_err[count] = targets.map(|t| root * t);
+    w.task_vel[count] = root * velocity;
+    w.task_count += 1;
+}
+
+/// Keep `w.task` (times the square root of `weight`) as a task row, with its target at each
+/// of `times` (the end of the tick and of each knot) moving at `velocity` from `error` now.
+fn horizon_row(
+    w: &mut Workspace,
+    n: usize,
+    error: f64,
+    velocity: f64,
+    weight: f64,
+    times: [f64; 3],
+) {
+    let count = w.task_count;
+    if (count + 1) * n > w.task_rows.len() {
+        return;
+    }
+    let root = weight.sqrt();
+    for (slot, value) in w.task_rows[count * n..(count + 1) * n]
+        .iter_mut()
+        .zip(&w.task)
+    {
         *slot = root * value;
     }
     w.task_err[count] = times.map(|t| root * velocity.mul_add(t, error));
     w.task_vel[count] = root * velocity;
     w.task_count += 1;
 }
-
 
 /// The rotation turning unit `f` onto unit `u`: about `f x u`, by the whole angle between
 /// them. The bare cross product vanishes at 180 degrees too, so a frame facing straight away
@@ -2498,8 +2558,6 @@ fn across(a: Vec3) -> [Vec3; 2] {
     [first, cross(a, first)]
 }
 
-
-
 /// The angle between two rotations, radians.
 fn turn(a: &Matrix3, b: &Matrix3) -> f64 {
     let trace: f64 = (0..3)
@@ -2507,9 +2565,6 @@ fn turn(a: &Matrix3, b: &Matrix3) -> f64 {
         .sum();
     ((trace - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
 }
-
-
-
 
 /// When this tick's QP must stop: `budget` from now. A browser's WASM has no monotonic clock
 /// (`Instant::now` panics on `wasm32-unknown-unknown`), so there the iteration bound
