@@ -373,6 +373,9 @@ struct Workspace {
     seen: Frames,
     /// Per axis, where it was measured, or where the step starts when it was not.
     seen_q: Vec<f64>,
+    /// The solved axes that may move this step (available, not held): only they close a
+    /// limb's error, so only their caps pace its approach.
+    moving: Vec<usize>,
     jv: Vec<Vec3>,
     jw: Vec<Vec3>,
     jp: Vec<Vec3>,
@@ -576,6 +579,7 @@ impl Ik {
             after: body.model.poses(&rest),
             seen: body.model.poses(&rest),
             seen_q: rest.clone(),
+            moving: Vec::with_capacity(body.solved.len()),
             jv: vec![[0.0; 3]; axes.len()],
             jw: vec![[0.0; 3]; axes.len()],
             jp: vec![[0.0; 3]; axes.len()],
@@ -973,6 +977,14 @@ impl Ik {
             self.anchored = true;
         }
         self.body.model.poses_into(q, &mut self.work.frames);
+        self.work.moving.clear();
+        self.work.moving.extend(
+            self.body
+                .solved
+                .iter()
+                .copied()
+                .filter(|&axis| available[axis]),
+        );
         self.cost(q, targets, dt);
         self.bounds(q, dt);
         for (column, &axis) in self.body.solved.iter().enumerate() {
@@ -1101,7 +1113,7 @@ impl Ik {
                     let e_p = sub(target.translation_m, pose.t);
                     let goal = target.rotation.matrix();
                     let e_r = matrix_rotation_vector(&mat_mul(&goal, &transpose(&pose.r)));
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
+                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
                     self.tool_asked[index] = (e_p, e_r);
@@ -1126,7 +1138,7 @@ impl Ik {
                     let u = scale(*toward, 1.0 / norm(*toward));
                     let e_p = sub(*translation_m, pose.t);
                     let e_r = pointing_error(a, u);
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &body.solved, &self.caps, s, dt);
+                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
                     self.tool_asked[index] = (e_p, e_r);
@@ -1164,7 +1176,7 @@ impl Ik {
                     // Closed no faster than the neck can still stop on it, as a pose error
                     // is: asking for the whole turn at once overshot the acceleration caps
                     // and the camera rang on every big swing (three bounces engaging).
-                    let share = pointing_approach(e, &w.jp, &body.solved, &self.caps, s, rho2, dt);
+                    let share = pointing_approach(e, &w.jp, &w.moving, &self.caps, s, rho2, dt);
                     let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
@@ -2102,7 +2114,10 @@ fn across(a: Vec3) -> [Vec3; 2] {
 /// than the limb can still stop on at its full acceleration caps (the time-optimal approach:
 /// full acceleration, then full braking onto the target), as a collision row's approach is
 /// planned. Until 2026-11-04 it planned on half the caps, which held a 10 cm hand jump to
-/// 0.4-1.4 s on the static upper body for no physical reason.
+/// 0.4-1.4 s on the static upper body for no physical reason. `solved` is the axes that move
+/// this step: a held or unavailable axis closes none of the error, and its cap (the static
+/// upper body's held torso, 0.3 rad/s^2) paced every hand to trail its target by about 264 ms
+/// until 2026-11-05 (embodiments#237 `teleop_shake`).
 ///
 /// The joint motion per unit of the error is its damped least-squares direction
 /// `d = A' (A A' + damping I)^-1 e/|e|` over the task rows `A = [Jv; rho Jw]`, the QP's own
