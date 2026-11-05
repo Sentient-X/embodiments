@@ -112,7 +112,9 @@ pub struct Settings {
     /// tools about their own points, more for a column that swings them further (a shoulder
     /// about 10x a wrist): `(dq - dq_prev)' N' D N (dq - dq_prev)` ([`Ik::smooth_null_space`]).
     /// A redundant arm's elbow carries on as it was going instead of shivering while the hand
-    /// tracks, and the tools' own motion is never smoothed. Tuned on lag against jerk on the
+    /// tracks; the driven tools' own motion is not smoothed (a held column, such as a torso held
+    /// in one-handed teleop, counts as free: a 0.5 m/s sweep's RMS error 10.96 -> 10.99 mm).
+    /// [`Ik::asked`] reads the whole cost, this term included. Tuned on lag against jerk on the
     /// station's solve after the full-braking approach (embodiments#239; `tests/fluid.rs` and
     /// `teleop_shake synth governed`, 2026-11-05): at 1e-4 every jump, sweep and sine kept its
     /// time to the tick (jump to 5 mm 0.452 -> 0.450 s mean, felt solve latency unchanged in
@@ -1028,6 +1030,13 @@ impl Ik {
                 .copied()
                 .filter(|&axis| available[axis]),
         );
+        // An unavailable axis carries no motion into this step: not into the smoothness cost's
+        // last step either (refute of embodiments#241).
+        for (column, &axis) in self.body.solved.iter().enumerate() {
+            if !available[axis] {
+                self.velocity[column] = 0.0;
+            }
+        }
         self.cost(q, targets, dt);
         self.bounds(q, dt);
         for (column, &axis) in self.body.solved.iter().enumerate() {
@@ -1035,7 +1044,6 @@ impl Ik {
                 let w = &mut self.work;
                 (w.lower[column], w.upper[column]) = (0.0, 0.0);
                 (w.safe_lower[column], w.safe_upper[column]) = (0.0, 0.0);
-                self.velocity[column] = 0.0;
             }
         }
         let w = &mut self.work;

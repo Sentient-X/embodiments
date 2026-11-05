@@ -1311,7 +1311,11 @@ fn a_single_bad_reading_moves_nothing() {
 /// turned 7-121x a cap with the row's axes widened to their whole range (4ea9e84;
 /// embodiments#210, #211). Since the null-space smoothness (`Settings::smoothness`,
 /// 2026-11-05) these five keep every row inside the caps (17 relaxed steps before, none after)
-/// and the margin: least clearance 10.8-15.1 mm (10.6-13.7 before).
+/// and the margin: least clearance 10.8-15.1 mm (10.6-13.7 before). That moves where rows give
+/// way rather than removing it (a 280-case grid: 86 -> 91 cases with a relaxed step, 307 -> 289
+/// steps, least clearance 10.15 -> 10.17 mm); the elastic retry's own coverage is
+/// `a_pushing_arm_keeps_its_pairs_clear_*` and `a_single_bad_reading_moves_nothing`, which fail
+/// without it.
 #[test]
 fn a_row_the_caps_cannot_keep_widens_no_cap() {
     std::thread::scope(|scope| {
