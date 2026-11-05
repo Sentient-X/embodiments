@@ -1296,7 +1296,11 @@ impl Ik {
             w.h[column * n + column] += 2.0 * (weight + s.damping);
             w.g[column] -= 2.0 * weight * error;
         }
-        if s.smoothness > 0.0 {
+        // A tool held to a speed ([`Ik::set_tool_speed`]: a program's goal) is a hard cap, and
+        // carried null-space motion can keep a joint from slowing as the cap's shortening needs:
+        // at 500 Hz a tool went 0.26 m/s against 0.2 (`a_tool_speed_never_shortens_a_step_past_a_row`).
+        // Such a step is not smoothed; an operator's hands, which set no speed, are.
+        if s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none) {
             self.smooth_null_space(dt);
         }
     }
