@@ -177,3 +177,28 @@ fn unity_is_the_only_left_handed_value() {
         );
     }
 }
+
+/// The golden's `exact` section: every basis quaternion at full precision (Python's shortest
+/// round-trip `repr`, parsed here with Rust's correctly rounded `str::parse`), compared by bits.
+/// The rounded cases above cannot see one ulp; this one can, and it pins the sign rule (the
+/// first non-zero of `(w, x, y, z)` positive, zeros `+0.0`) on the half turns too.
+#[test]
+fn every_basis_quaternion_is_the_python_bits() {
+    let cases = golden()["exact"].as_array().expect("exact").clone();
+    assert_eq!(cases.len(), 20);
+    for case in &cases {
+        let (parent, child) = (axes(&case["parent"]), axes(&case["child"]));
+        let want: Vec<f64> = case["rotation_wxyz"]
+            .as_array()
+            .expect("four strings")
+            .iter()
+            .map(|v| v.as_str().expect("repr").parse::<f64>().expect("a float"))
+            .collect();
+        let got = QuaternionLayout::Wxyz.write(basis_quaternion(parent, child).expect("right"));
+        assert_eq!(
+            got.map(f64::to_bits).to_vec(),
+            want.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "{parent}<-{child}: {got:?} != {want:?}"
+        );
+    }
+}
