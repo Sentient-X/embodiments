@@ -133,6 +133,10 @@ def zed_2i_eye(eye: Eye) -> CameraSpec:
 
 def zed_2i_imu() -> InertialSpec:
     """The ZED 2i's sensor module, mounted on the body's ZED frame (:data:`ZED_FRAME`)."""
+    # Frozen bytes: this is basis(FLU, DRB) (the module's x down, y towards the right eye, z out
+    # of the back, on the FLU ZED frame), written as the negation of the kernel's canonical
+    # quaternion. It is inside every ZED body's id, so computing it would re-key them all;
+    # tests/test_frames.py pins it to the axes up to sign.
     half = math.sqrt(0.5)
     return InertialSpec(
         part_id=PartId("zed-2i-imu"),
