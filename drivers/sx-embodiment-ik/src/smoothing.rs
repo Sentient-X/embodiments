@@ -1,19 +1,22 @@
 //! The operator's tool targets with their tremor taken out: a One-Euro filter (Casiez, Roussel and
-//! Vogel, CHI 2012) on each hand's pose, applied where the station takes the operator's intent,
-//! before the solve and before any prediction.
+//! Vogel, CHI 2012) on each hand's pose, applied inside [`crate::teleop::Teleop::step`] before
+//! anything reads the targets, so the station and the headset's ghost filter identically and it
+//! is the only tremor filter between the operator and the robot.
 //!
 //! An operator's hand shakes 1-2 mm at 8-12 Hz; through the solve that raised the commanded shake
 //! 3-5x and the joints' velocity reversals from about 5 to 170 a second (`teleop_shake`, 11-04).
 //! A fixed low-pass that removes it lags every deliberate move; the One-Euro filter is a
-//! first-order low-pass whose cutoff rises with the hand's own (filtered) speed: still, it
-//! cuts at [`OneEuro::min_cutoff_hz`] and takes the tremor out; sweeping, it opens to
-//! `min_cutoff_hz + beta * speed`, so a fast move lags by `1 / (2π · cutoff)` at most.
+//! low-pass whose cutoff rises with the hand's own (filtered) speed: still, it cuts at
+//! [`OneEuro::min_cutoff_hz`] and takes the tremor out; sweeping, it opens to
+//! `min_cutoff_hz + beta * speed`. Here it is two first-order stages at the one cutoff, and the
+//! speed is read from the first stage's output rather than the readings, so the tremor's own
+//! motion does not open the filter (a single stage on raw speed left 0.32 mm of a 2 mm tremor).
 //! Translation and rotation are filtered alike: the rotation by slerp toward the reading, its
 //! cutoff from the filtered turn rate.
 //!
 //! [`OneEuro::TOOL`] is tuned so a 0.5 m/s sweep lags under 10 ms once under way, measured with
-//! `cargo run --release -p sx-embodiment-ik --example teleop_shake -- synth governed` (its
-//! `one-euro` line). Nothing here allocates or reads a clock: the caller gives each reading's
+//! `cargo run --release -p sx-embodiment-ik --example teleop_shake -- synth governed` (its `1e`
+//! rows and `one-euro` line). Nothing here allocates or reads a clock: the caller gives each reading's
 //! time.
 
 use sx_frames::{Pose, Quaternion};
@@ -33,13 +36,25 @@ pub struct OneEuro {
 }
 
 impl OneEuro {
-    /// The operator's tool targets: 1 Hz still (a 10 Hz tremor down about tenfold), 16 Hz at
-    /// 0.5 m/s (under 10 ms of lag).
+    /// The operator's tool targets, tuned on `teleop_shake synth governed`, `tests/fluid.rs`
+    /// `table_station` and `tests/follow_lag.rs` (2026-11-06; unfiltered in brackets). Speed
+    /// first: every lag within about 10 ms of unfiltered, and the tremor cut as far as that
+    /// allows. A 2 mm 8-12 Hz tremor's commanded shake 0.17 mm (0.77) and a 1 mm one's 0.10
+    /// (0.46; no tremor 0.06); a 0.5 m/s sweep's filter lag 7.8 ms once under way and the
+    /// station's mean lag on a 0.3 s sweep from rest 40.2 mm (36.0); a 10 cm jump 365 ms (354);
+    /// the desk operator path's delay 50 ms (40); 1 and 2 Hz 3 cm sines 50/60 ms behind (20/30).
+    /// The curve, (min cutoff Hz, beta per m/s, derivative cutoff Hz): 2 mm shake, 0.3 s sweep
+    /// lag, desk delay, sine delay:
+    /// (0.5, 65, 4) 0.12 mm, 41.9 mm, 60 ms, +40 ms; (0.7, 80, 6) 0.17, 40.2, 50, +30;
+    /// (1, 100, 8) 0.25, 39.2, 40, +20; (0.5, 150, 8) 0.34, 38.5, 40, +20. A causal filter
+    /// cannot take a 10 Hz tremor out of a 1-2 Hz motion without delaying the motion; a lead
+    /// along the estimated motion (two time constants) cut the jump to 277-299 ms but let the
+    /// tremor back (0.24-0.53 mm) and barely helped the sines: removed.
     pub const TOOL: Self = Self {
-        min_cutoff_hz: 1.0,
-        beta_per_m_s: 30.0,
+        min_cutoff_hz: 0.7,
+        beta_per_m_s: 80.0,
         beta_per_rad_s: 4.0,
-        derivative_cutoff_hz: 1.0,
+        derivative_cutoff_hz: 6.0,
     };
 }
 
@@ -77,6 +92,8 @@ fn norm(v: [f64; 3]) -> f64 {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PoseFilter {
     last: Option<(f64, Pose)>,
+    /// The first of the two stages' output.
+    stage: Option<Pose>,
     velocity: [f64; 3],
     turn: [f64; 3],
 }
@@ -92,21 +109,18 @@ impl PoseFilter {
     /// no later than the last one passes the last filtered pose back unchanged.
     #[must_use]
     pub fn filter(&mut self, params: &OneEuro, t_s: f64, raw: Pose) -> Pose {
-        let Some((last_t, last)) = self.last else {
+        let (Some((last_t, last)), Some(stage)) = (self.last, self.stage) else {
             self.last = Some((t_s, raw));
+            self.stage = Some(raw);
             return raw;
         };
         let dt = t_s - last_t;
         if dt <= 0.0 || !dt.is_finite() {
             return last;
         }
-        let derivative = alpha(dt, params.derivative_cutoff_hz);
-        let speed = [0, 1, 2].map(|k| (raw.translation_m[k] - last.translation_m[k]) / dt);
-        let turn = rotation_vector(raw.rotation * last.rotation.conjugate()).map(|r| r / dt);
-        for k in 0..3 {
-            self.velocity[k] += derivative * (speed[k] - self.velocity[k]);
-            self.turn[k] += derivative * (turn[k] - self.turn[k]);
-        }
+        // The cutoff from the hand's speed and turn rate as last estimated: estimated from the
+        // first stage's output, not the readings, so the tremor's own (fast) motion barely
+        // opens the filter it is to be cut by.
         let moving = alpha(
             dt,
             params.min_cutoff_hz + params.beta_per_m_s * norm(self.velocity),
@@ -115,12 +129,26 @@ impl PoseFilter {
             dt,
             params.min_cutoff_hz + params.beta_per_rad_s * norm(self.turn),
         );
-        let filtered = Pose {
+        // Two first-order stages at the one cutoff (critically damped): a tremor at 10 Hz falls
+        // with the square of the cutoff's share of it, so the cutoff can stand higher for the
+        // same cut, and a deliberate move lags less (2026-11-06, `teleop_shake` `1e` rows).
+        let toward = |from: Pose, to: Pose| Pose {
             translation_m: [0, 1, 2].map(|k| {
-                last.translation_m[k] + moving * (raw.translation_m[k] - last.translation_m[k])
+                from.translation_m[k] + moving * (to.translation_m[k] - from.translation_m[k])
             }),
-            rotation: last.rotation.slerp(raw.rotation, turning),
+            rotation: from.rotation.slerp(to.rotation, turning),
         };
+        let next = toward(stage, raw);
+        let derivative = alpha(dt, params.derivative_cutoff_hz);
+        let speed = [0, 1, 2].map(|k| (next.translation_m[k] - stage.translation_m[k]) / dt);
+        let turn = rotation_vector(next.rotation * stage.rotation.conjugate()).map(|r| r / dt);
+        for k in 0..3 {
+            self.velocity[k] += derivative * (speed[k] - self.velocity[k]);
+            self.turn[k] += derivative * (turn[k] - self.turn[k]);
+        }
+        let stage = next;
+        let filtered = toward(last, stage);
+        self.stage = Some(stage);
         self.last = Some((t_s, filtered));
         filtered
     }

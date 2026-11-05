@@ -24,9 +24,11 @@
 //!   ticks a speed or acceleration cap bound, reference re-seeds, and the felt latency split into
 //!   transport, tick queueing, solve and follower.
 //!
-//! `synth` also runs the tremor rows again with the station's intake filter
-//! ([`sx_embodiment_ik::smoothing::OneEuro::TOOL`], marked `1e`), and prints the filter's own lag
-//! on a 0.5 m/s sweep and how much of a still hand's 10 Hz tremor it passes (`one-euro` line).
+//! `synth` runs the rows with the solve's tremor filter off, then the tremor, network and jump
+//! rows again with it on (`Teleop::set_input_filter`, [`sx_embodiment_ik::smoothing::OneEuro::TOOL`]
+//! unless `SX_ONE_EURO=min_hz,beta_m_s,beta_rad_s,d_hz` names others; marked `1e`), and prints
+//! the filter's own lag on a 0.5 m/s sweep and how much of a still hand's 10 Hz tremor it passes
+//! (`one-euro` line).
 //!
 //! Synthetic operator: a hand moving 8 cm by 5 cm over 4 s, the other still, sampled at the
 //! headset's 90 Hz; tremor of 2 mm at 8-12 Hz (three random-phase sines per axis) and 0.3 deg;
@@ -58,6 +60,29 @@ use sx_embodiment_ik::{
 use sx_frames::{Pose, Quaternion};
 
 const HANDS: [usize; 2] = [0, 1];
+
+/// The tremor filter the `1e` rows run: [`OneEuro::TOOL`], or `SX_ONE_EURO`'s four numbers
+/// (minimum cutoff Hz, beta per m/s, beta per rad/s, derivative cutoff Hz) to tune it.
+fn input_filter() -> OneEuro {
+    let given: Vec<f64> = std::env::var("SX_ONE_EURO")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_default();
+    match given[..] {
+        [
+            min_cutoff_hz,
+            beta_per_m_s,
+            beta_per_rad_s,
+            derivative_cutoff_hz,
+        ] => OneEuro {
+            min_cutoff_hz,
+            beta_per_m_s,
+            beta_per_rad_s,
+            derivative_cutoff_hz,
+        },
+        _ => OneEuro::TOOL,
+    }
+}
 /// Joint speed below this is standing still, rad/s.
 const STILL: f64 = 0.005;
 /// A tool moving faster than this is moving, m/s.
@@ -870,6 +895,17 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
             ..clean
         },
         Scenario {
+            name: "clean 1e",
+            filtered: true,
+            ..clean
+        },
+        Scenario {
+            name: "jump 10cm 1e",
+            jump: true,
+            filtered: true,
+            ..clean
+        },
+        Scenario {
             name: "tremor 2mm 1e",
             filtered: true,
             ..tremor
@@ -908,7 +944,7 @@ fn one_euro() {
     let mut lag_ms = 0.0;
     for i in 0..90 {
         let t = f64::from(i) * dt;
-        let out = filter.filter(&OneEuro::TOOL, t, at(0.5 * t));
+        let out = filter.filter(&input_filter(), t, at(0.5 * t));
         lag_ms = (0.5 * t - out.translation_m[0]) / 0.5 * 1000.0;
         if lag_ms < 10.0 && i > 0 && settled.is_none() {
             settled = Some(t * 1000.0);
@@ -919,13 +955,13 @@ fn one_euro() {
     for i in 0..900 {
         let t = f64::from(i) * dt;
         let x = 0.002 * (2.0 * std::f64::consts::PI * 10.0 * t).sin();
-        let y = filter.filter(&OneEuro::TOOL, t, at(x)).translation_m[0];
+        let y = filter.filter(&input_filter(), t, at(x)).translation_m[0];
         if t > 2.0 {
             raw = raw.max(x.abs());
             out = out.max(y.abs());
         }
     }
-    let p = OneEuro::TOOL;
+    let p = input_filter();
     println!(
         "\none-euro (min {} Hz, beta {}/m/s, {}/rad/s, d {} Hz): 0.5 m/s sweep lags {lag_ms:.1} ms after 1 s, under 10 ms from {:.0} ms; a still hand's 10 Hz tremor passes {:.0} %",
         p.min_cutoff_hz,
@@ -990,6 +1026,9 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
     const LAG_TICKS: usize = 4;
     let mut solve =
         Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, config).expect("solve");
+    // The solve's own tremor filter (`Teleop::set_input_filter`) only on the rows marked `1e`:
+    // the others measure the targets as the operator sent them.
+    solve.set_input_filter(scenario.filtered.then(input_filter));
     solve.set_deadline(std::time::Duration::from_secs(1));
     let width = body.model().axes().len();
     let q0 = start_pose(&solve, body);
@@ -1074,8 +1113,6 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
     };
     let mut extra = Extra::default();
     let mut newest: Option<usize> = None;
-    let mut filters = [PoseFilter::default(); 2];
-    let mut filtered_newest: Option<(usize, Targets)> = None;
     let mut arrived_targets: Vec<[[f64; 3]; 2]> = Vec::new();
     let mut jump_closed: Option<f64> = None;
     solve.reset();
@@ -1092,21 +1129,7 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
             }
         }
         let Some(current) = newest else { continue };
-        let (sent, arrival, mut targets, smooth) = packets[current];
-        if scenario.filtered {
-            // The station's intake: each newly kept intent's tool targets through the filter,
-            // timed by when they were read.
-            if filtered_newest.is_none_or(|(at, _)| at != current) {
-                for hand in HANDS {
-                    targets.tcp[hand] = targets.tcp[hand]
-                        .map(|pose| filters[hand].filter(&OneEuro::TOOL, sent, pose));
-                }
-                filtered_newest = Some((current, targets));
-            }
-            if let Some((_, kept)) = filtered_newest {
-                targets = kept;
-            }
-        }
+        let (sent, arrival, targets, smooth) = packets[current];
         if now - arrival > 0.25 {
             continue; // stale: the station holds (counted by the tick histogram)
         }
