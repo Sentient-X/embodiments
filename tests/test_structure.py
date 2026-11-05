@@ -102,6 +102,8 @@ PUBLIC_SURFACE = frozenset(
         "preview_asset",
         "recorded_streams_of",
         "resolve_asset",
+        "tool_points_checked_of",
+        "ToolPointCheck",
         "viewing_of",
     }
 )

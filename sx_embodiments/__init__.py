@@ -37,6 +37,7 @@ from .known import (
     embodiments,
     preview_asset,
     recorded_streams_of,
+    tool_points_checked_of,
     viewing_of,
 )
 from .layout import (
@@ -68,6 +69,7 @@ from .recorded import (
     read_recorded,
 )
 from .sites import BodySite
+from .tool_points import ToolPointCheck
 
 __all__ = [
     "ActuationBinding",
@@ -114,6 +116,7 @@ __all__ = [
     "PlacedEmbodiment",
     "RecordedEmbodiment",
     "SupportEdge",
+    "ToolPointCheck",
     "Unbounded",
     "UndocumentedDrive",
     "UnknownEmbodimentError",
@@ -137,5 +140,6 @@ __all__ = [
     "read_recorded",
     "recorded_streams_of",
     "resolve_asset",
+    "tool_points_checked_of",
     "viewing_of",
 ]

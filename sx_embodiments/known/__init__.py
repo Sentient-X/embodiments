@@ -15,6 +15,7 @@ from ..errors import CompositionError, UnknownEmbodimentError
 from ..identity import EmbodimentId, EmbodimentName
 from ..mechanical import Module
 from ..recorded_streams import RecordedStreams
+from ..tool_points import ToolPointCheck
 from ..viewing import Viewing
 from ._previews import PREVIEWS
 from .aloha import ALOHA_SPEC
@@ -197,6 +198,15 @@ def front_of(name: str) -> Direction | None:
     """The front ``name``'s registry module declares along its root link, ``None`` when it
     declares none; raises `UnknownEmbodimentError` for a name no registry holds."""
     return _definition_of(name).front
+
+
+def tool_points_checked_of(name: str) -> ToolPointCheck | None:
+    """Who checked ``name``'s tool points on its hardware; ``None`` when nobody has, or when no
+    registry holds the name (an unknown body's tool points are never driven)."""
+    try:
+        return _definition_of(name).tool_points_checked
+    except UnknownEmbodimentError:
+        return None
 
 
 def collection_definitions() -> tuple[EmbodimentDefinition, ...]:

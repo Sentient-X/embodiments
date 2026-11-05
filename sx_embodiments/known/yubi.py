@@ -25,6 +25,7 @@ meshes overlap by 0.106 mm at the mechanical stop, so the recorded closed apertu
 clamped to zero. Per-unit camera calibration remains episode/session evidence.
 """
 
+import datetime as dt
 from typing import Final
 
 from sx_contracts import ComponentId
@@ -54,6 +55,7 @@ from ..recorded_streams import (
     RecordedStreams,
 )
 from ..sites import BodySite
+from ..tool_points import ToolPointCheck
 from ..viewing import TrackedDevice, Viewing
 from ._authoring import bounded_layout
 from .sources import capture_source
@@ -338,6 +340,20 @@ YUBI_SPEC: Final = EmbodimentDefinition(
     # (sxd umico quest.py); the floating hands are placed in it.
     front=Direction.POS_Y,
     lineage=Lineage(family="yubi", revision="description7-sx1"),
+    # The tool points (left/right_gripper_tip) are what the operator's hands hold; the drawn tip
+    # is held to the capture app's controller_to_tip on real Quest streams.
+    tool_points_checked=ToolPointCheck(
+        checked_by="headset-device alignment check",
+        checked_on=dt.date(2026, 10, 26),
+        method=(
+            "The drawn gripper tip matched the tip the Quest capture app streams "
+            "(controller_to_tip) within 1 mm and 1 degree"
+        ),
+        evidence=(
+            "headset-device skill, YUBI overlay alignment; sx-rig test "
+            "the_drawn_tip_matches_quest_streams_controller_to_tip"
+        ),
+    ),
     build=Build.of(YUBI_MODULE),
     extra_assets=(YUBI_HANDS_URDF, *YUBI_MESHES),
     operator_mounts=(
