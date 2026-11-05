@@ -55,6 +55,7 @@ from typing import Final
 import numpy as np
 import numpy.typing as npt
 from sx_contracts.identity import JsonValue, canonical_bytes
+from sx_geometry.frames import RFU, RUB, QuaternionLayout, basis_quaternion
 
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
 from .collision_proxies import support_document
@@ -69,13 +70,15 @@ from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
 GENERATOR: Final = "sx_embodiments.render_pack/v1"
+XYZW: Final = QuaternionLayout.XYZW
 URDF_FILE: Final = "robot.urdf"
 GLB_FILE: Final = "pack.glb"
 JSON_FILE: Final = "pack.json"
 COLLISION_FILE: Final = "collision.json"
 
-#: URDF Z-up to glTF Y-up: -90 deg about x, as glTF's (x, y, z, w).
-URDF_TO_GLTF: Final = (-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+#: The URDF's Z-up world (RFU) seen from glTF's Y-up (RUB), as glTF's (x, y, z, w): -90 deg
+#: about x, computed from the two axes and exact (the bytes of every committed pack.glb).
+URDF_TO_GLTF: Final = tuple(float(v) for v in XYZW.write(basis_quaternion(RUB, RFU)))
 NEUTRAL_RGBA: Final = (0.7, 0.7, 0.7, 1.0)
 #: How far a tool point link may lie from its tool's grasp point, metres.
 _TOOL_POINT_M: Final = 0.01
