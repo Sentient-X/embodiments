@@ -71,6 +71,19 @@
 //!   The same axis straying again within [`TRACKING_REPEAT`] is stuck or broken: that stops the
 //!   chain and latches [`GovernorError::Tracking`], and every later command is refused until
 //!   [`ActuatorChain::clear_faults`].
+//! - **A gripper's finger stalls, it never faults.** A finger ([`BoundAxis::gripper`], a part
+//!   the registry declares a gripper) observed past its tracking bound *short of its command*,
+//!   on the way to its target, has closed on something or is blocked: the gripper's stall rule
+//!   (`sx_embodiment_ik::teleop::STALL`), never a fault (11-05: a finger closed on its other
+//!   finger latched the Spark's whole body). It is held, not pulled back: every command keeps
+//!   it pressing [`GRIP_PRESS_SHARE`] of its range past where it stands (never more than its
+//!   at-rest `max_tracking_error`), in the joint's own unit, so a grip keeps its hold without
+//!   driving a position servo deep into its torque limit ([`Governor::stalls`]); nothing stops
+//!   or latches, and once the target asks it back within that press it follows again. A
+//!   finger that gives way *backwards* from where it stalled, or strays past its command
+//!   away from its target (a pull, a slipping horn, a wrong sign), is no grip: it is judged
+//!   by the tracking rule above and latches on a repeat. A finger whose motor reports a fault
+//!   code is the caller's to stop, as any motor's is.
 //!
 //! The governor bounds what the station asks; it is not a substitute for the motors' own
 //! protections.
@@ -90,6 +103,12 @@ use crate::rail::AxisDerate;
 
 /// The longest time one command's speed bound counts: one control period at 50 Hz.
 pub const MAX_STEP_INTERVAL: Duration = Duration::from_millis(20);
+
+/// The share of a gripper finger's declared range (`upper - lower`, in its own unit, radians or
+/// metres) a stalled finger is held pressing past where it stands: enough to keep a grip, far
+/// less than the tracking bound, which drives a position servo to its torque limit and,
+/// sustained, into its overload protection. Not yet measured as a force on a real finger.
+pub const GRIP_PRESS_SHARE: f64 = 0.05;
 
 /// How soon one axis straying past its tracking bound again latches a fault. A first stray is
 /// pulled back (a bump, a lag on a fast move, a hand pushing the arm); a joint that strays again
@@ -251,6 +270,21 @@ impl<E: ChainError> ChainError for GovernorError<E> {
             Self::Tracking { .. } | Self::Unobserved { .. } => ChainFailure::Fault,
         }
     }
+
+    /// The codes the chain's error carried, and those its motors reported at the stop a fault
+    /// made.
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::Chain(error) => error.motor_faults(),
+            Self::Faulted { error, stop } => {
+                let mut faults = error.motor_faults();
+                faults.extend(stop.faults.iter().copied());
+                faults
+            }
+            Self::Tracking { stop, .. } | Self::Unobserved { stop, .. } => stop.faults.clone(),
+            Self::Target(_) | Self::NoStart | Self::Latched => Vec::new(),
+        }
+    }
 }
 
 /// An axis observed outside its range: since when it last came closer, how far out it was then,
@@ -303,6 +337,15 @@ pub struct Governor<C, K = MonotonicClock> {
     silent: Vec<bool>,
     /// Per axis, when it last strayed past its tracking bound and was pulled back.
     tripped: Vec<Option<Instant>>,
+    /// Per axis, whether it is a gripper's finger ([`BoundAxis::gripper`]): it stalls, never
+    /// faults.
+    gripper: Vec<bool>,
+    /// Per finger stalled on something: where it was last observed standing. Every command
+    /// holds it within its press of there.
+    stall: Vec<Option<f64>>,
+    /// Per axis, how far past where a stalled finger stands it is held pressing
+    /// ([`GRIP_PRESS_SHARE`] of its range, at most its at-rest tracking bound).
+    press: Vec<f64>,
     /// The first axis the last command pulled back to where it was observed.
     pulled_back: Option<usize>,
     /// Per axis, how many times it was approached again outside its range since the chain
@@ -386,6 +429,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         let positive = |value: f64| value.is_finite() && value > 0.0;
         let chain_unavailable = chain.unavailable();
         let width = axes.len();
+        let gripper: Vec<bool> = axes.iter().map(|axis| axis.gripper).collect();
         if let Some((axis, _)) = axes.iter().zip(&limits).find(|(_, limit)| {
             !(positive(limit.max_speed)
                 && positive(limit.max_tracking_error)
@@ -402,6 +446,13 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .map(|observed| observed.to_vec());
         let mut limits = limits;
         hold_to_ceilings(&mut limits, chain.tracking_ceilings());
+        let press: Vec<f64> = axes
+            .iter()
+            .zip(&limits)
+            .map(|(axis, limit)| {
+                (GRIP_PRESS_SHARE * (axis.upper - axis.lower)).min(limit.max_tracking_error)
+            })
+            .collect();
         let mut torque_caps = vec![None; limits.len()];
         let mut derated = chain.derated();
         if let Some(chosen) = derate {
@@ -460,6 +511,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             recent: vec![0.0; width],
             silent: vec![false; width],
             tripped: vec![None; width],
+            gripper,
+            stall: vec![None; width],
+            press,
             pulled_back: None,
             reapproached: vec![0; width],
             derated,
@@ -529,6 +583,22 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     #[must_use]
     pub const fn pulled_back(&self) -> Option<usize> {
         self.pulled_back
+    }
+
+    /// Each gripper finger stalled on something (closed on an object, or blocked): its index,
+    /// where it stands, and how far past that the last command holds it pressing (signed, at
+    /// most its press, [`GRIP_PRESS_SHARE`] of its range): the held force's measure. A caller reports each
+    /// stall once; none of them stops or latches anything. Allocates nothing.
+    pub fn stalls(&self) -> impl Iterator<Item = (usize, f64, f64)> + '_ {
+        let sent = self.held.as_ref().map(|held| &held.position);
+        self.stall
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, at)| {
+                let at = (*at)?;
+                let pressing = sent.and_then(|sent| sent.get(index)).map_or(0.0, |sent| sent - at);
+                Some((index, at, pressing))
+            })
     }
 
     /// The first axis resting outside its range that made no progress toward it for
@@ -640,6 +710,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.noted = None;
         self.silent.fill(false);
         self.tripped.fill(None);
+        self.stall.fill(None);
         // A fault stops the body where it is and holds it there: no joint is released here,
         // whatever it carries, since the governor knows no model of what would fall. The
         // caller's own stop releases those that would not ([`crate::rest`]); a joint whose
@@ -1009,6 +1080,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.rearm_outside(joints, now);
         let (mut next, mut velocity, (lower, upper), brought_in) =
             self.step(&held, joints, elapsed.as_secs_f64());
+        self.hold_stalled(&mut next, &mut velocity, &lower, &upper);
         self.brought_in = brought_in;
         self.interval = Some((lower, upper));
         let held_feedforward = self.held_feedforward(&velocity, feedforward);
@@ -1050,11 +1122,40 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             if self.unavailable.contains(&index) || observed.is_nan() {
                 continue;
             }
+            let target = joints[index];
+            let press = self.press[index];
+            let mut receded = false;
+            if let Some(at) = self.stall[index] {
+                // How far it moved toward its target since it stalled: a soft object gives
+                // (the hold follows it in); giving way backwards is no grip.
+                let toward = (observed - at) * (target - at).signum();
+                if toward < -press / 2.0 {
+                    self.stall[index] = None;
+                    receded = true;
+                } else if toward > 0.0 {
+                    self.stall[index] = Some(observed);
+                }
+            }
             let bound = self.limits[index].max_tracking_error
                 + TRACKING_PERIODS * self.recent[index] * step;
             if within(observed, next[index], bound) {
                 continue;
             }
+            // A finger short of its command on the way to its target, not stray within the
+            // repeat window, closed on something or is blocked: a stall, never a fault. Held
+            // pressing its press past where it stands.
+            let short = (next[index] - observed) * (target - observed) > 0.0;
+            let recent_stray = self.tripped[index]
+                .is_some_and(|at| now.saturating_duration_since(at) < TRACKING_REPEAT);
+            if self.gripper[index] && short && !recent_stray && !receded {
+                self.stall[index] = Some(observed);
+                next[index] = (observed + (next[index] - observed).clamp(-press, press))
+                    .clamp(lower[index], upper[index]);
+                velocity[index] = 0.0;
+                self.recent[index] = 0.0;
+                continue;
+            }
+            self.stall[index] = None;
             let again = self.tripped[index]
                 .is_some_and(|at| now.saturating_duration_since(at) < TRACKING_REPEAT);
             if again {
@@ -1131,7 +1232,33 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.noted = None;
         self.silent.fill(false);
         self.tripped.fill(None);
+        self.stall.fill(None);
         self.reapproached.fill(0);
+    }
+
+    /// Each stalled finger's step held within its press of where it stands, at rest: it keeps
+    /// pressing, never further. A step that comes back within that press on its own (the
+    /// target asks it open) releases the stall, and the finger follows again.
+    fn hold_stalled(
+        &mut self,
+        next: &mut Axes<f64>,
+        velocity: &mut Axes<f64>,
+        lower: &Axes<f64>,
+        upper: &Axes<f64>,
+    ) {
+        for (index, stall) in self.stall.iter_mut().enumerate() {
+            let Some(at) = *stall else {
+                continue;
+            };
+            let press = self.press[index];
+            if (next[index] - at).abs() <= press {
+                *stall = None;
+                continue;
+            }
+            next[index] = (at + (next[index] - at).clamp(-press, press))
+                .clamp(lower[index], upper[index]);
+            velocity[index] = 0.0;
+        }
     }
 }
 
@@ -1246,6 +1373,7 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
         self.latched = false;
         self.silent.fill(false);
         self.tripped.fill(None);
+        self.stall.fill(None);
         self.reapproached.fill(0);
         self.held = None;
         self.interval = None;
@@ -1319,6 +1447,7 @@ mod tests {
             zero: 0.0,
             direction: 1,
             home: None,
+            gripper: false,
             motion: crate::binding::AxisMotion {
                 speed: 1.0,
                 acceleration: 10.0,
@@ -1787,6 +1916,113 @@ mod tests {
         governor.clear_faults();
         governor.command(&[0.0, 0.5]).expect("after clearing");
         assert_eq!(governor.pulled_back(), None);
+    }
+
+    /// A gripper's finger that stops short of its command has closed on something (11-05, the
+    /// Spark: `left_gripper_right_finger_joint` sent 0.837, observed at 0.506, latched the whole
+    /// body): a stall. It is held pressing its press (a twentieth of its range) past where it
+    /// stands for as long as it is asked further, and nothing stops or latches; asked back
+    /// open, it follows.
+    #[test]
+    fn a_finger_short_of_its_command_stalls_and_never_latches() {
+        let mut chain = fake(true);
+        chain.axes[0].gripper = true;
+        chain.pinned = Some((0, 0.1));
+        let (mut governor, clock) = governed(chain);
+        let mut onset = None;
+        for tick in 0..300 {
+            governor
+                .command(&[0.9, 0.5])
+                .expect("a stalled finger never faults");
+            if onset.is_none() && governor.stalls().count() > 0 {
+                onset = Some(tick);
+            }
+            clock.advance(MAX_STEP_INTERVAL);
+        }
+        let onset = onset.expect("the finger stalled");
+        assert!(!governor.is_latched());
+        assert_eq!(governor.chain().stops, 0, "nothing stopped");
+        assert_eq!(governor.pulled_back(), None, "a stall is not a pull-back");
+        // A twentieth of its 2 rad range, well inside its 0.2 rad tracking bound.
+        let reach = GRIP_PRESS_SHARE * 2.0;
+        assert!(reach < governor.limits()[0].max_tracking_error);
+        let stalls: Vec<_> = governor.stalls().collect();
+        assert_eq!(stalls.len(), 1);
+        let (axis, at, pressing) = stalls[0];
+        assert_eq!(axis, 0);
+        assert!((at - 0.1).abs() < 1e-12, "{at}");
+        assert!(pressing > 0.0 && pressing <= reach + 1e-12, "held pressing {pressing}");
+        // Every command after the stall keeps it pressing, never further than its press.
+        for sent in &governor.chain().sent[onset + 1..] {
+            assert!(sent[0] - 0.1 <= reach + 1e-12, "{}", sent[0]);
+            assert!(sent[0] > 0.1, "it keeps its grip");
+        }
+        // The arm joint beside it went on following.
+        assert!((governor.sent().expect("sent")[1] - 0.5).abs() < 1e-12);
+        // Asked back open, it lets go of the stall and follows.
+        governor.chain_mut().pinned = None;
+        for _ in 0..100 {
+            governor.command(&[-0.5, 0.5]).expect("opens");
+            clock.advance(MAX_STEP_INTERVAL);
+        }
+        assert_eq!(governor.stalls().count(), 0);
+        assert!(governor.sent().expect("sent")[0] < 0.1, "following open");
+    }
+
+    /// A finger that gives way backwards from its command (a pull, a slipping horn, a wrong
+    /// sign: it reads half a radian behind whatever it is sent) is no grip: the hold does not
+    /// follow it away from its target. It strays again within 2 s and latches, as any joint
+    /// (refute of 11-06: the first stall rule followed such a finger to the far end of its
+    /// range and never latched).
+    #[test]
+    fn a_finger_giving_way_backwards_is_not_a_stall_and_latches_on_a_repeat() {
+        let mut chain = fake(true);
+        chain.axes[0].gripper = true;
+        chain.axes[1].gripper = true;
+        chain.lag = -0.5;
+        let (mut governor, clock) = governed(chain);
+        let mut latched = None;
+        for _ in 0..200 {
+            match governor.command(&[0.9, 0.9]) {
+                Ok(_) => {}
+                Err(GovernorError::Tracking { joint, .. }) => {
+                    latched = Some(joint);
+                    break;
+                }
+                Err(other) => panic!("{other:?}"),
+            }
+            clock.advance(MAX_STEP_INTERVAL);
+        }
+        assert!(latched.is_some(), "a finger giving way backwards latches");
+        assert!(governor.is_latched());
+        // Within a few commands: one stall, the stray it gives way by (pulled back, as any
+        // joint), and the repeat; never a hold that follows it for ever.
+        let sent = governor.chain().sent.len();
+        assert!(sent <= 4, "{sent} commands before it latched");
+    }
+
+    /// The same stop on a joint that is not a finger is still a tracking fault on a repeat.
+    #[test]
+    fn a_joint_that_is_not_a_finger_still_latches_on_a_repeat() {
+        let mut chain = fake(true);
+        chain.axes[1].gripper = true;
+        chain.pinned = Some((0, 0.1));
+        let (mut governor, clock) = governed(chain);
+        let mut latched = false;
+        for _ in 0..300 {
+            match governor.command(&[0.9, 0.5]) {
+                Ok(_) => {}
+                Err(GovernorError::Tracking { joint, .. }) => {
+                    assert_eq!(joint, "a");
+                    latched = true;
+                    break;
+                }
+                Err(other) => panic!("{other:?}"),
+            }
+            clock.advance(MAX_STEP_INTERVAL);
+        }
+        assert!(latched && governor.is_latched());
+        assert_eq!(governor.stalls().count(), 0);
     }
 
     #[test]

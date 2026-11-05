@@ -1560,4 +1560,13 @@ impl ChainError for FeetechChainError {
             _ => ChainFailure::Fault,
         }
     }
+
+    /// A servo's error byte: on an answer, or at a stop.
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::ServoError { bus_id, error } => vec![(*bus_id, *error)],
+            Self::FaultedAtStop { faults } => faults.clone(),
+            _ => Vec::new(),
+        }
+    }
 }

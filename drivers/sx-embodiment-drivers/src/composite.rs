@@ -48,6 +48,14 @@ impl<E: ChainError, F: ChainError> ChainError for CompositeError<E, F> {
             Self::Second(_) => ChainFailure::Fault,
         }
     }
+
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::Target(_) => Vec::new(),
+            Self::First(error) => error.motor_faults(),
+            Self::Second(error) => error.motor_faults(),
+        }
+    }
 }
 
 impl<A: ActuatorChain, B: ActuatorChain<Feedback = A::Feedback>> Composite<A, B> {
@@ -409,6 +417,7 @@ mod tests {
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
                 home: None,
+                gripper: false,
                 motion: crate::binding::AxisMotion {
                     speed: 1.0,
                     acceleration: 10.0,

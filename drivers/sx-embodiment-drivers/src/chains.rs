@@ -65,6 +65,13 @@ impl<E: ChainError> ChainError for ChainsError<E> {
             Self::Chain { error, .. } => error.failure(),
         }
     }
+
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::Target(_) => Vec::new(),
+            Self::Chain { error, .. } => error.motor_faults(),
+        }
+    }
 }
 
 impl<C: ActuatorChain> Chains<C> {
@@ -591,6 +598,7 @@ mod tests {
                 zero: UNCALIBRATED_ZERO,
                 direction: UNCALIBRATED_DIRECTION,
                 home: None,
+                gripper: false,
                 motion: crate::binding::AxisMotion {
                     speed: 1.0,
                     acceleration: 10.0,

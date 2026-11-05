@@ -109,6 +109,7 @@
       "bus_id": 7,
       "sign": -1,
       "reduction": 111.11111111111111,
+      "gripper": true,
       "speed": 0.11309733552923253,
       "acceleration": 1.1309733552923251,
       "inertia": 22.306878012419965

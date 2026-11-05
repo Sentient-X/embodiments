@@ -2083,4 +2083,21 @@ impl ChainError for DamiaoChainError {
             _ => ChainFailure::Fault,
         }
     }
+
+    /// A motor's own fault code (over-voltage, over-temperature, communication lost, ...): one
+    /// that persists after a clear, or a fault state where another was required.
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::FaultPersists { bus_id, code } => vec![(*bus_id, *code)],
+            Self::UnexpectedState {
+                bus_id,
+                state: MotorState::Fault(code),
+                ..
+            } => vec![(*bus_id, *code)],
+            Self::DisableUnsent { refused, .. } | Self::NothingAnswering { refused, .. } => {
+                refused.motor_faults()
+            }
+            _ => Vec::new(),
+        }
+    }
 }

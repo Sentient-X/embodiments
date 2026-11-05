@@ -233,3 +233,26 @@ fn the_bimanual_so101_opens_each_arm_on_its_own_serial_bus() {
         .expect("left_gripper");
     assert_eq!(unavailable, [left_gripper]);
 }
+
+/// Every finger of a part the registry declares a gripper (`GripperSpec`) is read as one, and
+/// nothing else is: the governor's stall rule rests on it (11-05, the Spark's fingers). Every
+/// chain joint declares a home and a gripper's finger none, so the two marks agree on every
+/// driven joint of every body; a parse that dropped the mark fails here.
+#[test]
+fn every_gripper_finger_and_only_those_is_marked_a_gripper() {
+    let mut fingers = 0_usize;
+    for document in documents() {
+        let body = BodyBindings::parse(&document).expect("body");
+        for axis in &body.axes {
+            assert_eq!(
+                axis.gripper,
+                axis.home.is_none(),
+                "{}/{}",
+                body.embodiment,
+                axis.joint
+            );
+            fingers += usize::from(axis.gripper);
+        }
+    }
+    assert!(fingers > 0, "the registry drives grippers");
+}

@@ -110,6 +110,7 @@
         "bus_id": 7,
         "sign": -1,
         "reduction": 111.11111111111111,
+        "gripper": true,
         "speed": 0.11309733552923253,
         "acceleration": 1.1309733552923251,
         "inertia": 22.306878012419965
@@ -261,6 +262,7 @@
         "bus_id": 7,
         "sign": -1,
         "reduction": 111.11111111111111,
+        "gripper": true,
         "of": {
           "body": "b601-dm",
           "port": "can",
@@ -407,6 +409,7 @@
         "bus_id": 7,
         "sign": -1,
         "reduction": 111.11111111111111,
+        "gripper": true,
         "of": {
           "body": "b601-dm",
           "port": "can",
@@ -563,6 +566,7 @@
         "bus_id": 7,
         "sign": -1,
         "reduction": 111.11111111111111,
+        "gripper": true,
         "of": {
           "body": "b601-dm",
           "port": "can",
@@ -709,6 +713,7 @@
         "bus_id": 7,
         "sign": -1,
         "reduction": 111.11111111111111,
+        "gripper": true,
         "of": {
           "body": "b601-dm",
           "port": "can",
@@ -844,6 +849,7 @@
         "bus_id": 6,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "of": {
           "body": "so101",
           "port": "serial",
@@ -969,6 +975,7 @@
         "bus_id": 6,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "of": {
           "body": "so101",
           "port": "serial",
@@ -1904,6 +1911,7 @@
         "bus_id": 3,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "speed": 4.0,
         "acceleration": 16.0,
         "inertia": 6.536337245757577e-05
@@ -1919,6 +1927,7 @@
         "bus_id": 4,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "speed": 4.0,
         "acceleration": 16.0,
         "inertia": 6.556846749010761e-05
@@ -1934,6 +1943,7 @@
         "bus_id": 1,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "speed": 4.0,
         "acceleration": 16.0,
         "inertia": 6.536331745477485e-05
@@ -1949,6 +1959,7 @@
         "bus_id": 2,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "speed": 4.0,
         "acceleration": 16.0,
         "inertia": 6.55684366927655e-05
@@ -2167,6 +2178,7 @@
         "bus_id": 6,
         "sign": 1,
         "reduction": 1.0,
+        "gripper": true,
         "speed": 4.71710608647116,
         "acceleration": 47.1710608647116,
         "inertia": 1.613472075435009e-05

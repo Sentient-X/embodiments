@@ -285,6 +285,7 @@ mod tests {
             zero: 0.0,
             direction: 1,
             home: None,
+            gripper: false,
             motion: AxisMotion {
                 speed: 1.0,
                 acceleration: 1.0,
