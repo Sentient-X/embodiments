@@ -413,6 +413,13 @@ impl TrackingCeiling {
 /// A chain's error, classified once by the crate that knows its vendor's failure modes.
 pub trait ChainError: std::error::Error + Send + Sync + 'static {
     fn failure(&self) -> ChainFailure;
+
+    /// The (bus address, vendor fault code) each motor reported in this error, when it carries
+    /// any: a fault the hardware itself reported, which a caller keeps across a restart, as
+    /// against a link's silence or a software check. Empty by default.
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        Vec::new()
+    }
 }
 
 /// A motor's two temperatures, as its answer reports them, in degrees Celsius.

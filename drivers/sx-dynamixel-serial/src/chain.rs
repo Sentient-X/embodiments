@@ -1190,4 +1190,14 @@ impl ChainError for DynamixelChainError {
             _ => ChainFailure::Fault,
         }
     }
+
+    /// A servo's error byte or hardware error status: on an answer, at open, or at a stop.
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::ServoError { bus_id, error } => vec![(*bus_id, *error)],
+            Self::HardwareError { bus_id, status } => vec![(*bus_id, *status)],
+            Self::FaultedAtStop { faults } => faults.clone(),
+            _ => Vec::new(),
+        }
+    }
 }

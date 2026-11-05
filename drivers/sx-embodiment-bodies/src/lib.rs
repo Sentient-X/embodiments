@@ -2213,6 +2213,14 @@ impl ChainError for BusError {
             Self::Dynamixel(error) => error.failure(),
         }
     }
+
+    fn motor_faults(&self) -> Vec<(u16, u8)> {
+        match self {
+            Self::Damiao(error) => error.motor_faults(),
+            Self::Feetech(error) => error.motor_faults(),
+            Self::Dynamixel(error) => error.motor_faults(),
+        }
+    }
 }
 
 /// A feedback type a bus's chain answers in, as the body's one feedback type: a Damiao motor's
