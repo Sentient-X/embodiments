@@ -1072,7 +1072,6 @@ impl Teleop {
         dt: f64,
     ) -> Result<&TeleopStep, IkError> {
         let width = self.q.len();
-        let targets = &self.filtered(targets, dt);
         for (given, expected) in [
             (reference.len(), width),
             (measured.len(), width),
@@ -1082,6 +1081,12 @@ impl Teleop {
                 return Err(IkError::Positions { expected, given });
             }
         }
+        if !(dt.is_finite() && dt > 0.0) {
+            return Err(IkError::Tick(dt));
+        }
+        // Filtered once the step is taken: a refused step leaves the filter and `taken` as
+        // they were.
+        let targets = &self.filtered(targets, dt);
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
         let mut gated = std::mem::take(&mut self.gated);

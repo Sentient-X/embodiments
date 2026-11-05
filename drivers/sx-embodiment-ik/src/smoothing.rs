@@ -109,6 +109,21 @@ impl PoseFilter {
     /// no later than the last one passes the last filtered pose back unchanged.
     #[must_use]
     pub fn filter(&mut self, params: &OneEuro, t_s: f64, raw: Pose) -> Pose {
+        // A reading that is not a pose passes as it is, and the filter forgets the hand: folded
+        // into the state, one NaN left every later step of that hand refused (refute of #248).
+        let finite = raw.translation_m.iter().all(|v| v.is_finite())
+            && [
+                raw.rotation.x,
+                raw.rotation.y,
+                raw.rotation.z,
+                raw.rotation.w,
+            ]
+            .iter()
+            .all(|v| v.is_finite());
+        if !finite {
+            self.reset();
+            return raw;
+        }
         let (Some((last_t, last)), Some(stage)) = (self.last, self.stage) else {
             self.last = Some((t_s, raw));
             self.stage = Some(raw);
@@ -194,6 +209,21 @@ mod tests {
             }
         }
         assert!(peak_out < peak_in / 5.0, "{peak_out} of {peak_in}");
+    }
+
+    #[test]
+    fn a_reading_that_is_not_a_pose_passes_and_leaves_no_trace() {
+        let mut filter = PoseFilter::default();
+        let _ = filter.filter(&OneEuro::TOOL, 0.0, at(0.1));
+        let _ = filter.filter(&OneEuro::TOOL, 0.01, at(0.1));
+        assert!(
+            filter
+                .filter(&OneEuro::TOOL, 0.02, at(f64::NAN))
+                .translation_m[0]
+                .is_nan()
+        );
+        assert_eq!(filter.filter(&OneEuro::TOOL, 0.03, at(0.2)), at(0.2));
+        assert!(filter.filter(&OneEuro::TOOL, 0.04, at(0.2)).translation_m[0].is_finite());
     }
 
     #[test]
