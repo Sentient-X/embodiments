@@ -867,9 +867,15 @@ def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> d
     ``tcp_frames`` (driven) with its ``tool_points_checked`` record only once a person checked
     them on the body's hardware (:mod:`sx_embodiments.tool_points`); until then ``tcp_frames``
     is empty and nothing may drive them."""
-    candidates: dict[str, JsonValue] = dict(tcp_frames(embodiment, tools))
+    derived = tcp_frames(embodiment, tools)
+    candidates: dict[str, JsonValue] = dict(derived)
     checked = tool_points_checked_of(str(embodiment.name))
-    if checked is None:
+    # A check holds for the revision and the links it checked, and for nothing else.
+    if (
+        checked is None
+        or checked.embodiment != str(embodiment.id)
+        or dict(checked.points) != derived
+    ):
         return {"tcp_candidates": candidates, "tcp_frames": {}}
     return {
         "tcp_candidates": candidates,

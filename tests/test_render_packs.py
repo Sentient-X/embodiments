@@ -80,7 +80,9 @@ def test_a_pack_draws_every_link_within_its_budget(name: str) -> None:
 
 def test_tool_frames_are_the_grippers() -> None:
     def frames(name: str) -> dict[str, str]:
-        return json.loads((ROOT / "render_packs" / name / "pack.json").read_bytes())["tcp_frames"]
+        return json.loads((ROOT / "render_packs" / name / "pack.json").read_bytes())[
+            "tcp_candidates"
+        ]
 
     assert frames("sentient-static-upper-body") == {
         "left": "left_gripper_tcp",

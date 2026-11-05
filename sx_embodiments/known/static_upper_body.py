@@ -479,17 +479,19 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs): driven on this
     # body's hardware by headset and desk teleoperation and by RobotService programs.
     tool_points_checked=ToolPointCheck(
+        embodiment="51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
+        points={"left": "left_gripper_tcp", "right": "right_gripper_tcp"},
         checked_by="the owner, operating the robot with the teleop and station agents",
         checked_on=dt.date(2026, 10, 27),
         method=(
-            "Teleoperated on the hardware: next-to-the-robot line-up touched both drawn tool tips "
-            "to the real grippers' tips (sx #2576), then headset and desk sessions drove both "
-            "tool points through the station's follower; not yet the robot-bench tool-point "
-            "procedure"
+            "Driven on the hardware, not measured: headset and desk teleoperation and RobotService "
+            "programs drove both tool points through the station's follower for days, with the "
+            "operator watching the jaws; no residual between a tool point and the real jaws is "
+            "recorded, and the robot-bench tool-point procedure has not been run"
         ),
         evidence=(
-            "production station dgx-spark (sx-c9f62718), 2026-10-27/28 sessions "
-            "(webxr-teleop skill); sx #2576, #2895, #3001; sx-embodiments #216"
+            "production station dgx-spark (sx-c9f62718), sessions from 2026-10-27 (webxr-teleop "
+            "skill; handoff 2026-10-27); sx #2895, #3001; sx-embodiments #216"
         ),
     ),
     build=Build.of(STATIC_UPPER_BODY_MODULE),
