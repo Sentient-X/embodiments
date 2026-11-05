@@ -771,3 +771,49 @@ fn station_table(station: &mut Station) {
         station.held
     );
 }
+
+/// How much of a lagging follower's tool lag the horizon's lag model wins back
+/// ([`Ik::set_follower_lag`]): each joint follows its command as a first-order lag of 40 ms
+/// (the Spark's 26-63 ms), measured where it is, and the station's solve is told that lag or not.
+/// The tool as measured against the target on a 0.5 m/s sweep and 1 and 2 Hz sines.
+#[test]
+#[ignore = "a table: cargo test --release --test fluid table_follower_lag -- --ignored --nocapture"]
+fn table_follower_lag() {
+    const LAG_S: f64 = 0.04;
+    for modelled in [0.0, LAG_S] {
+        let mut station = Station::new();
+        let names: Vec<String> = station.solve.model().axes().iter().map(|a| a.name.clone()).collect();
+        for name in &names {
+            station.solve.set_follower_lag(name, modelled);
+        }
+        let runs: [(&str, Box<dyn Fn(f64, &Pose) -> Pose>); 3] = [
+            ("sweep 0.5 m/s", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.5 * t.min(0.3), 0.0]))),
+            ("sine 1 Hz", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * t).sin(), 0.0]))),
+            ("sine 2 Hz", Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * 2.0 * t).sin(), 0.0]))),
+        ];
+        for (name, left) in runs {
+            let mut command = station.ready.clone();
+            let mut actual = station.ready.clone();
+            let (from, right) = (pose(&station.body, &command, 0), pose(&station.body, &command, 1));
+            let available = vec![true; command.len()];
+            station.solve.reset();
+            let mut errors = Vec::new();
+            for tick in 1..=300 {
+                let t = f64::from(tick) * DT;
+                let target = left(t, &from);
+                let targets = Targets { tcp: [Some(target), Some(right)], ..Targets::default() };
+                let measured: Vec<Option<f64>> = actual.iter().map(|v| Some(*v)).collect();
+                let step = station.solve.step(&command, &measured, &available, &targets, DT).expect("a step");
+                command.copy_from_slice(&step.q);
+                let blend = 1.0 - (-DT / LAG_S).exp();
+                for (a, c) in actual.iter_mut().zip(&command) {
+                    *a += blend * (c - *a);
+                }
+                if t > 0.15 {
+                    errors.push(distance(&target, &pose(&station.body, &actual, 0)));
+                }
+            }
+            println!("lag modelled {modelled:.2} s, {name}: measured tool to target RMS {:.1} mm", rms(&errors) * 1e3);
+        }
+    }
+}

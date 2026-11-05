@@ -685,15 +685,25 @@ impl Teleop {
         }
         let mut out = *targets;
         for (hand, filter) in self.filters.iter_mut().enumerate() {
-            match (
+            let rates = match (
                 targets.tcp[hand],
                 targets.tool_speed[hand],
                 self.input_filter,
             ) {
                 (Some(pose), None, Some(params)) => {
                     out.tcp[hand] = Some(filter.filter(&params, self.clock_s, pose));
+                    Some(filter.rates())
                 }
-                _ => filter.reset(),
+                _ => {
+                    filter.reset();
+                    None
+                }
+            };
+            // Where the hand is going, for the solve's horizon to predict it.
+            for (limb, of) in self.hand_of.iter().enumerate() {
+                if *of == Some(hand) {
+                    self.ik.set_target_velocity(limb, rates);
+                }
             }
         }
         self.taken = out;
@@ -744,6 +754,14 @@ impl Teleop {
     /// scores answers, not the clock of a loaded host.
     pub fn set_deadline(&mut self, budget: std::time::Duration) {
         self.ik.set_deadline(budget);
+    }
+
+    /// How far `joint`'s follower lags its command, seconds ([`Ik::set_follower_lag`]): the
+    /// solve leads it. An unknown joint is ignored.
+    pub fn set_follower_lag(&mut self, joint: &str, seconds: f64) {
+        if let Some(axis) = self.ik.body().model().axes().iter().position(|a| a.name == joint) {
+            self.ik.set_follower_lag(axis, seconds);
+        }
     }
 
     /// Engage: the next step seeds from the measured joints, starts from standing still and

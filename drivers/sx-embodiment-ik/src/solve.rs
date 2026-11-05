@@ -159,9 +159,23 @@ pub struct Settings {
     /// step is its cap times the tick ([`Caps`]), so this binds only above 3 rad/s at a 10 ms
     /// tick (a 0.5 m lever then moves 15 mm a tick against the 10 mm collision margin).
     pub max_step_rad: f64,
-    /// The most error one tick tries to close (the QP is a linearisation).
-    pub max_error_m: f64,
-    pub max_error_rad: f64,
+    /// The horizon beyond the tick ([`Ik::step`]): the two later knots' lengths, seconds. The
+    /// step is solved with the motion that follows it: the tool's error at the end of the tick
+    /// and of each knot, each joint's velocity held over each knot within its speed cap, its
+    /// change between knots within its acceleration cap, and its position at each knot within
+    /// its limits with room to stop after the last. The arm is asked to be on the (predicted)
+    /// target at the knots, so it brakes only where the plan must, at its full capability,
+    /// instead of every tick against the whole error.
+    pub horizon_s: [f64; 2],
+    /// How much the tool's error at the end of the tick weighs against the knots' (1): the
+    /// tick's own error is the least the arm can close, and asking it all overshoots.
+    pub tick_weight: f64,
+    /// How much matching the target's velocity at the horizon's end weighs, in the units of a
+    /// knot's error (the velocity error times the last knot's length): the plan's stop.
+    pub terminal_weight: f64,
+    /// A knot's error, metres, that a joint spending its whole acceleration cap across a knot
+    /// costs as much as: the caps bound the plan softly.
+    pub horizon_accel_m: f64,
     /// Below both, a limb is [`Reach::Tracking`].
     pub tracking_m: f64,
     pub tracking_rad: f64,
@@ -188,8 +202,10 @@ impl Default for Settings {
             influence_m: 0.2,
             approach_time_s: 0.3,
             max_step_rad: 0.03,
-            max_error_m: 0.1,
-            max_error_rad: 0.5,
+            horizon_s: [0.03, 0.12],
+            tick_weight: 0.5,
+            terminal_weight: 1.0,
+            horizon_accel_m: 0.01,
             tracking_m: 0.005,
             tracking_rad: 0.05,
             max_iterations: 40,
@@ -417,6 +433,24 @@ struct Workspace {
     null: Vec<f64>,
     /// A column of the Gram solve.
     pick: Vec<f64>,
+    /// Per task row: its target at the end of the tick and of each knot, and the target's
+    /// velocity along it (the horizon's rows are [`Workspace::task_rows`]).
+    task_err: Vec<[f64; 3]>,
+    /// Per solved column: held this step (unavailable), and where it stands.
+    held_column: Vec<bool>,
+    here: Vec<f64>,
+    task_vel: Vec<f64>,
+    /// The horizon's cost over `[dq, v2, v3]` (`3n` square) and its linear part.
+    big_h: Vec<f64>,
+    big_g: Vec<f64>,
+    /// The tasks' Gram matrix over the solved columns, and its right sides per term.
+    task_gram: Vec<f64>,
+    task_rhs: Vec<[f64; 4]>,
+    /// The knots' block's factor (`2n` square), a column of its solve, and its solve against
+    /// the step's columns and the knots' linear part (`2n` by `n + 1`).
+    knot_factor: Vec<f64>,
+    knot_column: Vec<f64>,
+    knot_through: Vec<f64>,
     h: Vec<f64>,
     g: Vec<f64>,
     task: Vec<f64>,
@@ -490,6 +524,11 @@ pub struct Ik {
     /// it (point, metres; turn, a rotation vector): the speed rows' own directions.
     tool_asked: Vec<(Vec3, Vec3)>,
     tool_moved: Vec<(Vec3, Vec3)>,
+    /// Per limb, its target's velocity (point m/s, turn rad/s, root frame) for the horizon's
+    /// prediction ([`Ik::set_target_velocity`]); `None`: the target stands where it is.
+    target_velocity: Vec<Option<(Vec3, Vec3)>>,
+    /// Per axis, its follower's lag behind its command, seconds ([`Ik::set_follower_lag`]).
+    follower_lag: Vec<f64>,
     /// Per axis, where the next step must leave it ([`Ik::set_window`]).
     window: Vec<[f64; 2]>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
@@ -628,6 +667,17 @@ impl Ik {
             through: vec![0.0; 6 * body.limbs.len() * n],
             null: vec![0.0; n * n],
             pick: vec![0.0; (6 * body.limbs.len()).max(1)],
+            task_err: vec![[0.0; 3]; 6 * body.limbs.len()],
+            held_column: vec![false; n],
+            here: vec![0.0; n],
+            task_vel: vec![0.0; 6 * body.limbs.len()],
+            big_h: vec![0.0; 9 * n * n],
+            big_g: vec![0.0; 3 * n],
+            task_gram: vec![0.0; n * n],
+            task_rhs: vec![[0.0; 4]; n],
+            knot_factor: vec![0.0; 4 * n * n],
+            knot_column: vec![0.0; 2 * n],
+            knot_through: vec![0.0; 2 * n * (n + 1)],
             h: vec![0.0; n * n],
             g: vec![0.0; n],
             task: vec![0.0; n],
@@ -690,6 +740,8 @@ impl Ik {
             tool_capped: vec![false; limbs],
             tool_asked: vec![([0.0; 3], [0.0; 3]); limbs],
             tool_moved: vec![([0.0; 3], [0.0; 3]); limbs],
+            target_velocity: vec![None; limbs],
+            follower_lag: vec![0.0; axes_count],
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
@@ -860,6 +912,25 @@ impl Ik {
                 });
                 (ToolSpeed { m_s: v.m_s, rad_s }, from)
             });
+        }
+    }
+
+    /// Where `limb`'s target is going: its point's velocity (m/s) and its turn rate (rad/s) in
+    /// the root frame, for the horizon's prediction of it ([`Settings::horizon_s`]); `None`:
+    /// it stands where it is. A limb out of range or a velocity not finite clears it.
+    pub fn set_target_velocity(&mut self, limb: usize, velocity: Option<(Vec3, Vec3)>) {
+        if let Some(slot) = self.target_velocity.get_mut(limb) {
+            *slot = velocity.filter(|(v, w)| v.iter().chain(w).all(|x| x.is_finite()));
+        }
+    }
+
+    /// How far `axis`'s follower lags its command, seconds (a first-order follower's time
+    /// constant, from its journals): the horizon plans where the joint will be, not where it is
+    /// sent, and leads the command by it. Zero (the default) or anything not finite and
+    /// positive: it is where it is sent.
+    pub fn set_follower_lag(&mut self, axis: usize, seconds: f64) {
+        if let Some(slot) = self.follower_lag.get_mut(axis) {
+            *slot = if seconds.is_finite() && seconds > 0.0 { seconds } else { 0.0 };
         }
     }
 
@@ -1036,6 +1107,8 @@ impl Ik {
             if !available[axis] {
                 self.velocity[column] = 0.0;
             }
+            self.work.held_column[column] = !available[axis];
+            self.work.here[column] = q[axis];
         }
         self.cost(q, targets, dt);
         self.bounds(q, dt);
@@ -1155,8 +1228,12 @@ impl Ik {
         Ok(&self.step)
     }
 
-    /// `1/2 dq' H dq + g' dq`: tool position, orientation (or pointing), the step itself
-    /// (damping), then posture toward the anchor.
+    /// The step's own cost, `1/2 dq' H dq + g' dq` (the step itself, damping; posture toward the
+    /// anchor; smoothness), and every task's rows with their targets over the horizon
+    /// ([`Workspace::task_rows`], [`Ik::horizon`]): tool position and orientation (or pointing),
+    /// each at the end of the tick and of each knot, the target predicted along its velocity
+    /// ([`Ik::set_target_velocity`]). No error is shortened here: the horizon plans how fast it
+    /// closes.
     #[allow(clippy::too_many_lines)] // one match arm per task and target
     fn cost(&mut self, q: &[f64], targets: &[Option<Target>], dt: f64) {
         let body = &self.body;
@@ -1166,6 +1243,8 @@ impl Ik {
         w.h.iter_mut().for_each(|v| *v = 0.0);
         w.g.iter_mut().for_each(|v| *v = 0.0);
         let rho2 = s.orientation_m_per_rad * s.orientation_m_per_rad;
+        let [t2, t3] = s.horizon_s;
+        let times = [dt, dt + t2, dt + t2 + t3];
         w.lever.fill(0.0);
         w.task_count = 0;
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
@@ -1184,44 +1263,21 @@ impl Ik {
                 w.lever[column] += dot(w.jv[axis], w.jv[axis]) + rho2 * dot(w.jw[axis], w.jw[axis]);
             }
             let Some(target) = target else { continue };
-            // No more of the error than the tool may move this tick: its point and its turn
-            // together, the turn weighed as the solve weighs it (orientation_m_per_rad), and the
-            // turn within its own cap.
-            let most = self.tool_speed[index].map(|(speed, _)| (speed.m_s * dt, speed.rad_s * dt));
+            let (v, turning) = self.target_velocity[index].unwrap_or(([0.0; 3], [0.0; 3]));
             match (limb.task, target) {
                 (Task::Pose, Target::Pose(target)) => {
-                    // Each error is closed no faster than the limb can still stop on it (as a
-                    // collision row's approach is): asking for the whole error in one tick
-                    // overshoots against the acceleration caps, and the overshoot wanders
-                    // the arm's free direction tick after tick.
                     let e_p = sub(target.translation_m, pose.t);
                     let goal = target.rotation.matrix();
                     let e_r = matrix_rotation_vector(&mat_mul(&goal, &transpose(&pose.r)));
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
-                    let (e_p, e_r) =
-                        within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
-                    self.tool_asked[index] = (e_p, e_r);
+                    self.tool_asked[index] = (
+                        [0, 1, 2].map(|k| v[k].mul_add(times[1], e_p[k])),
+                        [0, 1, 2].map(|k| turning[k].mul_add(times[1], e_r[k])),
+                    );
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
-                        task_row(
-                            &mut w.h,
-                            &mut w.g,
-                            &mut w.task_rows,
-                            &mut w.task_count,
-                            &w.task,
-                            e_p[k],
-                            1.0,
-                        );
+                        horizon_row(w, n, e_p[k], v[k], 1.0, times);
                         fill(&mut w.task, &body.solved, |axis| w.jw[axis][k]);
-                        task_row(
-                            &mut w.h,
-                            &mut w.g,
-                            &mut w.task_rows,
-                            &mut w.task_count,
-                            &w.task,
-                            e_r[k],
-                            rho2,
-                        );
+                        horizon_row(w, n, e_r[k], turning[k], rho2, times);
                     }
                 }
                 (
@@ -1232,39 +1288,23 @@ impl Ik {
                         toward,
                     },
                 ) => {
-                    // The axis's pointing error, closed as a pose's is; the roll about the
-                    // axis is left out of the rows altogether, so it floats.
+                    // The axis's pointing error; the roll about the axis is left out of the
+                    // rows altogether, so it floats.
                     let a = mat_vec(&pose.r, scale(*axis, 1.0 / norm(*axis)));
                     let u = scale(*toward, 1.0 / norm(*toward));
                     let e_p = sub(*translation_m, pose.t);
                     let e_r = pointing_error(a, u);
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
-                    let (e_p, e_r) =
-                        within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
-                    self.tool_asked[index] = (e_p, e_r);
+                    self.tool_asked[index] = (
+                        [0, 1, 2].map(|k| v[k].mul_add(times[1], e_p[k])),
+                        e_r,
+                    );
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
-                        task_row(
-                            &mut w.h,
-                            &mut w.g,
-                            &mut w.task_rows,
-                            &mut w.task_count,
-                            &w.task,
-                            e_p[k],
-                            1.0,
-                        );
+                        horizon_row(w, n, e_p[k], v[k], 1.0, times);
                     }
                     for across in across(a) {
                         fill(&mut w.task, &body.solved, |axis| dot(across, w.jw[axis]));
-                        task_row(
-                            &mut w.h,
-                            &mut w.g,
-                            &mut w.task_rows,
-                            &mut w.task_count,
-                            &w.task,
-                            dot(across, e_r),
-                            rho2,
-                        );
+                        horizon_row(w, n, dot(across, e_r), dot(across, turning), rho2, times);
                     }
                 }
                 (Task::LookAt { forward }, Target::LookAt { point_m }) => {
@@ -1289,22 +1329,9 @@ impl Ik {
                             [0.0; 3]
                         };
                     }
-                    // Closed no faster than the neck can still stop on it, as a pose error
-                    // is: asking for the whole turn at once overshot the acceleration caps
-                    // and the camera rang on every big swing (three bounces engaging).
-                    let share = pointing_approach(e, &w.jp, &w.moving, &self.caps, s, rho2, dt);
-                    let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
-                        task_row(
-                            &mut w.h,
-                            &mut w.g,
-                            &mut w.task_rows,
-                            &mut w.task_count,
-                            &w.task,
-                            e[k],
-                            rho2,
-                        );
+                        horizon_row(w, n, e[k], 0.0, rho2, times);
                     }
                 }
                 _ => {}
@@ -1328,6 +1355,160 @@ impl Ik {
         // Such a step is not smoothed; an operator's hands, which set no speed, are.
         if s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none) {
             self.smooth_null_space(dt);
+        }
+        self.horizon(dt);
+    }
+
+    /// The horizon's cost over `[dq, v2, v3]` ([`Workspace::big_h`]): the step's own cost on
+    /// `dq`, and the tasks' error at the end of the tick (weighed [`Settings::tick_weight`]) and
+    /// of each knot (1), where the joints stand at `q + dq`, `+ v2 t2`, `+ v3 t3`, each lagging
+    /// its command by its follower's lag at its velocity there (`- lag v`, a first-order
+    /// follower's steady lag; [`Ik::set_follower_lag`]), and the tools' velocity at the end
+    /// against the target's ([`Settings::terminal_weight`]). The later knots carry the step's
+    /// damping too, per their own motion.
+    fn horizon(&mut self, dt: f64) {
+        let s = &self.settings;
+        let w = &mut self.work;
+        let n = self.body.solved.len();
+        let m = w.task_count;
+        let [t2, t3] = s.horizon_s;
+        w.task_gram.fill(0.0);
+        w.task_rhs.fill([0.0; 4]);
+        for r in 0..m {
+            let row = &w.task_rows[r * n..(r + 1) * n];
+            let (e, v) = (w.task_err[r], w.task_vel[r]);
+            for i in 0..n {
+                if row[i] == 0.0 {
+                    continue;
+                }
+                for j in 0..n {
+                    w.task_gram[i * n + j] += row[i] * row[j];
+                }
+                let rhs = &mut w.task_rhs[i];
+                rhs[0] += row[i] * e[0];
+                rhs[1] += row[i] * e[1];
+                rhs[2] += row[i] * e[2];
+                rhs[3] += row[i] * v * t3;
+            }
+        }
+        let big = 3 * n;
+        w.big_h.fill(0.0);
+        w.big_g.fill(0.0);
+        for i in 0..n {
+            for j in 0..n {
+                w.big_h[i * big + j] = w.h[i * n + j];
+            }
+            w.big_g[i] = w.g[i];
+        }
+        // Per term, each block's coefficient on a column: how far that block's motion of the
+        // column carries the follower at the term's time.
+        let weights = [s.tick_weight, 1.0, 1.0, s.terminal_weight];
+        for (term, &weight) in weights.iter().enumerate() {
+            if weight == 0.0 {
+                continue;
+            }
+            // Velocity changes linearly across each knot (constant acceleration, as the caps
+            // bound it), so a knot's displacement is its length times its mean velocity; the
+            // tick's own velocity is dq / dt.
+            let carry = 1.0 + t2 / (2.0 * dt);
+            let coefficient = |block: usize, column: usize| -> f64 {
+                let lag = self.follower_lag[self.body.solved[column]];
+                match (term, block) {
+                    (0, 0) => 1.0,
+                    (1 | 2, 0) => carry,
+                    (1, 1) => t2 / 2.0 - lag.min(t2 / 2.0),
+                    (2, 1) => (t2 + t3) / 2.0,
+                    (2, 2) => t3 / 2.0 - lag.min(t3 / 2.0),
+                    (3, 2) => t3,
+                    _ => 0.0,
+                }
+            };
+            for bi in 0..3 {
+                for i in 0..n {
+                    let ci = coefficient(bi, i);
+                    if ci == 0.0 {
+                        continue;
+                    }
+                    w.big_g[bi * n + i] -= 2.0 * weight * ci * w.task_rhs[i][term];
+                    for bj in 0..3 {
+                        for j in 0..n {
+                            let cj = coefficient(bj, j);
+                            if cj == 0.0 {
+                                continue;
+                            }
+                            w.big_h[(bi * n + i) * big + bj * n + j] +=
+                                2.0 * weight * ci * w.task_gram[i * n + j] * cj;
+                        }
+                    }
+                }
+            }
+        }
+        // The later knots carry the step's damping per their own motion, and each change of a
+        // joint's velocity across a knot costs as much as a knot's error of `accel_m` when it
+        // spends the joint's whole acceleration cap there: the caps bound the plan softly, so
+        // the knots fold into the step below.
+        let soft = 2.0 * s.horizon_accel_m * s.horizon_accel_m;
+        for i in 0..n {
+            let axis = self.body.solved[i];
+            let a = self.caps.accel[axis];
+            let (k2, k3) = (n + i, 2 * n + i);
+            w.big_h[k2 * big + k2] += 2.0 * s.damping * t2 * t2;
+            w.big_h[k3 * big + k3] += 2.0 * s.damping * t3 * t3;
+            // (v2 - dq / dt) / (a t2) and (v3 - v2) / (a t3), squared.
+            let (c2, c3) = (soft / (a * t2).powi(2), soft / (a * t3).powi(2));
+            let pairs: [(usize, f64, usize, f64, f64); 2] =
+                [(k2, 1.0, i, -1.0 / dt, c2), (k3, 1.0, k2, -1.0, c3)];
+            for (p, cp, r, cr, weight) in pairs {
+                w.big_h[p * big + p] += weight * cp * cp;
+                w.big_h[r * big + r] += weight * cr * cr;
+                w.big_h[p * big + r] += weight * cp * cr;
+                w.big_h[r * big + p] += weight * cp * cr;
+            }
+            if w.held_column[i] {
+                // A held joint plans no motion.
+                w.big_h[k2 * big + k2] += 1e6;
+                w.big_h[k3 * big + k3] += 1e6;
+            }
+        }
+        // Fold the knots into the step: minimising over them for each step leaves the step's
+        // own cost H_xx - H_xk H_kk^-1 H_kx, g_x - H_xk H_kk^-1 g_k (a Schur complement, one 2n
+        // square factor a tick).
+        let k = 2 * n;
+        for i in 0..k {
+            for j in 0..k {
+                w.knot_factor[i * k + j] = w.big_h[(n + i) * big + n + j];
+            }
+        }
+        if !crate::qp::cholesky(&mut w.knot_factor[..k * k], k) {
+            return; // not finite: the step's own cost alone
+        }
+        // through = H_kk^-1 [H_kx | g_k], a column at a time.
+        for c in 0..=n {
+            for i in 0..k {
+                w.knot_column[i] = if c < n {
+                    w.big_h[(n + i) * big + c]
+                } else {
+                    w.big_g[n + i]
+                };
+            }
+            crate::qp::cholesky_solve(&w.knot_factor[..k * k], k, &mut w.knot_column[..k]);
+            for i in 0..k {
+                w.knot_through[i * (n + 1) + c] = w.knot_column[i];
+            }
+        }
+        for r in 0..n {
+            for c in 0..n {
+                let mut v = w.big_h[r * big + c];
+                for i in 0..k {
+                    v -= w.big_h[r * big + n + i] * w.knot_through[i * (n + 1) + c];
+                }
+                w.h[r * n + c] = v;
+            }
+            let mut v = w.big_g[r];
+            for i in 0..k {
+                v -= w.big_h[r * big + n + i] * w.knot_through[i * (n + 1) + n];
+            }
+            w.g[r] = v;
         }
     }
 
@@ -2270,40 +2451,22 @@ fn fill(out: &mut [f64], solved: &[usize], value: impl Fn(usize) -> f64) {
     }
 }
 
-/// [`least_squares`], keeping the row (times the square root of its weight) in `rows`.
-fn task_row(
-    h: &mut [f64],
-    g: &mut [f64],
-    rows: &mut [f64],
-    count: &mut usize,
-    row: &[f64],
-    target: f64,
-    weight: f64,
-) {
-    let n = row.len();
-    if (*count + 1) * n <= rows.len() {
-        let root = weight.sqrt();
-        for (slot, value) in rows[*count * n..(*count + 1) * n].iter_mut().zip(row) {
-            *slot = root * value;
-        }
-        *count += 1;
+/// Keep `w.task` (times the square root of `weight`) as a task row, with its target at each
+/// of `times` (the end of the tick and of each knot) moving at `velocity` from `error` now.
+fn horizon_row(w: &mut Workspace, n: usize, error: f64, velocity: f64, weight: f64, times: [f64; 3]) {
+    let count = w.task_count;
+    if (count + 1) * n > w.task_rows.len() {
+        return;
     }
-    least_squares(h, g, row, target, weight);
+    let root = weight.sqrt();
+    for (slot, value) in w.task_rows[count * n..(count + 1) * n].iter_mut().zip(&w.task) {
+        *slot = root * value;
+    }
+    w.task_err[count] = times.map(|t| root * velocity.mul_add(t, error));
+    w.task_vel[count] = root * velocity;
+    w.task_count += 1;
 }
 
-/// Add `weight * (row . x - target)^2` to `1/2 x'Hx + g'x`.
-fn least_squares(h: &mut [f64], g: &mut [f64], row: &[f64], target: f64, weight: f64) {
-    let n = g.len();
-    for i in 0..n {
-        if row[i] == 0.0 {
-            continue;
-        }
-        g[i] -= 2.0 * weight * row[i] * target;
-        for j in 0..n {
-            h[i * n + j] += 2.0 * weight * row[i] * row[j];
-        }
-    }
-}
 
 /// The rotation turning unit `f` onto unit `u`: about `f x u`, by the whole angle between
 /// them. The bare cross product vanishes at 180 degrees too, so a frame facing straight away
@@ -2335,114 +2498,7 @@ fn across(a: Vec3) -> [Vec3; 2] {
     [first, cross(a, first)]
 }
 
-/// The share of a pose error one tick closes, along the error's own straight line: no more
-/// than the limb can still stop on at its full acceleration caps (the time-optimal approach:
-/// full acceleration, then full braking onto the target), as a collision row's approach is
-/// planned. Until 2026-11-04 it planned on half the caps, which held a 10 cm hand jump to
-/// 0.4-1.4 s on the static upper body for no physical reason. `solved` is the axes that move
-/// this step: a held or unavailable axis closes none of the error, and its cap (the static
-/// upper body's held torso, 0.3 rad/s^2) paced every hand to trail its target by about 264 ms
-/// until 2026-11-05 (embodiments#237 `teleop_shake`).
-///
-/// The joint motion per unit of the error is its damped least-squares direction
-/// `d = A' (A A' + damping I)^-1 e/|e|` over the task rows `A = [Jv; rho Jw]`, the QP's own
-/// answer to it, and the error closes at most at the acceleration the tightest axis allows
-/// along `d`. Asking for the whole error at once overshoots against the acceleration caps,
-/// and the overshoot wanders the arm's free direction tick after tick; near a singularity
-/// `d` is large and the approach slows instead.
-#[allow(clippy::too_many_arguments)]
-fn approach(
-    e_p: Vec3,
-    e_r: Vec3,
-    jv: &[Vec3],
-    jw: &[Vec3],
-    solved: &[usize],
-    caps: &Caps,
-    s: &Settings,
-    dt: f64,
-) -> f64 {
-    let rho = s.orientation_m_per_rad;
-    let e = [
-        e_p[0],
-        e_p[1],
-        e_p[2],
-        rho * e_r[0],
-        rho * e_r[1],
-        rho * e_r[2],
-    ];
-    let length = e.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if length < 1e-12 {
-        return 1.0;
-    }
-    let row = |a: usize, axis: usize| {
-        if a < 3 {
-            jv[axis][a]
-        } else {
-            rho * jw[axis][a - 3]
-        }
-    };
-    let mut m = [[0.0; 6]; 6];
-    for (a, line) in m.iter_mut().enumerate() {
-        for (b, cell) in line.iter_mut().enumerate() {
-            *cell = solved.iter().map(|&axis| row(a, axis) * row(b, axis)).sum();
-        }
-        line[a] += s.damping;
-    }
-    let mut y = e.map(|v| v / length);
-    cholesky_solve(&mut m, &mut y);
-    let mut accel = f64::INFINITY;
-    for &axis in solved {
-        let d: f64 = (0..6).map(|a| row(a, axis) * y[a]).sum::<f64>().abs();
-        if d > 1e-12 {
-            accel = accel.min(caps.accel[axis] / d);
-        }
-    }
-    if !accel.is_finite() {
-        return 1.0;
-    }
-    length.min(braking(length, accel, dt)) / length
-}
 
-/// [`approach`] for a camera's pointing error `e` (radians) over its rows `jl` (per axis, the
-/// pointing rate per unit of joint motion; zero on axes it may not turn): the share of `e`
-/// one tick closes, no more than the neck can still stop on along its damped least-squares
-/// direction.
-fn pointing_approach(
-    e: Vec3,
-    jl: &[Vec3],
-    solved: &[usize],
-    caps: &Caps,
-    s: &Settings,
-    rho2: f64,
-    dt: f64,
-) -> f64 {
-    let length = norm(e);
-    if length < 1e-12 {
-        return 1.0;
-    }
-    // The 6x6 solve with the pointing rows in its first block and identity in the second.
-    let mut m = [[0.0; 6]; 6];
-    for a in 0..3 {
-        for b in 0..3 {
-            m[a][b] = solved.iter().map(|&axis| jl[axis][a] * jl[axis][b]).sum();
-        }
-        m[a][a] += s.damping / rho2;
-        m[a + 3][a + 3] = 1.0;
-    }
-    let mut y = [e[0] / length, e[1] / length, e[2] / length, 0.0, 0.0, 0.0];
-    cholesky_solve(&mut m, &mut y);
-    let mut accel = f64::INFINITY;
-    for &axis in solved {
-        let d: f64 = (0..3).map(|a| jl[axis][a] * y[a]).sum::<f64>().abs();
-        if d > 1e-12 {
-            accel = accel.min(caps.accel[axis] / d);
-        }
-    }
-    if !accel.is_finite() {
-        return 1.0;
-    }
-    length.min(braking(length, accel, dt)) / length
-}
 
 /// The angle between two rotations, radians.
 fn turn(a: &Matrix3, b: &Matrix3) -> f64 {
@@ -2452,73 +2508,8 @@ fn turn(a: &Matrix3, b: &Matrix3) -> f64 {
     ((trace - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
 }
 
-/// One tick's position and orientation error, each held to the most one tick closes
-/// (`max_error_m`, `max_error_rad`), and, when the tool has a speed ([`Ik::set_tool_speed`]),
-/// together, weighed as the solve weighs them, to its `most` metres and the turn to its `most`
-/// radians, both shortened alike: a turn left behind is not caught up faster than the tool may
-/// move or turn, nor dragging the tool point with it.
-fn within_tool_speed(e_p: Vec3, e_r: Vec3, most: Option<(f64, f64)>, s: &Settings) -> (Vec3, Vec3) {
-    let (e_p, e_r) = (
-        clamp_norm(e_p, s.max_error_m),
-        clamp_norm(e_r, s.max_error_rad),
-    );
-    let Some((most_m, most_rad)) = most else {
-        return (e_p, e_r);
-    };
-    let weighed = norm(e_p).hypot(s.orientation_m_per_rad * norm(e_r));
-    let turned = norm(e_r);
-    let mut share = 1.0_f64;
-    if weighed > most_m {
-        share = share.min(most_m / weighed);
-    }
-    if turned > most_rad {
-        share = share.min(most_rad / turned);
-    }
-    if share >= 1.0 {
-        return (e_p, e_r);
-    }
-    (scale(e_p, share), scale(e_r, share))
-}
 
-/// Solve `m x = b` in place for a symmetric positive definite 6x6 `m` (`b` becomes `x`).
-fn cholesky_solve(m: &mut [[f64; 6]; 6], b: &mut [f64; 6]) {
-    for j in 0..6 {
-        let mut diagonal = m[j][j];
-        for k in 0..j {
-            diagonal -= m[j][k] * m[j][k];
-        }
-        let diagonal = diagonal.max(1e-18).sqrt();
-        m[j][j] = diagonal;
-        for i in j + 1..6 {
-            let mut v = m[i][j];
-            for k in 0..j {
-                v -= m[i][k] * m[j][k];
-            }
-            m[i][j] = v / diagonal;
-        }
-    }
-    for i in 0..6 {
-        for k in 0..i {
-            b[i] -= m[i][k] * b[k];
-        }
-        b[i] /= m[i][i];
-    }
-    for i in (0..6).rev() {
-        for k in i + 1..6 {
-            b[i] -= m[k][i] * b[k];
-        }
-        b[i] /= m[i][i];
-    }
-}
 
-fn clamp_norm(v: Vec3, most: f64) -> Vec3 {
-    let length = norm(v);
-    if length > most {
-        scale(v, most / length)
-    } else {
-        v
-    }
-}
 
 /// When this tick's QP must stop: `budget` from now. A browser's WASM has no monotonic clock
 /// (`Instant::now` panics on `wasm32-unknown-unknown`), so there the iteration bound
