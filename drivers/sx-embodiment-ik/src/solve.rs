@@ -107,6 +107,22 @@ pub struct Settings {
     /// error, keeps a near-singular arm from spending its free direction, and costs a task
     /// direction with Jacobian gain `s` m/rad only `damping / s^2` of its error per tick.
     pub damping: f64,
+    /// Weight on the change of each tick's step from the last, in the motion that moves no
+    /// driven tool (the null space of the tools' rows), per rad^2 of a column that turns its
+    /// tools about their own points, more for a column that swings them further (a shoulder
+    /// about 10x a wrist): `(dq - dq_prev)' N' D N (dq - dq_prev)` ([`Ik::smooth_null_space`]).
+    /// A redundant arm's elbow carries on as it was going instead of shivering while the hand
+    /// tracks; the driven tools' own motion is not smoothed (a held column, such as a torso held
+    /// in one-handed teleop, counts as free: a 0.5 m/s sweep's RMS error 10.96 -> 10.99 mm).
+    /// [`Ik::asked`] reads the whole cost, this term included. Tuned on lag against jerk on the
+    /// station's solve after the full-braking approach (embodiments#239; `tests/fluid.rs` and
+    /// `teleop_shake synth governed`, 2026-11-05): at 1e-4 every jump, sweep and sine kept its
+    /// time to the tick (jump to 5 mm 0.452 -> 0.450 s mean, felt solve latency unchanged in
+    /// every scenario), the tremor's null-space jerk fell 647 -> 425 rad/s^3 and null-space
+    /// reversals 12.6 -> 7.5 /s; 3e-4 added 11 ms of felt solve latency on a clean sweep.
+    /// Registry-wide, tracking within 2 % and null-space jerk 8-83 % lower on every redundant
+    /// body. Zero: the step before it.
+    pub smoothness: f64,
     /// Posture weight toward the anchor (the measured posture at engage, [`Ik::reset`]), per
     /// rad^2: far below `damping`, so the free direction returns to where the operator
     /// started at `posture_weight / damping` of its offset per tick, never swings.
@@ -163,6 +179,7 @@ impl Default for Settings {
         Self {
             orientation_m_per_rad: 0.15,
             damping: 1e-4,
+            smoothness: 1e-4,
             posture_weight: 1e-6,
             shared_posture_weight: 1e-5,
             preferred_posture_weight: 1e-5,
@@ -330,6 +347,14 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// The null-space projector's damping, as a share of [`Settings::damping`]
+/// ([`Ik::smooth_null_space`]). At the step's own damping the projector let the smoothing into
+/// a six-joint arm's weak task directions near its wrist singularity, and a `UR10e`'s tool fell
+/// behind a tremor by a third (1.81 to 2.45 mm RMS, `tests/fluid.rs`); at a hundredth it holds
+/// 1.79 mm, and a hundred times less still left the static body's elbows twice the shiver
+/// (348 to 807 rad/s^3), the projector flickering as a weak direction crossed it.
+const NULL_DAMPING: f64 = 0.01;
+
 /// How far past its bound a row may close and still be kept, metres: the interior point's sliver.
 const ROW_KEPT_M: f64 = 1e-6;
 
@@ -379,6 +404,19 @@ struct Workspace {
     jv: Vec<Vec3>,
     jw: Vec<Vec3>,
     jp: Vec<Vec3>,
+    /// Per solved column, how far it swings the tools: [`Settings::smoothness`]'s weight.
+    lever: Vec<f64>,
+    /// This tick's task rows, each times the square root of its weight (`6 x limbs` by `n`),
+    /// and how many are in use: the motion that moves a driven tool.
+    task_rows: Vec<f64>,
+    task_count: usize,
+    /// Their Gram matrix (`6 limbs` square), `gram^-1 rows`, and the damped null-space
+    /// projector `I - rows' gram^-1 rows` (`n` square).
+    gram: Vec<f64>,
+    through: Vec<f64>,
+    null: Vec<f64>,
+    /// A column of the Gram solve.
+    pick: Vec<f64>,
     h: Vec<f64>,
     g: Vec<f64>,
     task: Vec<f64>,
@@ -583,6 +621,13 @@ impl Ik {
             jv: vec![[0.0; 3]; axes.len()],
             jw: vec![[0.0; 3]; axes.len()],
             jp: vec![[0.0; 3]; axes.len()],
+            lever: vec![0.0; n],
+            task_rows: vec![0.0; 6 * body.limbs.len() * n],
+            task_count: 0,
+            gram: vec![0.0; 36 * body.limbs.len() * body.limbs.len()],
+            through: vec![0.0; 6 * body.limbs.len() * n],
+            null: vec![0.0; n * n],
+            pick: vec![0.0; (6 * body.limbs.len()).max(1)],
             h: vec![0.0; n * n],
             g: vec![0.0; n],
             task: vec![0.0; n],
@@ -985,6 +1030,13 @@ impl Ik {
                 .copied()
                 .filter(|&axis| available[axis]),
         );
+        // An unavailable axis carries no motion into this step: not into the smoothness cost's
+        // last step either (refute of embodiments#241).
+        for (column, &axis) in self.body.solved.iter().enumerate() {
+            if !available[axis] {
+                self.velocity[column] = 0.0;
+            }
+        }
         self.cost(q, targets, dt);
         self.bounds(q, dt);
         for (column, &axis) in self.body.solved.iter().enumerate() {
@@ -992,7 +1044,6 @@ impl Ik {
                 let w = &mut self.work;
                 (w.lower[column], w.upper[column]) = (0.0, 0.0);
                 (w.safe_lower[column], w.safe_upper[column]) = (0.0, 0.0);
-                self.velocity[column] = 0.0;
             }
         }
         let w = &mut self.work;
@@ -1089,12 +1140,9 @@ impl Ik {
         w.h.iter_mut().for_each(|v| *v = 0.0);
         w.g.iter_mut().for_each(|v| *v = 0.0);
         let rho2 = s.orientation_m_per_rad * s.orientation_m_per_rad;
+        w.lever.fill(0.0);
+        w.task_count = 0;
         for (index, (limb, target)) in body.limbs.iter().zip(targets).enumerate() {
-            let Some(target) = target else { continue };
-            // No more of the error than the tool may move this tick: its point and its turn
-            // together, the turn weighed as the solve weighs it (orientation_m_per_rad), and the
-            // turn within its own cap.
-            let most = self.tool_speed[index].map(|(speed, _)| (speed.m_s * dt, speed.rad_s * dt));
             let pose = w.frames.links[limb.frame];
             for &axis in &body.solved {
                 w.jv[axis] = [0.0; 3];
@@ -1104,6 +1152,16 @@ impl Ik {
                 .point_jacobian(&w.frames, limb.frame, pose.t, &mut w.jv);
             body.model
                 .angular_jacobian(&w.frames, limb.frame, &mut w.jw);
+            // How far each column swings this limb's frame per unit, in the task's own metric
+            // (a radian of turn weighs orientation_m_per_rad metres), driven or not.
+            for (column, &axis) in body.solved.iter().enumerate() {
+                w.lever[column] += dot(w.jv[axis], w.jv[axis]) + rho2 * dot(w.jw[axis], w.jw[axis]);
+            }
+            let Some(target) = target else { continue };
+            // No more of the error than the tool may move this tick: its point and its turn
+            // together, the turn weighed as the solve weighs it (orientation_m_per_rad), and the
+            // turn within its own cap.
+            let most = self.tool_speed[index].map(|(speed, _)| (speed.m_s * dt, speed.rad_s * dt));
             match (limb.task, target) {
                 (Task::Pose, Target::Pose(target)) => {
                     // Each error is closed no faster than the limb can still stop on it (as a
@@ -1119,9 +1177,25 @@ impl Ik {
                     self.tool_asked[index] = (e_p, e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
-                        least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
+                        task_row(
+                            &mut w.h,
+                            &mut w.g,
+                            &mut w.task_rows,
+                            &mut w.task_count,
+                            &w.task,
+                            e_p[k],
+                            1.0,
+                        );
                         fill(&mut w.task, &body.solved, |axis| w.jw[axis][k]);
-                        least_squares(&mut w.h, &mut w.g, &w.task, e_r[k], rho2);
+                        task_row(
+                            &mut w.h,
+                            &mut w.g,
+                            &mut w.task_rows,
+                            &mut w.task_count,
+                            &w.task,
+                            e_r[k],
+                            rho2,
+                        );
                     }
                 }
                 (
@@ -1144,11 +1218,27 @@ impl Ik {
                     self.tool_asked[index] = (e_p, e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
-                        least_squares(&mut w.h, &mut w.g, &w.task, e_p[k], 1.0);
+                        task_row(
+                            &mut w.h,
+                            &mut w.g,
+                            &mut w.task_rows,
+                            &mut w.task_count,
+                            &w.task,
+                            e_p[k],
+                            1.0,
+                        );
                     }
                     for across in across(a) {
                         fill(&mut w.task, &body.solved, |axis| dot(across, w.jw[axis]));
-                        least_squares(&mut w.h, &mut w.g, &w.task, dot(across, e_r), rho2);
+                        task_row(
+                            &mut w.h,
+                            &mut w.g,
+                            &mut w.task_rows,
+                            &mut w.task_count,
+                            &w.task,
+                            dot(across, e_r),
+                            rho2,
+                        );
                     }
                 }
                 (Task::LookAt { forward }, Target::LookAt { point_m }) => {
@@ -1180,7 +1270,15 @@ impl Ik {
                     let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
-                        least_squares(&mut w.h, &mut w.g, &w.task, e[k], rho2);
+                        task_row(
+                            &mut w.h,
+                            &mut w.g,
+                            &mut w.task_rows,
+                            &mut w.task_count,
+                            &w.task,
+                            e[k],
+                            rho2,
+                        );
                     }
                 }
                 _ => {}
@@ -1197,6 +1295,86 @@ impl Ik {
             let error = self.anchor[axis] - q[axis];
             w.h[column * n + column] += 2.0 * (weight + s.damping);
             w.g[column] -= 2.0 * weight * error;
+        }
+        // A tool held to a speed ([`Ik::set_tool_speed`]: a program's goal) is a hard cap, and
+        // carried null-space motion can keep a joint from slowing as the cap's shortening needs:
+        // at 500 Hz a tool went 0.26 m/s against 0.2 (`a_tool_speed_never_shortens_a_step_past_a_row`).
+        // Such a step is not smoothed; an operator's hands, which set no speed, are.
+        if s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none) {
+            self.smooth_null_space(dt);
+        }
+    }
+
+    /// Add [`Settings::smoothness`]: the step's change from the last step, in the motion that
+    /// moves no driven tool, `(dq - dq_prev)' N' D N (dq - dq_prev)`. `N = I - A' (A A' +
+    /// eps I)^-1 A` over this tick's task rows `A` (`eps` [`NULL_DAMPING`] of the damping) is
+    /// the projector onto what the tools leave free, and `D` weighs each column by how far it swings the tools, so a shoulder weighs
+    /// more than a wrist. The tools' own motion is never smoothed: their tracking and speed
+    /// are the task's.
+    fn smooth_null_space(&mut self, dt: f64) {
+        let s = &self.settings;
+        let w = &mut self.work;
+        let n = self.body.solved.len();
+        let m = w.task_count;
+        let rho2 = s.orientation_m_per_rad * s.orientation_m_per_rad;
+        // gram = A A' + NULL_DAMPING damping I, factored.
+        for i in 0..m {
+            for j in 0..=i {
+                let dot: f64 = (0..n)
+                    .map(|k| w.task_rows[i * n + k] * w.task_rows[j * n + k])
+                    .sum();
+                w.gram[i * m + j] = dot;
+                w.gram[j * m + i] = dot;
+            }
+            w.gram[i * m + i] += NULL_DAMPING * s.damping;
+        }
+        if !(m == 0 || crate::qp::cholesky(&mut w.gram[..m * m], m)) {
+            return; // the rows are not finite: no smoothing this tick
+        }
+        // through = gram^-1 A, a column at a time (through is m x n, row-major).
+        for k in 0..n {
+            for i in 0..m {
+                w.pick[i] = w.task_rows[i * n + k];
+            }
+            crate::qp::cholesky_solve(&w.gram[..m * m], m, &mut w.pick[..m]);
+            for i in 0..m {
+                w.through[i * n + k] = w.pick[i];
+            }
+        }
+        // null = I - A' through: symmetric.
+        for i in 0..n {
+            for j in 0..=i {
+                let mut v: f64 = (0..m)
+                    .map(|r| w.task_rows[r * n + i] * w.through[r * n + j])
+                    .sum();
+                v = -v;
+                if i == j {
+                    v += 1.0;
+                }
+                w.null[i * n + j] = v;
+                w.null[j * n + i] = v;
+            }
+        }
+        // H += 2 N' D N; g -= 2 N' D N p, p the last step carried on.
+        for k in 0..n {
+            let weight = s.smoothness * (w.lever[k] / rho2).max(1.0);
+            // N's row k (= column k), weighed.
+            let row = &w.null[k * n..(k + 1) * n];
+            let carried: f64 = row
+                .iter()
+                .zip(&self.velocity)
+                .map(|(nv, v)| nv * v * dt)
+                .sum();
+            for i in 0..n {
+                let ri = row[i];
+                if ri == 0.0 {
+                    continue;
+                }
+                w.g[i] -= 2.0 * weight * ri * carried;
+                for j in 0..n {
+                    w.h[i * n + j] += 2.0 * weight * ri * row[j];
+                }
+            }
         }
     }
 
@@ -2064,6 +2242,27 @@ fn fill(out: &mut [f64], solved: &[usize], value: impl Fn(usize) -> f64) {
     for (slot, &axis) in out.iter_mut().zip(solved) {
         *slot = value(axis);
     }
+}
+
+/// [`least_squares`], keeping the row (times the square root of its weight) in `rows`.
+fn task_row(
+    h: &mut [f64],
+    g: &mut [f64],
+    rows: &mut [f64],
+    count: &mut usize,
+    row: &[f64],
+    target: f64,
+    weight: f64,
+) {
+    let n = row.len();
+    if (*count + 1) * n <= rows.len() {
+        let root = weight.sqrt();
+        for (slot, value) in rows[*count * n..(*count + 1) * n].iter_mut().zip(row) {
+            *slot = root * value;
+        }
+        *count += 1;
+    }
+    least_squares(h, g, row, target, weight);
 }
 
 /// Add `weight * (row . x - target)^2` to `1/2 x'Hx + g'x`.

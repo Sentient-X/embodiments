@@ -1309,7 +1309,13 @@ fn a_single_bad_reading_moves_nothing() {
 /// solve finds no step, and the elastic retry keeps the rows as nearly as the caps allow, and
 /// says so (`Solve::Relaxed`). Underdamped followers that ring into the box and the other hand
 /// turned 7-121x a cap with the row's axes widened to their whole range (4ea9e84;
-/// embodiments#210, #211).
+/// embodiments#210, #211). Since the null-space smoothness (`Settings::smoothness`,
+/// 2026-11-05) these five keep every row inside the caps (17 relaxed steps before, none after)
+/// and the margin: least clearance 10.8-15.1 mm (10.6-13.7 before). That moves where rows give
+/// way rather than removing it (a 280-case grid: 86 -> 91 cases with a relaxed step, 307 -> 289
+/// steps, least clearance 10.15 -> 10.17 mm); the elastic retry's own coverage is
+/// `a_pushing_arm_keeps_its_pairs_clear_*` and `a_single_bad_reading_moves_nothing`, which fail
+/// without it.
 #[test]
 fn a_row_the_caps_cannot_keep_widens_no_cap() {
     std::thread::scope(|scope| {
@@ -1326,20 +1332,21 @@ fn a_row_the_caps_cannot_keep_widens_no_cap() {
         .map(|(dt, case, follower, noise)| {
             scope.spawn(move || {
                 let got = least_clearance(dt, case, true, follower, noise, None);
-                (dt, case, follower, got.3, got.4)
+                (dt, case, follower, got.0, got.3)
             })
         })
         .collect();
-        let mut gave_way = 0;
         for run in runs {
-            let (dt, case, follower, turned, relaxed) = run.join().expect("a case");
+            let (dt, case, follower, clear, turned) = run.join().expect("a case");
             assert!(
                 turned <= WITHIN_THE_CAP,
                 "{case} at {dt} s, {follower:?}: turned {turned}x a cap"
             );
-            gave_way += relaxed;
+            assert!(
+                clear >= sx_embodiment_ik::Settings::default().collision_margin_m,
+                "{case} at {dt} s, {follower:?}: {clear} m clear, inside the margin"
+            );
         }
-        assert!(gave_way > 0, "rows that gave way inside the caps say so");
     });
 }
 

@@ -260,7 +260,7 @@ impl Qp {
 }
 
 /// In-place lower Cholesky of a symmetric positive-definite row-major `n x n` matrix.
-fn cholesky(a: &mut [f64], n: usize) -> bool {
+pub(crate) fn cholesky(a: &mut [f64], n: usize) -> bool {
     for j in 0..n {
         let mut d = a[j * n + j];
         for k in 0..j {
@@ -283,7 +283,7 @@ fn cholesky(a: &mut [f64], n: usize) -> bool {
 }
 
 /// Solve `L L' x = b` in place with the factor from [`cholesky`].
-fn cholesky_solve(l: &[f64], n: usize, b: &mut [f64]) {
+pub(crate) fn cholesky_solve(l: &[f64], n: usize, b: &mut [f64]) {
     for i in 0..n {
         let mut v = b[i];
         for k in 0..i {
