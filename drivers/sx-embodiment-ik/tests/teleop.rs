@@ -864,18 +864,15 @@ fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
 /// catches up, which is not the hand turning back. (A jump whose free path itself first draws
 /// the elbow back past `STALL_RELEASE`, [0.06, 0, 0.06] at 250 Hz: 11 mm, is a release, and
 /// what follows pushes the stop as a fresh contact does, at most the reference gap. Since the
-/// approach closes on the full acceleration caps (2026-11-04), [0.04, 0, 0.03] at 500 Hz is one
-/// too.)
+/// approach closes on the full acceleration caps of the joints that move (2026-11-04/05: no
+/// longer paced by the held torso or the stalled elbow itself), [0.04, 0, 0.03] is one too.)
 #[test]
 fn a_jumped_target_that_still_drives_into_the_stop_keeps_the_stall() {
     // Each, from Ready, drives a free elbow 0.05 to 0.07 rad into the stop.
-    let jumps = [[0.0, 0.0, -0.01], [0.02, 0.0, 0.01], [0.04, 0.0, 0.03]];
+    let jumps = [[0.0, 0.0, -0.01], [0.02, 0.0, 0.01]];
     let turn = STALL.as_secs_f64() + 1.5;
     for dt in RATES {
         for jump in jumps {
-            if dt < 0.004 && jump == [0.04, 0.0, 0.03] {
-                continue;
-            }
             let mut stalled = false;
             hold_the_elbow(
                 dt,
