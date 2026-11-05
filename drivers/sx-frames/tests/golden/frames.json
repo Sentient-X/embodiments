@@ -805,6 +805,208 @@
    ]
   }
  ],
+ "exact": [
+  {
+   "child": "RDF",
+   "parent": "FLU",
+   "rotation_wxyz": [
+    "0.5",
+    "-0.5",
+    "0.5",
+    "-0.5"
+   ]
+  },
+  {
+   "child": "RUB",
+   "parent": "FLU",
+   "rotation_wxyz": [
+    "0.5",
+    "0.5",
+    "-0.5",
+    "-0.5"
+   ]
+  },
+  {
+   "child": "RFU",
+   "parent": "FLU",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "0.0",
+    "0.0",
+    "-0.7071067811865476"
+   ]
+  },
+  {
+   "child": "LUF",
+   "parent": "FLU",
+   "rotation_wxyz": [
+    "0.5",
+    "0.5",
+    "0.5",
+    "0.5"
+   ]
+  },
+  {
+   "child": "FLU",
+   "parent": "RDF",
+   "rotation_wxyz": [
+    "0.5",
+    "0.5",
+    "-0.5",
+    "0.5"
+   ]
+  },
+  {
+   "child": "RUB",
+   "parent": "RDF",
+   "rotation_wxyz": [
+    "0.0",
+    "1.0",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "RFU",
+   "parent": "RDF",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "0.7071067811865476",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "LUF",
+   "parent": "RDF",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "1.0"
+   ]
+  },
+  {
+   "child": "FLU",
+   "parent": "RUB",
+   "rotation_wxyz": [
+    "0.5",
+    "-0.5",
+    "0.5",
+    "0.5"
+   ]
+  },
+  {
+   "child": "RDF",
+   "parent": "RUB",
+   "rotation_wxyz": [
+    "0.0",
+    "1.0",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "RFU",
+   "parent": "RUB",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "-0.7071067811865476",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "LUF",
+   "parent": "RUB",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "1.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "FLU",
+   "parent": "RFU",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "0.0",
+    "0.0",
+    "0.7071067811865476"
+   ]
+  },
+  {
+   "child": "RDF",
+   "parent": "RFU",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "-0.7071067811865476",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "RUB",
+   "parent": "RFU",
+   "rotation_wxyz": [
+    "0.7071067811865476",
+    "0.7071067811865476",
+    "0.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "LUF",
+   "parent": "RFU",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "0.7071067811865476",
+    "0.7071067811865476"
+   ]
+  },
+  {
+   "child": "FLU",
+   "parent": "LUF",
+   "rotation_wxyz": [
+    "0.5",
+    "-0.5",
+    "-0.5",
+    "-0.5"
+   ]
+  },
+  {
+   "child": "RDF",
+   "parent": "LUF",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "1.0"
+   ]
+  },
+  {
+   "child": "RUB",
+   "parent": "LUF",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "1.0",
+    "0.0"
+   ]
+  },
+  {
+   "child": "RFU",
+   "parent": "LUF",
+   "rotation_wxyz": [
+    "0.0",
+    "0.0",
+    "0.7071067811865476",
+    "0.7071067811865476"
+   ]
+  }
+ ],
  "note": "Written by packages/sx-geometry/scripts/write_golden.py; never edited by hand.",
  "recorded": [
   {
