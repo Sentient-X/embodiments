@@ -266,7 +266,12 @@ from the component graph, never a name: `tool` (each tool's frame, as above), `h
 chain's last link), `view` (a camera's frame) and `sensor` (any other sensor's). `pack.json`
 carries every link's axes and roles as `frames`, and `tcp_frames` (each side's tool point: the
 link at a jawed tool's grasp point, on the side `frames.sides` places it) instead of a
-`*_gripper_tcp` suffix. `tests/test_frames.py` holds every body in both registries to declare a
+`*_gripper_tcp` suffix. Derived is not checked: `tcp_frames` (what teleoperation drives) is
+filled only for a body whose definition carries `tool_points_checked`
+(`sx_embodiments.tool_points`: who checked the tool points on its hardware, when, how, and the
+evidence; outside the id like `front`); every body's derived points are `tcp_candidates`, drawn
+and never driven (`tests/test_tool_points.py`; the bench procedure is the `robot-bench` skill's).
+`tests/test_frames.py` holds every body in both registries to declare a
 front its geometry agrees with (two tools part along its left; a camera not on a tool looks
 ahead, upright), every camera to be a `view` on an `RDF` frame and every tool a `tool` frame.
 

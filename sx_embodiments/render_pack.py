@@ -16,7 +16,10 @@ A pack is a directory of three files, generated from the body's composed descrip
   as the others do). A description with no visual at all is drawn from its collision
   geometry. Meshes are decimated so the pack fits a headset's triangle budget.
 * ``pack.json``, ``sx.render-pack/v1``: the body, both files' digests, every link's triangle
-  count, ``tcp_frames`` (each side's tool point, :func:`tcp_frames`), ``tools``, each tool's
+  count, ``tcp_candidates`` (each side's tool point as derived, :func:`tcp_frames`), and
+  ``tcp_frames`` with ``tool_points_checked`` only when a person checked those points on the
+  body's hardware (:mod:`sx_embodiments.tool_points`): a reader drives ``tcp_frames`` and
+  only draws a candidate; ``tools``, each tool's
   grip (:mod:`sx_embodiments.tool_frames`: its frame, and its jaws' closing line, approach and
   grasp point, or why it has none), and ``frames``, every link's axes and roles
   (:mod:`sx_embodiments.frames`), which a reader takes in place of a link's name; and, when
@@ -59,6 +62,7 @@ from .embodiment import Embodiment
 from .errors import EmbodimentError
 from .frames import body_frames, sides
 from .kinematics import Kinematics, Transform, from_xyz_rpy
+from .known import tool_points_checked_of
 from .materialize import materialize
 from .tool_frames import Jaws, ToolFrame, tool_frames
 from .viewing import Viewing
@@ -858,6 +862,28 @@ def tcp_frames(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str
     return frames
 
 
+def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str, JsonValue]:
+    """``pack.json``'s tool points: every derived one as ``tcp_candidates`` (drawn), and as
+    ``tcp_frames`` (driven) with its ``tool_points_checked`` record only once a person checked
+    them on the body's hardware (:mod:`sx_embodiments.tool_points`); until then ``tcp_frames``
+    is empty and nothing may drive them."""
+    derived = tcp_frames(embodiment, tools)
+    candidates: dict[str, JsonValue] = dict(derived)
+    checked = tool_points_checked_of(str(embodiment.name))
+    # A check holds for the revision and the links it checked, and for nothing else.
+    if (
+        checked is None
+        or checked.embodiment != str(embodiment.id)
+        or dict(checked.points) != derived
+    ):
+        return {"tcp_candidates": candidates, "tcp_frames": {}}
+    return {
+        "tcp_candidates": candidates,
+        "tcp_frames": dict(candidates),
+        "tool_points_checked": checked.to_json(),
+    }
+
+
 def _rigid_with(urdf: bytes, tcp: str) -> set[str]:
     """Every link that moves with ``tcp`` but for its own joints: up from ``tcp`` through fixed
     joints to the last actuated joint's child, and that link's whole subtree (the jaw's fingers)."""
@@ -957,7 +983,7 @@ def build(
         "glb_sha256": hashlib.sha256(glb).hexdigest(),
         "links": [{"name": link, "triangles": triangles[link]} for link in links],
         "triangles": sum(triangles.values()),
-        "tcp_frames": tcp_frames(embodiment, tools),
+        **tool_point_fields(embodiment, tools),
         "tools": [tool.to_json() for tool in tools],
         "frames": [frame.to_json() for frame in body_frames(embodiment)],
         "generated_by": GENERATOR,

@@ -35,6 +35,7 @@ from .parts import (
     Part,
 )
 from .recorded_streams import RecordedStreams
+from .tool_points import ToolPointCheck
 from .viewing import Viewing
 
 if TYPE_CHECKING:
@@ -342,6 +343,10 @@ class EmbodimentDefinition:
     #: has no facing, and ``tests/test_frames.py`` holds every registered body to declare one
     #: its geometry agrees with. Outside the revision's identity like ``viewing``.
     front: Direction | None = None
+    #: Who checked this body's tool points on its hardware (`sx_embodiments.tool_points`).
+    #: Without it, its render pack offers the derived tool points only as candidates and
+    #: nothing drives them. Outside the revision's identity like ``front``.
+    tool_points_checked: ToolPointCheck | None = None
     attachments: tuple[Component, ...] = field(init=False)
 
     def __post_init__(self) -> None:

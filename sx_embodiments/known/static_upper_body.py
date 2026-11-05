@@ -99,6 +99,7 @@ the board answering at ids 1 (left finger) and 2 (right), ``left_gripper`` at 3 
 2026-10-23); each finger's declared range is the description's limit.
 """
 
+import datetime as dt
 from typing import Final
 
 from sx_contracts import ComponentId
@@ -130,6 +131,7 @@ from ..mechanical import Build, Module, ModuleId
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ..sites import BodySite
+from ..tool_points import ToolPointCheck
 from ..viewing import Viewing, VirtualGripper, Workcell
 from ._authoring import bounded_layout
 from .zed import EYES, ZED_FRAME, optical_frame, zed_2i_eye, zed_2i_imu
@@ -473,6 +475,25 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     kind=EmbodimentKind.ROBOT,
     front=Direction.POS_X,
     lineage=Lineage(family="sentient-static-upper-body"),
+    # The tool points (left/right_gripper_tcp, 15 cm out along each gripper base's +x) are the
+    # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs): driven on this
+    # body's hardware by headset and desk teleoperation and by RobotService programs.
+    tool_points_checked=ToolPointCheck(
+        embodiment="51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
+        points={"left": "left_gripper_tcp", "right": "right_gripper_tcp"},
+        checked_by="the owner, operating the robot with the teleop and station agents",
+        checked_on=dt.date(2026, 10, 27),
+        method=(
+            "Driven on the hardware, not measured: headset and desk teleoperation and RobotService "
+            "programs drove both tool points through the station's follower for days, with the "
+            "operator watching the jaws; no residual between a tool point and the real jaws is "
+            "recorded, and the robot-bench tool-point procedure has not been run"
+        ),
+        evidence=(
+            "production station dgx-spark (sx-c9f62718), sessions from 2026-10-27 (webxr-teleop "
+            "skill; handoff 2026-10-27); sx #2895, #3001; sx-embodiments #216"
+        ),
+    ),
     build=Build.of(STATIC_UPPER_BODY_MODULE),
     # The xy box of base_link's collision hull (meshes/collision/base_link.stl, x and y within
     # ±0.0549 m), the clamp plate on the table top; its plate visual (meshes/base_link.stl)
