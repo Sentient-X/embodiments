@@ -1096,9 +1096,35 @@ impl Ik {
         let w = &mut self.work;
         let n = self.body.solved.len();
         let solved = iterations.is_some();
-        // The answer, held to its box; on failure, standing still as nearly as the caps allow.
+        // The answer, held to its box; on failure, standing still as nearly as the caps allow,
+        // every joint braked together: the last step scaled by the one share each joint's box
+        // allows, so the tool slows along the line it was moving on. Braked each on its own
+        // (until 2026-11-06), the fast-stopping joints stopped first and the tool swerved off
+        // its line at up to 0.6 m/s on a missed deadline (refute of #3434).
+        let together = if solved {
+            None
+        } else {
+            let (mut low, mut high) = (0.0_f64, 1.0_f64);
+            for (j, &v) in self.velocity.iter().enumerate().take(n) {
+                let p = v * dt;
+                if p.abs() < 1e-12 {
+                    if w.lower[j] > 0.0 || w.upper[j] < 0.0 {
+                        high = -1.0;
+                    }
+                    continue;
+                }
+                let (a, b) = (w.lower[j] / p, w.upper[j] / p);
+                low = low.max(a.min(b));
+                high = high.min(a.max(b));
+            }
+            (low <= high).then_some(low)
+        };
         for j in 0..n {
-            let x = if solved { w.answer[j] } else { w.still[j] };
+            let x = match (solved, together) {
+                (true, _) => w.answer[j],
+                (false, Some(share)) => self.velocity[j] * dt * share,
+                (false, None) => w.still[j],
+            };
             w.still[j] = x.clamp(w.lower[j], w.upper[j]);
         }
         if !solved {
@@ -2517,6 +2543,72 @@ mod tests {
     fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
         let body = teleop.ik().body();
         body.frame(&body.model().poses(q), hand).pose()
+    }
+
+    /// A step that misses its deadline brakes every joint together: its joint velocity is the
+    /// last one scaled by one share, so the tool slows along the line it moved on rather than
+    /// swerving as each joint stops on its own.
+    #[test]
+    fn a_missed_deadline_brakes_every_joint_together() {
+        let config =
+            TeleopConfig::parse(include_str!("../tests/fixtures/static-teleop-config.json"))
+                .expect("the station's solve config");
+        let ready: BTreeMap<String, f64> =
+            serde_json::from_str(include_str!("../tests/fixtures/static-ready.json"))
+                .expect("ready");
+        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
+            .expect("solve");
+        solve.set_deadline(std::time::Duration::from_secs(3600));
+        let mut q: Vec<f64> = solve
+            .model()
+            .axes()
+            .iter()
+            .map(|a| ready.get(&a.name).copied().unwrap_or(0.0))
+            .collect();
+        let from = tcp(&solve, &q, 0);
+        let targets = Targets {
+            tcp: [
+                Some(Pose {
+                    translation_m: [0, 1, 2].map(|k| from.translation_m[k] + [0.0, 0.12, 0.0][k]),
+                    rotation: from.rotation,
+                }),
+                None,
+            ],
+            ..Targets::default()
+        };
+        let measured = vec![None; q.len()];
+        let available = vec![true; q.len()];
+        let dt = 0.01;
+        solve.reset();
+        let mut last = vec![0.0; q.len()];
+        for _ in 0..12 {
+            let step = solve
+                .step(&q, &measured, &available, &targets, dt)
+                .expect("a step")
+                .clone();
+            q.copy_from_slice(&step.q);
+            last.copy_from_slice(&step.qdot);
+        }
+        assert!(last.iter().any(|v| v.abs() > 0.2), "moving: {last:?}");
+        solve.set_deadline(std::time::Duration::ZERO);
+        let held = solve
+            .step(&q, &measured, &available, &targets, dt)
+            .expect("a step")
+            .clone();
+        assert_eq!(held.solve, Solve::Held);
+        let (i, _) = last
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .expect("an axis");
+        let share = held.qdot[i] / last[i];
+        assert!((0.0..1.0).contains(&share), "braking: {share}");
+        for (now, before) in held.qdot.iter().zip(&last) {
+            assert!(
+                (now - share * before).abs() < 1e-9,
+                "each joint braked by the same share {share}: {now} from {before}"
+            );
+        }
     }
 
     /// The right hand reaching for the left one, a follower two ticks behind its commands, at
