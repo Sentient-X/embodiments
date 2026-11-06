@@ -416,6 +416,7 @@ impl<C: ActuatorChain> Chains<C> {
 
 impl<C: ActuatorChain> Chains<C> {
     /// Every chain its slice of `joints`, and of `feedforward` when given, all at once.
+    #[allow(clippy::too_many_lines)] // One command: each chain its slice, every answer collected, the lowest failure kept.
     fn drive(
         &mut self,
         joints: &[f64],

@@ -2094,8 +2094,8 @@ impl ChainError for DamiaoChainError {
     /// that persists after a clear, or a fault state where another was required.
     fn motor_faults(&self) -> Vec<(u16, u8)> {
         match self {
-            Self::FaultPersists { bus_id, code } => vec![(*bus_id, *code)],
-            Self::UnexpectedState {
+            Self::FaultPersists { bus_id, code }
+            | Self::UnexpectedState {
                 bus_id,
                 state: MotorState::Fault(code),
                 ..
