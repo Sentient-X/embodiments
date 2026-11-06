@@ -293,6 +293,10 @@ pub struct Targets {
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
     pub head: Option<Pose>,
+    /// Per hand: how it was moving when read, its point's velocity (m/s) and turn rate (rad/s)
+    /// in the root frame (the station's measured motion, `Intent::motion`), for the solve's
+    /// horizon to predict it by. `None`: the tremor filter's own estimate.
+    pub velocity: [Option<([f64; 3], [f64; 3])>; 2],
 }
 
 /// How one gripper's opening in metres becomes its finger angles: linear between the fingers'
@@ -692,7 +696,11 @@ impl Teleop {
             ) {
                 (Some(pose), None, Some(params)) => {
                     out.tcp[hand] = Some(filter.filter(&params, self.clock_s, pose));
-                    Some(filter.rates())
+                    Some(targets.velocity[hand].unwrap_or_else(|| filter.rates()))
+                }
+                (Some(_), None, None) => {
+                    filter.reset();
+                    targets.velocity[hand]
                 }
                 _ => {
                     filter.reset();
