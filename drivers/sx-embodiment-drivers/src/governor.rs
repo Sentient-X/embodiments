@@ -429,6 +429,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         Self::governed(chain, limits, clock, None)
     }
 
+    #[allow(clippy::too_many_lines)] // One construction: limits checked against the axes, derates applied, velocity planned.
     fn governed(
         chain: C,
         limits: Vec<AxisLimits>,
@@ -1072,6 +1073,7 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
     }
 
     /// Slew toward `joints` and command the chain, with `feedforward` when given.
+    #[allow(clippy::too_many_lines)] // One command: send, then read each finger's stall and pull-back, top to bottom.
     fn drive(
         &mut self,
         joints: &[f64],
