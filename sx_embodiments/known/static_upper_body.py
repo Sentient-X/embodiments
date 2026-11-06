@@ -479,7 +479,7 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs). This record
     # claims only what is true: the owner accepted them as proven by use; nobody measured them.
     tool_points_checked=ToolPointCheck(
-        chain="379a4a1b96dd753872a22f4e772bb874bb0f1408053dab3580d64018c87b7203",
+        chain="4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
         points={"left": "left_gripper_tcp", "right": "right_gripper_tcp"},
         checked_by="the owner, accepting the static upper body's tool points as proven by use",
         # The day this record bound the acceptance to the chain below; the use it rests on
@@ -491,7 +491,8 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
             "programs through the station's follower from 2026-10-27, with the operator watching "
             "the jaws. Neither tool point was ever measured against the real jaws, no residual is "
             "recorded, and the robot-bench tool-point procedure has not been run. The chain is "
-            "the current description's, root to each tool point"
+            "the current description's, root to each tool point, with the grip (grasp point, "
+            "approach, closing line) of the gripper each rides with"
         ),
         evidence=(
             "production station dgx-spark (sx-c9f62718), teleoperation sessions from 2026-10-27 "
