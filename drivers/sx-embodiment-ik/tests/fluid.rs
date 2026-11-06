@@ -771,3 +771,136 @@ fn station_table(station: &mut Station) {
         station.held
     );
 }
+
+/// How much of a lagging follower's tool lag the horizon's lag model wins back
+/// ([`Ik::set_follower_lag`]): each joint follows its command as a first-order lag of 40 ms
+/// (the Spark's 26-63 ms), measured where it is, and the station's solve is told that lag or not.
+/// The tool as measured against the target on a 0.5 m/s sweep and 1 and 2 Hz sines.
+#[test]
+#[ignore = "a table: cargo test --release --test fluid table_follower_lag -- --ignored --nocapture"]
+fn table_follower_lag() {
+    const LAG_S: f64 = 0.04;
+    for modelled in [0.0, LAG_S] {
+        let mut station = Station::new();
+        let names: Vec<String> = station
+            .solve
+            .model()
+            .axes()
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
+        for name in &names {
+            station.solve.set_follower_lag(name, modelled);
+        }
+        let runs: [(&str, Box<dyn Fn(f64, &Pose) -> Pose>); 3] = [
+            (
+                "sweep 0.5 m/s",
+                Box::new(|t: f64, from: &Pose| shifted(from, [0.0, 0.5 * t.min(0.3), 0.0])),
+            ),
+            (
+                "sine 1 Hz",
+                Box::new(|t: f64, from: &Pose| {
+                    shifted(from, [0.0, 0.03 * (std::f64::consts::TAU * t).sin(), 0.0])
+                }),
+            ),
+            (
+                "sine 2 Hz",
+                Box::new(|t: f64, from: &Pose| {
+                    shifted(
+                        from,
+                        [0.0, 0.03 * (std::f64::consts::TAU * 2.0 * t).sin(), 0.0],
+                    )
+                }),
+            ),
+        ];
+        for (name, left) in runs {
+            let mut command = station.ready.clone();
+            let mut actual = station.ready.clone();
+            let (from, right) = (
+                pose(&station.body, &command, 0),
+                pose(&station.body, &command, 1),
+            );
+            let available = vec![true; command.len()];
+            station.solve.reset();
+            let mut errors = Vec::new();
+            for tick in 1..=300 {
+                let t = f64::from(tick) * DT;
+                let target = left(t, &from);
+                let targets = Targets {
+                    tcp: [Some(target), Some(right)],
+                    ..Targets::default()
+                };
+                let measured: Vec<Option<f64>> = actual.iter().map(|v| Some(*v)).collect();
+                let step = station
+                    .solve
+                    .step(&command, &measured, &available, &targets, DT)
+                    .expect("a step");
+                command.copy_from_slice(&step.q);
+                let blend = 1.0 - (-DT / LAG_S).exp();
+                for (a, c) in actual.iter_mut().zip(&command) {
+                    *a += blend * (c - *a);
+                }
+                if t > 0.15 {
+                    errors.push(distance(&target, &pose(&station.body, &actual, 0)));
+                }
+            }
+            println!(
+                "lag modelled {modelled:.2} s, {name}: measured tool to target RMS {:.1} mm",
+                rms(&errors) * 1e3
+            );
+        }
+    }
+}
+
+/// How hard the 10 cm jumps are taken on the station's solve: the tool's peak speed,
+/// acceleration and jerk (from the commanded tool point, second and third differences), and
+/// the joints' peak acceleration against their caps and peak jerk.
+#[test]
+#[ignore = "a table: cargo test --release --test fluid table_jump_dynamics -- --ignored --nocapture"]
+fn table_jump_dynamics() {
+    let mut station = Station::new();
+    let caps = station.solve.ik().caps().clone();
+    for (k, sign) in [
+        (0, 1.0),
+        (0, -1.0),
+        (1, 1.0),
+        (1, -1.0),
+        (2, 1.0),
+        (2, -1.0),
+    ] {
+        let mut by = [0.0; 3];
+        by[k] = 0.1 * sign;
+        let (run, history) = station.run(150, |_, from| shifted(from, by));
+        let p: Vec<[f64; 3]> = run.iter().map(|(_, at)| at.translation_m).collect();
+        let d = |i: usize, k: usize| p[i][k] - p[i - 1][k];
+        let (mut v, mut a, mut j) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for i in 3..p.len() {
+            let vel = norm(&[0, 1, 2].map(|c| d(i, c))) / DT;
+            let acc = norm(&[0, 1, 2].map(|c| d(i, c) - d(i - 1, c))) / (DT * DT);
+            let jerk = norm(&[0, 1, 2].map(|c| d(i, c) - 2.0 * d(i - 1, c) + d(i - 2, c)))
+                / (DT * DT * DT);
+            (v, a, j) = (v.max(vel), a.max(acc), j.max(jerk));
+        }
+        let (mut ratio, mut worst, mut jj) = (0.0_f64, String::new(), 0.0_f64);
+        for i in 3..history.len() {
+            for (axis, name) in station.body.model().axes().iter().enumerate() {
+                if caps.accel[axis] <= 0.0 || name.name.contains("finger") {
+                    continue;
+                }
+                let q = |m: usize| history[m][axis];
+                let acc = (q(i) - 2.0 * q(i - 1) + q(i - 2)) / (DT * DT);
+                let jerk = (q(i) - 3.0 * q(i - 1) + 3.0 * q(i - 2) - q(i - 3)) / (DT * DT * DT);
+                if acc.abs() / caps.accel[axis] > ratio {
+                    ratio = acc.abs() / caps.accel[axis];
+                    worst.clone_from(&name.name);
+                }
+                jj = jj.max(jerk.abs());
+            }
+        }
+        println!(
+            "jump {:+.1} on {}: tool peak {v:.2} m/s, {a:.1} m/s^2, {j:.0} m/s^3; joints peak {ratio:.2}x accel cap ({worst}), {jj:.0} rad/s^3",
+            by[k],
+            ["x", "y", "z"][k]
+        );
+    }
+}

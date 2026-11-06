@@ -99,6 +99,13 @@ pub struct PoseFilter {
 }
 
 impl PoseFilter {
+    /// The hand's estimated velocity (m/s) and turn rate (rad/s), from the filter's first
+    /// stage: the motion with its tremor out, for predicting where the hand is going.
+    #[must_use]
+    pub const fn rates(&self) -> ([f64; 3], [f64; 3]) {
+        (self.velocity, self.turn)
+    }
+
     /// Forget the hand: the next reading passes as it is (a new engagement, or a hand that went
     /// untracked).
     pub fn reset(&mut self) {

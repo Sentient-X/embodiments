@@ -293,6 +293,10 @@ pub struct Targets {
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
     pub head: Option<Pose>,
+    /// Per hand: how it was moving when read, its point's velocity (m/s) and turn rate (rad/s)
+    /// in the root frame (the station's measured motion, `Intent::motion`), for the solve's
+    /// horizon to predict it by. `None`: the tremor filter's own estimate.
+    pub velocity: [Option<([f64; 3], [f64; 3])>; 2],
 }
 
 /// How one gripper's opening in metres becomes its finger angles: linear between the fingers'
@@ -685,15 +689,29 @@ impl Teleop {
         }
         let mut out = *targets;
         for (hand, filter) in self.filters.iter_mut().enumerate() {
-            match (
+            let rates = match (
                 targets.tcp[hand],
                 targets.tool_speed[hand],
                 self.input_filter,
             ) {
                 (Some(pose), None, Some(params)) => {
                     out.tcp[hand] = Some(filter.filter(&params, self.clock_s, pose));
+                    Some(targets.velocity[hand].unwrap_or_else(|| filter.rates()))
                 }
-                _ => filter.reset(),
+                (Some(_), None, None) => {
+                    filter.reset();
+                    targets.velocity[hand]
+                }
+                _ => {
+                    filter.reset();
+                    None
+                }
+            };
+            // Where the hand is going, for the solve's horizon to predict it.
+            for (limb, of) in self.hand_of.iter().enumerate() {
+                if *of == Some(hand) {
+                    self.ik.set_target_velocity(limb, rates);
+                }
             }
         }
         self.taken = out;
@@ -744,6 +762,21 @@ impl Teleop {
     /// scores answers, not the clock of a loaded host.
     pub fn set_deadline(&mut self, budget: std::time::Duration) {
         self.ik.set_deadline(budget);
+    }
+
+    /// How far `joint`'s follower lags its command, seconds ([`Ik::set_follower_lag`]): the
+    /// solve leads it. An unknown joint is ignored.
+    pub fn set_follower_lag(&mut self, joint: &str, seconds: f64) {
+        if let Some(axis) = self
+            .ik
+            .body()
+            .model()
+            .axes()
+            .iter()
+            .position(|a| a.name == joint)
+        {
+            self.ik.set_follower_lag(axis, seconds);
+        }
     }
 
     /// Engage: the next step seeds from the measured joints, starts from standing still and

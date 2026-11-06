@@ -305,6 +305,24 @@ fn reachable_targets_converge_within_millimetres() {
             last = Some(step);
         }
         let step = last.expect("a step");
+        if step.limbs[0].residual_m > 0.01 || step.limbs[1].residual_m > 0.01 {
+            eprintln!(
+                "DBG {:?} {:?}",
+                step.solve,
+                step.limbs
+                    .iter()
+                    .map(|l| (
+                        l.residual_m,
+                        l.residual_rad,
+                        l.reach,
+                        l.active
+                            .iter()
+                            .map(|a| a.describe(ik.body()))
+                            .collect::<Vec<_>>()
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
         for limb in &step.limbs[..2] {
             errors.push(limb.residual_m);
         }
