@@ -476,22 +476,26 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     front=Direction.POS_X,
     lineage=Lineage(family="sentient-static-upper-body"),
     # The tool points (left/right_gripper_tcp, 15 cm out along each gripper base's +x) are the
-    # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs): driven on this
-    # body's hardware by headset and desk teleoperation and by RobotService programs.
+    # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs). This record
+    # claims only what is true: the owner accepted them as proven by use; nobody measured them.
     tool_points_checked=ToolPointCheck(
-        embodiment="51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
+        chain="43df8f6804b7c715c5aa986554e9445b7bc3396e85ccae7f76aee461ad3d25b8",
         points={"left": "left_gripper_tcp", "right": "right_gripper_tcp"},
-        checked_by="the owner, operating the robot with the teleop and station agents",
-        checked_on=dt.date(2026, 10, 27),
+        checked_by="the owner, accepting the static upper body's tool points as proven by use",
+        # The day this record bound the acceptance to the chain below; the use it rests on
+        # began on 2026-10-27.
+        checked_on=dt.date(2026, 11, 6),
         method=(
-            "Driven on the hardware, not measured: headset and desk teleoperation and RobotService "
-            "programs drove both tool points through the station's follower for days, with the "
-            "operator watching the jaws; no residual between a tool point and the real jaws is "
-            "recorded, and the robot-bench tool-point procedure has not been run"
+            "Accepted as proven by use, not measured: both tool points were driven on the "
+            "hardware in production teleoperation (headset and desk) and by RobotService "
+            "programs through the station's follower from 2026-10-27, with the operator watching "
+            "the jaws. Neither tool point was ever measured against the real jaws, no residual is "
+            "recorded, and the robot-bench tool-point procedure has not been run. The chain is "
+            "the current description's, root to each tool point"
         ),
         evidence=(
-            "production station dgx-spark (sx-c9f62718), sessions from 2026-10-27 (webxr-teleop "
-            "skill; handoff 2026-10-27); sx #2895, #3001; sx-embodiments #216"
+            "production station dgx-spark (sx-c9f62718), teleoperation sessions from 2026-10-27 "
+            "(webxr-teleop skill; handoff 2026-10-27); sx #2895, #3001; sx-embodiments #216"
         ),
     ),
     build=Build.of(STATIC_UPPER_BODY_MODULE),

@@ -38,6 +38,10 @@ pub struct BodyBindings {
     /// Earlier ids of the body that drive exactly as this one (the registry's
     /// `sx_embodiments.successor`): a robot still assigned one is this body.
     pub supersedes: Vec<String>,
+    /// Per id a robot may be assigned (this body's and each it supersedes), the digest of the
+    /// kinematic chain from the description's root to each checked tool point
+    /// (`sx_embodiments.tool_points.tool_chain`); empty for a body nobody checked.
+    pub tool_chains: BTreeMap<String, String>,
     pub axes: Vec<BoundAxis>,
     /// The ports whose bindings the registry marks provisional (`ActuatorBinding.provisional`):
     /// not yet verified on the robot, so not driven unless a supervised bring-up opts in.
@@ -81,6 +85,8 @@ struct Document {
     approach: BTreeMap<String, Approach>,
     #[serde(default)]
     supersedes: Vec<String>,
+    #[serde(default)]
+    tool_chains: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -220,6 +226,7 @@ impl BodyBindings {
             axes,
             approach,
             supersedes,
+            tool_chains,
         } = serde_json::from_str(document)
             .map_err(|error| BodyError::Document(error.to_string()))?;
         let mut provisional: Vec<String> = Vec::new();
@@ -306,11 +313,20 @@ impl BodyBindings {
             embodiment,
             id,
             supersedes,
+            tool_chains,
             axes,
             provisional,
             twins,
             approach,
         })
+    }
+
+    /// The chain from the root to the checked tool points of the revision a drive assigned
+    /// `embodiment` describes, when this body's tool points were checked and that revision has
+    /// every checked link; `None` otherwise (nothing drives its tool points).
+    #[must_use]
+    pub fn tool_chain(&self, embodiment: &str) -> Option<&str> {
+        self.tool_chains.get(embodiment).map(String::as_str)
     }
 
     /// Whether a drive assigned `embodiment` is this body: its id, or an earlier id it

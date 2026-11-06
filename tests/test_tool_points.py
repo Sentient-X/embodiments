@@ -24,6 +24,7 @@ pytest.importorskip("numpy")
 
 from sx_embodiments.render_pack import tcp_frames, tool_point_fields
 from sx_embodiments.tool_frames import tool_frames
+from sx_embodiments.tool_points import tool_chain
 
 BODIES = sorted({*map(str, embodiments), *map(str, development_embodiments)})
 CHECKED = {"sentient-static-upper-body"}
@@ -46,7 +47,8 @@ def test_only_checked_tool_points_are_driven(name: str) -> None:
         # A record is of this revision and these links; a stale one fails here, asking for a
         # new check (robot-bench), never a silent pass.
         record = tool_points_checked_of(name)
-        assert record is not None and record.embodiment == str(body.id)
+        assert record is not None
+        assert record.chain == tool_chain(body.urdf_bytes, record.points)
         assert dict(record.points) == fields["tcp_candidates"]
         assert fields["tcp_frames"] == fields["tcp_candidates"]
         assert fields["tool_points_checked"] == tool_points_checked_of(name).to_json()  # type: ignore[union-attr]
@@ -74,7 +76,7 @@ def test_a_check_moves_no_embodiment_id(name: str) -> None:
 def test_a_check_says_who_how_and_where() -> None:
     with pytest.raises(ToolPointCheckError):
         ToolPointCheck(
-            embodiment="e",
+            chain="c",
             points={"left": "l"},
             checked_by="",
             checked_on=dt.date(2026, 11, 5),
@@ -93,7 +95,7 @@ def test_a_check_of_another_revision_or_other_links_drives_nothing(
     real = tool_points_checked_of("sentient-static-upper-body")
     assert real is not None
     for stale in (
-        dataclasses.replace(real, embodiment="0" * 64),
+        dataclasses.replace(real, chain="0" * 64),
         dataclasses.replace(
             real, points={"left": "left_gripper_base_link", "right": "right_gripper_tcp"}
         ),
@@ -102,3 +104,72 @@ def test_a_check_of_another_revision_or_other_links_drives_nothing(
         fields = render_pack.tool_point_fields(body, tools)
         assert fields["tcp_frames"] == {}
         assert "tool_points_checked" not in fields
+
+
+def _moved(urdf: bytes, joint: str) -> bytes:
+    """``urdf`` with ``joint``'s origin moved a millimetre along x."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(urdf)  # nosec B314 - the registry's own description
+    element = next(j for j in root.findall("joint") if j.get("name") == joint)
+    origin = element.find("origin")
+    assert origin is not None
+    x, y, z = (float(v) for v in origin.get("xyz", "0 0 0").split())
+    origin.set("xyz", f"{x + 0.001} {y} {z}")
+    return ET.tostring(root)
+
+
+def test_the_chain_is_what_was_checked_and_nothing_else() -> None:
+    from sx_embodiments.kinematics import Kinematics
+
+    body = _body("sentient-static-upper-body")
+    record = tool_points_checked_of("sentient-static-upper-body")
+    assert record is not None
+    urdf = body.urdf_bytes
+    kinematics = Kinematics.of(urdf)
+    on_path = kinematics.joints[kinematics.parent_joint["left_gripper_tcp"]].name
+    # A camera's mount is on no tool point's chain.
+    camera = kinematics.joints[kinematics.parent_joint["ZED_camera"]].name
+    assert tool_chain(_moved(urdf, on_path), record.points) != record.chain
+    assert tool_chain(_moved(urdf, camera), record.points) == record.chain
+
+
+def test_every_id_a_checked_body_may_be_assigned_names_its_chain() -> None:
+    import json
+    from pathlib import Path
+
+    registry = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "drivers/sx-embodiment-bodies/bindings/registry.json"
+        ).read_text(encoding="utf-8")
+    )
+    for document in registry:
+        record = tool_points_checked_of(document["embodiment"])
+        if record is None:
+            assert "tool_chains" not in document, document["embodiment"]
+            continue
+        ids = [document["id"], *document.get("supersedes", [])]
+        assert sorted(document["tool_chains"]) == sorted(ids)
+        assert document["tool_chains"][document["id"]] == record.chain
+
+
+def test_no_two_registered_bodies_share_an_id() -> None:
+    """A drive's id resolves to exactly one body (the station opens it and checks its tool
+    points by it): no id is two bodies', current or superseded."""
+    import json
+    from collections import Counter
+    from pathlib import Path
+
+    registry = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "drivers/sx-embodiment-bodies/bindings/registry.json"
+        ).read_text(encoding="utf-8")
+    )
+    counts = Counter(
+        identity
+        for document in registry
+        for identity in (document["id"], *document.get("supersedes", []))
+    )
+    assert [identity for identity, n in counts.items() if n > 1] == []

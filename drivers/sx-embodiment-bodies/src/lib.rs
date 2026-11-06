@@ -868,6 +868,20 @@ mod resolution {
             Err(OpenError::Body(_))
         ));
     }
+
+    /// Every id the static upper body may be assigned names the chain to its checked tool
+    /// points; they are one chain while no revision moved a tool point or a joint above one.
+    #[test]
+    fn every_id_of_a_checked_body_names_its_tool_chain() {
+        let body =
+            registered_body("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402")
+                .expect("the static upper body");
+        let current = body.tool_chain(&body.id).expect("its chain");
+        for earlier in &body.supersedes {
+            assert_eq!(body.tool_chain(earlier), Some(current), "{earlier}");
+        }
+        assert_eq!(body.tool_chain(&"0".repeat(64)), None);
+    }
 }
 
 impl Opener {
