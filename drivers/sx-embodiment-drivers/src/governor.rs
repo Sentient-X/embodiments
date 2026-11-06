@@ -156,6 +156,11 @@ pub struct AxisLimits {
     pub max_tracking_error: f64,
     /// The fastest the commanded speed changes, unit/s², or `None` for no bound.
     pub max_acceleration: Option<f64>,
+    /// The shortest time the commanded acceleration takes to rise from zero to
+    /// `max_acceleration`, seconds: the follower's own response time, `sqrt(J / kp)` from its
+    /// gains ([`crate::chain::TrackingCeiling::rise_s`]); `None` where no follower is known.
+    /// Its jerk bound is [`AxisLimits::max_jerk`] ([`crate::jerk`]).
+    pub acceleration_rise_s: Option<f64>,
 }
 
 impl AxisLimits {
@@ -177,7 +182,18 @@ impl AxisLimits {
             max_speed: axis.motion.speed * share,
             max_tracking_error: SETTLED_TRACKING,
             max_acceleration: Some(axis.motion.acceleration * share),
+            acceleration_rise_s: None,
         })
+    }
+
+    /// The fastest the commanded acceleration changes, unit/s³: the acceleration cap over the
+    /// rise time; `None` where either is unknown ([`crate::jerk`]).
+    #[must_use]
+    pub fn max_jerk(&self) -> Option<f64> {
+        let rise = self
+            .acceleration_rise_s
+            .filter(|r| r.is_finite() && *r > 0.0)?;
+        self.max_acceleration.map(|a| a / rise)
     }
 
     /// [`AxisLimits::rated`] for every one of `axes`, in their order.
@@ -748,6 +764,10 @@ fn hold_to_ceilings(
                     .max_acceleration
                     .map_or(acceleration, |own| own.min(acceleration)),
             );
+        }
+        if let Some(rise) = ceiling.rise_s.filter(|r| positive(*r)) {
+            limit.acceleration_rise_s =
+                Some(limit.acceleration_rise_s.map_or(rise, |own| own.max(rise)));
         }
     }
 }
@@ -1594,6 +1614,7 @@ mod tests {
         max_speed: 0.25,
         max_tracking_error: 0.2,
         max_acceleration: None,
+        acceleration_rise_s: None,
     };
 
     fn governed(chain: Fake) -> (Governor<Fake, Manual>, Manual) {
@@ -1645,6 +1666,7 @@ mod tests {
             max_speed: 10.0,
             max_tracking_error: SETTLED_TRACKING,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         let mut chain = fake(true);
         chain.pinned = Some((0, 0.0));
@@ -1701,6 +1723,7 @@ mod tests {
             crate::chain::TrackingCeiling {
                 speed: 0.1,
                 acceleration: Some(0.5),
+                rise_s: None,
             },
         )];
         let (governor, _) = governed(chain);
@@ -2186,6 +2209,7 @@ mod tests {
                     max_speed: bad,
                     max_tracking_error: 0.2,
                     max_acceleration: None,
+                    acceleration_rise_s: None,
                 },
             ];
             assert!(matches!(

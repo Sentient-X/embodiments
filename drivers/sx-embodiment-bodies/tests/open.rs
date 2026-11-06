@@ -1225,6 +1225,7 @@ fn the_so101_follower_opens_on_its_one_serial_bus() {
             max_speed: 0.25,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         6
     ];
@@ -1460,6 +1461,7 @@ fn bring_up_limits() -> Vec<AxisLimits> {
             max_speed: 0.2,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         25
     ]
@@ -1829,6 +1831,7 @@ fn governed(body: Body) -> Governor<Body> {
                 max_speed: 0.25,
                 max_tracking_error: 0.2,
                 max_acceleration: None,
+                acceleration_rise_s: None,
             };
             15
         ],
@@ -2169,6 +2172,7 @@ fn a_serial_servo_out_of_service_is_read_on_its_bus_and_never_written() {
                 max_speed: 0.25,
                 max_tracking_error: 0.2,
                 max_acceleration: None,
+                acceleration_rise_s: None,
             };
             25
         ],
@@ -2220,6 +2224,7 @@ fn a_derate_commissioning_declares_holds_the_over_rail_axes_to_it() {
             max_speed: 3.0,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         15
     ];
@@ -2258,6 +2263,7 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
             max_speed: 0.5,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         15
     ];

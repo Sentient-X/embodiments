@@ -394,6 +394,10 @@ pub struct TrackingCeiling {
     pub speed: f64,
     /// `None` where the controller bounds no acceleration (no inertia is known).
     pub acceleration: Option<f64>,
+    /// How long the controller takes to answer a change of acceleration, seconds: a PD's
+    /// `sqrt(J / kp)`, the reciprocal of its natural frequency; `None` where it is not known.
+    /// The jerk every motion is held to ([`crate::jerk`]).
+    pub rise_s: Option<f64>,
 }
 
 impl TrackingCeiling {
@@ -406,6 +410,7 @@ impl TrackingCeiling {
         Self {
             speed: speed * joint_per_shaft_radian,
             acceleration: Some(acceleration * joint_per_shaft_radian),
+            rise_s: None,
         }
     }
 }

@@ -51,6 +51,7 @@ fn neck(bus: &SimBus) -> (Governor<FeetechChain<SimBus>, Manual>, Manual) {
             max_speed: BRING_UP_APPROACH.speed,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         6
     ];
