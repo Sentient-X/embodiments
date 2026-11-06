@@ -203,10 +203,14 @@ fn the_cup_grasp_keeps_the_elbow_down_and_its_joints_calm_with_the_ready_posture
     assert!(preferred.travel_rad_per_m < anchored_at_engage.travel_rad_per_m);
     // Pacing each pair's approach by its room (`Settings::approach_time_s`) calmed both runs,
     // the anchored more: 13.49 -> 10.23 rad/m, the Ready 11.89 -> 9.36. The Ready run stays
-    // calmer, and calmer than it was.
+    // calmer. Since the solve follows a moving target's velocity
+    // (`Ik::set_target_velocity`, 2026-11-06) both peak higher at the start, where the tool now
+    // keeps pace with the goal from its first tick instead of falling behind it (the wrist and
+    // forearm counter-spin to hold the hand's turn): the anchored 10.29 -> 15.52, the Ready
+    // 9.25 -> 14.23 rad/m, every joint inside its speed cap.
     if cfg!(not(debug_assertions)) {
         assert!(preferred.peak_rad_per_m < 0.95 * anchored_at_engage.peak_rad_per_m);
-        assert!(preferred.peak_rad_per_m < 11.89);
+        assert!(preferred.peak_rad_per_m < 14.5);
     }
     // ...and the tool still arrives, well inside a goal's 5 mm and 3 degrees.
     assert!(preferred.residual_m < 0.002 && preferred.residual_rad < 0.02);

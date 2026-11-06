@@ -117,8 +117,81 @@ fn document(pose: &Pose) -> [f64; 7] {
     [t[0], t[1], t[2], x, y, z, w]
 }
 
+/// Both hands as the operator holds them at `t`: the script and the tremor.
+fn hands(t: f64, from: &[Pose; 2]) -> ([Pose; 2], f64) {
+    let (offset, width) = script(t);
+    let mut targets = *from;
+    for (hand, target) in targets.iter_mut().enumerate() {
+        let (shake, turn) = tremor(t, 0.9 + 2.3 * hand as f64);
+        for k in 0..3 {
+            target.translation_m[k] += shake[k] + if hand == 0 { offset[k] } else { 0.0 };
+        }
+        *target = rotated(target, turn);
+    }
+    (targets, width)
+}
+
+/// A LiveKit-like link from the headset (`--network`): the hands read at 90 Hz, each sample
+/// 145 ms late plus exponential jitter (mean 12 ms), 1 % lost, and stalls (0.5 a second, 30-150
+/// ms) that release bunched; the station keeps the newest sample, reads the hands' velocity from
+/// the last two it kept, and carries the sample forward by its age (at most 150 ms and 3 cm), as
+/// the station's pose stream does (`Intent::predicted`).
+struct Link {
+    /// (sent, arrives) per sample, in order of sending.
+    samples: Vec<(f64, f64)>,
+}
+
+impl Link {
+    fn new(end_s: f64) -> Self {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut uniform = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut stalls = Vec::new();
+        let mut t = 0.0;
+        while t < end_s {
+            t += -uniform().max(1e-12).ln() / 0.5;
+            stalls.push((t, t + 0.03 + 0.12 * uniform()));
+        }
+        let mut samples = Vec::new();
+        let mut sent = 0.0;
+        while sent < end_s {
+            sent += 1.0 / 90.0;
+            if uniform() < 0.01 {
+                continue;
+            }
+            let mut arrives = sent + 0.145 - 0.012 * uniform().max(1e-12).ln();
+            if let Some((_, end)) = stalls.iter().find(|(a, b)| *a <= arrives && arrives < *b) {
+                arrives = *end;
+            }
+            samples.push((sent, arrives));
+        }
+        Self { samples }
+    }
+
+    /// The newest sample arrived by `now`, the one before it, and how far ahead of its reading
+    /// the station carries it: its own latency on arrival plus one send period, at most 150 ms
+    /// (`Motion::horizon`), so a stall never carries the hand on.
+    fn newest(&self, now: f64) -> Option<(f64, Option<f64>, f64)> {
+        let mut kept: Option<(f64, f64)> = None;
+        let mut before = None;
+        for &(sent, arrives) in &self.samples {
+            if arrives <= now && kept.is_none_or(|(k, _)| sent > k) {
+                before = kept.map(|(k, _)| k);
+                kept = Some((sent, arrives));
+            }
+        }
+        kept.map(|(k, arrives)| (k, before, (arrives - k + 1.0 / 90.0).min(0.15)))
+    }
+}
+
 fn main() {
     let out = std::env::args().nth(1).expect("an output path");
+    let network = std::env::args().any(|a| a == "--network");
+    let link = Link::new(END_S + 1.0);
     let config = TeleopConfig::parse(include_str!("../tests/fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
@@ -146,21 +219,54 @@ fn main() {
     let count = (END_S / DT).round() as usize;
     for tick in 1..=count {
         let t = tick as f64 * DT;
-        let (offset, width) = script(t);
-        let mut targets = [from[0], from[1]];
-        for (hand, target) in targets.iter_mut().enumerate() {
-            let (shake, turn) = tremor(t, 0.9 + 2.3 * hand as f64);
-            for k in 0..3 {
-                target.translation_m[k] += shake[k] + if hand == 0 { offset[k] } else { 0.0 };
-            }
-            *target = rotated(target, turn);
-        }
+        // What the operator's hands do now (what the film measures against), and what the
+        // station is given.
+        let (targets, width) = hands(t, &from);
         let widths = [width, OPEN_M];
-        let ask = Targets {
+        let mut ask = Targets {
             tcp: [Some(targets[0]), Some(targets[1])],
             gripper_width_m: [Some(widths[0]), Some(widths[1])],
             ..Targets::default()
         };
+        // `--no-carry`: the station gives the newest sample as read, not carried forward by
+        // its age.
+        let carry = !std::env::args().any(|a| a == "--no-carry" || a == "--age");
+        // `--age`: the station gives the newest sample as read and its age; the solve carries the
+        // filtered hand forward (`Targets::age_s`).
+        let aged = std::env::args().any(|a| a == "--age");
+        if network {
+            // Before the first sample arrives the station holds the hands where they stood.
+            let (sent, before, horizon) = link.newest(t).unwrap_or((0.0, None, 0.0));
+            let (read, _) = hands(sent, &from);
+            let lead = (t - sent).min(horizon);
+            for hand in 0..2 {
+                let velocity = before.map(|b| {
+                    let (earlier, _) = hands(b, &from);
+                    let span = (sent - b).max(1e-3);
+                    [0, 1, 2].map(|k| {
+                        (read[hand].translation_m[k] - earlier[hand].translation_m[k]) / span
+                    })
+                });
+                let mut carried = read[hand];
+                if let (Some(v), true) = (velocity, carry) {
+                    let step = [0, 1, 2].map(|k| v[k] * lead);
+                    let length = step.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    let scale = if length > 0.03 { 0.03 / length } else { 1.0 };
+                    for (at, by) in carried.translation_m.iter_mut().zip(step) {
+                        *at += by * scale;
+                    }
+                }
+                ask.tcp[hand] = Some(carried);
+                if aged {
+                    ask.age_s = Some(lead);
+                }
+                // `--filter-rates`: let the solve's tremor filter estimate the motion instead of
+                // the link's raw two-sample velocity.
+                if !std::env::args().any(|a| a == "--filter-rates") {
+                    ask.velocity[hand] = velocity.map(|v| (v, [0.0; 3]));
+                }
+            }
+        }
         let measured: Vec<Option<f64>> = q.iter().map(|v| Some(*v)).collect();
         let began = std::time::Instant::now();
         let step = solve
