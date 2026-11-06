@@ -6,7 +6,7 @@
 use sx_frames::{
     Authority, Axes, Direction, FLU, FrameError, Frames, MUJOCO_EULER, Pose, Quaternion,
     QuaternionLayout, RDF, RFU, RUB, Rigid, Source, Transform, UNITY, URDF_RPY, basis,
-    matrix_rotation_vector, recorded, rotation_vector_matrix,
+    matrix_rotation_vector, recorded, rotation_vector_matrix, unrecorded,
 };
 
 fn close(a: &[f64], b: &[f64], tolerance: f64) -> bool {
@@ -458,4 +458,43 @@ fn a_rotation_vector_of_norm_three_comes_back_as_itself() {
         let again = matrix_rotation_vector(&q.matrix());
         assert!(close(&again, &v, 1e-12), "{v:?} -> {again:?}");
     }
+}
+
+#[test]
+fn unrecorded_is_the_ingests_inverse() {
+    let mut frames = Frames::new();
+    let world = frames.declare("world", RFU).expect("world");
+    let link = frames.declare("link", FLU).expect("link");
+    let q = Quaternion {
+        x: 0.2,
+        y: -0.3,
+        z: 0.5,
+        w: 0.8,
+    }
+    .normalized();
+    // A left-handed source whose device axes are the link's with x reversed (a mirrored mesh).
+    let mirrored = Source {
+        local: Axes::new(Direction::Back, Direction::Left, Direction::Up).expect("axes"),
+        ..Source::new(UNITY)
+    };
+    for source in [Source::new(UNITY), Source::new(RUB), mirrored] {
+        let edge = recorded(world, link, [0.3, 1.2, -0.4], &q.matrix(), source).expect("ingest");
+        let (t, r) = unrecorded(&edge, source).expect("inverse");
+        assert!(close(&t, &[0.3, 1.2, -0.4], 1e-15), "{t:?}");
+        let again = recorded(world, link, t, &r, source).expect("again");
+        assert!(again.pose().rotation.angle_to(edge.pose().rotation) < 1e-12);
+    }
+    // Unity: positions are the exact permutation, no rounding.
+    let edge = Transform::new(
+        world,
+        link,
+        Pose {
+            translation_m: [0.1, 0.7, -0.3],
+            rotation: q,
+        },
+        Authority::Computed,
+    )
+    .expect("edge");
+    let (t, _) = unrecorded(&edge, Source::new(UNITY)).expect("inverse");
+    assert_eq!(t, [0.1, -0.3, 0.7]);
 }

@@ -1,4 +1,9 @@
-"""Build-keyed hardware and raw pose facts for OpenQuestCapture."""
+"""OpenQuestCapture builds: their content identities, and which one new capture is pinned to.
+
+What a build's pose streams were recorded in is not here: a recording declares it
+(``recorded_sources.json``), and for recordings made before declarations the one stored-data
+derivation (``sx_delivery.recorded_sources``) states each build's sources.
+"""
 
 from __future__ import annotations
 
@@ -67,44 +72,6 @@ class QuestCaptureApp:
                 raise QuestCaptureAppError(field, "must be non-empty")
 
 
-class QuestRawPoseSource(StrEnum):
-    """Coordinate convention serialized by one raw Quest pose stream."""
-
-    UNITY_LH = "unity_lh"
-    OVR_NATIVE_RH = "ovr_native_rh"
-
-
-@dataclass(frozen=True, slots=True)
-class QuestPoseConvention:
-    """The complete build-bound source convention used by the converter."""
-
-    capture_app: QuestCaptureApp
-    controller_hmd_source: QuestRawPoseSource
-    body_source: QuestRawPoseSource
-
-    @property
-    def apk_build_id(self) -> QuestApkBuildId:
-        return self.capture_app.apk_build_id
-
-    @property
-    def needs_unmirror(self) -> bool:
-        """Existing controller/HMD control equivalent for this raw source."""
-        match self.controller_hmd_source:
-            case QuestRawPoseSource.UNITY_LH:
-                return True
-            case QuestRawPoseSource.OVR_NATIVE_RH:
-                return False
-
-    @property
-    def body_flip(self) -> bool:
-        """Existing body-writer control equivalent for this raw source."""
-        match self.body_source:
-            case QuestRawPoseSource.UNITY_LH:
-                return False
-            case QuestRawPoseSource.OVR_NATIVE_RH:
-                return True
-
-
 class QuestCaptureContract(StrEnum):
     """The OpenQuestCapture 1.4 metadata/sidecar contract a session was recorded under.
 
@@ -138,31 +105,16 @@ class QuestCaptureContract(StrEnum):
         return self is QuestCaptureContract.V1_4_3
 
 
-class QuestPoseConventionError(Exception):
-    """An exact managed APK cannot resolve to a registered convention."""
+class QuestBuildError(Exception):
+    """An installed capture build is not the one new capture is pinned to."""
 
 
-class QuestPoseConventionNotConfiguredError(QuestPoseConventionError):
+class QuestBuildNotConfiguredError(QuestBuildError):
     def __init__(self) -> None:
         super().__init__("no active real Quest APK is registered for managed capture")
 
 
-class UnknownQuestApkBuildError(QuestPoseConventionError):
-    def __init__(
-        self,
-        build_id: QuestApkBuildId,
-        registered_build_ids: tuple[QuestApkBuildId, ...],
-    ) -> None:
-        self.build_id = build_id
-        self.registered_build_ids = registered_build_ids
-        registered = ", ".join(str(item) for item in registered_build_ids)
-        super().__init__(
-            f"Quest APK {build_id} has no registered pose convention; "
-            f"registered builds: {registered}"
-        )
-
-
-class InactiveQuestApkBuildError(QuestPoseConventionError):
+class InactiveQuestApkBuildError(QuestBuildError):
     def __init__(self, installed: QuestApkBuildId, active: QuestApkBuildId) -> None:
         self.installed = installed
         self.active = active
@@ -183,30 +135,10 @@ SIMULATED_QUEST_CAPTURE_APP = QuestCaptureApp(
 )
 
 
-def _simulated_app_convention(capture_app: QuestCaptureApp) -> QuestPoseConvention:
-    return QuestPoseConvention(
-        capture_app=capture_app,
-        controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-        body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-    )
-
-
-SIMULATED_QUEST_POSE_CONVENTION = _simulated_app_convention(SIMULATED_QUEST_CAPTURE_APP)
-
-
-@dataclass(frozen=True, slots=True)
-class QuestPoseConventionFacts:
-    """Append-only calibrated facts for one exact real APK identity."""
-
-    controller_hmd_source: QuestRawPoseSource
-    body_source: QuestRawPoseSource
-
-
-# Real APK facts are deliberately source-controlled and append-only. A digest
+# Real APK identities are deliberately source-controlled and append-only. A digest
 # is measured from the exact signed release APK bytes; the managed-capture
 # preflight independently hashes the installed base.apk and requires that same
-# identity. Pose facts must be calibrated, or carried forward only when the
-# pose-producing code is unchanged. The simulator identity never appears here.
+# identity. The simulator identity never appears here.
 # Verified 2026-08-06 from the locally pulled APK set on a Quest 3S running
 # capture app 1.2.0; the preflight recording retained all mono-time streams.
 QUEST_APK_BUILD_1_2_0 = QuestApkBuildId(
@@ -349,88 +281,25 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         ),
     }
 )
-REAL_QUEST_POSE_CONVENTION_FACTS: Mapping[QuestApkBuildId, QuestPoseConventionFacts] = (
-    MappingProxyType(
-        {
-            QUEST_APK_BUILD_1_2_0: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            # The stereo-camera build changes capture output only; its controller,
-            # HMD, and body pose sources retain the calibrated 1.2.0 convention.
-            QUEST_APK_BUILD_1_2_0_STEREO: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            # Capture contract 1.3 changes video cadence/timestamps and records
-            # tracking-origin/stereo evidence; raw pose producers are unchanged.
-            QUEST_APK_BUILD_1_3_0: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_0: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_0_LIFECYCLE: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_1: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_2: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_3: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_4: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_5: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            QUEST_APK_BUILD_1_4_6: QuestPoseConventionFacts(
-                controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-            ),
-            **{
-                build: QuestPoseConventionFacts(
-                    controller_hmd_source=QuestRawPoseSource.UNITY_LH,
-                    body_source=QuestRawPoseSource.OVR_NATIVE_RH,
-                )
-                for build in HEADSET_QUEST_APK_BUILDS.values()
-            },
-        }
-    )
+#: Every real build that has recorded, laptop pod and headset alike (append-only).
+REAL_QUEST_APK_BUILDS: tuple[QuestApkBuildId, ...] = (
+    QUEST_APK_BUILD_1_2_0,
+    QUEST_APK_BUILD_1_2_0_STEREO,
+    QUEST_APK_BUILD_1_3_0,
+    QUEST_APK_BUILD_1_4_0,
+    QUEST_APK_BUILD_1_4_0_LIFECYCLE,
+    QUEST_APK_BUILD_1_4_1,
+    QUEST_APK_BUILD_1_4_2,
+    QUEST_APK_BUILD_1_4_3,
+    QUEST_APK_BUILD_1_4_4,
+    QUEST_APK_BUILD_1_4_5,
+    QUEST_APK_BUILD_1_4_6,
+    *HEADSET_QUEST_APK_BUILDS.values(),
 )
 
 # New capture is additionally pinned to one registered build. Historical
 # registry entries remain resolvable after this active identity advances.
 ACTIVE_REAL_QUEST_APK_BUILD_ID: QuestApkBuildId | None = QUEST_APK_BUILD_1_4_6
-
-
-def resolve_real_quest_pose_convention(
-    capture_app: QuestCaptureApp,
-) -> QuestPoseConvention:
-    """Resolve only source-controlled real-device facts, never simulation."""
-    facts = REAL_QUEST_POSE_CONVENTION_FACTS.get(capture_app.apk_build_id)
-    if facts is None:
-        raise UnknownQuestApkBuildError(
-            capture_app.apk_build_id,
-            tuple(sorted(REAL_QUEST_POSE_CONVENTION_FACTS)),
-        )
-    return QuestPoseConvention(
-        capture_app=capture_app,
-        controller_hmd_source=facts.controller_hmd_source,
-        body_source=facts.body_source,
-    )
 
 
 def require_active_real_quest_build(
@@ -440,7 +309,7 @@ def require_active_real_quest_build(
 ) -> None:
     """Gate new capture separately from historical convention resolution."""
     if active_build_id is None:
-        raise QuestPoseConventionNotConfiguredError()
+        raise QuestBuildNotConfiguredError()
     if capture_app.apk_build_id != active_build_id:
         raise InactiveQuestApkBuildError(capture_app.apk_build_id, active_build_id)
 
@@ -459,21 +328,16 @@ __all__ = [
     "QUEST_APK_BUILD_1_4_4",
     "QUEST_APK_BUILD_1_4_5",
     "QUEST_APK_BUILD_1_4_6",
-    "REAL_QUEST_POSE_CONVENTION_FACTS",
+    "REAL_QUEST_APK_BUILDS",
     "SIMULATED_QUEST_APK_BUILD_ID",
     "SIMULATED_QUEST_CAPTURE_APP",
-    "SIMULATED_QUEST_POSE_CONVENTION",
     "InactiveQuestApkBuildError",
     "QuestApkBuildId",
     "QuestApkBuildIdError",
+    "QuestBuildError",
+    "QuestBuildNotConfiguredError",
     "QuestCaptureApp",
     "QuestCaptureAppError",
-    "QuestPoseConvention",
-    "QuestPoseConventionError",
-    "QuestPoseConventionFacts",
-    "QuestPoseConventionNotConfiguredError",
-    "QuestRawPoseSource",
-    "UnknownQuestApkBuildError",
+    "QuestCaptureContract",
     "require_active_real_quest_build",
-    "resolve_real_quest_pose_convention",
 ]

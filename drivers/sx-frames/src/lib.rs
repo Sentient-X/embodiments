@@ -11,6 +11,7 @@
 //! - [`Frame`]: a small id from a [`Frames`] registry and right-handed axes;
 //!   [`Transform`] `parent_from_child` with checked [`Transform::compose`].
 //! - [`recorded`]: the one ingest; a left-handed source is reflected exactly once, there.
+//!   [`unrecorded`] is its inverse, for a consumer that takes a source's own numbers.
 //! - Codecs: [`QuaternionLayout`] (xyzw/wxyz), [`EulerSequence`] ([`URDF_RPY`],
 //!   [`MUJOCO_EULER`]), rotation vectors ([`rotation_vector_matrix`],
 //!   [`matrix_rotation_vector`]) and [`Quaternion::slerp`].
@@ -29,7 +30,9 @@ pub use axes::{
     Axes, Direction, FLU, Handedness, LUF, NAMED_AXES, RDF, RFU, RUB, UNITY, basis,
     basis_quaternion,
 };
-pub use frame::{Authority, Frame, FrameId, Frames, LengthUnit, Source, Transform, recorded};
+pub use frame::{
+    Authority, Frame, FrameId, Frames, LengthUnit, Source, Transform, recorded, unrecorded,
+};
 pub use linalg::{Matrix3, Vec3};
 pub use pose::{Pose, Rigid};
 pub use rotation::{
