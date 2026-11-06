@@ -1443,7 +1443,7 @@ pub fn open_unopened(
     ports: &[String],
     source: &mut dyn PortSource,
 ) -> Result<Answered, OpenError> {
-    let reopening = unopened_parts(body.chains().len(), drive, setup, ports)?;
+    let reopening = unopened_parts(body.len(), drive, setup, ports)?;
     let mut answered = Answered::default();
     if reopening.is_empty() {
         return Ok(answered);
@@ -1969,10 +1969,10 @@ fn open_part(
         setup.calibrations,
         setup.options,
     )?;
-    if body.chains().len() != plan.parts.len() {
+    if body.len() != plan.parts.len() {
         return Err(OpenError::NotInPlace(format!(
             "the opened body has {} buses and this setup opens {}",
-            body.chains().len(),
+            body.len(),
             plan.parts.len()
         )));
     }

@@ -8,8 +8,9 @@ const BUCKET_US: u64 = 250;
 const BUCKETS: usize = 128;
 
 /// One chain's command times on its bus: how many, their p50 and p99, and the longest. A tick's
-/// commands run one chain after another, so the slow chain is the one whose time fills the
-/// period (10-28: the Spark's ticks overran by half a period at median).
+/// commands run on every bus at once ([`crate::Chains`]), so the slowest chain's time is the
+/// command's (one after another, the Spark's four buses took 8 ms of a 10 ms tick and its
+/// ticks overran by half a period at median, 10-28..30).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BusTiming {
     /// The chain's first joint, naming which chain this is.
