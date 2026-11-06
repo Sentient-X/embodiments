@@ -249,7 +249,7 @@ def _view(
     binding = next(binding for binding in embodiment.cameras if binding.name == camera.name)
     measured_from = measured.get(binding.frame)
     optics = camera.nominal
-    measured = camera.calibration
+    calibrated = camera.calibration
     view: dict[str, JsonValue] = {
         "camera": camera.name,
         "model": str(binding.camera.model),
@@ -258,14 +258,14 @@ def _view(
         "height": optics.height,
         "fps": binding.camera.fps,
         "image_from_camera": list(
-            measured.image_from_camera if measured is not None else optics.image_from_camera
+            calibrated.image_from_camera if calibrated is not None else optics.image_from_camera
         ),
         "distortion_model": (
-            measured.distortion_model if measured is not None else optics.distortion_model
+            calibrated.distortion_model if calibrated is not None else optics.distortion_model
         ),
         "distortion_coefficients": list(
-            measured.distortion_coefficients
-            if measured is not None
+            calibrated.distortion_coefficients
+            if calibrated is not None
             else optics.distortion_coefficients
         ),
         "unit": None if camera.unit is None else str(camera.unit),
