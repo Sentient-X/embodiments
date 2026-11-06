@@ -109,6 +109,7 @@ fn main() {
         limbs: TeleopConfig::static_upper_body_limbs(),
         speed,
         accel,
+        jerk: std::collections::BTreeMap::new(),
         ramp_s: 0.1,
         max_step_rad: 0.08,
         held: Vec::new(),

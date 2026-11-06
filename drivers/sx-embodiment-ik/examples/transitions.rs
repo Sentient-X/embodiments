@@ -15,10 +15,10 @@
 //! - **jump**: a 10 cm jump mid-session (engaged and at rest for 1 s) along each of +-x, +-y,
 //!   +-z: mean and worst time to within 5 mm.
 //!
-//! A joint's jerk cap is the config's (`jerk`), else its acceleration over the config's
-//! `ramp_s`, given to the solve (`Teleop::set_jerk_cap`; `SX_NO_JERK=1` gives none, the solve
-//! as it ran before caps). Acceleration and jerk are the commanded positions differenced, from
-//! rest at engage.
+//! A joint's jerk cap is the config's (`jerk`, `TeleopConfig::jerk`), else its acceleration over
+//! the config's `ramp_s`: the solve shapes each hand's target within it (`sx_embodiment_ik::shaper`).
+//! Acceleration and jerk are the commanded positions differenced, from rest at engage. Run the
+//! base revision's binary for the before.
 //!
 //! ```text
 //! cargo run --release -p sx-embodiment-ik --example transitions -- [fixture|governed|station] [trace.json]
@@ -119,13 +119,11 @@ fn config_json(which: &str) -> Value {
     config
 }
 
-/// The config the solve takes (its `jerk` given to the solve by `Teleop::set_jerk_cap`).
+/// The config the solve takes, and as JSON.
 fn config(which: &str) -> (TeleopConfig, Value) {
     let json = config_json(which);
-    let mut bare = json.clone();
-    bare.as_object_mut().expect("object").remove("jerk");
     (
-        TeleopConfig::parse(&bare.to_string()).expect("the station's solve config"),
+        TeleopConfig::parse(&json.to_string()).expect("the station's solve config"),
         json,
     )
 }
@@ -148,17 +146,6 @@ impl Bench {
         let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
             .expect("solve");
         solve.set_deadline(std::time::Duration::from_secs(3600));
-        // Each joint's jerk cap, as the station gives it (`SX_NO_JERK`: none, as before caps).
-        let ramp = json["ramp_s"].as_f64().expect("ramp");
-        if std::env::var_os("SX_NO_JERK").is_none() {
-            for axis in solve.model().axes().to_vec() {
-                let a = json["accel"][&axis.name].as_f64();
-                let j = json["jerk"][&axis.name].as_f64().or(a.map(|a| a / ramp));
-                if let Some(j) = j {
-                    solve.set_jerk_cap(&axis.name, j);
-                }
-            }
-        }
         let names: Vec<String> = solve
             .model()
             .axes()
@@ -244,6 +231,19 @@ fn run(
             eprintln!("ACT {t:.2} {:?} {:?}", step.solve, step.limbs[0].active);
         }
         q.copy_from_slice(&step.q);
+        let solved = step.solve;
+        if std::env::var("SX_DEBUG_RUN").is_ok() {
+            let shaped = bench.solve.shaped()[0].map_or([f64::NAN; 3], |p| p.translation_m);
+            let tool = bench.tools(&q)[0].translation_m;
+            let target = targets.tcp[0].map_or([f64::NAN; 3], |p| p.translation_m);
+            eprintln!(
+                "RUN {t:.2} target {:+.4} shaped {:+.4} tool {:+.4} {:?}",
+                target[1] - from[0].translation_m[1],
+                shaped[1] - from[0].translation_m[1],
+                tool[1] - from[0].translation_m[1],
+                solved
+            );
+        }
         out.left.push(bench.tools(&q)[0].translation_m);
         out.target.push(targets.tcp[0].map(|p| p.translation_m));
         out.q.push(q.clone());
@@ -261,7 +261,7 @@ struct Peaks {
     jerk_joint: String,
 }
 
-fn peaks(bench: &Bench, run: &Run, from_s: f64, to_s: f64) -> Peaks {
+fn peaks_of(bench: &Bench, axes: &[usize], run: &Run, from_s: f64, to_s: f64) -> Peaks {
     let mut p = Peaks {
         accel_share: 0.0,
         jerk_share: 0.0,
@@ -270,7 +270,7 @@ fn peaks(bench: &Bench, run: &Run, from_s: f64, to_s: f64) -> Peaks {
         jerk_joint: String::new(),
     };
     let n = run.q.len();
-    for &axis in &bench.arm {
+    for &axis in axes {
         let (_, a_cap, j_cap) = bench.caps[axis];
         // Velocity, acceleration, from rest before tick 0.
         let mut v_prev = 0.0;
@@ -280,7 +280,10 @@ fn peaks(bench: &Bench, run: &Run, from_s: f64, to_s: f64) -> Peaks {
             let a = (v - v_prev) / DT;
             let j = (a - a_prev) / DT;
             let t = k as f64 * DT;
-            if std::env::var("SX_DEBUG_JERK").is_ok() && j.abs() / j_cap > 1.05 && t <= 0.6 {
+            if std::env::var("SX_DEBUG_JERK").is_ok()
+                && j.abs() / j_cap > 1.05
+                && (t <= 0.6 || std::env::var("SX_DEBUG_JERK").as_deref() == Ok("all"))
+            {
                 eprintln!(
                     "JERK {t:.2} {} {:.1}x a {:.2} v {:.3}",
                     bench.names[axis],
@@ -334,10 +337,17 @@ fn moved(from: &Pose, by: [f64; 3]) -> Pose {
     p
 }
 
-fn line(label: &str, p: &Peaks, extra: &str) {
+/// The arms' and torso's peaks, then the neck's, on one line.
+fn split(bench: &Bench, label: &str, run: &Run, from_s: f64, to_s: f64, extra: &str) {
+    let (arms, neck): (Vec<usize>, Vec<usize>) = bench
+        .arm
+        .iter()
+        .partition(|&&a| !bench.names[a].starts_with("so101_"));
+    let a = peaks_of(bench, &arms, run, from_s, to_s);
+    let n = peaks_of(bench, &neck, run, from_s, to_s);
     println!(
-        "{label:<34} accel {:>5.2}x ({:<26}) jerk {:>6.2}x ({:<26}) {:>8.0} rad/s^3  {extra}",
-        p.accel_share, p.accel_joint, p.jerk_share, p.jerk_joint, p.jerk
+        "{label:<26} arms accel {:>5.2}x jerk {:>5.2}x ({:<26}) | neck accel {:>5.2}x jerk {:>5.2}x  {extra}",
+        a.accel_share, a.jerk_share, a.jerk_joint, n.accel_share, n.jerk_share
     );
 }
 
@@ -353,7 +363,11 @@ fn main() {
         rad_s: 3.0,
     });
     // Engage with a far first target: as an operator's jump and as a program's first row.
-    for (label, offset) in [("10 cm", [0.0, 0.10, 0.0]), ("30 cm", [0.10, 0.10, 0.2645])] {
+    for (label, offset) in [
+        ("0 cm", [0.0, 0.0, 0.0]),
+        ("10 cm", [0.0, 0.10, 0.0]),
+        ("30 cm", [0.10, 0.10, 0.2645]),
+    ] {
         for (who, speed) in [("operator", None), ("program", program)] {
             let r = run(&mut bench, 2.5, |t, from| {
                 let targets = Targets {
@@ -372,11 +386,13 @@ fn main() {
                     );
                 }
             }
-            let p = peaks(&bench, &r, 0.0, WINDOW_S);
             let to5 = settled(&r, 0.0, 0.005).map_or("never".into(), |s| format!("{s:.2} s"));
-            line(
+            split(
+                &bench,
                 &format!("engage {label} {who}"),
-                &p,
+                &r,
+                0.0,
+                WINDOW_S,
                 &format!("to 5 mm {to5}"),
             );
         }
@@ -402,47 +418,57 @@ fn main() {
             );
         }
     }
-    line("plan start", &peaks(&bench, &r, 0.0, WINDOW_S), "");
-    line(
+    split(&bench, "plan start", &r, 0.0, WINDOW_S, "");
+    split(
+        &bench,
         "plan end",
-        &peaks(
-            &bench,
-            &r,
-            arrived - WINDOW_S / 2.0,
-            arrived + WINDOW_S / 2.0,
-        ),
+        &r,
+        arrived - WINDOW_S / 2.0,
+        arrived + WINDOW_S / 2.0,
         &format!("within 5 mm at {arrived:.2} s"),
     );
-    // Release mid-sweep: engaged at rest, a 0.5 m/s sweep from 0.5 s, let go at 0.7 s.
-    let release_s = 0.7;
-    let r = run(&mut bench, 2.0, |t, from| {
-        let along = 0.5 * (t - 0.5).clamp(0.0, 1.0);
-        let targets = if t < release_s {
-            Targets {
-                tcp: [Some(moved(&from[0], [0.0, along, 0.0])), Some(from[1])],
-                ..Targets::default()
-            }
-        } else {
-            Targets::default()
-        };
-        (targets, t <= DT + 1e-9)
-    });
-    let k0 = (release_s / DT).round() as usize - 1;
-    let rest = (k0 + 1..r.q.len())
-        .find(|&k| {
-            bench
-                .arm
-                .iter()
-                .all(|&a| (r.q[k][a] - r.q[k - 1][a]).abs() <= 1e-9)
-        })
-        .map_or(f64::NAN, |k| (k - 1 - k0) as f64 * DT);
-    let rest_k = ((release_s + rest) / DT).round() as usize;
-    let went = distance(r.left[k0], r.left[rest_k.min(r.left.len() - 1)]);
-    line(
-        "release at 0.5 m/s",
-        &peaks(&bench, &r, release_s - DT, release_s + WINDOW_S),
-        &format!("tool on {:.1} mm, still in {rest:.2} s", went * 1e3),
-    );
+    // Release mid-sweep: engaged at rest, a sweep from 0.5 s, let go at 0.7 s: at 0.2 m/s, within
+    // the joints' line speed on the governed caps, and at 0.5 m/s, past it (joints at their speed
+    // caps, as main holds them).
+    for sweep in [0.2, 0.5] {
+        let release_s = 0.7;
+        let r = run(&mut bench, 2.0, |t, from| {
+            let along = sweep * (t - 0.5).clamp(0.0, 1.0);
+            let targets = if t < release_s {
+                Targets {
+                    tcp: [Some(moved(&from[0], [0.0, along, 0.0])), Some(from[1])],
+                    ..Targets::default()
+                }
+            } else {
+                Targets::default()
+            };
+            (targets, t <= DT + 1e-9)
+        });
+        let k0 = (release_s / DT).round() as usize - 1;
+        // The released arm's own joints (the right hand stays driven where it stands).
+        let left: Vec<usize> = bench
+            .arm
+            .iter()
+            .copied()
+            .filter(|&a| bench.names[a].starts_with("left_"))
+            .collect();
+        let rest = (k0 + 1..r.q.len())
+            .find(|&k| {
+                left.iter()
+                    .all(|&a| (r.q[k][a] - r.q[k - 1][a]).abs() <= 1e-9)
+            })
+            .map_or(f64::NAN, |k| (k - 1 - k0) as f64 * DT);
+        let rest_k = ((release_s + rest) / DT).round() as usize;
+        let went = distance(r.left[k0], r.left[rest_k.min(r.left.len() - 1)]);
+        split(
+            &bench,
+            &format!("release at {sweep} m/s"),
+            &r,
+            release_s - DT / 2.0,
+            release_s + WINDOW_S,
+            &format!("tool on {:.1} mm, still in {rest:.2} s", went * 1e3),
+        );
+    }
     // 10 cm jumps mid-session.
     let mut times = Vec::new();
     for axis in 0..3 {

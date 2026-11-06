@@ -502,8 +502,8 @@ pub struct Ik {
     target_velocity: Vec<Option<(Vec3, Vec3)>>,
     limb_lag: Vec<f64>,
     follower_lag: Vec<f64>,
-    /// The closest commanded pair's room to its margin at the last step, metres; zero before
-    /// the first step after a reset (no feedforward until the room is measured).
+    /// The closest commanded pair's room to its margin at the last step, metres; not a number
+    /// after a reset, until the next step measures it where it starts.
     closest_room: f64,
     /// Per axis, its jerk cap (unit/s^3; infinite: none), and per solved column the last
     /// step's acceleration: the state's third derivative bounded as its second is
@@ -711,7 +711,7 @@ impl Ik {
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
             target_velocity: vec![None; limbs],
             limb_lag: vec![0.0; limbs],
-            closest_room: 0.0,
+            closest_room: f64::NAN,
             follower_lag: vec![0.0; axes_count],
             jerk: vec![f64::INFINITY; axes_count],
             acceleration: vec![0.0; n],
@@ -770,7 +770,7 @@ impl Ik {
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
         self.acceleration.fill(0.0);
-        self.closest_room = 0.0;
+        self.closest_room = f64::NAN;
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
         self.tool_moved.fill(([0.0; 3], [0.0; 3]));
@@ -1000,25 +1000,8 @@ impl Ik {
     /// control thread may check each configuration it commands. `q` holds one finite position
     /// per axis.
     pub fn clearance_into(&self, q: &[f64], frames: &mut Frames) -> Clearance {
-        let body = &self.body;
-        body.model.poses_into(q, frames);
-        let mut clearance = Clearance {
-            body_m: f64::INFINITY,
-            scene_m: f64::INFINITY,
-        };
-        for &(i, j) in &body.proxies.pairs {
-            clearance.body_m = clearance
-                .body_m
-                .min(capsule_distance(body, frames, i, j, 0.0).0);
-        }
-        for &(index, k) in &self.scene_pairs {
-            let capsule = &body.proxies.capsules[index];
-            let (a, b) = world(frames, capsule);
-            clearance.scene_m = clearance
-                .scene_m
-                .min(segment_box(&self.scene[k], a, b).1 - capsule.radius);
-        }
-        clearance
+        self.body.model.poses_into(q, frames);
+        clearance_at(&self.body, &self.scene_pairs, &self.scene, frames)
     }
 
     /// One tick: the next positions from `q` toward `targets` (one per limb, in
@@ -1113,6 +1096,21 @@ impl Ik {
                 self.velocity[column] = 0.0;
                 self.acceleration[column] = 0.0;
             }
+        }
+        // The first step after a reset fades the target's motion by the room where it starts
+        // (every pair, not only those in influence): left at zero, it asked the first tick of an
+        // engage for no motion and the next for two ticks' (3.6x a shoulder's jerk cap,
+        // `examples/transitions.rs`).
+        if self.closest_room.is_nan() {
+            let clearance = clearance_at(
+                &self.body,
+                &self.scene_pairs,
+                &self.scene,
+                &self.work.frames,
+            );
+            self.closest_room = (clearance.body_m.min(clearance.scene_m)
+                - self.settings.collision_margin_m)
+                .max(0.0);
         }
         self.cost(q, targets, dt);
         self.bounds(q, dt);
@@ -2281,6 +2279,32 @@ fn within(lo: &mut f64, hi: &mut f64, (low, high): (f64, f64)) -> bool {
     }
 }
 
+/// Every pair's clearance at `frames`: the body's own and its scene's.
+fn clearance_at(
+    body: &Body,
+    scene_pairs: &[(usize, usize)],
+    scene: &[Obstacle],
+    frames: &Frames,
+) -> Clearance {
+    let mut clearance = Clearance {
+        body_m: f64::INFINITY,
+        scene_m: f64::INFINITY,
+    };
+    for &(i, j) in &body.proxies.pairs {
+        clearance.body_m = clearance
+            .body_m
+            .min(capsule_distance(body, frames, i, j, 0.0).0);
+    }
+    for &(index, k) in scene_pairs {
+        let capsule = &body.proxies.capsules[index];
+        let (a, b) = world(frames, capsule);
+        clearance.scene_m = clearance
+            .scene_m
+            .min(segment_box(&scene[k], a, b).1 - capsule.radius);
+    }
+    clearance
+}
+
 /// The fastest per-tick step from which ticks decelerating by at most `accel` still stop
 /// within `room`: `v dt + v^2 / 2a + v dt / 2 <= room`.
 fn braking(room: f64, accel: f64, dt: f64) -> f64 {
@@ -2626,7 +2650,7 @@ fn within_tool_speed(e_p: Vec3, e_r: Vec3, most: Option<(f64, f64)>, s: &Setting
 }
 
 /// Solve `m x = b` in place for a symmetric positive definite 6x6 `m` (`b` becomes `x`).
-fn cholesky_solve(m: &mut [[f64; 6]; 6], b: &mut [f64; 6]) {
+pub(crate) fn cholesky_solve(m: &mut [[f64; 6]; 6], b: &mut [f64; 6]) {
     for j in 0..6 {
         let mut diagonal = m[j][j];
         for k in 0..j {
