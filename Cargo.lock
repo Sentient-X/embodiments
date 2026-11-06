@@ -1264,6 +1264,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sx-frames",
+ "sx-realtime",
  "thiserror 2.0.21",
 ]
 

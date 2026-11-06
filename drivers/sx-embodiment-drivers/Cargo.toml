@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 sx-frames.workspace = true
+# A bus thread of a multi-bus body takes its caller's real-time policy (chains.rs).
+sx-realtime.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
