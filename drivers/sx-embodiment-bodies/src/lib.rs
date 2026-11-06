@@ -835,9 +835,11 @@ fn registered(embodiment: &str) -> Result<(&'static str, BodyBindings), OpenErro
 
 /// The registered body a drive assigned `embodiment` opens as: the body whose id it is, or one
 /// of whose earlier ids (`supersedes`, which drive exactly as it) it is. `id` on the answer is
-/// the body's current id, what the opened body is read as: a consumer bound to a revision (a
-/// tool-point check) compares that, never the stored assignment's id, so a robot still assigned
-/// an earlier id is the body it opens as.
+/// the body's current id, what the opened body is read as. A consumer bound to what one
+/// revision describes reads that revision through the assigned id: the tool-point check
+/// compares [`BodyBindings::tool_chain`] of the id the robot is assigned, so a robot still
+/// assigned an earlier revision keeps its check only when that revision's chain to the tool
+/// points is the one checked.
 ///
 /// # Errors
 ///

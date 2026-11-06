@@ -106,16 +106,30 @@ def test_a_check_of_another_revision_or_other_links_drives_nothing(
         assert "tool_points_checked" not in fields
 
 
-def _moved(urdf: bytes, joint: str) -> bytes:
-    """``urdf`` with ``joint``'s origin moved a millimetre along x."""
+def _edited(urdf: bytes, joint: str, **change: str) -> bytes:
+    """``urdf`` with ``joint`` changed: ``xyz``/``rpy`` set its origin, ``axis`` its axis,
+    ``type`` its type, ``upper`` its limit's upper bound."""
     import xml.etree.ElementTree as ET
 
     root = ET.fromstring(urdf)  # nosec B314 - the registry's own description
     element = next(j for j in root.findall("joint") if j.get("name") == joint)
-    origin = element.find("origin")
-    assert origin is not None
-    x, y, z = (float(v) for v in origin.get("xyz", "0 0 0").split())
-    origin.set("xyz", f"{x + 0.001} {y} {z}")
+    for key, value in change.items():
+        if key == "type":
+            element.set("type", value)
+        elif key in ("xyz", "rpy"):
+            origin = element.find("origin")
+            if origin is None:
+                origin = ET.SubElement(element, "origin")
+            origin.set(key, value)
+        elif key == "axis":
+            axis = element.find("axis")
+            if axis is None:
+                axis = ET.SubElement(element, "axis")
+            axis.set("xyz", value)
+        else:
+            limit = element.find("limit")
+            assert limit is not None
+            limit.set(key, value)
     return ET.tostring(root)
 
 
@@ -127,11 +141,76 @@ def test_the_chain_is_what_was_checked_and_nothing_else() -> None:
     assert record is not None
     urdf = body.urdf_bytes
     kinematics = Kinematics.of(urdf)
-    on_path = kinematics.joints[kinematics.parent_joint["left_gripper_tcp"]].name
-    # A camera's mount is on no tool point's chain.
-    camera = kinematics.joints[kinematics.parent_joint["ZED_camera"]].name
-    assert tool_chain(_moved(urdf, on_path), record.points) != record.chain
-    assert tool_chain(_moved(urdf, camera), record.points) == record.chain
+    assert tool_chain(urdf, record.points) == record.chain
+
+    def above(link: str) -> str:
+        return kinematics.joints[kinematics.parent_joint[link]].name
+
+    tcp = above("left_gripper_tcp")
+    mount = kinematics.joints[tcp].parent
+    finger = next(j.name for j in kinematics.joints.values() if j.parent == mount and j.name != tcp)
+    revolute = next(
+        j.name
+        for j in kinematics.joints.values()
+        if j.type.value == "revolute" and j.name.startswith("left_") and "finger" not in j.name
+    )
+    moved = {
+        "the tool point, along x": _edited(urdf, tcp, xyz="0.2 0 0"),
+        "the tool point, turned": _edited(urdf, tcp, rpy="0 0.1 0"),
+        "a joint up the arm, turned": _edited(urdf, revolute, rpy="0.1 0 0"),
+        "a joint up the arm, its axis": _edited(urdf, revolute, axis="0 0 -1"),
+        "a joint up the arm, its type": _edited(urdf, revolute, type="continuous"),
+        "the right tool point": _edited(urdf, above("right_gripper_tcp"), xyz="0.2 0 0"),
+        "a finger of the tool": _edited(urdf, finger, xyz="0.03 0 0"),
+        "a finger's axis": _edited(urdf, finger, axis="0 1 0"),
+    }
+    for what, edited in moved.items():
+        assert tool_chain(edited, record.points) != record.chain, what
+    # Off the tool path: the head's camera mount, and a joint's range.
+    unchanged = {
+        "the camera mount": _edited(urdf, above("ZED_camera"), xyz="0.5 0 0"),
+        "a joint's limit": _edited(urdf, revolute, upper="0.5"),
+    }
+    for what, edited in unchanged.items():
+        assert tool_chain(edited, record.points) == record.chain, what
+
+
+def test_an_earlier_revisions_chain_is_read_from_its_own_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bindings' chain for a superseded id comes from that revision's kept description:
+    an earlier revision whose tool point sat elsewhere names its own chain, never today's."""
+    import importlib.util
+    import types
+    from pathlib import Path
+
+    from sx_embodiments.kinematics import Kinematics
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "render_driver_bindings.py"
+    spec = importlib.util.spec_from_file_location("render_driver_bindings", path)
+    assert spec is not None and spec.loader is not None
+    bindings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bindings)
+    body = _body("sentient-static-upper-body")
+    record = tool_points_checked_of("sentient-static-upper-body")
+    assert record is not None
+    kinematics = Kinematics.of(body.urdf_bytes)
+    tcp = kinematics.joints[kinematics.parent_joint["left_gripper_tcp"]].name
+    elsewhere = _edited(body.urdf_bytes, tcp, xyz="0.2 0 0")
+    monkeypatch.setattr(
+        bindings,
+        "read_recorded",
+        lambda _document: types.SimpleNamespace(
+            embodiment=types.SimpleNamespace(urdf_bytes=elsewhere)
+        ),
+    )
+    document = bindings.document("sentient-static-upper-body")
+    chains = document["tool_chains"]
+    assert chains[document["id"]] == record.chain
+    earlier = [identity for identity in chains if identity != document["id"]]
+    assert earlier, "the static body supersedes earlier ids"
+    for identity in earlier:
+        assert chains[identity] != record.chain, identity
 
 
 def test_every_id_a_checked_body_may_be_assigned_names_its_chain() -> None:

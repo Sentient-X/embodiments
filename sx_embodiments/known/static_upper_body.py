@@ -479,7 +479,7 @@ STATIC_UPPER_BODY_SPEC: Final = EmbodimentDefinition(
     # frames the station's own IK drives (TeleopConfig::static_upper_body_limbs). This record
     # claims only what is true: the owner accepted them as proven by use; nobody measured them.
     tool_points_checked=ToolPointCheck(
-        chain="43df8f6804b7c715c5aa986554e9445b7bc3396e85ccae7f76aee461ad3d25b8",
+        chain="379a4a1b96dd753872a22f4e772bb874bb0f1408053dab3580d64018c87b7203",
         points={"left": "left_gripper_tcp", "right": "right_gripper_tcp"},
         checked_by="the owner, accepting the static upper body's tool points as proven by use",
         # The day this record bound the acceptance to the chain below; the use it rests on
