@@ -43,6 +43,14 @@ pub enum Target {
         axis: [f64; 3],
         toward: [f64; 3],
     },
+    /// No target: come to rest. Each of the limb's joints (and a joint it shares, when no other
+    /// limb has a target) brakes from its commanded motion to standing still within its
+    /// acceleration cap and its follower's jerk (`sx_embodiment_drivers::jerk`), as the rows
+    /// allow: an operator letting go mid-sweep. Brought to rest along the tool's line instead,
+    /// a sweep that held joints at their speed caps (0.5 m/s on the static upper body's
+    /// governed caps) left them with a kink at 6x a shoulder's jerk cap, and a stop short
+    /// enough to bound the coast raised its bounds past the caps.
+    Rest,
 }
 
 #[derive(Clone, Debug)]

@@ -521,7 +521,18 @@ fn write_trace(bench: &mut Bench, path: &str) {
     let start = bench.tools(&q);
     let first = moved(&start[0], [0.10, 0.10, 0.2645]);
     let available = vec![true; q.len()];
-    let mut ticks = Vec::new();
+    // The robot at rest before the first tick: the gate differences from here, so the first
+    // tick's own move counts (padded with the first tick's pose instead, its second tick read
+    // as a start from rest a tick late, 2.6x).
+    let mut ticks = vec![json!({
+        "t": 0.0,
+        "q": q,
+        "target": {"left": document(&start[0]), "right": document(&start[1])},
+        "taken": {"left": document(&start[0]), "right": document(&start[1])},
+        "width": [0.07, 0.07],
+        "solve": "Solved",
+        "took_us": 0.0,
+    })];
     let mut hold = start;
     let count = (6.0 / DT).round() as usize;
     for tick in 1..=count {
