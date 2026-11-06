@@ -26,10 +26,14 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sx_contracts.identity import JsonValue, content_digest
 
 from .errors import EmbodimentError
+
+if TYPE_CHECKING:
+    from .kinematics import Joint
 
 
 class ToolPointCheckError(EmbodimentError):
@@ -77,12 +81,35 @@ def _rounded(values: tuple[float, ...]) -> list[float]:
     return [round(float(value), 9) + 0.0 for value in values]
 
 
+def _joint(joint: Joint) -> JsonValue:
+    mimic: JsonValue = None
+    if joint.mimic is not None:
+        mimic = {
+            "leader": joint.mimic.leader,
+            "multiplier": round(joint.mimic.multiplier, 9) + 0.0,
+            "offset": round(joint.mimic.offset, 9) + 0.0,
+        }
+    origin: list[JsonValue] = [*_rounded(joint.origin)]
+    axis: list[JsonValue] = [*_rounded(joint.axis)]
+    return {
+        "name": joint.name,
+        "type": joint.type.value,
+        "parent": joint.parent,
+        "child": joint.child,
+        "origin": origin,
+        "axis": axis,
+        "mimic": mimic,
+    }
+
+
 def tool_chain(urdf: bytes, points: Mapping[str, str]) -> str:
     """The digest of the kinematic chain from ``urdf``'s root to each tool point in ``points``.
 
-    For each side (sorted), every joint from the root link down to the tool point's link: its
-    name, type, parent and child links, origin transform, axis and mimic. Anything off those
-    paths (another limb, a camera, a mesh, a collision proxy, a joint limit) is not in it.
+    For each side (sorted): every joint from the root link down to the tool point's link, and
+    the tool itself, every joint hanging below the link the tool point is mounted on (a
+    gripper's fingers, whose geometry decides where its jaws close). Each joint by its name,
+    type, parent and child links, origin transform, axis and mimic. Anything off those (another
+    limb, a camera on the head, a mesh, a collision proxy, a joint limit) is not in it.
 
     Raises:
         KinematicsError: a tool point that is not a link of the description.
@@ -96,27 +123,20 @@ def tool_chain(urdf: bytes, points: Mapping[str, str]) -> str:
         while (above := kinematics.parent_joint.get(root)) is not None:
             root = kinematics.joints[above].parent
         _, down = kinematics.path(root, link)
-        joints: list[JsonValue] = []
-        for joint in down:
-            mimic: JsonValue = None
-            if joint.mimic is not None:
-                mimic = {
-                    "leader": joint.mimic.leader,
-                    "multiplier": round(joint.mimic.multiplier, 9) + 0.0,
-                    "offset": round(joint.mimic.offset, 9) + 0.0,
-                }
-            origin: list[JsonValue] = [*_rounded(joint.origin)]
-            axis: list[JsonValue] = [*_rounded(joint.axis)]
-            joints.append(
-                {
-                    "name": joint.name,
-                    "type": joint.type.value,
-                    "parent": joint.parent,
-                    "child": joint.child,
-                    "origin": origin,
-                    "axis": axis,
-                    "mimic": mimic,
-                }
-            )
-        sides.append({"side": side, "root": root, "link": link, "joints": joints})
+        joints: list[JsonValue] = [_joint(joint) for joint in down]
+        # The tool: the joints below the link the tool point hangs from, other than the path.
+        mount = down[-1].parent if down else root
+        on_path = {joint.name for joint in down}
+        below: list[str] = []
+        frontier = [mount]
+        while frontier:
+            parent = frontier.pop()
+            for joint in kinematics.joints.values():
+                if joint.parent == parent and joint.name not in below:
+                    below.append(joint.name)
+                    frontier.append(joint.child)
+        tool: list[JsonValue] = [
+            _joint(kinematics.joints[name]) for name in sorted(below) if name not in on_path
+        ]
+        sides.append({"side": side, "root": root, "link": link, "joints": joints, "tool": tool})
     return str(content_digest(sides))
