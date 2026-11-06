@@ -596,7 +596,9 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
             .enumerate()
             .filter_map(move |(index, at)| {
                 let at = (*at)?;
-                let pressing = sent.and_then(|sent| sent.get(index)).map_or(0.0, |sent| sent - at);
+                let pressing = sent
+                    .and_then(|sent| sent.get(index))
+                    .map_or(0.0, |sent| sent - at);
                 Some((index, at, pressing))
             })
     }
@@ -1255,8 +1257,8 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
                 *stall = None;
                 continue;
             }
-            next[index] = (at + (next[index] - at).clamp(-press, press))
-                .clamp(lower[index], upper[index]);
+            next[index] =
+                (at + (next[index] - at).clamp(-press, press)).clamp(lower[index], upper[index]);
             velocity[index] = 0.0;
         }
     }
@@ -1951,7 +1953,10 @@ mod tests {
         let (axis, at, pressing) = stalls[0];
         assert_eq!(axis, 0);
         assert!((at - 0.1).abs() < 1e-12, "{at}");
-        assert!(pressing > 0.0 && pressing <= reach + 1e-12, "held pressing {pressing}");
+        assert!(
+            pressing > 0.0 && pressing <= reach + 1e-12,
+            "held pressing {pressing}"
+        );
         // Every command after the stall keeps it pressing, never further than its press.
         for sent in &governor.chain().sent[onset + 1..] {
             assert!(sent[0] - 0.1 <= reach + 1e-12, "{}", sent[0]);
