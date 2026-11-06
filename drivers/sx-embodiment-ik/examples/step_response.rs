@@ -126,6 +126,7 @@ fn main() {
         limbs: TeleopConfig::static_upper_body_limbs(),
         speed: speed.clone(),
         accel: accel.clone(),
+        jerk: std::collections::BTreeMap::new(),
         ramp_s: if ramp_s > 0.0 { ramp_s } else { 0.1 },
         max_step_rad: (fastest * DT).max(0.03),
         held: vec!["torso_joint".into()],

@@ -30,6 +30,7 @@ fn config() -> TeleopConfig {
         limbs: TeleopConfig::static_upper_body_limbs(),
         speed,
         accel: BTreeMap::new(),
+        jerk: std::collections::BTreeMap::new(),
         ramp_s: 0.25,
         max_step_rad: 0.03,
         held: Vec::new(),
@@ -142,7 +143,9 @@ fn gaze_turns_the_camera_to_the_head_and_holds_the_rest() {
             assert_eq!(now, was, "{} moved", axis.name);
         }
     }
-    // No head pose: the neck holds too.
+    // No head pose: the neck comes to rest (the look-at point is shaped, `crate::shaper`), then
+    // holds.
+    run(&mut solve, &mut q, &Targets::default(), 150);
     let turned = q.clone();
     run(&mut solve, &mut q, &Targets::default(), 50);
     assert_eq!(q, turned);
@@ -482,7 +485,8 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
     solve.reset();
     let mut reference = q.clone();
     let mut stalled_at = None;
-    let ticks = ((STALL.as_secs_f64() + 1.0) / DT) as usize;
+    let mut at_gap = None;
+    let ticks = ((STALL.as_secs_f64() + 2.0) / DT) as usize;
     for tick in 0..ticks {
         let step = solve
             .step(
@@ -508,14 +512,19 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
             );
             // At most the gap and one tick's step (max_step_rad) ahead of where it stands.
             assert!((reference[elbow] - blocked_at).abs() <= REFERENCE_GAP + 0.03 + 1e-9);
+            if (reference[elbow] - blocked_at).abs() >= REFERENCE_GAP - 0.005 {
+                at_gap.get_or_insert(tick);
+            }
         }
     }
     let stalled_at = stalled_at.expect("the blocked elbow stalled");
+    let at_gap = at_gap.expect("the elbow reached its gap");
     assert!(
-        // The gap is reached in a few tenths, then the stall time runs.
-        (stalled_at as f64) * DT <= STALL.as_secs_f64() + 0.5,
-        "stalled at {:.2} s",
-        stalled_at as f64 * DT
+        // The gap is reached as fast as the shaped hand carries it there (under a second on this
+        // config's 16 rad/s^3 jerk caps), then the stall time runs.
+        ((stalled_at - at_gap) as f64) * DT <= STALL.as_secs_f64() + 0.1,
+        "stalled {:.2} s after reaching the gap",
+        (stalled_at - at_gap) as f64 * DT
     );
     // The hand asks back up: the elbow is free and moves away from what stopped it.
     let mut freed = false;
@@ -751,8 +760,10 @@ fn hold_the_elbow(
     // Answers, not the clock: a debug build past the station's budget would hold steps.
     solve.set_deadline(std::time::Duration::from_secs(3600));
     // The stall rules on the targets as scripted: a hand turning back at once, which no
-    // operator's hand does, would reach the solve through the tremor filter over 100 ms later.
+    // operator's hand does, would reach the solve through the tremor filter over 100 ms later,
+    // and through its shaper jerk-limited (released 0.4 s after the turn).
     solve.set_input_filter(None);
+    solve.set_target_shaping(false);
     let rest: Vec<f64> = solve
         .model()
         .axes()

@@ -41,6 +41,7 @@ fn teleop() -> Teleop {
         limbs: TeleopConfig::static_upper_body_limbs(),
         speed,
         accel: BTreeMap::new(),
+        jerk: std::collections::BTreeMap::new(),
         ramp_s: 0.25,
         max_step_rad: 0.03,
         held: Vec::new(),

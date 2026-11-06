@@ -42,6 +42,14 @@
 //!   it is the only tremor filter between the operator and the robot. A program's goal (a tool
 //!   speed) is smooth by construction and passes as given. Each hand's filter starts afresh at
 //!   [`Teleop::reset`] and whenever the hand stops being driven.
+//! - **starts and ends**: each hand's target, filtered, then passes its [`ToolShaper`]
+//!   ([`crate::shaper`]) before the solve reads it: from where the tool stands at rest, the
+//!   shaped target reaches the asked one jerk-limited and never past it, rides it while it
+//!   moves within the tool's bounds (the joints' caps carried to the tool at the pose), and
+//!   when the hand's target goes (released, let go, a program's end) comes to rest
+//!   jerk-limited before the hand is held ([`Teleop::settling`]). The solve follows the
+//!   shaped target with every row in force. A program's goal is shaped too, under its tool
+//!   speed. Each joint's jerk cap is [`TeleopConfig::jerk`].
 //!
 //! Nothing here allocates per step after [`Teleop::new`], and nothing reads a clock.
 
@@ -54,6 +62,7 @@ use crate::IkError;
 use crate::body::{Body, Limb, Target, Task};
 use crate::geometry::Obstacle;
 use crate::model::{Frames, Model};
+use crate::shaper::{Aim, Shaped, ToolMap, ToolShaper};
 use crate::smoothing::{OneEuro, PoseFilter};
 use crate::solve::{
     Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, ToolSpeed,
@@ -173,6 +182,37 @@ impl Clutch {
     }
 }
 
+/// Whether every joint of `limb` can be held where it is next tick within its acceleration cap
+/// and half its jerk cap, from the velocity `qdot` the last step commanded and `before` the one
+/// before it: a limb whose target went is let go then, so it is held without a jolt (held while
+/// its joints still closed the last fraction of a millimetre, they stopped in a tick at 20x a
+/// shoulder's jerk cap; waiting for them to stand still waited on the posture's creep for ever).
+fn holds(ik: &Ik, limb: usize, qdot: &[f64], before: &[f64], jerk: &[f64], dt: f64) -> bool {
+    let caps = ik.caps();
+    ik.body().limb_axes(limb).iter().all(|&axis| {
+        let v = qdot[axis];
+        let a = (v - before[axis]) / dt;
+        let stop = -v / dt;
+        stop.abs() <= caps.accel[axis] && ((stop - a) / dt).abs() <= 0.5 * jerk[axis]
+    })
+}
+
+/// The rotation vector turning unit `from` onto unit `to` the least.
+fn least_turn(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+    let axis = [
+        from[1] * to[2] - from[2] * to[1],
+        from[2] * to[0] - from[0] * to[2],
+        from[0] * to[1] - from[1] * to[0],
+    ];
+    let sin = axis.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let cos: f64 = (0..3).map(|k| from[k] * to[k]).sum();
+    if sin < 1e-12 {
+        return [0.0; 3];
+    }
+    let angle = sin.atan2(cos);
+    axis.map(|x| x / sin * angle)
+}
+
 /// One limb of the config: a frame of the description and its task.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LimbConfig {
@@ -201,6 +241,12 @@ pub struct TeleopConfig {
     /// Per joint, its acceleration cap in rad/s²; absent: its speed reached in `ramp_s`.
     #[serde(default)]
     pub accel: BTreeMap<String, f64>,
+    /// Per joint, its jerk cap in rad/s³, the most its acceleration changes: its acceleration
+    /// cap over its follower's rise time (`sx_embodiment_drivers::governor::AxisLimits::max_jerk`).
+    /// Absent: its acceleration reached in `ramp_s`. The tool's target is shaped within it
+    /// ([`crate::shaper`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub jerk: BTreeMap<String, f64>,
     /// The time a joint takes to reach its speed cap from rest where `accel` names none.
     pub ramp_s: f64,
     /// The most any joint moves in one tick ([`Settings::max_step_rad`]).
@@ -505,6 +551,27 @@ pub struct Teleop {
     gated: Vec<Option<f64>>,
     /// Per axis, the readings smoothed over [`STEADY_S`]: where the gap and a stall are judged.
     steady: Vec<f64>,
+    /// Per hand, how its filtered target moves (the filter's estimate, or the caller's).
+    rates: [Option<([f64; 3], [f64; 3])>; 2],
+    /// Per axis, its jerk cap ([`TeleopConfig::jerk`]).
+    jerk: Vec<f64>,
+    /// Per hand, its target's shaper ([`crate::shaper`]); the camera's look-at point's; the map
+    /// their bounds are read from.
+    shapers: [ToolShaper; 2],
+    gaze: ToolShaper,
+    map: ToolMap,
+    /// Per limb, the axes its tool's bounds are carried from; per axis, whether it moves this
+    /// tick; the limb's Jacobian.
+    shape_axes: Vec<Vec<usize>>,
+    shape_moving: Vec<bool>,
+    jv: Vec<[f64; 3]>,
+    jw: Vec<[f64; 3]>,
+    /// Per hand, its last target's free roll and tool speed, kept while it comes to rest.
+    kept: [(bool, Option<ToolSpeed>); 2],
+    /// Per axis, the velocity the step before the last commanded.
+    qdot_before: Vec<f64>,
+    /// Whether targets pass their shapers ([`Teleop::set_target_shaping`]).
+    shaping: bool,
 }
 
 impl Teleop {
@@ -542,6 +609,7 @@ impl Teleop {
             .speed
             .keys()
             .chain(config.accel.keys())
+            .chain(config.jerk.keys())
             .chain(&config.held)
             .chain(config.posture.keys())
         {
@@ -557,6 +625,7 @@ impl Teleop {
         }
         let mut speed = Vec::with_capacity(names.len());
         let mut accel = Vec::with_capacity(names.len());
+        let mut jerk = Vec::with_capacity(names.len());
         for (index, name) in names.iter().enumerate() {
             let cap = match config.speed.get(name) {
                 Some(cap) => *cap,
@@ -564,13 +633,13 @@ impl Teleop {
                 None => return Err(IkError::NoSpeed(name.clone())),
             };
             speed.push(cap);
-            accel.push(
-                config
-                    .accel
-                    .get(name)
-                    .copied()
-                    .unwrap_or(cap / config.ramp_s),
-            );
+            let a = config
+                .accel
+                .get(name)
+                .copied()
+                .unwrap_or(cap / config.ramp_s);
+            accel.push(a);
+            jerk.push(config.jerk.get(name).copied().unwrap_or(a / config.ramp_s));
         }
         let settings = Settings {
             max_step_rad: config.max_step_rad,
@@ -619,6 +688,18 @@ impl Teleop {
             .map(|name| config.held.contains(name))
             .collect();
         let grippers = HANDS.map(|side| Gripper::of(&body, side));
+        // The axes a hand's tool bounds are carried from: its own, not one it shares (a torso,
+        // held unless every limb is driven, which the damped least-squares motion would hand a
+        // share its low caps never take: the bounds fell to a third and it still saturated).
+        let shape_axes = (0..limb_names.len())
+            .map(|index| {
+                body.limb_axes(index)
+                    .iter()
+                    .copied()
+                    .filter(|&axis| limbs_of[axis].is_power_of_two())
+                    .collect()
+            })
+            .collect();
         let mut q = vec![0.0; width];
         for (slot, axis) in q.iter_mut().zip(body.model().axes()) {
             if let Some([lower, upper]) = axis.limits {
@@ -684,7 +765,29 @@ impl Teleop {
             filters: [PoseFilter::default(); 2],
             clock_s: 0.0,
             taken: Targets::default(),
+            rates: [None; 2],
+            jerk,
+            shapers: [ToolShaper::default(); 2],
+            gaze: ToolShaper::default(),
+            map: ToolMap::with_capacity(3 * width),
+            shape_axes,
+            shape_moving: vec![false; width],
+            jv: vec![[0.0; 3]; width],
+            jw: vec![[0.0; 3]; width],
+            kept: [(false, None); 2],
+            qdot_before: vec![0.0; width],
+            shaping: true,
         })
+    }
+
+    /// Whether each target passes its shaper ([`crate::shaper`], the default); `false` hands the
+    /// solve the targets as given, with the filter's estimate of a hand's motion, as before the
+    /// shaper: a measurement of the solve's own rules on scripted targets (a hand turning back in
+    /// a tick, which the shaper takes jerk-limited). Every shaper starts afresh.
+    pub fn set_target_shaping(&mut self, shaping: bool) {
+        self.shaping = shaping;
+        self.shapers = [ToolShaper::default(); 2];
+        self.gaze = ToolShaper::default();
     }
 
     /// The filter an operator's tool targets pass (default [`OneEuro::TOOL`]); `None` passes
@@ -763,12 +866,8 @@ impl Teleop {
                     None
                 }
             };
-            // Where the hand is going, for the solve to follow it.
-            for (limb, of) in self.hand_of.iter().enumerate() {
-                if *of == Some(hand) {
-                    self.ik.set_target_velocity(limb, rates);
-                }
-            }
+            // Where the hand is going, for its shaper to follow it.
+            self.rates[hand] = rates;
         }
         self.taken = out;
         out
@@ -856,6 +955,224 @@ impl Teleop {
         self.ik.reset();
         self.seed = true;
         self.filters = [PoseFilter::default(); 2];
+        self.shapers = [ToolShaper::default(); 2];
+        self.gaze = ToolShaper::default();
+    }
+
+    /// Whether a shaped target still has motion to bring to rest: a caller whose targets went
+    /// (the operator let go, the intent went stale, a plan ended) keeps stepping with none until
+    /// this is false, then holds; each limb is held as soon as it can be without a jolt. A stop at
+    /// the jerk bound from 0.5 m/s takes about a quarter of a second.
+    #[must_use]
+    pub fn settling(&self) -> bool {
+        self.shaping && (self.shapers.iter().any(ToolShaper::is_active) || self.gaze.is_active())
+    }
+
+    /// Each hand's target as the solve last followed it, shaped ([`crate::shaper`]).
+    #[must_use]
+    pub fn shaped(&self) -> [Option<Pose>; 2] {
+        self.shapers.map(|s| s.shaped().map(|s| s.pose))
+    }
+
+    /// Each hand's target shaped from where its tool stands ([`crate::shaper`]): `asked` holds
+    /// the targets the solve then takes. A hand whose target went comes to rest.
+    fn shape(&mut self, targets: &Targets, asked: &mut Targets, available: &[bool], dt: f64) {
+        if !self.shaping {
+            *asked = *targets;
+            for (limb, hand) in self.hand_of.iter().enumerate() {
+                if let Some(hand) = *hand {
+                    self.ik.set_target_velocity(limb, self.rates[hand]);
+                }
+            }
+            return;
+        }
+        self.ik.body().model().poses_into(&self.q, &mut self.frames);
+        // The limbs driven this tick, as the step will hold them: an axis moves only while every
+        // limb it carries is (a torso carries both arms and the neck).
+        let mut driven = 0_u64;
+        let hands = (0..HANDS.len())
+            .any(|hand| targets.tcp[hand].is_some() || self.shapers[hand].is_active());
+        for (index, hand) in self.hand_of.iter().enumerate().take(64) {
+            let on = match hand {
+                Some(hand) => targets.tcp[*hand].is_some() || self.shapers[*hand].is_active(),
+                None => {
+                    Some(index) == self.head
+                        && (targets.head.is_some() || hands || self.gaze.is_active())
+                }
+            };
+            if on {
+                driven |= 1 << index;
+            }
+        }
+        for (axis, moving) in self.shape_moving.iter_mut().enumerate() {
+            *moving = available[axis]
+                && !self.held[axis]
+                && self.limbs_of[axis] != 0
+                && self.limbs_of[axis] & !driven == 0;
+        }
+        let rho = self.ik.settings().orientation_m_per_rad;
+        let damping = self.ik.settings().damping;
+        for (limb, hand) in self.hand_of.iter().enumerate() {
+            let Some(hand) = *hand else { continue };
+            let shaper = &mut self.shapers[hand];
+            // Its target went: held at once where the limb can be held without a jolt ([`holds`]),
+            // and otherwise brought to rest first.
+            if targets.tcp[hand].is_none()
+                && holds(
+                    &self.ik,
+                    limb,
+                    &self.step.qdot,
+                    &self.qdot_before,
+                    &self.jerk,
+                    dt,
+                )
+            {
+                shaper.reset();
+            }
+            // Aimed where the target will be at the tick's end, along its own motion: the solve
+            // once led a moving hand by a tick this way itself.
+            let aim = targets.tcp[hand].map(|pose| Aim {
+                pose: self.rates[hand].map_or(pose, |(v, w)| {
+                    Shaped {
+                        pose,
+                        velocity: v,
+                        turning: w,
+                    }
+                    .at(dt)
+                }),
+                motion: self.rates[hand],
+                free_axis: targets.free_roll[hand]
+                    .then_some(self.approach[limb])
+                    .flatten()
+                    .map(|axis| pose.rotation.rotate(axis)),
+            });
+            if aim.is_none() && !shaper.is_active() {
+                asked.tcp[hand] = None;
+                self.ik.set_target_velocity(limb, None);
+                continue;
+            }
+            let body = self.ik.body();
+            body.jacobian(&self.frames, limb, &mut self.jv, &mut self.jw);
+            let caps = self.ik.caps();
+            self.map.of_limb(
+                &self.jv,
+                &self.jw,
+                &self.shape_axes[limb],
+                &self.shape_moving,
+                (&caps.speed, &caps.accel, &self.jerk),
+                rho,
+                damping,
+            );
+            if let Some(speed) = asked.tool_speed[hand] {
+                self.map.at_most(speed.m_s, speed.rad_s);
+            }
+            let frames = &self.frames;
+            let next = shaper.step(
+                || body.frame(frames, limb).pose(),
+                aim.as_ref(),
+                &self.map,
+                dt,
+            );
+            // The solve carries its target over the tick by the target's velocity: it is given
+            // where the shaped target stands at the tick's start and arrives where it ends, so
+            // the tool moves exactly as the shaped target does. Given the end, the tool landed a
+            // tick on along the velocity, and the shaped target's jerk steps came through as
+            // three times its jerk.
+            asked.tcp[hand] = next.map(|s| s.at(-dt));
+            self.ik
+                .set_target_velocity(limb, next.map(|s| (s.velocity, s.turning)));
+        }
+    }
+
+    /// Where the camera looks, shaped as a hand's target is: its look direction turned
+    /// jerk-limited from where it looks now (a first look, a turn to the operator's gaze, a
+    /// hand's engage). The direction is a rotation whose roll about the view is free, bounded
+    /// through the camera's turn per joint with that roll taken out (the pointing the neck
+    /// does). A look-at point bounded by each neck joint's own caps missed a program's 3 s
+    /// settle on a slow neck (the six-joint SO-101 points with several at once); the solve's
+    /// look-at carries no target velocity, so the neck still passes a wrist's jerk cap about 2x
+    /// engaging (main: 13-20x, the look jumping), and feeding the turn forward made it worse.
+    fn shape_gaze(&mut self, head: usize, dt: f64) {
+        if !self.shaping {
+            return;
+        }
+        let asked = match self.wanted[head] {
+            Some(Target::LookAt { point_m }) => Some(point_m),
+            _ => None,
+        };
+        if asked.is_none()
+            && holds(
+                &self.ik,
+                head,
+                &self.step.qdot,
+                &self.qdot_before,
+                &self.jerk,
+                dt,
+            )
+        {
+            self.gaze.reset();
+        }
+        if asked.is_none() && !self.gaze.is_active() {
+            return;
+        }
+        let body = self.ik.body();
+        let Task::LookAt { forward } = body.limbs[head].task else {
+            return;
+        };
+        let camera = body.frame(&self.frames, head);
+        let unit = |v: [f64; 3]| {
+            let n = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+            (n > 1e-12).then(|| v.map(|x| x / n))
+        };
+        let Some(local) = unit(forward) else { return };
+        let ahead = [0, 1, 2].map(|k| (0..3).map(|j| camera.r[k][j] * local[j]).sum::<f64>());
+        // The camera's turn per joint, its roll about the view taken out.
+        body.jacobian(&self.frames, head, &mut self.jv, &mut self.jw);
+        for (v, w) in self.jv.iter_mut().zip(self.jw.iter_mut()) {
+            let roll: f64 = (0..3).map(|k| w[k] * ahead[k]).sum();
+            for k in 0..3 {
+                w[k] -= roll * ahead[k];
+            }
+            *v = [0.0; 3];
+        }
+        let caps = self.ik.caps();
+        self.map.of_limb(
+            &self.jv,
+            &self.jw,
+            &self.shape_axes[head],
+            &self.shape_moving,
+            (&caps.speed, &caps.accel, &self.jerk),
+            1.0,
+            self.ik.settings().damping,
+        );
+        let start = Pose {
+            translation_m: camera.t,
+            rotation: Quaternion::from_matrix(&camera.r),
+        };
+        // The asked direction as the shaped orientation turned the least that lays its view
+        // along it.
+        let now = self.gaze.shaped().map_or(start, |s| s.pose);
+        let aim = asked.and_then(|p| {
+            let toward = unit([0, 1, 2].map(|k| p[k] - camera.t[k]))?;
+            let looking = now.rotation.rotate(local);
+            Some(Aim {
+                pose: Pose {
+                    translation_m: camera.t,
+                    rotation: Quaternion::from_matrix(&sx_frames::rotation_vector_matrix(
+                        least_turn(looking, toward),
+                    )) * now.rotation,
+                },
+                motion: None,
+                free_axis: Some(toward),
+            })
+        });
+        let shaped = self.gaze.step(|| start, aim.as_ref(), &self.map, dt);
+        self.wanted[head] = shaped.map(|s| {
+            let look = s.pose.rotation.rotate(local);
+            Target::LookAt {
+                point_m: [0, 1, 2].map(|k| GAZE_DISTANCE_M.mul_add(look[k], camera.t[k])),
+            }
+        });
     }
 
     /// Each hand's target as the solve takes it: its whole pose, or with its roll free only
@@ -1191,13 +1508,32 @@ impl Teleop {
         // Filtered once the step is taken: a refused step leaves the filter and `taken` as
         // they were.
         let targets = &self.filtered(targets, dt);
+        // A hand whose target went is driven while its shaped target comes to rest, with the
+        // free roll and tool speed it last had.
+        let mut asked = *targets;
+        for hand in 0..HANDS.len() {
+            if targets.tcp[hand].is_some() {
+                self.kept[hand] = (targets.free_roll[hand], targets.tool_speed[hand]);
+            } else if let Some(shaped) = self.shapers[hand].shaped()
+                && !self.seed
+            {
+                asked.tcp[hand] = Some(shaped.pose);
+                (asked.free_roll[hand], asked.tool_speed[hand]) = self.kept[hand];
+            }
+        }
+        if self.seed {
+            self.shapers = [ToolShaper::default(); 2];
+            self.gaze = ToolShaper::default();
+        }
         // The reference, seeded from the measurement at engage and held within the gap of it.
         let seeded = self.seed;
         let mut gated = std::mem::take(&mut self.gated);
         self.gate_readings(reference, measured, &mut gated, seeded, dt);
         let measured = &gated[..];
-        self.take_reference(reference, measured, available, targets, seeded, dt);
+        self.take_reference(reference, measured, available, &asked, seeded, dt);
         self.seed = false;
+        self.shape(targets, &mut asked, available, dt);
+        let targets = &asked;
         for (slot, (available, held)) in self
             .available
             .iter_mut()
@@ -1243,6 +1579,9 @@ impl Teleop {
                 })
             };
         }
+        if let Some(head) = self.head {
+            self.shape_gaze(head, dt);
+        }
         let mut idle = 0_u64;
         for (index, wanted) in self.wanted.iter().enumerate().take(64) {
             if wanted.is_none() {
@@ -1271,6 +1610,7 @@ impl Teleop {
         self.gated = gated;
         set?;
         let solved = self.ik.step(&self.q, &self.available, &self.wanted, dt)?;
+        self.qdot_before.copy_from_slice(&self.step.qdot);
         self.step.q.copy_from_slice(&solved.q);
         self.step.qdot.copy_from_slice(&solved.qdot);
         self.step.limbs.clone_from(&solved.limbs);

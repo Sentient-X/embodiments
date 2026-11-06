@@ -836,6 +836,7 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
         limbs: TeleopConfig::static_upper_body_limbs(),
         speed,
         accel,
+        jerk: std::collections::BTreeMap::new(),
         ramp_s: 0.1,
         max_step_rad: (max_speed * dt).clamp(0.03, 0.08),
         held: vec!["torso_joint".into()],
