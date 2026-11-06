@@ -256,6 +256,11 @@ struct State {
     rho: f64,
     /// Whether it rides a moving target it has caught ([`ToolShaper::step`]).
     riding: bool,
+    /// While it stops: how much its bounds are raised, taken once when the target went so the
+    /// stop runs no further than [`COAST_M`] (from a fast hand the line bounds carried a release
+    /// 11-42 cm on; taken afresh each tick as the speed fell, 29 mm from 0.5 m/s). Its
+    /// acceleration by this, its jerk by the square (the ramp shortens too), at most [`RIDE`].
+    stop_scale: Option<f64>,
 }
 
 /// One hand's target shaper; see the module docs.
@@ -320,6 +325,7 @@ impl ToolShaper {
                 moved: None,
                 rho,
                 riding: false,
+                stop_scale: None,
             }),
         };
         // The metric is the map's; a state carried over a change of weight keeps its motion.
@@ -331,13 +337,34 @@ impl ToolShaper {
             state.rho = rho;
         }
         let Some(aim) = aim else {
+            if state.stop_scale.is_none() {
+                let v = state.velocity;
+                let speed = norm6(&v);
+                state.stop_scale = Some(if speed > 1e-12 {
+                    let u = v.map(|x| x / speed);
+                    let run = jerk::stopping_distance(
+                        speed,
+                        dot6(&state.acceleration, &u),
+                        map.along(&u, Of::Acceleration),
+                        map.along(&u, Of::Jerk),
+                    );
+                    (run / COAST_M).clamp(1.0, RIDE)
+                } else {
+                    1.0
+                });
+            }
             advance(state, None, &[0.0; 6], &[0.0; 6], map, dt);
             state.last = None;
             state.moved = None;
             state.riding = false;
             integrate(state, None, dt);
+            if !finite(state) {
+                self.state = None;
+                return None;
+            }
             return self.shaped();
         };
+        state.stop_scale = None;
         let target = aim.pose;
         let mut error: Six = [0.0; 6];
         let turn = matrix_rotation_vector(&mat_mul(
@@ -416,7 +443,11 @@ impl ToolShaper {
         // (further from where the ride would carry it than [`RIDE_JUMP_M`]) is caught again.
         if state.riding && !still {
             let ahead: Six = std::array::from_fn(|k| state.velocity[k].mul_add(-dt, error[k]));
-            if norm6(&ahead) <= RIDE_JUMP_M {
+            // Never a tick faster than a program's tool speed.
+            let pace = norm6(&error) / dt;
+            let within_program = pace <= 1e-12
+                || pace <= map.program(&error.map(|x| x / (pace * dt))) * (1.0 + 1e-9);
+            if norm6(&ahead) <= RIDE_JUMP_M && within_program {
                 state.velocity = moving;
                 state.acceleration = turning;
                 state.pose = if aim.free_axis.is_some() {
@@ -441,6 +472,10 @@ impl ToolShaper {
         );
         if landed && aim.free_axis.is_some() {
             state.pose.translation_m = target.translation_m;
+        }
+        if !finite(state) {
+            self.state = None;
+            return None;
         }
         // Caught: within [`CAUGHT_M`] of where the target ends the tick, moving and turning with
         // it closely enough that taking its motion is a step within the line jerk.
@@ -467,6 +502,25 @@ fn turned(rotation: Quaternion, six: Six, rho: f64) -> Quaternion {
         return rotation;
     }
     (Quaternion::from_matrix(&rotation_vector_matrix(turn)) * rotation).normalized()
+}
+
+/// Whether every part of the state is a number: one that is not is dropped, never carried on
+/// (a single infinite target refused every later step, refute).
+fn finite(state: &State) -> bool {
+    state
+        .velocity
+        .iter()
+        .chain(&state.acceleration)
+        .chain(&state.pose.translation_m)
+        .all(|x| x.is_finite())
+        && [
+            state.pose.rotation.x,
+            state.pose.rotation.y,
+            state.pose.rotation.z,
+            state.pose.rotation.w,
+        ]
+        .iter()
+        .all(|x| x.is_finite())
 }
 
 fn norm6(v: &Six) -> f64 {
@@ -532,12 +586,12 @@ fn advance(
             }
         }
         next = if still {
-            line(error, &v, &a, map, dt, false)
+            line(error, &v, &a, map, dt, false, 1.0)
         } else {
             track(error, &v, &a, moving, turning, map, dt)
         };
     } else {
-        next = line(&v, &v, &a, map, dt, true);
+        next = line(&v, &v, &a, map, dt, true, state.stop_scale.unwrap_or(1.0));
     }
     for k in 0..6 {
         state.acceleration[k] = (next[k] - v[k]) / dt;
@@ -568,12 +622,15 @@ fn within(t: Six, of: Of, factor: f64, map: &ToolMap) -> Six {
     }
 }
 
+/// The furthest a shaped target runs on after its target goes, metres (the solve's metric),
+/// where the bounds allow ([`line`]).
+pub const COAST_M: f64 = 0.02;
+
 /// How far a ridden target may land from where the ride carries it in a tick (the solve's metric,
-/// metres) and still be ridden: further is a jump (a regrip, a 10 cm program row), caught again
-/// within the bounds. Past the operator's carry (`teleop::LEAD_MAX_M`, 3 cm): a carried hand
-/// that stops falls back by up to it in a tick, as main follows it; at 1 cm the shaper caught
-/// that fall and carried 39 mm past a dead stop at 0.5 m/s against main's 32.
-pub const RIDE_JUMP_M: f64 = 0.04;
+/// metres) and still be ridden: further is a jump (a regrip, a program row), caught again within
+/// the bounds. 4 cm (to ride a carried hand's fall back after a stop) bought nothing measured and
+/// let a 3.5 cm program jump through in a tick (refute).
+pub const RIDE_JUMP_M: f64 = 0.01;
 
 /// How near a moving target the shaped one must come (the solve's metric, metres) before it rides
 /// it.
@@ -651,7 +708,8 @@ fn track(
 /// The next relative velocity: along the unit line `toward` points (`remaining` to come to rest
 /// on, or, `stop`, the motion itself), the jerk-bounded approach (or stop) at the joints'
 /// bounds along it; across it, the motion braked to zero.
-fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64, stop: bool) -> Six {
+#[allow(clippy::too_many_arguments)]
+fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64, stop: bool, scale: f64) -> Six {
     let length = norm6(toward);
     let u: Six = if length > 1e-12 {
         toward.map(|x| x / length)
@@ -674,12 +732,28 @@ fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64, stop: bool) -> S
     );
     let v_along = dot6(v, &u);
     let a_along = dot6(a, &u);
-    // A ride's acceleration past the line bound winds down at the jerk bound, never cut.
+    // A stop's bounds raised by its scale ([`State::stop_scale`]); then a ride's acceleration
+    // past them winds down at the jerk bound, never cut.
+    let (accel, jerk) = if stop {
+        (accel * scale, jerk * scale * scale)
+    } else {
+        (accel, jerk)
+    };
     let accel = accel.max(a_along.abs());
     let along = if stop {
         let (x, _) = jerk::acceleration_window(v_along, a_along, (0.0, 0.0), accel, jerk, dt);
         let next = x.mul_add(dt, v_along);
-        if next * v_along < 0.0 { 0.0 } else { next }
+        // Never past rest, and never to it faster than the acceleration bound.
+        if next * v_along < 0.0 {
+            let most = accel * dt;
+            if v_along.abs() <= most {
+                0.0
+            } else {
+                v_along - most.copysign(v_along)
+            }
+        } else {
+            next
+        }
     } else {
         jerk::velocity_toward(
             if length > 1e-12 { length } else { 0.0 },
@@ -891,27 +965,43 @@ mod tests {
     }
 
     #[test]
-    fn a_release_comes_to_rest_within_the_line_bounds_and_stays_there() {
-        let mut shaper = ToolShaper::default();
-        let speed = 0.5;
-        let trace = run(&mut shaper, 300, |tick| {
-            (tick < 100).then(|| moving_at(speed)(tick))
-        });
-        let stop = &trace[99..];
-        let (_, a, j) = peaks(stop);
+    fn a_slow_release_stops_within_the_line_bounds_and_a_fast_one_within_its_coast() {
         let [_, accel, jerk] = line_bounds();
-        assert!(a <= accel + 1e-9 && j <= jerk * (1.0 + 1e-6), "{a} {j}");
-        assert!(shaper.is_still(), "at rest, held until the caller lets go");
-        assert!(
-            stop.windows(2).all(|w| w[1][0] >= w[0][0] - 1e-12),
-            "never back"
-        );
-        // The jerk-bounded stop from 0.5 m/s: v^2 / 2a + v a / 2j, and a tick.
-        let carried = trace.last().expect("ticks")[0] - speed * 99.0 * DT;
-        let most = speed * speed / (2.0 * accel) + speed * accel / (2.0 * jerk) + speed * DT;
-        assert!(carried <= most + 1e-9, "{carried} against {most}");
-        shaper.reset();
-        assert!(!shaper.is_active());
+        for speed in [0.1, 0.5, 0.9] {
+            let mut shaper = ToolShaper::default();
+            let trace = run(&mut shaper, 300, |tick| {
+                (tick < 100).then(|| moving_at(speed)(tick))
+            });
+            let stop = &trace[99..];
+            let (_, a, j) = peaks(stop);
+            assert!(
+                shaper.is_still(),
+                "{speed}: at rest, held until the caller lets go"
+            );
+            assert!(
+                stop.windows(2).all(|w| w[1][0] >= w[0][0] - 1e-12),
+                "{speed}: never back"
+            );
+            let carried = trace.last().expect("ticks")[0] - speed * 99.0 * DT;
+            // From a slow hand the stop keeps the line bounds; from a fast one it runs no further
+            // than COAST_M (and a tick), its bounds raised at most RIDE and RIDE squared.
+            let plain = jerk::stopping_distance(speed, 0.0, accel, jerk);
+            if plain <= COAST_M {
+                assert!(
+                    a <= accel + 1e-9 && j <= jerk * (1.0 + 1e-6),
+                    "{speed}: {a} {j}"
+                );
+            } else {
+                assert!(
+                    carried <= COAST_M + speed * DT + 1e-9,
+                    "{speed}: {carried} on"
+                );
+                assert!(
+                    a <= RIDE * accel + 1e-9 && j <= RIDE * RIDE * jerk * (1.0 + 1e-6),
+                    "{speed}: {a} {j}"
+                );
+            }
+        }
     }
 
     #[test]
