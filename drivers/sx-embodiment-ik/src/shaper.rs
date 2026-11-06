@@ -22,9 +22,11 @@
 //!   turn arrive together; motion across the line is braked to zero. Once on a target it rides
 //!   it exactly while the target moves within the bounds. It starts where the tool stands, at
 //!   rest ([`ToolShaper::reset`], then the first [`ToolShaper::step`]).
-//! - **stop** when the target is gone (released, let go, a plan's end): along its motion, speed
-//!   and acceleration to zero together at the jerk bound ([`jerk::acceleration_window`] into
-//!   `[0, 0]`), then it holds and goes idle.
+//!
+//! When the target goes (let go, a plan's end) the shaper is reset and the limb's joints come to
+//! rest each within its own caps (`Target::Rest` in the solve): a stop along the tool's line
+//! asked joints held at their speed caps to leave them with a kink (6x a shoulder's jerk cap
+//! letting go of a 0.5 m/s sweep), and bounding its coast raised its bounds past the caps.
 //!
 //! The bounds along a line are the joints' own ([`ToolMap`]): the most the tool may move along
 //! it with no joint past its cap in the damped least-squares motion the solve answers with.
@@ -256,11 +258,6 @@ struct State {
     rho: f64,
     /// Whether it rides a moving target it has caught ([`ToolShaper::step`]).
     riding: bool,
-    /// While it stops: how much its bounds are raised, taken once when the target went so the
-    /// stop runs no further than [`COAST_M`] (from a fast hand the line bounds carried a release
-    /// 11-42 cm on; taken afresh each tick as the speed fell, 29 mm from 0.5 m/s). Its
-    /// acceleration by this, its jerk by the square (the ramp shortens too), at most [`RIDE`].
-    stop_scale: Option<f64>,
 }
 
 /// One hand's target shaper; see the module docs.
@@ -275,17 +272,10 @@ impl ToolShaper {
         self.state = None;
     }
 
-    /// Whether it shapes a target: following one, or coming to rest after one went.
+    /// Whether it shapes a target.
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.state.is_some()
-    }
-
-    /// Whether it is at rest: no target is moving it, and it stands still.
-    #[must_use]
-    pub fn is_still(&self) -> bool {
-        self.state
-            .is_some_and(|s| s.velocity.iter().chain(&s.acceleration).all(|x| *x == 0.0))
     }
 
     /// The shaped target now, if active.
@@ -298,15 +288,14 @@ impl ToolShaper {
         })
     }
 
-    /// One tick of `dt`: toward `aim`, or to rest without one, where it then stays until
-    /// [`ToolShaper::reset`] (the caller lets go once the arm stands there too). `tool` is where
-    /// the tool stands (the pose the solve would reach with no target), read only when the
-    /// shaper starts. The shaped target; `None` when idle with no aim.
+    /// One tick of `dt` toward `aim`. `tool` is where the tool stands (the pose the solve would
+    /// reach with no target), read only when the shaper starts. The shaped target; `None` only
+    /// when its state stopped being a number (it is then reset).
     #[allow(clippy::too_many_lines)] // one tick: the target's motion, riding, catching, landing
     pub fn step(
         &mut self,
         tool: impl FnOnce() -> Pose,
-        aim: Option<&Aim>,
+        aim: &Aim,
         map: &ToolMap,
         dt: f64,
     ) -> Option<Shaped> {
@@ -314,20 +303,15 @@ impl ToolShaper {
             return self.shaped();
         }
         let rho = map.rho;
-        let state = match (&mut self.state, aim) {
-            (None, None) => return None,
-            (Some(state), _) => state,
-            (None, Some(_)) => self.state.insert(State {
-                pose: tool(),
-                velocity: [0.0; 6],
-                acceleration: [0.0; 6],
-                last: None,
-                moved: None,
-                rho,
-                riding: false,
-                stop_scale: None,
-            }),
-        };
+        let state = self.state.get_or_insert_with(|| State {
+            pose: tool(),
+            velocity: [0.0; 6],
+            acceleration: [0.0; 6],
+            last: None,
+            moved: None,
+            rho,
+            riding: false,
+        });
         // The metric is the map's; a state carried over a change of weight keeps its motion.
         if (state.rho - rho).abs() > 0.0 {
             for k in 3..6 {
@@ -336,35 +320,6 @@ impl ToolShaper {
             }
             state.rho = rho;
         }
-        let Some(aim) = aim else {
-            if state.stop_scale.is_none() {
-                let v = state.velocity;
-                let speed = norm6(&v);
-                state.stop_scale = Some(if speed > 1e-12 {
-                    let u = v.map(|x| x / speed);
-                    let run = jerk::stopping_distance(
-                        speed,
-                        dot6(&state.acceleration, &u),
-                        map.along(&u, Of::Acceleration),
-                        map.along(&u, Of::Jerk),
-                    );
-                    (run / COAST_M).clamp(1.0, RIDE)
-                } else {
-                    1.0
-                });
-            }
-            advance(state, None, &[0.0; 6], &[0.0; 6], map, dt);
-            state.last = None;
-            state.moved = None;
-            state.riding = false;
-            integrate(state, None, dt);
-            if !finite(state) {
-                self.state = None;
-                return None;
-            }
-            return self.shaped();
-        };
-        state.stop_scale = None;
         let target = aim.pose;
         let mut error: Six = [0.0; 6];
         let turn = matrix_rotation_vector(&mat_mul(
@@ -462,7 +417,7 @@ impl ToolShaper {
             }
         }
         state.riding = false;
-        let landed = advance(state, Some(&error), &moving, &turning, map, dt);
+        let landed = advance(state, &error, &moving, &turning, map, dt);
         integrate(
             state,
             landed
@@ -549,62 +504,49 @@ fn integrate(state: &mut State, onto: Option<&Pose>, dt: f64) {
     }
 }
 
-/// One tick of the state's velocity and acceleration: toward `error` (what is left to the
-/// target at the tick's end) with the target moving at `moving`, or to rest without one.
-/// Following, whether it lands on the target exactly; stopping, whether it is at rest.
+/// One tick of the state's velocity and acceleration toward `error` (what is left to the
+/// target at the tick's end) with the target moving at `moving`: whether it lands on the target
+/// exactly.
 fn advance(
     state: &mut State,
-    error: Option<&Six>,
+    error: &Six,
     moving: &Six,
     turning: &Six,
     map: &ToolMap,
     dt: f64,
 ) -> bool {
     let (v, a) = (state.velocity, state.acceleration);
-    let next: Six;
-    if let Some(error) = error {
-        // A target standing still is landed on exactly once this tick can reach it and the next
-        // stand there, within the line bounds (the jerk-bounded approach otherwise closes the
-        // last fraction of a millimetre geometrically). A moving one is never snapped onto: the
-        // snap's acceleration, left in the state, rang 0.5 mm about a steady 0.5 m/s target.
-        let still = norm6(moving) <= STILL_M_S && norm6(turning) <= STILL_M_S;
-        if still {
-            let land: Six = error.map(|e| e / dt);
-            let landing: Six = std::array::from_fn(|k| (land[k] - v[k]) / dt);
-            let standing: Six = land.map(|x| -x / dt);
-            let change: Six = std::array::from_fn(|k| (landing[k] - a[k]) / dt);
-            let settle: Six = std::array::from_fn(|k| (standing[k] - landing[k]) / dt);
-            if map.within(&land, Of::Speed)
-                && map.within(&landing, Of::Acceleration)
-                && map.within(&standing, Of::Acceleration)
-                && map.within(&change, Of::Jerk)
-                && map.within(&settle, Of::Jerk)
-            {
-                state.velocity = land;
-                state.acceleration = landing;
-                return true;
-            }
+    // A target standing still is landed on exactly once this tick can reach it and the next
+    // stand there, within the line bounds (the jerk-bounded approach otherwise closes the last
+    // fraction of a millimetre geometrically). A moving one is never snapped onto: the snap's
+    // acceleration, left in the state, rang 0.5 mm about a steady 0.5 m/s target.
+    let still = norm6(moving) <= STILL_M_S && norm6(turning) <= STILL_M_S;
+    if still {
+        let land: Six = error.map(|e| e / dt);
+        let landing: Six = std::array::from_fn(|k| (land[k] - v[k]) / dt);
+        let standing: Six = land.map(|x| -x / dt);
+        let change: Six = std::array::from_fn(|k| (landing[k] - a[k]) / dt);
+        let settle: Six = std::array::from_fn(|k| (standing[k] - landing[k]) / dt);
+        if map.within(&land, Of::Speed)
+            && map.within(&landing, Of::Acceleration)
+            && map.within(&standing, Of::Acceleration)
+            && map.within(&change, Of::Jerk)
+            && map.within(&settle, Of::Jerk)
+        {
+            state.velocity = land;
+            state.acceleration = landing;
+            return true;
         }
-        next = if still {
-            line(error, &v, &a, map, dt, false, 1.0)
-        } else {
-            track(error, &v, &a, moving, turning, map, dt)
-        };
-    } else {
-        next = line(&v, &v, &a, map, dt, true, state.stop_scale.unwrap_or(1.0));
     }
+    let next = if still {
+        line(error, &v, &a, map, dt)
+    } else {
+        track(error, &v, &a, moving, turning, map, dt)
+    };
     for k in 0..6 {
         state.acceleration[k] = (next[k] - v[k]) / dt;
     }
     state.velocity = next;
-    if error.is_none() {
-        let still = norm6(&next) < 1e-9 && norm6(&state.acceleration) < 1e-6;
-        if still {
-            state.velocity = [0.0; 6];
-            state.acceleration = [0.0; 6];
-        }
-        return still;
-    }
     false
 }
 
@@ -621,10 +563,6 @@ fn within(t: Six, of: Of, factor: f64, map: &ToolMap) -> Six {
         t
     }
 }
-
-/// The furthest a shaped target runs on after its target goes, metres (the solve's metric),
-/// where the bounds allow ([`line`]).
-pub const COAST_M: f64 = 0.02;
 
 /// How far a ridden target may land from where the ride carries it in a tick (the solve's metric,
 /// metres) and still be ridden: further is a jump (a regrip, a program row), caught again within
@@ -706,10 +644,9 @@ fn track(
 }
 
 /// The next relative velocity: along the unit line `toward` points (`remaining` to come to rest
-/// on, or, `stop`, the motion itself), the jerk-bounded approach (or stop) at the joints'
-/// bounds along it; across it, the motion braked to zero.
-#[allow(clippy::too_many_arguments)]
-fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64, stop: bool, scale: f64) -> Six {
+/// on), the jerk-bounded approach at the joints' bounds along it; across it, the motion braked
+/// to zero.
+fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64) -> Six {
     let length = norm6(toward);
     let u: Six = if length > 1e-12 {
         toward.map(|x| x / length)
@@ -732,39 +669,17 @@ fn line(toward: &Six, v: &Six, a: &Six, map: &ToolMap, dt: f64, stop: bool, scal
     );
     let v_along = dot6(v, &u);
     let a_along = dot6(a, &u);
-    // A stop's bounds raised by its scale ([`State::stop_scale`]); then a ride's acceleration
-    // past them winds down at the jerk bound, never cut.
-    let (accel, jerk) = if stop {
-        (accel * scale, jerk * scale * scale)
-    } else {
-        (accel, jerk)
-    };
+    // A ride's acceleration past the bound winds down at the jerk bound, never cut.
     let accel = accel.max(a_along.abs());
-    let along = if stop {
-        let (x, _) = jerk::acceleration_window(v_along, a_along, (0.0, 0.0), accel, jerk, dt);
-        let next = x.mul_add(dt, v_along);
-        // Never past rest, and never to it faster than the acceleration bound.
-        if next * v_along < 0.0 {
-            let most = accel * dt;
-            if v_along.abs() <= most {
-                0.0
-            } else {
-                v_along - most.copysign(v_along)
-            }
-        } else {
-            next
-        }
-    } else {
-        jerk::velocity_toward(
-            if length > 1e-12 { length } else { 0.0 },
-            v_along,
-            a_along,
-            speed,
-            accel,
-            jerk,
-            dt,
-        )
-    };
+    let along = jerk::velocity_toward(
+        if length > 1e-12 { length } else { 0.0 },
+        v_along,
+        a_along,
+        speed,
+        accel,
+        jerk,
+        dt,
+    );
     let mut next: Six = u.map(|x| x * along);
     // Across the line: each component's leftover motion braked to rest at its own bounds.
     for k in 0..6 {
@@ -829,7 +744,7 @@ mod tests {
         let m = map();
         let mut out = Vec::new();
         for tick in 0..ticks {
-            let stepped = shaper.step(|| at(0.0), aim(tick).as_ref(), &m, DT);
+            let stepped = aim(tick).and_then(|aim| shaper.step(|| at(0.0), &aim, &m, DT));
             let s = shaper.state.map_or([0.0; 3], |s| {
                 [s.pose.translation_m[0], s.velocity[0], s.acceleration[0]]
             });
@@ -899,11 +814,11 @@ mod tests {
             let s = shaper
                 .step(
                     || at(0.0),
-                    Some(&Aim {
+                    &Aim {
                         pose: goal,
                         motion: None,
                         free_axis: None,
-                    }),
+                    },
                     &m,
                     DT,
                 )
@@ -965,46 +880,6 @@ mod tests {
     }
 
     #[test]
-    fn a_slow_release_stops_within_the_line_bounds_and_a_fast_one_within_its_coast() {
-        let [_, accel, jerk] = line_bounds();
-        for speed in [0.1, 0.5, 0.9] {
-            let mut shaper = ToolShaper::default();
-            let trace = run(&mut shaper, 300, |tick| {
-                (tick < 100).then(|| moving_at(speed)(tick))
-            });
-            let stop = &trace[99..];
-            let (_, a, j) = peaks(stop);
-            assert!(
-                shaper.is_still(),
-                "{speed}: at rest, held until the caller lets go"
-            );
-            assert!(
-                stop.windows(2).all(|w| w[1][0] >= w[0][0] - 1e-12),
-                "{speed}: never back"
-            );
-            let carried = trace.last().expect("ticks")[0] - speed * 99.0 * DT;
-            // From a slow hand the stop keeps the line bounds; from a fast one it runs no further
-            // than COAST_M (and a tick), its bounds raised at most RIDE and RIDE squared.
-            let plain = jerk::stopping_distance(speed, 0.0, accel, jerk);
-            if plain <= COAST_M {
-                assert!(
-                    a <= accel + 1e-9 && j <= jerk * (1.0 + 1e-6),
-                    "{speed}: {a} {j}"
-                );
-            } else {
-                assert!(
-                    carried <= COAST_M + speed * DT + 1e-9,
-                    "{speed}: {carried} on"
-                );
-                assert!(
-                    a <= RIDE * accel + 1e-9 && j <= RIDE * RIDE * jerk * (1.0 + 1e-6),
-                    "{speed}: {a} {j}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn a_turn_is_shaped_as_a_point_is() {
         let mut shaper = ToolShaper::default();
         let m = map();
@@ -1014,14 +889,14 @@ mod tests {
         for _ in 0..400 {
             shaper.step(
                 || at(0.0),
-                Some(&Aim {
+                &Aim {
                     pose: Pose {
                         translation_m: [0.0; 3],
                         rotation: goal,
                     },
                     motion: None,
                     free_axis: None,
-                }),
+                },
                 &m,
                 DT,
             );

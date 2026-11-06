@@ -347,6 +347,16 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// Weight on a resting column's step from its jerk-bounded stop ([`Target::Rest`]), per
+/// rad^2: far above the damping and the posture, so the stop is what the step takes unless a
+/// row needs otherwise.
+const REST_WEIGHT: f64 = 100.0;
+
+/// The share of each axis's speed, acceleration and jerk its posture moves within ([`Ik::draw_posture`]).
+pub const POSTURE_SHARE: f64 = 0.25;
+/// An axis's jerk until [`Ik::set_jerk_rule`]: its acceleration cap reached in this long.
+const POSTURE_RAMP_S: f64 = 0.1;
+
 /// The null-space projector's damping, as a share of [`Settings::damping`]
 /// ([`Ik::smooth_null_space`]). At the step's own damping the projector let the smoothing into
 /// a six-joint arm's weak task directions near its wrist singularity, and a `UR10e`'s tool fell
@@ -510,6 +520,12 @@ pub struct Ik {
     /// ([`Ik::set_jerk_cap`]).
     jerk: Vec<f64>,
     acceleration: Vec<f64>,
+    /// Per axis, the jerk its follower takes ([`Ik::set_jerk_rule`]), and the posture the
+    /// free direction is drawn to this tick: moved toward the anchor within a share of the
+    /// axis's caps from where the arm stood at engage ([`POSTURE_SHARE`]).
+    jerk_rule: Vec<f64>,
+    posture: Vec<sx_embodiment_drivers::jerk::Motion>,
+    posture_seeded: bool,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
     measured: Vec<f64>,
     /// Per axis, the measurement before this one, and a smoothed measured velocity (units/s).
@@ -689,6 +705,7 @@ impl Ik {
         };
         let limbs = body.limbs.len();
         let axes_count = rest.len();
+        let jerk_rule = caps.accel.iter().map(|a| a / POSTURE_RAMP_S).collect();
         Ok(Self {
             body,
             caps,
@@ -715,6 +732,9 @@ impl Ik {
             follower_lag: vec![0.0; axes_count],
             jerk: vec![f64::INFINITY; axes_count],
             acceleration: vec![0.0; n],
+            jerk_rule,
+            posture: vec![sx_embodiment_drivers::jerk::Motion::default(); axes_count],
+            posture_seeded: false,
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
@@ -775,6 +795,19 @@ impl Ik {
         self.measured_speed.fill(0.0);
         self.tool_moved.fill(([0.0; 3], [0.0; 3]));
         self.anchored = self.preferred.is_some();
+        self.posture_seeded = false;
+    }
+
+    /// The jerk `axis`'s follower takes, unit/s^3 (`sx_embodiment_drivers::jerk`): what the
+    /// posture's pull is shaped within. Not a bound on the step ([`Ik::set_jerk_cap`] is). Not
+    /// finite and positive: ignored.
+    pub fn set_jerk_rule(&mut self, axis: usize, jerk: f64) {
+        if let Some(slot) = self.jerk_rule.get_mut(axis)
+            && jerk.is_finite()
+            && jerk > 0.0
+        {
+            *slot = jerk;
+        }
     }
 
     /// Where the next steps must leave `axis`, positions `[low, high]`, never past its joint
@@ -1041,7 +1074,7 @@ impl Ik {
         }
         for (limb, target) in self.body.limbs.iter().zip(targets) {
             let fits = match (limb.task, target) {
-                (_, None) => true,
+                (_, None | Some(Target::Rest)) => true,
                 (Task::Pose, Some(Target::Pose(target))) => {
                     target
                         .translation_m
@@ -1080,6 +1113,7 @@ impl Ik {
             self.anchor.copy_from_slice(q);
             self.anchored = true;
         }
+        self.draw_posture(q, dt);
         self.body.model.poses_into(q, &mut self.work.frames);
         self.work.moving.clear();
         self.work.moving.extend(
@@ -1232,6 +1266,35 @@ impl Ik {
         Ok(&self.step)
     }
 
+    /// The posture this tick's step is drawn to: from where the arm stands at engage toward the
+    /// anchor, each axis within [`POSTURE_SHARE`] of its caps and its follower's jerk. Drawn
+    /// straight to the anchor, the free direction took up any offset at about a tenth a tick
+    /// (`posture_weight / damping`): a velocity step at every engage away from the anchor and
+    /// whenever the target moved against it (8x a shoulder's jerk cap handing a resting arm from
+    /// a program to an operator, `examples/transitions.rs`).
+    fn draw_posture(&mut self, q: &[f64], dt: f64) {
+        if !self.posture_seeded {
+            for (motion, &at) in self.posture.iter_mut().zip(q) {
+                *motion = sx_embodiment_drivers::jerk::Motion {
+                    position: at,
+                    velocity: 0.0,
+                    acceleration: 0.0,
+                };
+            }
+            self.posture_seeded = true;
+        }
+        for &axis in &self.body.solved {
+            sx_embodiment_drivers::jerk::toward(
+                &mut self.posture[axis],
+                self.anchor[axis],
+                POSTURE_SHARE * self.caps.speed[axis],
+                POSTURE_SHARE * self.caps.accel[axis],
+                POSTURE_SHARE * self.jerk_rule[axis],
+                dt,
+            );
+        }
+    }
+
     /// `1/2 dq' H dq + g' dq`: tool position, orientation (or pointing), the step itself
     /// (damping), then posture toward the anchor.
     #[allow(clippy::too_many_lines)] // one match arm per task and target
@@ -1365,6 +1428,29 @@ impl Ik {
                         );
                     }
                 }
+                (_, Target::Rest) => {
+                    // Each of its columns toward its own jerk-bounded stop
+                    // ([`jerk::acceleration_window`] into standing still), a shared one (a torso)
+                    // too: once the limb is held, a column it carries stops whatever else drives
+                    // it, so it comes to rest first. Left to another hand's target, the torso
+                    // kept the resting limb from holding until the timeout, then stopped in a
+                    // tick (8-10x its acceleration cap, refute 2026-11-06).
+                    for &column in &self.limb_columns[index] {
+                        let axis = body.solved[column];
+                        let (v, a) = (self.velocity[column], self.acceleration[column]);
+                        let (x, _) = sx_embodiment_drivers::jerk::acceleration_window(
+                            v,
+                            a,
+                            (0.0, 0.0),
+                            self.caps.accel[axis].max(a.abs()),
+                            self.jerk_rule[axis],
+                            dt,
+                        );
+                        let next = x.mul_add(dt, v);
+                        w.h[column * n + column] += 2.0 * REST_WEIGHT;
+                        w.g[column] -= 2.0 * REST_WEIGHT * next * dt;
+                    }
+                }
                 (Task::LookAt { forward }, Target::LookAt { point_m }) => {
                     let mask = &self.look_columns[index];
                     let f = mat_vec(&pose.r, forward);
@@ -1417,7 +1503,7 @@ impl Ik {
             } else {
                 s.posture_weight
             };
-            let error = self.anchor[axis] - q[axis];
+            let error = self.posture[axis].position - q[axis];
             w.h[column * n + column] += 2.0 * (weight + s.damping);
             w.g[column] -= 2.0 * weight * error;
         }
@@ -2246,10 +2332,12 @@ impl Ik {
             report.residual_m = residual_m;
             report.residual_rad = residual_rad;
             report.hidden_by = match (limb.task, target) {
-                (Task::Pose, Some(_)) => hidden(body, &w.after, &self.sight_skip, pose.t, s),
+                (Task::Pose, Some(Target::Pose(_) | Target::Axis { .. })) => {
+                    hidden(body, &w.after, &self.sight_skip, pose.t, s)
+                }
                 _ => None,
             };
-            report.reach = if target.is_none() {
+            report.reach = if matches!(target, None | Some(Target::Rest)) {
                 Reach::Idle
             } else if residual_m <= s.tracking_m && residual_rad <= s.tracking_rad {
                 Reach::Tracking

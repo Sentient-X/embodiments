@@ -521,7 +521,18 @@ fn write_trace(bench: &mut Bench, path: &str) {
     let start = bench.tools(&q);
     let first = moved(&start[0], [0.10, 0.10, 0.2645]);
     let available = vec![true; q.len()];
-    let mut ticks = Vec::new();
+    // The robot at rest before the first tick: the gate differences from here, so the first
+    // tick's own move counts (padded with the first tick's pose instead, its second tick read
+    // as a start from rest a tick late, 2.6x).
+    let mut ticks = vec![json!({
+        "t": 0.0,
+        "q": q,
+        "target": {"left": document(&start[0]), "right": document(&start[1])},
+        "taken": {"left": document(&start[0]), "right": document(&start[1])},
+        "width": [0.07, 0.07],
+        "solve": "Solved",
+        "took_us": 0.0,
+    })];
     let mut hold = start;
     let count = (6.0 / DT).round() as usize;
     for tick in 1..=count {
@@ -568,11 +579,16 @@ fn write_trace(bench: &mut Bench, path: &str) {
             targets.tcp[0].unwrap_or(now[0]),
             targets.tcp[1].unwrap_or(now[1]),
         ];
+        // What the solve followed: each hand's shaped target (`sx_embodiment_ik::shaper`), so the
+        // film's shiver gate holds the command to the motion it was asked for, not to a target
+        // that jumped 30 cm at once.
+        let shaped = bench.solve.shaped();
+        let taken = [0, 1].map(|hand| shaped[hand].unwrap_or(shown[hand]));
         ticks.push(json!({
             "t": t,
             "q": q,
             "target": {"left": document(&shown[0]), "right": document(&shown[1])},
-            "taken": {"left": document(&shown[0]), "right": document(&shown[1])},
+            "taken": {"left": document(&taken[0]), "right": document(&taken[1])},
             "width": [0.07, 0.07],
             "solve": solve_state,
             "took_us": took_us,
