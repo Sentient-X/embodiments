@@ -65,7 +65,7 @@ from .frames import body_frames, sides
 from .kinematics import Kinematics, Transform, from_xyz_rpy
 from .known import tool_points_checked_of
 from .materialize import materialize
-from .tool_frames import Jaws, ToolFrame, tool_frames
+from .tool_frames import Jaws, ToolFrame, tool_frames, tool_grips
 from .tool_points import tool_chain
 from .viewing import Viewing
 
@@ -879,7 +879,8 @@ def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> d
     if (
         checked is None
         or dict(checked.points) != derived
-        or checked.chain != tool_chain(embodiment.urdf_bytes, derived)
+        or checked.chain
+        != tool_chain(embodiment.urdf_bytes, derived, tool_grips(embodiment, derived, tools))
     ):
         return {"tcp_candidates": candidates, "tcp_frames": {}}
     return {

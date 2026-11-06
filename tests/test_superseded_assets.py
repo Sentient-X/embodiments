@@ -82,3 +82,24 @@ def test_the_store_serves_an_earlier_revision_by_its_digest(
     resolved = resolve_asset(ref)
     assert resolved.read_bytes() == published
     assert resolved.name == "so101.urdf"
+
+
+def test_a_superseded_revisions_closure_materializes_from_the_tree_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``materialize`` reads a kept revision as ``resolve_asset`` does: a superseded static
+    upper body, whose description the canonical file no longer matches, materializes with no
+    store (its tool-point chain is derived from its own collision geometry this way)."""
+    from sx_embodiments.embodiment import EmbodimentId
+    from sx_embodiments.materialize import materialize
+    from sx_embodiments.recorded import historical_document, read_recorded
+
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
+    monkeypatch.delenv("SX_EMBODIMENTS_ASSET_STORE", raising=False)
+    earlier = read_recorded(
+        historical_document(
+            "sentient-static-upper-body",
+            EmbodimentId("477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97"),
+        )
+    ).embodiment
+    assert materialize(earlier).is_dir()

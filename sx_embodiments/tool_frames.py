@@ -36,6 +36,7 @@ extra (NumPy), as the collision geometry does.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -150,6 +151,26 @@ def tool_frames(embodiment: Embodiment) -> tuple[ToolFrame, ...]:
         else:
             tools.append(_flange(embodiment, component, frame))
     return tuple(tools)
+
+
+def tool_grips(
+    embodiment: Embodiment, points: Mapping[str, str], tools: tuple[ToolFrame, ...] | None = None
+) -> dict[str, JsonValue]:
+    """Each side's grip as a tool-point check binds it (``tool_points.tool_chain``): the jawed
+    tool whose frame the side's tool point rides rigidly with, as its render pack states it. A
+    side whose point rides with no jawed tool has none."""
+    kinematics = Kinematics.of(embodiment.urdf_bytes)
+    jawed = [
+        tool
+        for tool in (tool_frames(embodiment) if tools is None else tools)
+        if isinstance(tool.grip, Jaws)
+    ]
+    grips: dict[str, JsonValue] = {}
+    for side, link in points.items():
+        riding = [tool for tool in jawed if kinematics.is_rigid(tool.frame, link)]
+        if len(riding) == 1:
+            grips[side] = riding[0].to_json()
+    return grips
 
 
 def _flange(embodiment: Embodiment, arm: Component, frame: str) -> ToolFrame:
@@ -453,4 +474,5 @@ __all__ = [
     "ToolFrame",
     "fingertip_line",
     "tool_frames",
+    "tool_grips",
 ]

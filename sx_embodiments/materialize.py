@@ -38,6 +38,7 @@ from .assets import (
     link_view,
     local_asset_root,
     refuse_retired_configuration,
+    superseded_relpath,
 )
 from .embodiment import Embodiment
 from .errors import AssetsUnavailableError
@@ -179,11 +180,17 @@ def _resolve_closure(embodiment: Embodiment) -> dict[str, ContentBlob]:
 
 
 def _source(relpath: str, content: ContentBlob, local: Path | None) -> Path:
-    """The verified blob for one closure file, filled from the tree, this host or the store."""
+    """The verified blob for one closure file, filled from the tree (the file, or the earlier
+    revision of it the package keeps, as :func:`~sx_embodiments.assets.resolve_asset` reads
+    it), this host or the store."""
     if relpath.startswith("generated/"):
         # A composed description is retained in this host's cache, not in the tree.
         return cached_blob(content, relpath=relpath, local=cache_root() / relpath)
-    return cached_blob(content, relpath=relpath, local=local / relpath if local else None)
+    if local is None:
+        return cached_blob(content, relpath=relpath)
+    kept = local / superseded_relpath(relpath, content.sha256)
+    tree = kept if not intact(local / relpath, content) and kept.is_file() else local / relpath
+    return cached_blob(content, relpath=relpath, local=tree)
 
 
 def _readable(relpath: str, content: ContentBlob, local: Path | None) -> Path:

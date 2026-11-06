@@ -12,13 +12,14 @@ pack's check names the chain of the revision the robot is assigned (the bindings
 
 A check is of the body design's tool points as they hang off its root: it names the links it
 checked and the digest of the kinematic chain from the description's root to each of them
-(:func:`tool_chain`: every joint on the path, its type, origin, axis and mimic). A render pack
-fills ``tcp_frames`` only while both still match, so a revision that moves a tool point or any
-joint on its chain asks for a new check, and one that changes only what is off the tool path (a
-camera, a mesh) keeps it. The check is per body design, never per unit: a unit's own mount
-offsets are its measured calibration (a correction edge), not this record. Like ``front`` and
-``viewing``, the record lives on the definition outside the revision's identity: recording it
-moves no embodiment id.
+(:func:`tool_chain`: every joint on the path, its type, origin, axis and mimic, and the grip of
+the tool each point rides with, its grasp point, approach and closing line). A render pack
+fills ``tcp_frames`` only while both still match, so a revision that moves a tool point, any
+joint on its chain or where its jaws close (a finger's collision geometry) asks for a new check,
+and one that changes only what is off the tool path (a camera, another link's mesh) keeps it.
+The check is per body design, never per unit: a unit's own mount offsets are its measured
+calibration (a correction edge), not this record. Like ``front`` and ``viewing``, the record
+lives on the definition outside the revision's identity: recording it moves no embodiment id.
 """
 
 from __future__ import annotations
@@ -102,17 +103,20 @@ def _joint(joint: Joint) -> JsonValue:
     }
 
 
-def tool_chain(urdf: bytes, points: Mapping[str, str]) -> str:
+def tool_chain(urdf: bytes, points: Mapping[str, str], grips: Mapping[str, JsonValue]) -> str:
     """The digest of the kinematic chain from ``urdf``'s root to each tool point in ``points``.
 
     For each side (sorted): every joint from the root link down to the tool point's link, and
     the tool itself, every joint hanging below the link the tool point is mounted on (a
-    gripper's fingers, whose geometry decides where its jaws close). Each joint by its name,
-    type, parent and child links, origin transform, axis and mimic. Anything off those (another
-    limb, a camera on the head, a mesh, a collision proxy, a joint limit) is not in it.
+    gripper's fingers), and ``grips[side]``, the tool the point rides with as its render pack
+    states it (its frame, grasp point, approach and closing line; ``tool_frames.tool_grips``),
+    which the fingers' collision geometry decides. Each joint by its name, type, parent and
+    child links, origin transform, axis and mimic. Anything off those (another limb, a camera
+    on the head, a mesh that moves no jaw's closing, a joint limit) is not in it.
 
     Raises:
         KinematicsError: a tool point that is not a link of the description.
+        ToolPointCheckError: a side with no grip.
     """
     from .kinematics import Kinematics
 
@@ -138,5 +142,16 @@ def tool_chain(urdf: bytes, points: Mapping[str, str]) -> str:
         tool: list[JsonValue] = [
             _joint(kinematics.joints[name]) for name in sorted(below) if name not in on_path
         ]
-        sides.append({"side": side, "root": root, "link": link, "joints": joints, "tool": tool})
+        if side not in grips:
+            raise ToolPointCheckError(f"the {side} tool point {link} rides with no jawed tool")
+        sides.append(
+            {
+                "side": side,
+                "root": root,
+                "link": link,
+                "joints": joints,
+                "tool": tool,
+                "grip": grips[side],
+            }
+        )
     return str(content_digest(sides))

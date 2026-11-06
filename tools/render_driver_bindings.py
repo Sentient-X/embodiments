@@ -94,7 +94,8 @@ from sx_embodiments.parts import ChainSpec, GripperSpec
 from sx_embodiments.recorded import historical_document, read_recorded
 from sx_embodiments.rendered import same_rendering
 from sx_embodiments.successor import superseded_ids
-from sx_embodiments.tool_points import tool_chain
+from sx_embodiments.tool_frames import tool_grips
+from sx_embodiments.tool_points import ToolPointCheckError, tool_chain
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -469,8 +470,9 @@ def document(name: str) -> dict[str, object]:
         ]
         for identity, revision in revisions:
             try:
-                chains[identity] = tool_chain(revision.urdf_bytes, checked.points)
-            except KinematicsError:
+                grips = tool_grips(revision, checked.points)
+                chains[identity] = tool_chain(revision.urdf_bytes, checked.points, grips)
+            except (KinematicsError, ToolPointCheckError):
                 continue
         rendered["tool_chains"] = dict(sorted(chains.items()))
     if approach:
