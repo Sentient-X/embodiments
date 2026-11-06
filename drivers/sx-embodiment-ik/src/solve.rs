@@ -1429,24 +1429,13 @@ impl Ik {
                     }
                 }
                 (_, Target::Rest) => {
-                    // Each column toward its own jerk-bounded stop ([`jerk::acceleration_window`]
-                    // into standing still); a shared one only when no other limb's target moves
-                    // it (a camera's look never turns a joint it shares).
+                    // Each of its columns toward its own jerk-bounded stop
+                    // ([`jerk::acceleration_window`] into standing still), a shared one (a torso)
+                    // too: once the limb is held, a column it carries stops whatever else drives
+                    // it, so it comes to rest first. Left to another hand's target, the torso
+                    // kept the resting limb from holding until the timeout, then stopped in a
+                    // tick (8-10x its acceleration cap, refute 2026-11-06).
                     for &column in &self.limb_columns[index] {
-                        let driven_by_another = self.shared[column]
-                            && targets.iter().enumerate().any(|(other, t)| {
-                                other != index
-                                    && match t {
-                                        None | Some(Target::Rest) => false,
-                                        Some(Target::LookAt { .. }) => {
-                                            self.look_columns[other][column]
-                                        }
-                                        Some(_) => self.limb_columns[other].contains(&column),
-                                    }
-                            });
-                        if driven_by_another {
-                            continue;
-                        }
                         let axis = body.solved[column];
                         let (v, a) = (self.velocity[column], self.acceleration[column]);
                         let (x, _) = sx_embodiment_drivers::jerk::acceleration_window(
