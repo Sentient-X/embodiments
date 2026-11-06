@@ -353,6 +353,11 @@ pub struct Targets {
     pub age_s: Option<f64>,
 }
 
+/// The longest a shaped target may still run after its target went, seconds: then the limb is
+/// held whatever it does. A stop from 2 m/s ends within 0.2 s; at 250 and 500 Hz the joints'
+/// creep after a release never met [`holds`]' one-tick test, and the station never held (refute).
+pub const COAST_MAX_S: f64 = 0.6;
+
 /// The longest a person's hand is carried forward by its sample's age ([`Targets::age_s`]). The
 /// station gives the age bounded by its own horizon (the sample's latency on arrival plus one
 /// send period), so a stall does not carry the hand on; this is the backstop. At 0.3 s a hand
@@ -572,6 +577,10 @@ pub struct Teleop {
     qdot_before: Vec<f64>,
     /// Whether targets pass their shapers ([`Teleop::set_target_shaping`]).
     shaping: bool,
+    /// Per hand, and the camera's look: seconds since its target went while its shaper still
+    /// runs ([`COAST_MAX_S`]).
+    gone_s: [f64; 2],
+    gaze_gone_s: f64,
 }
 
 impl Teleop {
@@ -777,6 +786,8 @@ impl Teleop {
             kept: [(false, None); 2],
             qdot_before: vec![0.0; width],
             shaping: true,
+            gone_s: [0.0; 2],
+            gaze_gone_s: 0.0,
         })
     }
 
@@ -957,6 +968,8 @@ impl Teleop {
         self.filters = [PoseFilter::default(); 2];
         self.shapers = [ToolShaper::default(); 2];
         self.gaze = ToolShaper::default();
+        self.gone_s = [0.0; 2];
+        self.gaze_gone_s = 0.0;
     }
 
     /// Whether a shaped target still has motion to bring to rest: a caller whose targets went
@@ -976,6 +989,7 @@ impl Teleop {
 
     /// Each hand's target shaped from where its tool stands ([`crate::shaper`]): `asked` holds
     /// the targets the solve then takes. A hand whose target went comes to rest.
+    #[allow(clippy::too_many_lines)] // each hand: its hold, its aim, its bounds, its step
     fn shape(&mut self, targets: &Targets, asked: &mut Targets, available: &[bool], dt: f64) {
         if !self.shaping {
             *asked = *targets;
@@ -1016,18 +1030,25 @@ impl Teleop {
             let Some(hand) = *hand else { continue };
             let shaper = &mut self.shapers[hand];
             // Its target went: held at once where the limb can be held without a jolt ([`holds`]),
-            // and otherwise brought to rest first.
+            // otherwise brought to rest first, and held after [`COAST_MAX_S`] whatever it does.
+            if targets.tcp[hand].is_none() && shaper.is_active() {
+                self.gone_s[hand] += dt;
+            } else {
+                self.gone_s[hand] = 0.0;
+            }
             if targets.tcp[hand].is_none()
-                && holds(
-                    &self.ik,
-                    limb,
-                    &self.step.qdot,
-                    &self.qdot_before,
-                    &self.jerk,
-                    dt,
-                )
+                && (self.gone_s[hand] >= COAST_MAX_S
+                    || holds(
+                        &self.ik,
+                        limb,
+                        &self.step.qdot,
+                        &self.qdot_before,
+                        &self.jerk,
+                        dt,
+                    ))
             {
                 shaper.reset();
+                self.gone_s[hand] = 0.0;
             }
             // Aimed where the target will be at the tick's end, along its own motion: the solve
             // once led a moving hand by a tick this way itself.
@@ -1100,17 +1121,24 @@ impl Teleop {
             Some(Target::LookAt { point_m }) => Some(point_m),
             _ => None,
         };
+        if asked.is_none() && self.gaze.is_active() {
+            self.gaze_gone_s += dt;
+        } else {
+            self.gaze_gone_s = 0.0;
+        }
         if asked.is_none()
-            && holds(
-                &self.ik,
-                head,
-                &self.step.qdot,
-                &self.qdot_before,
-                &self.jerk,
-                dt,
-            )
+            && (self.gaze_gone_s >= COAST_MAX_S
+                || holds(
+                    &self.ik,
+                    head,
+                    &self.step.qdot,
+                    &self.qdot_before,
+                    &self.jerk,
+                    dt,
+                ))
         {
             self.gaze.reset();
+            self.gaze_gone_s = 0.0;
         }
         if asked.is_none() && !self.gaze.is_active() {
             return;
@@ -1505,6 +1533,32 @@ impl Teleop {
         if !(dt.is_finite() && dt > 0.0) {
             return Err(IkError::Tick(dt));
         }
+        // A target that is not a number is refused before it reaches the filter or the shaper,
+        // as the solve refused it before them: one infinite target once refused every later step.
+        let pose_finite = |p: &Pose| {
+            p.translation_m.iter().all(|x| x.is_finite())
+                && [p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w]
+                    .iter()
+                    .all(|x| x.is_finite())
+        };
+        for (hand, name) in HANDS.iter().enumerate() {
+            if targets.tcp[hand].is_some_and(|p| !pose_finite(&p))
+                || targets.gripper_width_m[hand].is_some_and(|w| !w.is_finite())
+            {
+                return Err(IkError::Target((*name).to_owned()));
+            }
+        }
+        if targets.head.is_some_and(|p| !pose_finite(&p)) {
+            return Err(IkError::Target("head".to_owned()));
+        }
+        // A motion that is not a number is no motion (as the solve took it before the shaper).
+        let mut cleaned = *targets;
+        for velocity in &mut cleaned.velocity {
+            if velocity.is_some_and(|(v, w)| !v.iter().chain(&w).all(|x| x.is_finite())) {
+                *velocity = None;
+            }
+        }
+        let targets = &cleaned;
         // Filtered once the step is taken: a refused step leaves the filter and `taken` as
         // they were.
         let targets = &self.filtered(targets, dt);
