@@ -358,6 +358,10 @@ const NULL_DAMPING: f64 = 0.01;
 /// How far past its bound a row may close and still be kept, metres: the interior point's sliver.
 const ROW_KEPT_M: f64 = 1e-6;
 
+/// Over how much of the closest pair's room a moving target's velocity is faded out
+/// ([`Ik::set_target_velocity`]), metres.
+const FOLLOW_ROOM_M: f64 = 0.01;
+
 /// The cost of the rows' slack ([`Ik::solve_qp`]), against a cost scaled to a unit diagonal.
 const SLACK_WEIGHT: f64 = 1e4;
 /// Slack past this (the rows' units) is rows giving way, not the interior-point's sliver.
@@ -492,6 +496,20 @@ pub struct Ik {
     tool_moved: Vec<(Vec3, Vec3)>,
     /// Per axis, where the next step must leave it ([`Ik::set_window`]).
     window: Vec<[f64; 2]>,
+    /// Per limb, its target's velocity (point m/s, turn rad/s, root frame;
+    /// [`Ik::set_target_velocity`]), and how far its follower lags (the slowest of its axes'
+    /// [`Ik::set_follower_lag`]), seconds.
+    target_velocity: Vec<Option<(Vec3, Vec3)>>,
+    limb_lag: Vec<f64>,
+    follower_lag: Vec<f64>,
+    /// The closest commanded pair's room to its margin at the last step, metres; zero before
+    /// the first step after a reset (no feedforward until the room is measured).
+    closest_room: f64,
+    /// Per axis, its jerk cap (unit/s^3; infinite: none), and per solved column the last
+    /// step's acceleration: the state's third derivative bounded as its second is
+    /// ([`Ik::set_jerk_cap`]).
+    jerk: Vec<f64>,
+    acceleration: Vec<f64>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
     measured: Vec<f64>,
     /// Per axis, the measurement before this one, and a smoothed measured velocity (units/s).
@@ -691,6 +709,12 @@ impl Ik {
             tool_asked: vec![([0.0; 3], [0.0; 3]); limbs],
             tool_moved: vec![([0.0; 3], [0.0; 3]); limbs],
             window: vec![[f64::NEG_INFINITY, f64::INFINITY]; axes_count],
+            target_velocity: vec![None; limbs],
+            limb_lag: vec![0.0; limbs],
+            closest_room: 0.0,
+            follower_lag: vec![0.0; axes_count],
+            jerk: vec![f64::INFINITY; axes_count],
+            acceleration: vec![0.0; n],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
@@ -745,6 +769,8 @@ impl Ik {
     /// posture when one is set.
     pub fn reset(&mut self) {
         self.velocity.iter_mut().for_each(|v| *v = 0.0);
+        self.acceleration.fill(0.0);
+        self.closest_room = 0.0;
         self.measured_before.fill(f64::NAN);
         self.measured_speed.fill(0.0);
         self.tool_moved.fill(([0.0; 3], [0.0; 3]));
@@ -860,6 +886,56 @@ impl Ik {
                 });
                 (ToolSpeed { m_s: v.m_s, rad_s }, from)
             });
+        }
+    }
+
+    /// Where `limb`'s target is going: its point's velocity (m/s) and turn rate (rad/s) in the
+    /// root frame. A pose limb follows it: each step carries the target's motion over the tick
+    /// and closes the error to where the target will be, rather than braking on the whole error
+    /// as if the target stood still. A target that stops at once still costs the arm its
+    /// stopping distance: a paced goal's velocity given to the very end overshot its settle
+    /// (`tests/fluid.rs` `table_paced_goal`), so a plan gives it only with its own deceleration.
+    /// `None` (the default): it stands. A limb out of range or a velocity not finite clears it.
+    pub fn set_target_velocity(&mut self, limb: usize, velocity: Option<(Vec3, Vec3)>) {
+        if let Some(slot) = self.target_velocity.get_mut(limb) {
+            *slot = velocity.filter(|(v, w)| v.iter().chain(w).all(|x| x.is_finite()));
+        }
+    }
+
+    /// How far `axis`'s follower lags its command, seconds (a first-order follower's time
+    /// constant, from its journals): a moving target is followed to where it will be that much
+    /// later, so the arm, not its command, arrives with it. Zero (the default) or anything not
+    /// finite and positive: none.
+    pub fn set_follower_lag(&mut self, axis: usize, seconds: f64) {
+        let Some(slot) = self.follower_lag.get_mut(axis) else {
+            return;
+        };
+        *slot = if seconds.is_finite() && seconds > 0.0 {
+            seconds
+        } else {
+            0.0
+        };
+        for (lag, limb) in self.limb_lag.iter_mut().zip(&self.body.limbs) {
+            *lag = limb
+                .axes
+                .iter()
+                .map(|&a| self.follower_lag[a])
+                .fold(0.0, f64::max);
+        }
+    }
+
+    /// The most `axis`'s acceleration may change, unit/s^3 (an embodiment's declared jerk):
+    /// each step's acceleration stays within it of the last, as its velocity stays within the
+    /// acceleration cap of the last; [`Ik::reset`] starts from rest. A joint limit or a window
+    /// outranks it: where they cannot be kept within it, it gives way. Infinite (the default)
+    /// or anything not finite and positive: no cap.
+    pub fn set_jerk_cap(&mut self, axis: usize, jerk: f64) {
+        if let Some(slot) = self.jerk.get_mut(axis) {
+            *slot = if jerk.is_finite() && jerk > 0.0 {
+                jerk
+            } else {
+                f64::INFINITY
+            };
         }
     }
 
@@ -1035,6 +1111,7 @@ impl Ik {
         for (column, &axis) in self.body.solved.iter().enumerate() {
             if !available[axis] {
                 self.velocity[column] = 0.0;
+                self.acceleration[column] = 0.0;
             }
         }
         self.cost(q, targets, dt);
@@ -1146,7 +1223,9 @@ impl Ik {
         self.step.qdot.iter_mut().for_each(|v| *v = 0.0);
         for (column, &axis) in self.body.solved.iter().enumerate() {
             self.step.q[axis] = q[axis] + dq[column];
-            self.velocity[column] = dq[column] / dt;
+            let velocity = dq[column] / dt;
+            self.acceleration[column] = (velocity - self.velocity[column]) / dt;
+            self.velocity[column] = velocity;
             self.step.qdot[axis] = self.velocity[column];
         }
         self.step.solve = solve;
@@ -1197,9 +1276,28 @@ impl Ik {
                     let e_p = sub(target.translation_m, pose.t);
                     let goal = target.rotation.matrix();
                     let e_r = matrix_rotation_vector(&mat_mul(&goal, &transpose(&pose.r)));
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
+                    // A moving target ([`Ik::set_target_velocity`]) is followed, not chased: the
+                    // step carries its motion over the tick and closes the error to where it
+                    // will be (led by the follower's lag, [`Ik::set_follower_lag`]) no faster
+                    // than the limb can stop on it. Braking on the whole error every tick held
+                    // a 0.5 m/s sweep 36-48 mm behind.
+                    let (v, turning) = self.target_velocity[index].unwrap_or(([0.0; 3], [0.0; 3]));
+                    // Near a pair the target is followed by position alone: carried at its speed
+                    // into a box, a lagging follower rang 1.7 mm deeper into the margin than
+                    // main's (`spark_followers` table, worst 4.00 -> 2.26 mm). Faded in over the
+                    // last [`FOLLOW_ROOM_M`] of the closest pair's room the last tick saw.
+                    let fade = (self.closest_room / FOLLOW_ROOM_M).clamp(0.0, 1.0);
+                    let (v, turning) = (v.map(|x| x * fade), turning.map(|x| x * fade));
+                    let lead = self.limb_lag[index];
+                    let e_p = [0, 1, 2].map(|k| v[k].mul_add(lead, e_p[k]));
+                    let e_r = [0, 1, 2].map(|k| turning[k].mul_add(lead, e_r[k]));
+                    let share = approach(
+                        e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, &self.jerk, s, dt,
+                    );
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
+                    let e_p = [0, 1, 2].map(|k| v[k].mul_add(dt, e_p[k]));
+                    let e_r = [0, 1, 2].map(|k| turning[k].mul_add(dt, e_r[k]));
                     self.tool_asked[index] = (e_p, e_r);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jv[axis][k]);
@@ -1238,7 +1336,9 @@ impl Ik {
                     let u = scale(*toward, 1.0 / norm(*toward));
                     let e_p = sub(*translation_m, pose.t);
                     let e_r = pointing_error(a, u);
-                    let share = approach(e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, s, dt);
+                    let share = approach(
+                        e_p, e_r, &w.jv, &w.jw, &w.moving, &self.caps, &self.jerk, s, dt,
+                    );
                     let (e_p, e_r) =
                         within_tool_speed(scale(e_p, share), scale(e_r, share), most, s);
                     self.tool_asked[index] = (e_p, e_r);
@@ -1292,7 +1392,8 @@ impl Ik {
                     // Closed no faster than the neck can still stop on it, as a pose error
                     // is: asking for the whole turn at once overshot the acceleration caps
                     // and the camera rang on every big swing (three bounces engaging).
-                    let share = pointing_approach(e, &w.jp, &w.moving, &self.caps, s, rho2, dt);
+                    let share =
+                        pointing_approach(e, &w.jp, &w.moving, &self.caps, &self.jerk, s, rho2, dt);
                     let e = clamp_norm(scale(e, share), s.max_error_rad);
                     for k in 0..3 {
                         fill(&mut w.task, &body.solved, |axis| w.jp[axis][k]);
@@ -1405,6 +1506,7 @@ impl Ik {
     }
 
     /// Per column: joint limits with braking, speed, then acceleration where it fits.
+    #[allow(clippy::too_many_lines)] // one axis's bounds, in their order of precedence
     fn bounds(&mut self, q: &[f64], dt: f64) {
         let body = &self.body;
         let axes = body.model.axes();
@@ -1419,8 +1521,8 @@ impl Ik {
                 let margin = s.limit_margin_rad.min((high_limit - low_limit) / 2.0);
                 let room_up = (high_limit - margin - q[axis]).max(0.0);
                 let room_down = (q[axis] - low_limit - margin).max(0.0);
-                let up = braking(room_up, accel, dt);
-                let down = braking(room_down, accel, dt);
+                let up = braking_jerk(room_up, accel, self.jerk[axis], dt);
+                let down = braking_jerk(room_down, accel, self.jerk[axis], dt);
                 if up < hi {
                     (hi, hi_by) = (up, Bound::Limit);
                 }
@@ -1445,12 +1547,12 @@ impl Ik {
             // and never stalled, embodiments#208); applied after the acceleration cap, which it
             // never overrules (a jittered edge moved the braking step 3x the cap at 500 Hz).
             let edge_hi = if window.1.is_finite() && window.1 > 0.0 {
-                braking(window.1, accel, dt)
+                braking_jerk(window.1, accel, self.jerk[axis], dt)
             } else {
                 f64::INFINITY
             };
             let edge_lo = if window.0.is_finite() && window.0 < 0.0 {
-                -braking(-window.0, accel, dt)
+                -braking_jerk(-window.0, accel, self.jerk[axis], dt)
             } else {
                 f64::NEG_INFINITY
             };
@@ -1474,6 +1576,26 @@ impl Ik {
                 (hi, hi_by) = (lo, Bound::Accel);
             } else {
                 (lo, lo_by) = (hi, Bound::Accel);
+            }
+            // The acceleration within the jerk cap of the last step's, as the velocity is
+            // within the acceleration cap of the last ([`Ik::set_jerk_cap`]).
+            let jerk = self.jerk[axis];
+            if jerk.is_finite() {
+                let centre = self.acceleration[column].mul_add(dt * dt, previous);
+                let reach = jerk * dt * dt * dt;
+                let (j_lo, j_hi) = (centre - reach, centre + reach);
+                if j_lo <= hi && j_hi >= lo {
+                    if j_lo > lo {
+                        (lo, lo_by) = (j_lo, Bound::Accel);
+                    }
+                    if j_hi < hi {
+                        (hi, hi_by) = (j_hi, Bound::Accel);
+                    }
+                } else if j_hi < lo {
+                    (hi, hi_by) = (lo, Bound::Accel);
+                } else {
+                    (lo, lo_by) = (hi, Bound::Accel);
+                }
             }
             // Where the step must leave it ([`Ik::set_window`]).
             if edge_hi < hi {
@@ -1590,6 +1712,7 @@ impl Ik {
         w.candidates
             .sort_unstable_by(|x, y| x.distance.total_cmp(&y.distance));
         w.used = 0;
+        let mut closest = f64::INFINITY;
         for index in 0..w.candidates.len() {
             let candidate = w.candidates[index];
             let slot = w.used;
@@ -1647,6 +1770,9 @@ impl Ik {
             // Never more than half the room in one tick either: a long step is where the
             // linearisation is least true.
             let room = (distance - s.collision_margin_m).max(0.0);
+            if !candidate.measured {
+                closest = closest.min(room);
+            }
             let mut rhs = braking(room, capability, dt).min(0.5 * room);
             if s.approach_time_s > 0.0 {
                 rhs = rhs.min(room * dt / s.approach_time_s);
@@ -1706,6 +1832,7 @@ impl Ik {
                 w.used += 1;
             }
         }
+        self.closest_room = closest;
     }
 
     /// Ready the rows for the solve. A commanded row no step within the acceleration caps can
@@ -2157,7 +2284,20 @@ fn within(lo: &mut f64, hi: &mut f64, (low, high): (f64, f64)) -> bool {
 /// The fastest per-tick step from which ticks decelerating by at most `accel` still stop
 /// within `room`: `v dt + v^2 / 2a + v dt / 2 <= room`.
 fn braking(room: f64, accel: f64, dt: f64) -> f64 {
-    dt * accel * ((2.25 * dt * dt + 2.0 * room / accel).sqrt() - 1.5 * dt)
+    braking_jerk(room, accel, f64::INFINITY, dt)
+}
+
+/// [`braking`] with the deceleration reached no faster than `jerk` allows (infinite: at once):
+/// stopping from `v` then takes about `v accel / 2 jerk` further, `v dt + v^2 / 2a + v dt / 2 + v a
+/// / 2j <= room`. Without it a jerk cap left a wrist ringing at its speed cap, braked too late.
+fn braking_jerk(room: f64, accel: f64, jerk: f64, dt: f64) -> f64 {
+    let ramp = if jerk.is_finite() && jerk > 0.0 {
+        accel / (2.0 * jerk)
+    } else {
+        0.0
+    };
+    let lead = 1.5f64.mul_add(dt, ramp);
+    dt * accel * ((lead * lead + 2.0 * room / accel).sqrt() - lead)
 }
 
 /// Signed distance between two capsules at `frames`, their closest axis points, and the unit
@@ -2358,6 +2498,7 @@ fn approach(
     jw: &[Vec3],
     solved: &[usize],
     caps: &Caps,
+    jerks: &[f64],
     s: &Settings,
     dt: f64,
 ) -> f64 {
@@ -2390,28 +2531,31 @@ fn approach(
     }
     let mut y = e.map(|v| v / length);
     cholesky_solve(&mut m, &mut y);
-    let mut accel = f64::INFINITY;
+    let (mut accel, mut jerk) = (f64::INFINITY, f64::INFINITY);
     for &axis in solved {
         let d: f64 = (0..6).map(|a| row(a, axis) * y[a]).sum::<f64>().abs();
         if d > 1e-12 {
             accel = accel.min(caps.accel[axis] / d);
+            jerk = jerk.min(jerks[axis] / d);
         }
     }
     if !accel.is_finite() {
         return 1.0;
     }
-    length.min(braking(length, accel, dt)) / length
+    length.min(braking_jerk(length, accel, jerk, dt)) / length
 }
 
 /// [`approach`] for a camera's pointing error `e` (radians) over its rows `jl` (per axis, the
 /// pointing rate per unit of joint motion; zero on axes it may not turn): the share of `e`
 /// one tick closes, no more than the neck can still stop on along its damped least-squares
 /// direction.
+#[allow(clippy::too_many_arguments)]
 fn pointing_approach(
     e: Vec3,
     jl: &[Vec3],
     solved: &[usize],
     caps: &Caps,
+    jerks: &[f64],
     s: &Settings,
     rho2: f64,
     dt: f64,
@@ -2431,17 +2575,18 @@ fn pointing_approach(
     }
     let mut y = [e[0] / length, e[1] / length, e[2] / length, 0.0, 0.0, 0.0];
     cholesky_solve(&mut m, &mut y);
-    let mut accel = f64::INFINITY;
+    let (mut accel, mut jerk) = (f64::INFINITY, f64::INFINITY);
     for &axis in solved {
         let d: f64 = (0..3).map(|a| jl[axis][a] * y[a]).sum::<f64>().abs();
         if d > 1e-12 {
             accel = accel.min(caps.accel[axis] / d);
+            jerk = jerk.min(jerks[axis] / d);
         }
     }
     if !accel.is_finite() {
         return 1.0;
     }
-    length.min(braking(length, accel, dt)) / length
+    length.min(braking_jerk(length, accel, jerk, dt)) / length
 }
 
 /// The angle between two rotations, radians.

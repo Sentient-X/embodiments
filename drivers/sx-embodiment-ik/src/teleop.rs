@@ -293,7 +293,30 @@ pub struct Targets {
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
     pub head: Option<Pose>,
+    /// Per hand: how it is moving, its point's velocity (m/s) and turn rate (rad/s) in the root
+    /// frame, for the solve to follow it by ([`crate::Ik::set_target_velocity`]): a person's
+    /// hand as the station measured it (`Intent::motion`), a goal's path speed. `None`: for a
+    /// person's hand the tremor filter's own estimate, for a goal none.
+    pub velocity: [Option<([f64; 3], [f64; 3])>; 2],
+    /// How old the hands' sample is, seconds (the link's latency on arrival plus the time held
+    /// since): a person's hand is carried forward by it after its tremor is filtered out, along
+    /// the filter's own tremor-free motion ([`LEAD_MAX_S`], [`LEAD_MAX_M`], [`LEAD_MAX_RAD`]),
+    /// and the filter
+    /// reads it on the sender's clock (now less its age). `None`: as read, filtered on the
+    /// solve's clock.
+    pub age_s: Option<f64>,
 }
+
+/// The longest a person's hand is carried forward by its sample's age ([`Targets::age_s`]). The
+/// station gives the age bounded by its own horizon (the sample's latency on arrival plus one
+/// send period), so a stall does not carry the hand on; this is the backstop. At 0.3 s a hand
+/// that stopped in a stall was carried 3 cm past where it stopped (refute, 2026-11-06).
+pub const LEAD_MAX_S: f64 = 0.15;
+/// The furthest it is carried, metres.
+pub const LEAD_MAX_M: f64 = 0.03;
+/// The most it is turned, radians: a twist moves the tool point nowhere, so the distance cap
+/// alone let a 4 rad/s twist carry 0.52 rad past the stopped hand (refute, 2026-11-06).
+pub const LEAD_MAX_RAD: f64 = 0.25;
 
 /// How one gripper's opening in metres becomes its finger angles: linear between the fingers'
 /// closed angles at `closed_width_m` and their open angles at `open_width_m`. The width is the
@@ -683,17 +706,68 @@ impl Teleop {
         if dt.is_finite() && dt > 0.0 {
             self.clock_s += dt;
         }
+        let sample_age = targets.age_s.filter(|a| a.is_finite() && *a >= 0.0);
+        let lead = sample_age.map_or(0.0, |a| a.min(LEAD_MAX_S));
         let mut out = *targets;
         for (hand, filter) in self.filters.iter_mut().enumerate() {
-            match (
+            let rates = match (
                 targets.tcp[hand],
                 targets.tool_speed[hand],
                 self.input_filter,
             ) {
                 (Some(pose), None, Some(params)) => {
-                    out.tcp[hand] = Some(filter.filter(&params, self.clock_s, pose));
+                    // Read on the sender's clock when the age is known: a sample held between
+                    // arrivals, or bunched after a stall, is the same reading, not a hand that
+                    // stopped and leapt (the filter's velocity, carried by the age, turned that
+                    // into shake: 9 shiver windows to 4, `examples/trace.rs --network --age`). Past
+                    // the station's horizon the age stops growing, so a stalled hand reads as
+                    // one that stopped and its carry winds down.
+                    let read_s = sample_age.map_or(self.clock_s, |a| self.clock_s - a);
+                    let filtered = filter.filter(&params, read_s, pose);
+                    let (v, turning) = filter.rates();
+                    // Carried forward by the sample's age along the filtered motion: a raw
+                    // two-sample velocity carries the tremor too, and over a 150 ms lead turned
+                    // a still hand's 1.6 mm shake into 2.8-5.7 mm (`examples/trace.rs --network`).
+                    let step = v.map(|x| x * lead);
+                    let length = step.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    let shorten = if length > LEAD_MAX_M {
+                        LEAD_MAX_M / length
+                    } else {
+                        1.0
+                    };
+                    let mut carried = filtered;
+                    for k in 0..3 {
+                        carried.translation_m[k] += step[k] * shorten;
+                    }
+                    let turn = turning.map(|w| w * lead);
+                    let angle = turn.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    let turn = if angle > LEAD_MAX_RAD {
+                        turn.map(|x| x * LEAD_MAX_RAD / angle)
+                    } else {
+                        turn
+                    };
+                    carried.rotation = sx_frames::Quaternion::from_matrix(
+                        &sx_frames::rotation_vector_matrix(turn),
+                    ) * carried.rotation;
+                    out.tcp[hand] = Some(carried);
+                    Some(targets.velocity[hand].unwrap_or((v, turning)))
                 }
-                _ => filter.reset(),
+                // A person's hand unfiltered, or a program's goal: followed by the velocity the
+                // caller gives (a goal's own path speed), if any.
+                (Some(_), _, _) => {
+                    filter.reset();
+                    targets.velocity[hand]
+                }
+                (None, _, _) => {
+                    filter.reset();
+                    None
+                }
+            };
+            // Where the hand is going, for the solve to follow it.
+            for (limb, of) in self.hand_of.iter().enumerate() {
+                if *of == Some(hand) {
+                    self.ik.set_target_velocity(limb, rates);
+                }
             }
         }
         self.taken = out;
@@ -744,6 +818,36 @@ impl Teleop {
     /// scores answers, not the clock of a loaded host.
     pub fn set_deadline(&mut self, budget: std::time::Duration) {
         self.ik.set_deadline(budget);
+    }
+
+    /// How far `joint`'s follower lags its command, seconds ([`Ik::set_follower_lag`]): a moving
+    /// hand is followed to where it will be that much later. An unknown joint is ignored.
+    pub fn set_follower_lag(&mut self, joint: &str, seconds: f64) {
+        if let Some(axis) = self
+            .ik
+            .body()
+            .model()
+            .axes()
+            .iter()
+            .position(|a| a.name == joint)
+        {
+            self.ik.set_follower_lag(axis, seconds);
+        }
+    }
+
+    /// The most `joint`'s acceleration may change, unit/s^3 ([`Ik::set_jerk_cap`]). An unknown
+    /// joint is ignored.
+    pub fn set_jerk_cap(&mut self, joint: &str, jerk: f64) {
+        if let Some(axis) = self
+            .ik
+            .body()
+            .model()
+            .axes()
+            .iter()
+            .position(|a| a.name == joint)
+        {
+            self.ik.set_jerk_cap(axis, jerk);
+        }
     }
 
     /// Engage: the next step seeds from the measured joints, starts from standing still and
