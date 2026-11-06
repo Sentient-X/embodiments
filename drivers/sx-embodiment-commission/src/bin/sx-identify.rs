@@ -1157,6 +1157,7 @@ fn run() -> Result<(), String> {
                 max_speed: args.speed,
                 max_tracking_error: MAX_TRACKING_ERROR,
                 max_acceleration: None,
+                acceleration_rise_s: None,
             };
             width
         ],

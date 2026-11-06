@@ -47,6 +47,7 @@ pub mod governor;
 pub mod holder;
 pub mod host_needs;
 pub mod inertial;
+pub mod jerk;
 pub mod kinematics;
 pub mod layout;
 pub mod lerobot;

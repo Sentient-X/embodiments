@@ -213,6 +213,7 @@ fn a_governed_joint_outside_its_range_comes_in_at_the_speed_bound() {
             max_speed: 0.25,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         15
     ];
@@ -258,6 +259,7 @@ fn the_governor_starts_from_where_the_body_rests_and_slews() {
             max_speed: 0.25,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         15
     ];
@@ -525,6 +527,7 @@ fn a_late_answer_to_a_command_is_a_stale_reading_and_a_silent_motor_is_held_not_
             max_speed: 0.25,
             max_tracking_error: 0.2,
             max_acceleration: None,
+            acceleration_rise_s: None,
         };
         15
     ];

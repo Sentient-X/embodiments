@@ -815,6 +815,7 @@ mod tests {
         max_speed: 0.25,
         max_tracking_error: 0.2,
         max_acceleration: None,
+        acceleration_rise_s: None,
     };
 
     /// `chain` governed, and driven once where it rests, as an operation leaves it.

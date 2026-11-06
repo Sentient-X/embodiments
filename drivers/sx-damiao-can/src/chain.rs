@@ -1839,9 +1839,12 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
     ///   coasted 0.58 rad from their rated 10.47 rad/s in the MIT simulation; refute
     ///   2026-10-30), and no faster than the motor's peak torque decelerates it within
     ///   [`MAX_COAST`], `sqrt(2 MAX_COAST peak / J)`, where a stiffer spring would saturate;
-    /// - and the acceleration `kp MAX_LAG / J`, whose inertial torque the position term gives
+    /// - the acceleration `kp MAX_LAG / J`, whose inertial torque the position term gives
     ///   within [`MAX_LAG`]: braking harder overshoots and rings (the shoulders' kd 1.09 damps
-    ///   their arm at a damping ratio near 0.1).
+    ///   their arm at a damping ratio near 0.1);
+    /// - and the rise time `sqrt(J / kp)`, the PD's natural period over 2 pi: every motion's
+    ///   acceleration rises and falls no faster than over it (`sx_embodiment_drivers::jerk`;
+    ///   12-200 ms on the static upper body, the shoulders 83 ms).
     ///
     /// Re-tuned gains lift every one of these. An axis with no damping limits nothing.
     fn tracking_ceilings(&self) -> Vec<(usize, sx_embodiment_drivers::TrackingCeiling)> {
@@ -1869,6 +1872,9 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                     sx_embodiment_drivers::TrackingCeiling {
                         speed: lag.min(momentum),
                         acceleration: (inertia > 0.0).then(|| kp * MAX_LAG / inertia),
+                        // The PD's own response time, `sqrt(J / kp)`: an acceleration that
+                        // rises faster than this is a step to the joint, and it rings.
+                        rise_s: (inertia > 0.0 && kp > 0.0).then(|| (inertia / kp).sqrt()),
                     },
                 )
             })

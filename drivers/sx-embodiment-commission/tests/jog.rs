@@ -90,6 +90,7 @@ fn governed(drive: &InstanceDrive, bus: &Sim) -> (Governor<Body, Manual>, Manual
                 max_speed: SPEED,
                 max_tracking_error: 0.2,
                 max_acceleration: None,
+                acceleration_rise_s: None,
             };
             joints.len()
         ],

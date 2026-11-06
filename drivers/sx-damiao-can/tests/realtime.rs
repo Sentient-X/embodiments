@@ -36,6 +36,7 @@ fn a_governed_command_tick_allocates_nothing() {
                 max_speed: 0.25,
                 max_tracking_error: 0.2,
                 max_acceleration: None,
+                acceleration_rise_s: None,
             };
             width
         ],
