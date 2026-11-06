@@ -66,6 +66,7 @@ from .kinematics import Kinematics, Transform, from_xyz_rpy
 from .known import tool_points_checked_of
 from .materialize import materialize
 from .tool_frames import Jaws, ToolFrame, tool_frames
+from .tool_points import tool_chain
 from .viewing import Viewing
 
 SCHEMA: Final = "sx.render-pack/v1"
@@ -873,11 +874,12 @@ def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> d
     derived = tcp_frames(embodiment, tools)
     candidates: dict[str, JsonValue] = dict(derived)
     checked = tool_points_checked_of(str(embodiment.name))
-    # A check holds for the revision and the links it checked, and for nothing else.
+    # A check holds for the links it checked and the chain from the root to them, and for
+    # nothing else: a revision that moves a tool point or a joint on its chain is unchecked.
     if (
         checked is None
-        or checked.embodiment != str(embodiment.id)
         or dict(checked.points) != derived
+        or checked.chain != tool_chain(embodiment.urdf_bytes, derived)
     ):
         return {"tcp_candidates": candidates, "tcp_frames": {}}
     return {

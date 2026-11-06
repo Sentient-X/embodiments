@@ -52,6 +52,7 @@ from sx_embodiments.composition import compose_build
 from sx_embodiments.embodiment import Embodiment
 from sx_embodiments.errors import UnknownEmbodimentError
 from sx_embodiments.factory_intrinsics import zed_factory_calibration
+from sx_embodiments.identity import EmbodimentId
 from sx_embodiments.instance import (
     RobotInstance,
     Slot,
@@ -60,6 +61,8 @@ from sx_embodiments.instance import (
     nominal_instance,
     resolve,
 )
+from sx_embodiments.kinematics import KinematicsError
+from sx_embodiments.known import tool_points_checked_of
 from sx_embodiments.known.humanoid import (
     HEAD_INFRARED_RIG,
     SENTIENT_HUMANOID_UPPER_BODY_INFRARED_BUILD,
@@ -88,8 +91,10 @@ from sx_embodiments.media import (
     mount_pose_at,
 )
 from sx_embodiments.parts import ChainSpec, GripperSpec
+from sx_embodiments.recorded import historical_document, read_recorded
 from sx_embodiments.rendered import same_rendering
 from sx_embodiments.successor import superseded_ids
+from sx_embodiments.tool_points import tool_chain
 
 ROOT = Path(__file__).resolve().parents[1]
 #: Each rendered file and the registered body it carries.
@@ -448,6 +453,26 @@ def document(name: str) -> dict[str, object]:
     # Earlier ids of this body that drive as it does: a robot still assigned one opens it.
     if supersedes := superseded_ids(robot.name):
         rendered["supersedes"] = list(supersedes)
+    # The chain from the root to each checked tool point, per id a robot may be assigned (this
+    # one and each it supersedes): the station drives a tool point only when the id it was
+    # assigned has the chain the check was of, so an earlier revision wired the same but with
+    # another gripper or arm stays unchecked. Absent for a body nobody checked, and for an id
+    # whose description lacks a checked link.
+    if (checked := tool_points_checked_of(name)) is not None:
+        chains: dict[str, str] = {}
+        revisions = [(str(robot.id), robot)] + [
+            (
+                identity,
+                read_recorded(historical_document(robot.name, EmbodimentId(identity))).embodiment,
+            )
+            for identity in supersedes
+        ]
+        for identity, revision in revisions:
+            try:
+                chains[identity] = tool_chain(revision.urdf_bytes, checked.points)
+            except KinematicsError:
+                continue
+        rendered["tool_chains"] = dict(sorted(chains.items()))
     if approach:
         rendered["approach"] = {
             port: {"speed": limit.speed, "acceleration": limit.acceleration}
