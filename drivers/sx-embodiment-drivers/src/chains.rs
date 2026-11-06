@@ -18,8 +18,12 @@
 //! A chain that fails while another may have applied its frames is a [`ChainFailure::Fault`]
 //! whatever it reported, since that other device already holds its new target; one that fails
 //! alone keeps its own failure (a refusal from every failing chain with nothing applied
-//! anywhere stays a refusal). The error names the lowest failing chain. A chain that panics
-//! is waited out with the others and its panic resumed on the caller. A stop stops every
+//! anywhere stays a refusal). So the first chain's own refusal (a Damiao `StopPending`) is a
+//! fault when the others moved in the same command, where it used to leave them unwritten:
+//! the governor stops and holds, which is the safe side. The error names the lowest failing
+//! chain. A chain that panics, on its thread or the caller's, is waited out with the others
+//! (no bus thread is left mid-command or holding an answer) and its panic resumed on the
+//! caller. A stop stops every
 //! chain, one after the other, whatever an earlier one answered, and is proven only when every
 //! chain's is. Its budget is the sum of theirs.
 //!
@@ -162,6 +166,8 @@ impl<C: ActuatorChain> Slot<C> {
         if state.gone {
             return false;
         }
+        // Never an answer to an earlier command: every command takes its own answer.
+        state.done = None;
         state.job = Some(job);
         drop(state);
         self.changed.notify_all();
@@ -286,10 +292,17 @@ where
     }
 }
 
-impl<C: ActuatorChain> Chains<C> {
+impl<C> Chains<C>
+where
+    C: ActuatorChain + Send + 'static,
+    C::Error: Send,
+    C::Feedback: Send,
+{
+    /// The chains in native state order, each after the first given its bus thread now (one
+    /// that cannot be started leaves its chain to be commanded on the caller's thread).
     #[must_use]
     pub fn new(chains: Vec<C>) -> Self {
-        let axes = chains
+        let axes: Vec<BoundAxis> = chains
             .iter()
             .flat_map(|chain| chain.axes().iter().cloned())
             .collect();
@@ -306,13 +319,25 @@ impl<C: ActuatorChain> Chains<C> {
                 timing
             })
             .collect();
-        let crew = chains.iter().map(|_| None).collect();
         let widths = chains.iter().map(|chain| chain.axes().len()).collect();
+        let members: Vec<Member<C>> = chains
+            .into_iter()
+            .map(|chain| Arc::new(Mutex::new(chain)))
+            .collect();
+        let mut first = 0;
+        let crew = members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| {
+                let name = axes.get(first).map_or("chain", |axis| axis.joint.as_str());
+                first += lock(member).axes().len();
+                (index > 0)
+                    .then(|| Crew::start(Arc::clone(member), name).ok())
+                    .flatten()
+            })
+            .collect();
         Self {
-            members: chains
-                .into_iter()
-                .map(|chain| Arc::new(Mutex::new(chain)))
-                .collect(),
+            members,
             crew,
             axes,
             commandable,
@@ -322,7 +347,9 @@ impl<C: ActuatorChain> Chains<C> {
             last_command: None,
         }
     }
+}
 
+impl<C: ActuatorChain> Chains<C> {
     /// How many chains.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -387,12 +414,7 @@ impl<C: ActuatorChain> Chains<C> {
     }
 }
 
-impl<C> Chains<C>
-where
-    C: ActuatorChain + Send + 'static,
-    C::Error: Send,
-    C::Feedback: Send,
-{
+impl<C: ActuatorChain> Chains<C> {
     /// Every chain its slice of `joints`, and of `feedforward` when given, all at once.
     fn drive(
         &mut self,
@@ -424,9 +446,15 @@ where
             first += width;
             let wanted = feedforward.map(|wanted| &wanted[span.clone()]);
             let (answer, took) = if handed & (1 << index) == 0 {
+                // A panic here waits, as a bus thread's does, until every thread has answered:
+                // none is left running a command, or holding an answer, when it resumes.
                 let mut chain = lock(&self.members[index]);
-                let (receipt, took) = command(&mut *chain, &joints[span], wanted);
-                (Ok(receipt), took)
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    command(&mut *chain, &joints[span], wanted)
+                })) {
+                    Ok((receipt, took)) => (Ok(receipt), took),
+                    Err(panic) => (Err(panic), Duration::ZERO),
+                }
             } else {
                 let answer = self.crew[index]
                     .as_ref()
@@ -501,9 +529,9 @@ where
         })
     }
 
-    /// Every chain after the first its slice, on its own thread (started at its first
-    /// command); which chains were handed theirs, by bit. A chain whose thread cannot be
-    /// started or has ended is commanded on the caller's thread instead.
+    /// Every chain after the first its slice, on its own thread; which chains were handed
+    /// theirs, by bit. A chain with no thread (it could not be started, or it ended) is
+    /// commanded on the caller's thread instead.
     fn hand_out(&mut self, joints: &[f64], feedforward: Option<&[Feedforward]>) -> u64 {
         let now = Instant::now();
         let realtime = sx_realtime::is_elevated().then(|| {
@@ -521,17 +549,6 @@ where
             let width = self.width(index);
             let span = first..first + width;
             first += width;
-            if self.crew[index].is_none() {
-                let name = self
-                    .axes
-                    .get(span.start)
-                    .map_or("chain", |axis| axis.joint.as_str());
-                match Crew::start(Arc::clone(&self.members[index]), name) {
-                    Ok(crew) => self.crew[index] = Some(crew),
-                    // No thread: this chain is commanded here, after the first.
-                    Err(_) => continue,
-                }
-            }
             let job = Job {
                 joints: Axes::from_slice(&joints[span.clone()]),
                 feedforward: feedforward.map(|wanted| Axes::from_slice(&wanted[span])),
@@ -574,12 +591,10 @@ where
     }
 }
 
-impl<C> ActuatorChain for Chains<C>
-where
-    C: ActuatorChain + Send + 'static,
-    C::Error: Send,
-    C::Feedback: Send,
-{
+/// No `Send` or `'static` bound here (only [`Chains::new`] starts threads): a bound on this impl
+/// would have every async caller prove it at every lifetime, which rustc cannot ("implementation
+/// of `Send` is not general enough" across the station's futures).
+impl<C: ActuatorChain> ActuatorChain for Chains<C> {
     type Error = ChainsError<C::Error>;
     type Feedback = C::Feedback;
 
@@ -1249,6 +1264,30 @@ mod tests {
         assert_eq!(chains.chain(0).sent, [[0.0]], "the other bus was commanded");
         // The body still stops every chain.
         assert!(chains.stop().is_proven());
+        // The first bus panicking on the caller's thread (the refute of 2026-11-06): the slow
+        // bus thread is waited out, so no command runs after the stop that follows and every
+        // later receipt is its own command's.
+        let mut first = fake("can", &[1], true);
+        first.panics = true;
+        let mut slow = fake("neck", &[1], true);
+        slow.delay = Duration::from_millis(5);
+        let mut chains = Chains::new(vec![first, slow]);
+        let caught =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| chains.command(&[0.1, 0.1])));
+        assert!(caught.is_err());
+        assert_eq!(
+            chains.chain(1).sent,
+            [[0.1]],
+            "answered before the panic resumed"
+        );
+        chains.chain(0).panics = false;
+        assert!(chains.stop().is_proven());
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(chains.chain(1).sent, [[0.1]], "nothing ran after the stop");
+        for target in [0.2, 0.3] {
+            let receipt = chains.command(&[target, target]).expect("commanded");
+            assert_eq!(receipt.observed, [target, target], "its own answer");
+        }
     }
 
     /// A steady command allocates nothing on the caller's thread: each bus thread is started
