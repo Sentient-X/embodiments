@@ -27,6 +27,7 @@ from sx_embodiments import (
     EmbodimentSchemaError,
     development_embodiments,
     embodiments,
+    loadable_description,
     materialize,
     materialized,
 )
@@ -412,6 +413,20 @@ def test_materialized_names_a_file_inside_the_closure(
             assert name.startswith("package://sx-embodiments/das_gripper_with_vr/meshes/"), name
         assert (root / name.removeprefix("package://sx-embodiments/")).is_file(), name
     assert vendored
+
+
+@pytest.mark.parametrize("name", sorted(development_embodiments))
+def test_every_bodys_loadable_description_names_only_closure_files(
+    name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A loader that follows no package name (MuJoCo) opens every mesh it is given."""
+    monkeypatch.setenv("SX_EMBODIMENTS_ASSET_CACHE", str(tmp_path / "cache"))
+    body = development_embodiments[name]
+    root = materialize(body)
+    meshes = [mesh.attrib["filename"] for mesh in ET.fromstring(loadable_description(body)).iter("mesh")]
+    for filename in meshes:
+        assert Path(filename).is_absolute() and Path(filename).is_file(), filename
+        assert Path(filename).is_relative_to(root), filename
 
 
 def test_an_intact_local_tree_is_the_closure_and_a_tampered_one_is_not(

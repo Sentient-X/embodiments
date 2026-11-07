@@ -60,7 +60,7 @@ from .layout import (
     Unobserved,
     VendorReadout,
 )
-from .materialize import materialize, materialized
+from .materialize import loadable_description, materialize, materialized
 from .parts import CameraOptics, CameraOpticsAuthority, FactSource, Limb
 from .recorded import (
     RecordedEmbodiment,
@@ -131,6 +131,7 @@ __all__ = [
     "embodiments",
     "historical_document",
     "historical_identities",
+    "loadable_description",
     "materialize",
     "materialized",
     "migrate",
