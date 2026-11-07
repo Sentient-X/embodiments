@@ -223,10 +223,18 @@ def _at_zero(kinematics: Kinematics, root: str, link: str, at_zero: dict[str, fl
 def _rounded(capsule: Capsule) -> Capsule:
     a, b, radius = capsule
     # Ends move by at most half a micrometre each; the radius grows by one to cover them.
+    # A radius on a whole micrometre (a primitive's 0.08 m) is that micrometre: its last
+    # bits differ between macOS and Linux libm, and ceil would turn them into a micrometre
+    # of difference. Snapping within 1e-6 of a micrometre stays inside the half-micrometre
+    # the extra one leaves spare, so every vertex is still contained.
+    micrometres = radius / _MICRO
+    nearest = round(micrometres)
+    if abs(micrometres - nearest) < 1e-6:
+        micrometres = float(nearest)
     return (
         np.round(a / _MICRO) * _MICRO,
         np.round(b / _MICRO) * _MICRO,
-        math.ceil(radius / _MICRO + 1) * _MICRO,
+        (math.ceil(micrometres) + 1) * _MICRO,
     )
 
 
