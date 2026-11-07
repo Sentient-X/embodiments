@@ -79,7 +79,6 @@ def test_new_robot_layout_widths_follow_upstream_action_order() -> None:
         "ur10e": 6,
         "ur5e": 6,
         "yor": 22,
-        "sentient-humanoid": 25,
     }
     assert {name: embodiments[name].state.width for name in expected} == expected
 

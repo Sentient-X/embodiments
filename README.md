@@ -100,15 +100,26 @@ reach of a work surface (warnings), payload against a base's rating (a refusal),
 of mass over the support polygon at rest (a refusal) and with the arms reaching together (a
 warning). `tests/test_checks.py` holds it to an interactive budget.
 
-`Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves, and a
-part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
-way from its one vendor URDF: the upper body (the robot in service) offers a neck seat, two hip
-seats and two wrists; the full humanoid mates the legs back on, and `tests/test_humanoid.py`
-holds the rejoined parts to the vendor's robot by forward kinematics. The head's camera holder is
-a socket fitted with the CAD's D435, a camera module that adds its own optical frame (a module's
-`frames`) and carries the colour stream, riding on the torso that turns the chest. Its parallel
-grippers are modules whose servo and jaw no source describes, so the body with them,
-`sentient-humanoid-upper-body-grippers`, is a development body.
+`Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves,
+and `namespaced=False` keeps the source's names. The legacy Sentient humanoid upper-body
+variants remain cut from their original vendor URDF, with five-joint arms and a D435 head.
+
+The canonical `sentient-humanoid` is now a **development candidate**: the original pelvis,
+three-joint torso, waist, chest and legs, with the corrected static body's seven-joint
+arm/gripper and SO-101/ZED head modules. The original shoulder seats remain 272.381 mm
+apart; the corrected static body's span is 279.750 mm. The head preserves its offset from
+the shoulder midpoint under the sources' common forward/up axes. This nominal design
+extrapolation is not a measured full-body assembly. Source changes are checked against
+both source URDFs; part reuse and retained lower-body FK are tested at nonzero waist poses.
+
+The 39-coordinate candidate has a new identity. Earlier 25-coordinate recordings retain
+their exact historical body and public URDF; the stale 28-joint MJCF is not its active
+simulation model. Its composite URDF lives in the entitled `sentient_humanoid/` directory,
+retaining both BSD and proprietary source provenance. Inherited part-local arm/neck ready
+references are not an accepted standing pose or full-body Ready. The static clamp, table
+height, mass margin, unit calibration and torso tuning are not transferred. Waist and leg
+drives remain undocumented; full-body dynamics, bus compatibility and physical operation
+remain unqualified.
 
 `sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
 arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge

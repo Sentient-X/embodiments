@@ -19,8 +19,6 @@ from sx_embodiments.kinematics import IDENTITY, Kinematics
 from sx_embodiments.known.humanoid import (
     HEAD_MODULE,
     LEG_MODULES,
-    SENTIENT_HUMANOID_BUILD,
-    SENTIENT_HUMANOID_SPEC,
     SENTIENT_HUMANOID_UPPER_BODY_BUILD,
     SENTIENT_HUMANOID_UPPER_BODY_SPEC,
     SENTIENT_HUMANOID_URDF,
@@ -29,7 +27,6 @@ from sx_embodiments.known.humanoid import (
 from sx_embodiments.known.so101 import SO101_URDF
 from sx_embodiments.layout import ActuatorBus, ActuatorModel, DirectDrive, UndocumentedDrive
 from sx_embodiments.mechanical import Build, Mate, Placed
-from sx_embodiments.parts import Limb
 
 
 def _movable(urdf: bytes) -> list[str]:
@@ -40,53 +37,18 @@ def _movable(urdf: bytes) -> list[str]:
     ]
 
 
-def test_the_reassembled_parts_are_the_vendors_robot() -> None:
-    """Every link of the source sits where the source puts it, at any joint values."""
-    source = SENTIENT_HUMANOID_URDF.path().read_bytes()
-    rejoined = SENTIENT_HUMANOID_BUILD.urdf()
-    assert sorted(_movable(source)) == sorted(_movable(rejoined))
-    source_links = {
-        link.attrib["name"]: ET.canonicalize(ET.tostring(link), strip_text=True)
-        for link in ET.fromstring(source).findall("link")
-    }
-    rejoined_links = {
-        link.attrib["name"]: ET.canonicalize(ET.tostring(link), strip_text=True)
-        for link in ET.fromstring(rejoined).findall("link")
-    }
-    for name, element in source_links.items():
-        assert rejoined_links[name] == element, name  # geometry, inertia and meshes untouched
+def test_legacy_upper_body_and_head_keep_the_vendor_kinematics() -> None:
+    source = Kinematics.of(SENTIENT_HUMANOID_URDF.path().read_bytes())
+    upper = Kinematics.of(SENTIENT_HUMANOID_UPPER_BODY_BUILD.urdf())
     rng = random.Random(15)
     for _ in range(4):
-        joints = {name: rng.uniform(-1.0, 1.0) for name in _movable(source)}
-        expected = Kinematics.of(source).poses("pelvis", joints)
-        found = Kinematics.of(rejoined).poses("pelvis", joints)
-        for name, pose in expected.items():
-            worst = max(abs(a - b) for a, b in zip(pose, found[name], strict=True))
-            assert worst < 1e-12, name
-
-
-def test_the_upper_body_is_the_humanoid_without_its_legs() -> None:
-    full = {
-        link.attrib["name"] for link in ET.fromstring(SENTIENT_HUMANOID_BUILD.urdf()).iter("link")
-    }
-    upper = {
-        link.attrib["name"]
-        for link in ET.fromstring(SENTIENT_HUMANOID_UPPER_BODY_BUILD.urdf()).iter("link")
-    }
-    legs = full - upper
-    assert upper < full
-    assert all(
-        name.startswith(("left_", "right_"))
-        and any(part in name for part in ("hip", "knee", "foot", "ankle"))
-        for name in legs
-    ), legs
-
-
-def test_the_full_humanoid_is_the_upper_body_plus_legs() -> None:
-    upper = SENTIENT_HUMANOID_UPPER_BODY_SPEC.attachments
-    full = SENTIENT_HUMANOID_SPEC.attachments
-    assert full[: len(upper)] == upper
-    assert {component.limb for component in full[len(upper) :]} == {Limb.LEG}
+        joints = {name: rng.uniform(-1.0, 1.0) for name in source.independent}
+        expected = source.poses("pelvis", joints)
+        for name, pose in upper.poses(
+            "pelvis", {k: v for k, v in joints.items() if k in upper.joints}
+        ).items():
+            if name in expected:
+                assert pose == pytest.approx(expected[name], abs=1e-12), name
 
 
 def test_the_upper_body_drives_its_arms_and_torso_yaw_on_one_damiao_bus() -> None:

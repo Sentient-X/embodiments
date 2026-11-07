@@ -50,6 +50,10 @@ VENDORED_LICENCES: Final[Mapping[str, str]] = {
     # kept so the recordings that name that revision keep resolving. The official/ tree
     # holds several licences, so this superseded revision names its own: YOR's MIT.
     "official/_by_digest/b5242242eb182ac80af88c1ccafbf042adc82e72112519867bb4e808cf63ce38": "MIT",
+    # Panda-on-Omron before its mesh references were resolved in each source's context.
+    (
+        "official/_by_digest/a6083f958c833ad83ccfac25b2409cc3f0129dac4f86a91305e7e8e16d3c8dcd"
+    ): "Apache-2.0",
 }
 """Licences of tree files that no embodiment declaration reaches, by file or directory.
 

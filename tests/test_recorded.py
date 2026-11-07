@@ -1,6 +1,7 @@
 """A recording's embodiment keeps the identity it was recorded under."""
 
 import json
+from hashlib import sha256
 from importlib import resources
 
 import pytest
@@ -11,10 +12,13 @@ from sx_embodiments import (
     EmbodimentName,
     EmbodimentSchemaError,
     development_embodiments,
+    embodiments,
+    historical_document,
     historical_identities,
     read_recorded,
     resolve_asset,
 )
+from sx_embodiments.successor import successor
 
 # The canonical YUBI package published under schema 13 from bf11315 (2026-08-20) until
 # the schema-14 bump, as the field pods recorded it. The schema-13 commit itself
@@ -63,6 +67,24 @@ def test_a_current_document_reads_exactly() -> None:
     recorded = read_recorded(current.to_dict())
     assert recorded.embodiment == current
     assert recorded.recorded_id == current.id
+
+
+def test_panda_before_mesh_normalization_keeps_exact_description_and_joint_order() -> None:
+    identity = EmbodimentId("deaf877f9718a58a04937177c9eed9f8f3c5397afefb303a5d14aa9febd86d6d")
+    recorded = read_recorded(historical_document(EmbodimentName("panda_omron"), identity))
+    old = recorded.embodiment
+    current = embodiments["panda_omron"]
+    assert recorded.recorded_id == old.id == identity
+    assert current.id != identity
+    assert len(old.urdf_bytes) == 20760
+    assert sha256(old.urdf_bytes).hexdigest() == (
+        "a6083f958c833ad83ccfac25b2409cc3f0129dac4f86a91305e7e8e16d3c8dcd"
+    )
+    assert old.state == current.state
+    assert old.joint_names == current.joint_names
+    assert old.ready_joints == current.ready_joints
+    assert old.components == current.components
+    assert successor(str(identity)) == current
 
 
 def test_a_schema_13_document_whose_content_moved_is_refused() -> None:

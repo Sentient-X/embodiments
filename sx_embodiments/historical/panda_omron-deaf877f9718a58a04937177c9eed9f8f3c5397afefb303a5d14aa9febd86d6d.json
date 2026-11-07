@@ -1,0 +1,344 @@
+{
+  "id": "deaf877f9718a58a04937177c9eed9f8f3c5397afefb303a5d14aa9febd86d6d",
+  "schema_version": 16,
+  "name": "panda_omron",
+  "label": "Franka Panda on Omron LD mobile base",
+  "kind": "robot",
+  "lineage": {
+    "family": "panda",
+    "variant": "omron",
+    "revision": ""
+  },
+  "components": [
+    {
+      "instance": "base",
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "part_id": "omron-ld",
+          "kind": "mobile_base",
+          "layout": []
+        },
+        "limb": null
+      },
+      "mount": {
+        "kind": "root",
+        "frame": "omron_ld"
+      }
+    },
+    {
+      "instance": "arm",
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "part_id": "panda-arm",
+          "kind": "chain",
+          "layout": [
+            {
+              "name": "panda_joint1",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8973,
+                "upper": 2.8973
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint2",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -1.7628,
+                "upper": 1.7628
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint3",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8973,
+                "upper": 2.8973
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint4",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -3.0718,
+                "upper": -0.0698
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint5",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8973,
+                "upper": 2.8973
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint6",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -0.0175,
+                "upper": 3.7525
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            },
+            {
+              "name": "panda_joint7",
+              "unit": "rad",
+              "bounds": {
+                "kind": "bounded",
+                "lower": -2.8973,
+                "upper": 2.8973
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            }
+          ],
+          "home": [
+            0.0,
+            -0.785,
+            0.0,
+            -2.356,
+            0.0,
+            1.571,
+            0.785
+          ],
+          "ready": [
+            0.0,
+            -0.153,
+            0.0,
+            -2.715,
+            0.0,
+            1.932,
+            0.785
+          ],
+          "physical": {
+            "payload_kg": 3.0,
+            "reach_m": 0.855,
+            "mass_kg": 18.0
+          }
+        },
+        "limb": "arm"
+      },
+      "mount": {
+        "kind": "root",
+        "frame": "panda_link0"
+      }
+    },
+    {
+      "instance": "gripper",
+      "attachment": {
+        "kind": "body",
+        "part": {
+          "part_id": "panda-gripper",
+          "kind": "gripper",
+          "grasp": "parallel",
+          "layout": [
+            {
+              "name": "panda_finger_joint1",
+              "unit": "m",
+              "bounds": {
+                "kind": "bounded",
+                "lower": 0.0,
+                "upper": 0.04
+              },
+              "observation": {
+                "kind": "unobserved",
+                "reason": "observation facts are not documented"
+              },
+              "actuation": {
+                "kind": "undocumented",
+                "reason": "drive facts are not documented"
+              }
+            }
+          ],
+          "travel_m": [
+            0.0,
+            0.08
+          ],
+          "grasp_centre_m": [
+            0.0,
+            0.0,
+            0.1034
+          ],
+          "mimic_joints": [
+            {
+              "name": "panda_finger_joint2",
+              "of": "panda_finger_joint1",
+              "multiplier": 1.0
+            }
+          ],
+          "gap_curve": null,
+          "physical": null
+        },
+        "limb": null
+      },
+      "mount": {
+        "kind": "mounted_on",
+        "parent": "arm",
+        "frame": "panda_link8"
+      }
+    }
+  ],
+  "rates": {
+    "policy_hz": 20.0,
+    "low_level_hz": null
+  },
+  "base_mount": {
+    "kind": "mobile",
+    "frame": "base",
+    "half_extents": [
+      0.35,
+      0.25
+    ],
+    "centre": [
+      0.0,
+      0.0
+    ],
+    "clearance_m": 0.0
+  },
+  "operator_mounts": [],
+  "assets": [
+    {
+      "asset": {
+        "location": "package://sx-embodiments/official/franka_panda/panda.urdf",
+        "content": {
+          "sha256": "668d8398e32164587fc2e9886b37d1a17a20d889cafe192f28ba245a3e82c24a",
+          "size_bytes": 19046
+        },
+        "format": "urdf",
+        "role": "other",
+        "media_type": "application/xml",
+        "logical_path": "official/franka_panda/panda.urdf"
+      },
+      "provenance": {
+        "repository": "https://github.com/frankarobotics/franka_ros",
+        "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+        "path": "franka_description/robots/panda/panda.urdf.xacro",
+        "license_id": "Apache-2.0",
+        "generator": "xacro 2.1.1 hand=true"
+      }
+    },
+    {
+      "asset": {
+        "location": "package://sx-embodiments/menagerie/franka_emika_panda/panda.xml",
+        "content": {
+          "sha256": "96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273",
+          "size_bytes": 14438
+        },
+        "format": "mjcf",
+        "role": "description",
+        "media_type": "application/xml",
+        "logical_path": "menagerie/franka_emika_panda/panda.xml"
+      },
+      "provenance": {
+        "repository": "https://github.com/google-deepmind/mujoco_menagerie",
+        "revision": "71f066ad0be9cd271f7ed58c030243ef157af9f4",
+        "path": "franka_emika_panda/panda.xml",
+        "license_id": "Apache-2.0",
+        "generator": null
+      }
+    },
+    {
+      "asset": {
+        "location": "package://sx-embodiments/official/franka_panda/panda_omron.urdf",
+        "content": {
+          "sha256": "a6083f958c833ad83ccfac25b2409cc3f0129dac4f86a91305e7e8e16d3c8dcd",
+          "size_bytes": 20760
+        },
+        "format": "urdf",
+        "role": "description",
+        "media_type": "application/xml",
+        "logical_path": "official/franka_panda/panda_omron.urdf"
+      },
+      "provenance": {
+        "repository": "https://github.com/frankarobotics/franka_ros",
+        "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+        "path": "franka_description/robots/panda/panda.urdf.xacro",
+        "license_id": "Apache-2.0",
+        "generator": "sx-embodiments/tools/compose_registered_urdfs.py"
+      }
+    },
+    {
+      "asset": {
+        "location": "package://sx-embodiments/robosuite/omron_mobile_base/omron_ld.urdf",
+        "content": {
+          "sha256": "08347010b49d5a87cceb1b453bed9f99193a47ce11c1140e3d3e6ddff55f4533",
+          "size_bytes": 4016
+        },
+        "format": "urdf",
+        "role": "other",
+        "media_type": "application/xml",
+        "logical_path": "robosuite/omron_mobile_base/omron_ld.urdf"
+      },
+      "provenance": {
+        "repository": "https://github.com/ARISE-Initiative/robosuite",
+        "revision": "5ce6643f3092639d08f7b0f90ed1c6a84f50552c",
+        "path": "robosuite/models/assets/bases/omron_mobile_base.xml",
+        "license_id": "MIT",
+        "generator": "sx-embodiments: the wheeled_base and fixed_support bodies as one URDF link"
+      }
+    }
+  ],
+  "sites": []
+}

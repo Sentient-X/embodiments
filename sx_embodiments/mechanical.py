@@ -29,12 +29,13 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, NewType
 
 from sx_contracts import ComponentId
 
 from .assembly import Assembly, Frame, Member, MountJoint, Pose, Subtree, namespaced
-from .assets import PackagedAsset
+from .assets import PackagedAsset, description_asset_uri
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError, InterfaceMismatchError, SocketError
 from .sites import BodySite
@@ -449,11 +450,21 @@ class Build:
     ) -> Assembly:
         """The rendering: placed modules, then mates, each on its socket's link and pose.
 
-        ``mesh_uri`` gives each module's mesh-reference rewrite, for bytes that will not sit
-        beside their sources (a runtime composition); the registry's sit beside them.
+        ``mesh_uri`` gives each module's mesh-reference rewrite. Mixed-source builds resolve
+        references in their original source context by default; runtime compositions also
+        resolve single-source builds because their output can live in another directory.
         """
         if self.root is None or self.robot is None:
             raise CompositionError(str(self.robot), "a build without a root renders no assembly")
+        # A multi-source build has no single directory for relative mesh references.
+        # Keep single-source renderings stable; resolve mixed sources through their owner.
+        directories = {
+            str(PurePosixPath(file.relpath).parent)
+            for entry in (*self.placed, *self.mates)
+            if isinstance(file := source(entry.module.description), PackagedAsset)
+        }
+        if mesh_uri is None and len(directories) > 1:
+            mesh_uri = source_mesh_uri
         prefixes: dict[str, str] = {}
         members: list[Member] = []
         modules: dict[str, Module] = {}
@@ -583,6 +594,14 @@ class Build:
             )
             out.extend(_carried(mate.module, self._opened(mate.name), prefix, rides, seat))
         return tuple(out)
+
+
+def source_mesh_uri(module: Module) -> Callable[[str], str] | None:
+    """Resolve every mesh reference in the module's original description context."""
+    file = source(module.description)
+    if not isinstance(file, PackagedAsset):
+        return None
+    return lambda reference: description_asset_uri(file.provenanced_asset().uri, reference)
 
 
 def _carried(

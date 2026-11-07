@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 from xml.etree import ElementTree as ET
@@ -17,7 +17,7 @@ from .description import joint_names
 from .embodiment import Embodiment, portable_component
 from .errors import CompositionError
 from .identity import EmbodimentKind, EmbodimentName, Lineage
-from .mechanical import Build, Module, carrier, source
+from .mechanical import Build, carrier, source, source_mesh_uri
 from .parts import ChainSpec, GripperSpec, MobileBaseSpec
 from .sites import BodySite
 
@@ -167,7 +167,7 @@ def compose_build(
     """
     if build.root is None:
         raise CompositionError(name, "a runtime composition is a rooted build")
-    urdf = build.assembly(mesh_uri=_mesh_uri).urdf()
+    urdf = build.assembly(mesh_uri=source_mesh_uri).urdf()
     components = build.components()
     retained_sources: dict[tuple[str, str], ProvenancedAsset] = {}
     packaged = [
@@ -196,10 +196,3 @@ def compose_build(
     ).with_assets(assets, urdf=urdf)
     joint_names(composed.components, composed.state, urdf)
     return composed
-
-
-def _mesh_uri(module: Module) -> Callable[[str], str] | None:
-    file = source(module.description)
-    if not isinstance(file, PackagedAsset):
-        return None
-    return partial(description_asset_uri, file.provenanced_asset().uri)
