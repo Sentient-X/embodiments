@@ -378,3 +378,32 @@ def materialized(embodiment: Embodiment, ref: AssetRef | None = None) -> Path:
             f"{embodiment.name}: {relpath} is {content} in its closure, not {target.content}"
         )
     return root / relpath
+
+
+def loadable_description(embodiment: Embodiment) -> str:
+    """The description as a loader that follows no ``package://`` name can read it.
+
+    :func:`materialized` places the description beside every file it names, but a mesh
+    named ``package://...`` (a body mixing vendored packages with its own relative meshes,
+    the static upper body's SO-101 head) is still a name MuJoCo cannot open. Every mesh
+    here is rewritten to its absolute path in the closure, by the registry's one rule
+    (:func:`description_asset_uri`); a relative one is anchored to the description's own
+    directory. An absolute name, or a mesh the closure does not hold, is :class:`AssetsUnavailableError`, never
+    left for the loader to fail on.
+    """
+    path = materialized(embodiment)
+    root, files = _materialized_closure(embodiment)
+    description = embodiment.urdf.asset.uri
+    tree = ET.fromstring(path.read_bytes())
+    for mesh in tree.iter("mesh"):
+        reference = mesh.get("filename")
+        if reference is None:
+            continue
+        resolved = description_asset_uri(description, reference)
+        if not resolved.startswith(PACKAGE_URI_PREFIX):
+            raise AssetsUnavailableError(f"{embodiment.name}: {reference} is outside the package")
+        relpath = resolved.removeprefix(PACKAGE_URI_PREFIX)
+        if relpath not in files:
+            raise AssetsUnavailableError(f"{embodiment.name}: {relpath} is not in its closure")
+        mesh.set("filename", str(root / relpath))
+    return ET.tostring(tree, encoding="unicode")
