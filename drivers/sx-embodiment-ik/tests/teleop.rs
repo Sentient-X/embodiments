@@ -882,8 +882,11 @@ fn a_stall_holds_for_as_long_as_the_hand_pushes_into_it() {
 /// catches up, which is not the hand turning back. (A jump whose free path itself first draws
 /// the elbow back past `STALL_RELEASE`, [0.06, 0, 0.06] at 250 Hz: 11 mm, is a release, and
 /// what follows pushes the stop as a fresh contact does, at most the reference gap. Since the
-/// approach closes on the full acceleration caps of the joints that move (2026-11-04/05: no
-/// longer paced by the held torso or the stalled elbow itself), [0.04, 0, 0.03] is one too.)
+/// approach closes on the full acceleration caps of the joints that move (#243, 2026-11-05: no
+/// longer paced by the held torso or the stalled elbow itself), [0.04, 0, 0.03] is one too, and
+/// so is [0.02, 0, 0.01] at 250 and 500 Hz: its first two ticks ask the elbow back 7.2 and
+/// 5.6 mrad, 12.8 past `STALL_RELEASE`; at 100 Hz it keeps the stall. Those releases are held to
+/// the gap by `a_jump_that_releases_the_stall_pushes_no_further_than_the_reference_gap`.)
 #[test]
 fn a_jumped_target_that_still_drives_into_the_stop_keeps_the_stall() {
     // Each, from Ready, drives a free elbow 0.05 to 0.07 rad into the stop.
@@ -891,6 +894,9 @@ fn a_jumped_target_that_still_drives_into_the_stop_keeps_the_stall() {
     let turn = STALL.as_secs_f64() + 1.5;
     for dt in RATES {
         for jump in jumps {
+            if dt < 0.01 && jump == [0.02, 0.0, 0.01] {
+                continue;
+            }
             let mut stalled = false;
             hold_the_elbow(
                 dt,
@@ -908,6 +914,39 @@ fn a_jumped_target_that_still_drives_into_the_stop_keeps_the_stall() {
                 },
             );
             assert!(stalled, "{jump:?} at {dt}: stalled before the jump");
+        }
+    }
+}
+
+/// A jump whose first ticks ask the stalled elbow back past `STALL_RELEASE` releases it, and the
+/// push that follows is a fresh contact's: at every rate the elbow is commanded no further past
+/// where it stopped than the reference gap, the bound every contact keeps. Measured at #243's
+/// faster approach: 0.052 rad for [0.02, 0, 0.01], 0.060 for [0.04, 0, 0.03] and 0.041 for
+/// [0.06, 0, 0.06].
+#[test]
+fn a_jump_that_releases_the_stall_pushes_no_further_than_the_reference_gap() {
+    let turn = STALL.as_secs_f64() + 1.5;
+    for dt in RATES {
+        for jump in [[0.02, 0.0, 0.01], [0.04, 0.0, 0.03], [0.06, 0.0, 0.06]] {
+            let mut stalled = false;
+            let mut deepest = f64::INFINITY;
+            let stopped_at = hold_the_elbow(
+                dt,
+                |t| if t < turn { INTO } else { jump },
+                |t, elbow, step| {
+                    stalled |= step.stalled[elbow];
+                    if t >= turn {
+                        deepest = deepest.min(step.q[elbow]);
+                    }
+                    t < turn + 3.0
+                },
+            );
+            assert!(stalled, "{jump:?} at {dt}: stalled before the jump");
+            assert!(
+                stopped_at - deepest <= REFERENCE_GAP + 1e-9,
+                "{jump:?} at {dt}: commanded {:.4} rad past its stop",
+                stopped_at - deepest
+            );
         }
     }
 }
