@@ -5,7 +5,9 @@ import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from sx_embodiments.compose import BaseMount, Direction, MountKind, SupportEdge
 from sx_embodiments.embodiment import Embodiment, embodiment_from_definition
@@ -35,8 +37,38 @@ def test_the_description_is_the_generators_rendering() -> None:
     for path, data in tool.render().items():
         if path.suffix == ".urdf":
             _assert_same_description(path.read_bytes(), data, path.relative_to(ROOT))
+        elif path.suffix == ".stl":
+            _assert_same_hull(path.read_bytes(), data, path.relative_to(ROOT))
         else:
             assert path.read_bytes() == data, path.relative_to(ROOT)
+
+
+def _triangles(stl: bytes) -> NDArray[np.float64]:
+    record = np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")])
+    return np.frombuffer(stl, dtype=record, offset=84)["v"].astype(np.float64)
+
+
+def _assert_same_hull(committed: bytes, rendered: bytes, where: object) -> None:
+    """The committed collision hull is the rendering: the same header, the same corners and the
+    same enclosed volume, to a micrometre. qhull's last bits and its triangulation of coplanar
+    corners differ between macOS and Linux, so the bytes do not (CI renders on Linux); the
+    hull is the same solid either way, and its bytes are the asset's identity, which a test
+    must never re-mint."""
+    assert committed[:80] == rendered[:80], where
+    ours, theirs = _triangles(committed), _triangles(rendered)
+
+    def corners(tris: NDArray[np.float64]) -> NDArray[np.float64]:
+        points = np.unique(np.round(tris.reshape(-1, 3), 6), axis=0)
+        return points[np.lexsort(points.T[::-1])]
+
+    def volume(tris: NDArray[np.float64]) -> float:
+        a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
+        return float(abs(np.einsum("ij,ij->i", a, np.cross(b, c)).sum()) / 6.0)
+
+    mine, others = corners(ours), corners(theirs)
+    assert mine.shape == others.shape, (where, mine.shape, others.shape)
+    assert np.allclose(mine, others, rtol=0.0, atol=1e-6), where
+    assert volume(ours) == pytest.approx(volume(theirs), rel=1e-6), where
 
 
 def _numbers(text: str) -> list[float] | None:

@@ -357,7 +357,9 @@ def _read_stl(path: Path) -> Vec:
     return tris["v"].reshape(-1, 3).astype(np.float64)
 
 
-def _write_stl(path: Path, vertices: Vec, faces: NDArray[np.int32]) -> None:
+def _stl_bytes(vertices: Vec, faces: NDArray[np.int32]) -> bytes:
+    """A binary STL of the hull. Rendering never writes the tree: only :func:`main` does, so
+    the test that renders cannot rewrite a committed asset under the bytes it compares."""
     out = bytearray(b"sentient static upper body collision hull".ljust(80, b"\0"))
     out += struct.pack("<I", len(faces))
     for face in faces:
@@ -365,7 +367,7 @@ def _write_stl(path: Path, vertices: Vec, faces: NDArray[np.int32]) -> None:
         normal: Vec = np.asarray(np.cross(b - a, c - a), dtype=np.float64)
         normal = normal / (float(np.sqrt(normal @ normal)) or 1.0)
         out += struct.pack("<12fH", *normal, *a, *b, *c, 0)
-    path.write_bytes(bytes(out))
+    return bytes(out)
 
 
 def _hull(points: Vec) -> tuple[Vec, NDArray[np.int32]]:
@@ -498,9 +500,7 @@ def render() -> dict[Path, bytes]:
             geometry = ET.SubElement(stl, "geometry")
             ET.SubElement(geometry, "mesh", {"filename": relpath})
             link.append(stl)
-            path = ASSET / relpath
-            _write_stl(path, vertices, faces)
-            outputs[path] = path.read_bytes()
+            outputs[ASSET / relpath] = _stl_bytes(vertices, faces)
 
     # The ZED's frame from the source's left optical frame, and both eyes. The source's frame is
     # the left eye of an upside-down camera: it sits on the right lens (as the ZED meshes show
