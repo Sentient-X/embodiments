@@ -57,6 +57,9 @@ PUBLIC_SURFACE = frozenset(
         # digest-keyed cache (embodiment-assets plan, E1). Its consumers move to it in E3.
         "materialize",
         "materialized",
+        # The same closure as a description a simulator opens directly: package names
+        # rewritten to the materialized files (#268, for Train's MuJoCo scenes).
+        "loadable_description",
         # One reader for stored documents of every earlier schema, returning the edge.
         "migrate",
         "part_from_dict",
