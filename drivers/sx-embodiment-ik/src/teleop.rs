@@ -79,6 +79,19 @@ pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
 /// ([`TeleopConfig::hands`]: one per tool, `crate::BodyFiles`); a body with more is refused.
 pub const MAX_HANDS: usize = 4;
 
+/// The hand an operator's `side` hand (`left`, `right`) drives on a body whose hands are
+/// `hands` ([`TeleopConfig::hands`]): the hand of that side, and on a body whose one hand has no
+/// side (a single arm, named by its component) the right hand, as the control contract names a
+/// one-armed body's arm. The station's intents and the headset's ghost both map hands by it.
+#[must_use]
+pub fn hand_of_side(hands: &[String], side: &str) -> Option<usize> {
+    if let Some(hand) = hands.iter().position(|hand| hand == side) {
+        return Some(hand);
+    }
+    let sided = |hand: &String| hand == "left" || hand == "right";
+    (side == "right" && hands.len() == 1 && !hands.iter().any(sided)).then_some(0)
+}
+
 /// Per-hand values given for the first hands, the rest at their default (`None`, `false`).
 #[must_use]
 pub fn hands<T: Copy + Default, const N: usize>(given: [T; N]) -> [T; MAX_HANDS] {
@@ -1772,5 +1785,25 @@ impl Teleop {
             }
         }
         Ok(&self.step)
+    }
+}
+
+#[cfg(test)]
+mod hand_tests {
+    use super::hand_of_side;
+
+    /// Each operator hand drives the body's hand of its side; a single unsided arm is the right
+    /// hand's; nothing else maps.
+    #[test]
+    fn an_operators_side_drives_the_bodys_hand_of_that_side() {
+        let two = ["left".to_owned(), "right".to_owned()];
+        assert_eq!(hand_of_side(&two, "left"), Some(0));
+        assert_eq!(hand_of_side(&two, "right"), Some(1));
+        let one = ["gripper".to_owned()];
+        assert_eq!(hand_of_side(&one, "right"), Some(0));
+        assert_eq!(hand_of_side(&one, "left"), None);
+        assert_eq!(hand_of_side(&one, "gripper"), Some(0));
+        let left_only = ["left".to_owned()];
+        assert_eq!(hand_of_side(&left_only, "right"), None);
     }
 }

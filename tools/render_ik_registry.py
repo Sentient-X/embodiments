@@ -10,8 +10,8 @@ names a tool frame, the three documents a render pack carries, cut for size: its
 description without geometry (links, joints, limits, mimics and inertia, so its dynamics
 hold), its ``collision.json`` capsules and ignored pairs as ``sx_embodiments.collision_proxies``
 fits them (the convex pieces left out: they refine contacts only), and the ``pack.json`` fields
-a solve reads (``tools`` with their grips and sides, ``frames`` with their roles, the tool
-points and their check, ``sx_embodiments.render_pack``). A declared support whose frame the
+a solve reads (the body's id, ``tools`` with their grips and sides, ``frames`` with their roles,
+the tool points and their check, ``sx_embodiments.render_pack``). A declared support whose frame the
 description lacks is dropped and listed under ``defects`` (2026-11-04: ``franka`` and
 ``panda_omron`` mount on ``link0`` and ``base``, which their prefixed descriptions call
 ``panda_link0``). The solve's tests and the station's registry-wide follower test build each
@@ -96,6 +96,7 @@ def rendered() -> dict[Path, str]:
                     "urdf": urdf,
                     "collision": collision,
                     "pack": {
+                        "embodiment_digest": str(body.id),
                         **tool_point_fields(body, grips),
                         "tools": tool_documents(body, grips),
                         "frames": [frame.to_json() for frame in body_frames(body)],

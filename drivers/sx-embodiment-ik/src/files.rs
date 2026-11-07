@@ -171,12 +171,11 @@ impl BodyFiles<'_> {
                     let nearest = (0..3)
                         .flat_map(|k| [1.0, -1.0].map(|sign| (k, sign)))
                         .max_by(|a, b| (a.1 * derived[a.0]).total_cmp(&(b.1 * derived[b.0])))
-                        .map(|(k, sign)| {
+                        .map_or(derived, |(k, sign)| {
                             let mut axis = [0.0; 3];
                             axis[k] = sign;
                             axis
-                        })
-                        .unwrap_or(derived);
+                        });
                     let cos: f64 = (0..3).map(|k| nearest[k] * derived[k]).sum();
                     if cos >= APPROACH_SNAP_RAD.cos() {
                         nearest
@@ -243,8 +242,9 @@ fn look(body: &Body, frames: &[FrameDocument]) -> Option<(String, [f64; 3])> {
     // The view's +z (optical) in the root frame, then in the look's frame.
     let along = [0, 1, 2].map(|k| view.r[k][2]);
     let forward = [0, 1, 2].map(|j| (0..3).map(|k| frame.r[k][j] * along[k]).sum::<f64>());
-    // Rounded to a picometre's worth, so a quarter turn's last bits do not reach the config.
-    let forward = unit(forward.map(|x| (x * 1e12).round() / 1e12))?;
+    // Rounded to a picometre's worth, so a quarter turn's last bits do not reach the config (and
+    // no negative zero does).
+    let forward = unit(forward.map(|x| (x * 1e12).round() / 1e12))?.map(|x| x + 0.0);
     Some((model.links()[at].clone(), forward))
 }
 
