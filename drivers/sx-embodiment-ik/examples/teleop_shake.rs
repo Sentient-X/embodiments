@@ -54,10 +54,13 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use sx_embodiment_ik::smoothing::{OneEuro, PoseFilter};
 use sx_embodiment_ik::teleop::{REFERENCE_GAP, TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{
-    Active, Body, Frames, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve,
-};
+use sx_embodiment_ik::{Active, Body, Frames, Solve};
 use sx_frames::{Pose, Quaternion};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const HANDS: [usize; 2] = [0, 1];
 
@@ -116,7 +119,7 @@ struct Extra {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     print_dof(&body);
     match args.first().map(String::as_str) {
         Some("journal") => {
@@ -833,7 +836,7 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
     let max_speed = speed.values().copied().fold(0.0, f64::max);
     let config = TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed,
         accel,
         jerk: std::collections::BTreeMap::new(),
@@ -1026,7 +1029,7 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
     const LATENCY_S: f64 = 0.145;
     const LAG_TICKS: usize = 4;
     let mut solve =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, config).expect("solve");
     // The solve's own tremor filter (`Teleop::set_input_filter`) only on the rows marked `1e`:
     // the others measure the targets as the operator sent them.
     solve.set_input_filter(scenario.filtered.then(input_filter));
@@ -1179,7 +1182,7 @@ fn run(body: &Body, config: &TeleopConfig, dt: f64, scenario: Scenario) {
         measured.q.push(lagging.clone());
         history.remove(0);
         history.push(step.q.clone());
-        let target = targets.tcp.map(|p| p.map_or([0.0; 3], |p| p.translation_m));
+        let target = [0, 1].map(|hand| targets.tcp[hand].map_or([0.0; 3], |p| p.translation_m));
         arrived_targets.push(target);
         let at = tools(body, &mut frames, &step_q)[0];
         follow_error.push(

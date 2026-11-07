@@ -3,8 +3,12 @@
 
 use std::path::Path;
 
-use sx_embodiment_ik::teleop::TeleopConfig;
 use sx_embodiment_ik::{Body, Grip, JawKind};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -53,8 +57,8 @@ fn every_pack_states_each_tool_in_its_own_tree() {
 
 #[test]
 fn the_static_upper_body_closes_across_its_fingers_in_the_solves_tool_frames() {
-    let body = Body::static_upper_body();
-    for limb in TeleopConfig::static_upper_body_limbs() {
+    let body = static_files().body().expect("the static upper body solves");
+    for limb in static_files().limbs().expect("its limbs") {
         let Some(approach) = limb.approach else {
             assert!(body.tool(&limb.frame).is_none(), "the camera is no tool");
             continue;

@@ -27,8 +27,12 @@ use std::collections::BTreeMap;
 use std::f64::consts::TAU;
 
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const SECONDS: f64 = 8.0;
@@ -83,7 +87,7 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let names: Vec<String> = body.model().axes().iter().map(|a| a.name.clone()).collect();
     let rest: Vec<f64> = names
         .iter()
@@ -98,7 +102,7 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
     let start = tool(&rest);
     let start_q = start.pose().rotation;
     let mut teleop =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     // Answers, not the clock: a debug build or a loaded host past the station's 4 ms budget
     // would hold steps and measure the host.
     teleop.set_deadline(std::time::Duration::from_secs(1));
@@ -119,7 +123,7 @@ fn follow(path: Path, omega: f64, zeta: f64) -> Follow {
         };
         let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
         let targets = Targets {
-            tcp: [Some(target), None],
+            tcp: sx_embodiment_ik::teleop::hands([Some(target), None]),
             ..Targets::default()
         };
         let step = teleop

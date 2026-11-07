@@ -6,19 +6,22 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    Clutch, GLITCH_HOLD, HANDS, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
+    Clutch, GLITCH_HOLD, MAX_HANDS, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
     TeleopConfig, TeleopStep,
 };
-use sx_embodiment_ik::{
-    Body, READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve, ToolSpeed,
-};
+use sx_embodiment_ik::{READING_JITTER, Solve, ToolSpeed};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 
 /// Every joint at 1 rad/s, reached in a quarter second.
 fn config() -> TeleopConfig {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let speed: BTreeMap<String, f64> = body
         .model()
         .axes()
@@ -27,7 +30,7 @@ fn config() -> TeleopConfig {
         .collect();
     TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed,
         accel: BTreeMap::new(),
         jerk: std::collections::BTreeMap::new(),
@@ -40,12 +43,8 @@ fn config() -> TeleopConfig {
 }
 
 fn teleop() -> Teleop {
-    let mut solve = Teleop::new(
-        STATIC_UPPER_BODY_URDF,
-        STATIC_UPPER_BODY_COLLISION,
-        &config(),
-    )
-    .expect("solve");
+    let mut solve =
+        Teleop::new(static_files().urdf, static_files().collision, &config()).expect("solve");
     // Answers, not the clock: a loaded host (the clearance cases on every core) past the
     // station's budget would hold steps.
     solve.set_deadline(std::time::Duration::from_secs(3600));
@@ -165,7 +164,7 @@ fn hands_looks_at_the_commanded_hands_even_from_facing_away() {
         .map(|k| f64::midpoint(left.translation_m[k], right.translation_m[k]))
         .collect();
     let targets = Targets {
-        tcp: [Some(left), Some(right)],
+        tcp: sx_embodiment_ik::teleop::hands([Some(left), Some(right)]),
         ..Targets::default()
     };
     solve.reset();
@@ -185,7 +184,7 @@ fn an_idle_hand_and_the_torso_hold_while_one_hand_drives() {
     let mut target = tcp(&solve, &q, 0);
     target.translation_m[2] += 0.05;
     let targets = Targets {
-        tcp: [Some(target), None],
+        tcp: sx_embodiment_ik::teleop::hands([Some(target), None]),
         ..Targets::default()
     };
     solve.reset();
@@ -206,7 +205,9 @@ fn an_idle_hand_and_the_torso_hold_while_one_hand_drives() {
 #[test]
 fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
     let mut solve = teleop();
-    for (hand, gripper) in HANDS.iter().zip(solve.grippers()) {
+    let hands = solve.hands().to_vec();
+    assert_eq!(hands, ["left", "right"]);
+    for (hand, gripper) in hands.iter().zip(solve.grippers()) {
         let gripper = gripper.as_ref().expect(hand);
         assert_eq!(gripper.fingers.len(), 2);
         assert!(
@@ -217,7 +218,7 @@ fn each_gripper_maps_the_fingertip_distance_onto_its_fingers() {
     let open = solve.grippers()[0].clone().expect("left").open_width_m;
     let mut q = start(&solve);
     let targets = Targets {
-        gripper_width_m: [Some(open), None],
+        gripper_width_m: sx_embodiment_ik::teleop::hands([Some(open), None]),
         ..Targets::default()
     };
     run(&mut solve, &mut q, &targets, 1);
@@ -287,7 +288,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     };
     let mut clutch = Clutch::default();
     let mut targets = Targets {
-        tcp: [Some(hand), None],
+        tcp: sx_embodiment_ik::teleop::hands([Some(hand), None]),
         ..Targets::default()
     };
     clutch.apply(&tools, &mut targets);
@@ -307,7 +308,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
         rotation: QuaternionLayout::Xyzw.read(turned(turn, quarter)),
     };
     let mut targets = Targets {
-        tcp: [Some(moved), None],
+        tcp: sx_embodiment_ik::teleop::hands([Some(moved), None]),
         ..Targets::default()
     };
     clutch.apply(&tools, &mut targets);
@@ -324,7 +325,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     clutch.apply(&tools, &mut gone);
     assert!(!clutch.holds(0));
     let mut back = Targets {
-        tcp: [Some(moved), None],
+        tcp: sx_embodiment_ik::teleop::hands([Some(moved), None]),
         ..Targets::default()
     };
     clutch.apply(&tools, &mut back);
@@ -365,8 +366,8 @@ fn turned(turn: [f64; 4], rotation: [f64; 4]) -> [f64; 4] {
 fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
     let peak = |speed: Option<ToolSpeed>| {
         let mut solve = Teleop::new(
-            STATIC_UPPER_BODY_URDF,
-            STATIC_UPPER_BODY_COLLISION,
+            static_files().urdf,
+            static_files().collision,
             &TeleopConfig {
                 ramp_s: 0.05,
                 ..config()
@@ -392,8 +393,11 @@ fn a_tool_speed_holds_every_ticks_tool_step_and_ends_as_near() {
             )),
         };
         let targets = Targets {
-            tcp: [Some(target(from[0], -0.04)), Some(target(from[1], 0.04))],
-            tool_speed: [speed; 2],
+            tcp: sx_embodiment_ik::teleop::hands([
+                Some(target(from[0], -0.04)),
+                Some(target(from[1], 0.04)),
+            ]),
+            tool_speed: [speed; MAX_HANDS],
             head: Some(from[0]),
             ..Targets::default()
         };
@@ -469,7 +473,7 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
             .collect()
     };
     let reach = |dz: f64| Targets {
-        tcp: [
+        tcp: sx_embodiment_ik::teleop::hands([
             Some(Pose {
                 translation_m: [
                     from.translation_m[0] + 0.06,
@@ -479,7 +483,7 @@ fn a_blocked_joint_stops_pushing_within_the_stall_time_and_backs_off_when_asked(
                 rotation: from.rotation,
             }),
             None,
-        ],
+        ]),
         ..Targets::default()
     };
     solve.reset();
@@ -583,7 +587,7 @@ fn a_blocked_joint_stalls_through_a_readings_jitter() {
             noise * 2.0f64.mul_add(unit, -1.0)
         };
         let targets = Targets {
-            tcp: [
+            tcp: sx_embodiment_ik::teleop::hands([
                 Some(Pose {
                     translation_m: [
                         from.translation_m[0] + 0.06,
@@ -593,7 +597,7 @@ fn a_blocked_joint_stalls_through_a_readings_jitter() {
                     rotation: from.rotation,
                 }),
                 None,
-            ],
+            ]),
             ..Targets::default()
         };
         solve.reset();
@@ -657,7 +661,7 @@ fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
     // 0.05 rad the other way from its command; the right elbow is pushed 0.15 rad by someone;
     // the left finger is held open by an object; the rest land where they are sent.
     let targets = Targets {
-        tcp: [
+        tcp: sx_embodiment_ik::teleop::hands([
             Some(Pose {
                 translation_m: [
                     from.translation_m[0] + 0.06,
@@ -667,8 +671,8 @@ fn a_stalled_joint_holds_under_load_and_only_a_driven_arms_joints_stall() {
                 rotation: from.rotation,
             }),
             None,
-        ],
-        gripper_width_m: [Some(0.0), None],
+        ]),
+        gripper_width_m: sx_embodiment_ik::teleop::hands([Some(0.0), None]),
         ..Targets::default()
     };
     let stop_at = q[elbow];
@@ -756,7 +760,7 @@ fn hold_the_elbow(
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
     let mut solve =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     // Answers, not the clock: a debug build past the station's budget would hold steps.
     solve.set_deadline(std::time::Duration::from_secs(3600));
     // The stall rules on the targets as scripted: a hand turning back at once, which no
@@ -791,13 +795,13 @@ fn hold_the_elbow(
             .collect();
         let offset = push(t);
         let targets = Targets {
-            tcp: [
+            tcp: sx_embodiment_ik::teleop::hands([
                 Some(Pose {
                     translation_m: [0, 1, 2].map(|k| from.translation_m[k] + offset[k]),
                     rotation: from.rotation,
                 }),
                 None,
-            ],
+            ]),
             ..Targets::default()
         };
         let step = solve
@@ -1004,8 +1008,7 @@ fn least_clearance_at(
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
-    let probe =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+    let probe = Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     let rest: Vec<f64> = probe
         .model()
         .axes()
@@ -1034,7 +1037,7 @@ fn least_clearance_at(
     }
     let left_tcp = link("left_gripper_tcp");
     let mut solve =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     solve.set_deadline(std::time::Duration::from_secs(3600));
     let elbow = index(&solve, "left_elbow_pitch_joint");
     let (left0, right0) = (tcp(&solve, &rest, 0), tcp(&solve, &rest, 1));
@@ -1099,17 +1102,17 @@ fn least_clearance_at(
             0.0
         };
         let mut targets = Targets {
-            tcp: [
+            tcp: sx_embodiment_ik::teleop::hands([
                 Some(Pose {
                     translation_m: [0, 1, 2]
                         .map(|k| left0.translation_m[k] + [INTO[0], inward, INTO[2]][k]),
                     rotation: left0.rotation,
                 }),
                 None,
-            ],
+            ]),
             ..Targets::default()
         };
-        targets.tool_speed = [tool_speed.map(linear); 2];
+        targets.tool_speed = [tool_speed.map(linear); MAX_HANDS];
         if case == "reach" && t >= turn {
             targets.tcp[1] = Some(Pose {
                 translation_m: solve.model().poses(&real).links[left_tcp].t,

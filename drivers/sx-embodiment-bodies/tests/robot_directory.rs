@@ -64,3 +64,25 @@ fn every_commissioned_port_without_an_explicit_calibration_takes_the_directorys(
             .is_err()
     );
 }
+
+/// A joint marked not yet identified is data on the robot: read as given, absent as none, and
+/// refused when it is no joint name.
+#[test]
+fn commissioning_marks_the_joints_not_yet_identified() {
+    assert!(commissioning().unidentified.is_empty());
+    let mut document = serde_json::json!({
+        "instance": INSTANCE,
+        "pod_id": "bench",
+        "pod_revision": 1,
+        "ports": {"can": "ZLG1:0"},
+        "schema": "sx.station-commissioning/v1",
+        "unidentified": ["torso_joint"],
+    });
+    let parsed = Commissioning::parse(&document.to_string(), INSTANCE).expect("commissioning");
+    assert_eq!(
+        parsed.unidentified.into_iter().collect::<Vec<_>>(),
+        ["torso_joint"]
+    );
+    document["unidentified"] = serde_json::json!([" torso_joint"]);
+    assert!(Commissioning::parse(&document.to_string(), INSTANCE).is_err());
+}

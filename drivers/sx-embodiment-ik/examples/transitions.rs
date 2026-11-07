@@ -44,9 +44,14 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use sx_embodiment_ik::ToolSpeed;
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, ToolSpeed};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const WINDOW_S: f64 = 0.5;
@@ -143,8 +148,8 @@ impl Bench {
         let ready: BTreeMap<String, f64> =
             serde_json::from_str(include_str!("../tests/fixtures/static-ready.json"))
                 .expect("ready");
-        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
-            .expect("solve");
+        let mut solve =
+            Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
         solve.set_deadline(std::time::Duration::from_secs(3600));
         let names: Vec<String> = solve
             .model()
@@ -371,8 +376,11 @@ fn main() {
         for (who, speed) in [("operator", None), ("program", program)] {
             let r = run(&mut bench, 2.5, |t, from| {
                 let targets = Targets {
-                    tcp: [Some(moved(&from[0], offset)), Some(from[1])],
-                    tool_speed: [speed, speed],
+                    tcp: sx_embodiment_ik::teleop::hands([
+                        Some(moved(&from[0], offset)),
+                        Some(from[1]),
+                    ]),
+                    tool_speed: sx_embodiment_ik::teleop::hands([speed, speed]),
                     ..Targets::default()
                 };
                 (targets, t <= DT + 1e-9)
@@ -400,8 +408,11 @@ fn main() {
     // A program's goal: its start and its end.
     let r = run(&mut bench, 3.0, |t, from| {
         let targets = Targets {
-            tcp: [Some(moved(&from[0], [0.0, 0.2, 0.0])), Some(from[1])],
-            tool_speed: [program, program],
+            tcp: sx_embodiment_ik::teleop::hands([
+                Some(moved(&from[0], [0.0, 0.2, 0.0])),
+                Some(from[1]),
+            ]),
+            tool_speed: sx_embodiment_ik::teleop::hands([program, program]),
             ..Targets::default()
         };
         (targets, t <= DT + 1e-9)
@@ -436,7 +447,10 @@ fn main() {
             let along = sweep * (t - 0.5).clamp(0.0, 1.0);
             let targets = if t < release_s {
                 Targets {
-                    tcp: [Some(moved(&from[0], [0.0, along, 0.0])), Some(from[1])],
+                    tcp: sx_embodiment_ik::teleop::hands([
+                        Some(moved(&from[0], [0.0, along, 0.0])),
+                        Some(from[1]),
+                    ]),
                     ..Targets::default()
                 }
             } else {
@@ -477,14 +491,14 @@ fn main() {
             by[axis] = 0.10 * sign;
             let r = run(&mut bench, 2.5, |t, from| {
                 let targets = Targets {
-                    tcp: [
+                    tcp: sx_embodiment_ik::teleop::hands([
                         Some(if t >= 1.0 {
                             moved(&from[0], by)
                         } else {
                             from[0]
                         }),
                         Some(from[1]),
-                    ],
+                    ]),
                     ..Targets::default()
                 };
                 (targets, t <= DT + 1e-9)
@@ -544,21 +558,24 @@ fn write_trace(bench: &mut Bench, path: &str) {
         }
         let targets = if t < 2.0 {
             Targets {
-                tcp: [Some(first), Some(start[1])],
-                tool_speed: [program, program],
+                tcp: sx_embodiment_ik::teleop::hands([Some(first), Some(start[1])]),
+                tool_speed: sx_embodiment_ik::teleop::hands([program, program]),
                 ..Targets::default()
             }
         } else if t < RELEASE_S {
             let along = 0.5 * (t - 3.0).clamp(0.0, 0.3);
             Targets {
-                tcp: [Some(moved(&hold[0], [0.0, along, 0.0])), Some(hold[1])],
+                tcp: sx_embodiment_ik::teleop::hands([
+                    Some(moved(&hold[0], [0.0, along, 0.0])),
+                    Some(hold[1]),
+                ]),
                 ..Targets::default()
             }
         } else if t < REENGAGE_S {
             Targets::default()
         } else {
             Targets {
-                tcp: [Some(hold[0]), Some(hold[1])],
+                tcp: sx_embodiment_ik::teleop::hands([Some(hold[0]), Some(hold[1])]),
                 ..Targets::default()
             }
         };

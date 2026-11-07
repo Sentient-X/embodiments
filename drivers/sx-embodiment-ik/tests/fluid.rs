@@ -26,11 +26,13 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{
-    Body, Caps, Ik, Limb, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Settings, Target,
-    Task,
-};
+use sx_embodiment_ik::{Body, BodyFiles, Caps, Ik, Settings, Target};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const RHO: f64 = 0.15;
@@ -277,28 +279,22 @@ fn registry() -> (Vec<Registered>, Vec<String>) {
     let (mut bodies, mut skipped) = (Vec::new(), Vec::new());
     for document in documents {
         let name = document["embodiment"].as_str().expect("name").to_owned();
-        let tools: Vec<String> = document["tools"]
-            .as_array()
-            .expect("tools")
-            .iter()
-            .map(|t| t.as_str().expect("frame").to_owned())
-            .collect();
-        let limbs: Vec<Limb> = tools
-            .iter()
-            .map(|frame| Limb {
-                name: frame.clone(),
-                frame: frame.clone(),
-                task: Task::Pose,
-            })
-            .collect();
-        let body = Body::new(
-            document["urdf"].as_str().expect("urdf"),
-            &document["collision"].to_string(),
-            &limbs,
-        )
+        let (collision, pack) = (
+            document["collision"].to_string(),
+            document["pack"].to_string(),
+        );
+        let body = BodyFiles {
+            embodiment: &name,
+            urdf: document["urdf"].as_str().expect("urdf"),
+            collision: &collision,
+            pack: &pack,
+            superseded: &[],
+        }
+        .body()
         .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let driven: Vec<usize> = (0..tools.len())
-            .filter(|&i| !body.limb_axes(i).is_empty())
+        // Its hands, the limbs the registry's tools give it (its look is not a tool).
+        let driven: Vec<usize> = (0..body.limbs().len())
+            .filter(|&i| body.limbs()[i] != sx_embodiment_ik::HEAD && !body.limb_axes(i).is_empty())
             .collect();
         if driven.is_empty() {
             // A handheld tool (YUBI, a UMI): no joint carries it.
@@ -529,8 +525,8 @@ impl Station {
             .expect("the station's solve config");
         let ready: BTreeMap<String, f64> =
             serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
-        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
-            .expect("solve");
+        let mut solve =
+            Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
         // Answers, not a loaded host's clock: each tick is timed and counted against the
         // station's 4 ms budget below instead.
         solve.set_deadline(Duration::from_secs(3600));
@@ -568,7 +564,7 @@ impl Station {
             let t = tick as f64 * DT;
             let target = left(t, &from);
             let targets = Targets {
-                tcp: [Some(target), Some(right)],
+                tcp: sx_embodiment_ik::teleop::hands([Some(target), Some(right)]),
                 ..Targets::default()
             };
             let measured: Vec<Option<f64>> = q.iter().map(|v| Some(*v)).collect();
@@ -830,7 +826,7 @@ fn table_follower_lag() {
                 let t = f64::from(tick) * DT;
                 let target = left(t, &from);
                 let targets = Targets {
-                    tcp: [Some(target), Some(right)],
+                    tcp: sx_embodiment_ik::teleop::hands([Some(target), Some(right)]),
                     ..Targets::default()
                 };
                 let measured: Vec<Option<f64>> = actual.iter().map(|v| Some(*v)).collect();
@@ -1005,18 +1001,18 @@ fn table_paced_goal() {
                 let target = shifted(&from, direction.map(|d| d * s));
                 let moving = s < length;
                 let targets = Targets {
-                    tcp: [Some(target), Some(right)],
-                    tool_speed: [
+                    tcp: sx_embodiment_ik::teleop::hands([Some(target), Some(right)]),
+                    tool_speed: sx_embodiment_ik::teleop::hands([
                         Some(ToolSpeed {
                             m_s: speed,
                             rad_s: 1.0,
                         }),
                         None,
-                    ],
-                    velocity: [
+                    ]),
+                    velocity: sx_embodiment_ik::teleop::hands([
                         (given && moving).then(|| (direction.map(|d| d * speed), [0.0; 3])),
                         None,
-                    ],
+                    ]),
                     ..Targets::default()
                 };
                 let measured: Vec<Option<f64>> = q.iter().map(|x| Some(*x)).collect();

@@ -12,8 +12,13 @@
     clippy::doc_markdown
 )]
 
-use sx_embodiment_ik::{Body, Caps, Ik, Settings, Target};
+use sx_embodiment_ik::{Caps, Ik, Settings, Target};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
 /// the clock, and run on a loaded machine.
@@ -29,7 +34,7 @@ const ALL: [bool; 64] = [true; 64];
 
 #[test]
 fn a_steady_state_tick_allocates_nothing() {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let caps = Caps::declared(&body, 0.25).expect("caps").at_most(0.5);
     let mut ik = Ik::new(body, caps, settings(), Vec::new()).expect("ik");
     let mut q = ik.rest().to_vec();
@@ -66,7 +71,7 @@ fn a_steady_state_tick_allocates_nothing() {
 /// axis given a window allocates nothing either.
 #[test]
 fn a_measured_tick_with_windows_allocates_nothing() {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let caps = Caps::declared(&body, 0.25).expect("caps").at_most(0.5);
     let mut ik = Ik::new(body, caps, settings(), Vec::new()).expect("ik");
     let mut q = ik.rest().to_vec();
@@ -115,7 +120,7 @@ fn a_measured_tick_with_windows_allocates_nothing() {
 /// and agrees with the allocating one.
 #[test]
 fn a_clearance_check_allocates_nothing_and_agrees() {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let caps = Caps::declared(&body, 0.25).expect("caps");
     let scene = vec![sx_embodiment_ik::Obstacle {
         min: [0.3, -0.5, -0.3],

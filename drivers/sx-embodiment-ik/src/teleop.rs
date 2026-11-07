@@ -29,7 +29,10 @@
 //!   arm stays put (left free, the posture task swung it by up to 1 rad on the first bench
 //!   A/B), and so does the torso, which carries both arms and the neck, unless both hands and
 //!   the head are driven. Joints the config holds are never solved.
-//! - **head**: the limb named `head` (a camera, [`Task::LookAt`]) looks along the operator's
+//! - **hands**: every pose limb is a hand, in the config's order ([`TeleopConfig::hands`]; one
+//!   per tool the body carries, named by its side or component, `crate::BodyFiles`), at most
+//!   [`MAX_HANDS`]; [`Targets`] carries one slot per hand in that order.
+//! - **head**: the limb that looks (a camera, [`Task::LookAt`]) looks along the operator's
 //!   gaze when the ask carries their head (they look through the robot: the head pose's local
 //!   +x, as the point [`GAZE_DISTANCE_M`] ahead of the camera along it), and otherwise between
 //!   the commanded hands. There is no choice to make: who is looking decides. The neck alone
@@ -71,8 +74,18 @@ use crate::solve::{
 /// The config's schema, written in every config and refused when another.
 pub const TELEOP_SCHEMA: &str = "sx.teleop-solve/v2";
 
-/// The hands an operator's intent names, in the order [`Targets`] carries them.
-pub const HANDS: [&str; 2] = ["left", "right"];
+/// The most hands one solve drives: [`Targets`] carries one slot per hand, fixed so a tick
+/// copies it without allocating. A body's hands are its config's pose limbs, in order
+/// ([`TeleopConfig::hands`]: one per tool, `crate::BodyFiles`); a body with more is refused.
+pub const MAX_HANDS: usize = 4;
+
+/// Per-hand values given for the first hands, the rest at their default (`None`, `false`).
+#[must_use]
+pub fn hands<T: Copy + Default, const N: usize>(given: [T; N]) -> [T; MAX_HANDS] {
+    let mut all = [T::default(); MAX_HANDS];
+    all[..N.min(MAX_HANDS)].copy_from_slice(&given[..N.min(MAX_HANDS)]);
+    all
+}
 
 /// How far a joint's reference may lead its measurement: one that strays further is held at
 /// this far; well inside the governor's tracking stop.
@@ -140,15 +153,15 @@ pub const STALL_RELEASE: f64 = 0.01;
 /// answer the same targets.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Clutch {
-    /// Per hand in [`HANDS`] order: the translation added to the hand, and the rotation applied
-    /// after the hand's own (its rotation at hold, inverted, then the gripper's).
-    held: [Option<([f64; 3], Quaternion)>; 2],
+    /// Per hand: the translation added to the hand, and the rotation applied after the hand's
+    /// own (its rotation at hold, inverted, then the gripper's).
+    held: [Option<([f64; 3], Quaternion)>; MAX_HANDS],
 }
 
 impl Clutch {
     /// Let go of both hands: the next targets take hold afresh. Every engage.
     pub fn release(&mut self) {
-        self.held = [None; 2];
+        self.held = [None; MAX_HANDS];
     }
 
     /// Whether `hand` holds on.
@@ -160,8 +173,8 @@ impl Clutch {
     /// `targets`' hands moved onto the grippers they hold, taking hold with `tools` (each
     /// gripper's tool point where the robot stands, [`Teleop::tool_poses`]) for a hand seen
     /// first; a hand whose gripper has no pose is left as given.
-    pub fn apply(&mut self, tools: &[Option<Pose>; 2], targets: &mut Targets) {
-        for hand in 0..HANDS.len() {
+    pub fn apply(&mut self, tools: &[Option<Pose>; MAX_HANDS], targets: &mut Targets) {
+        for hand in 0..MAX_HANDS {
             let Some(target) = targets.tcp[hand] else {
                 self.held[hand] = None;
                 continue;
@@ -293,31 +306,12 @@ pub struct TeleopConfig {
 }
 
 impl TeleopConfig {
-    /// The static upper body's limbs: both grippers' tool frames, approaching along their +x
-    /// (the tool point sits 15 cm out along the gripper base's +x), and the ZED looking out of
-    /// its lenses (`ZED_camera` +x) from the SO-101 neck.
-    #[must_use]
-    pub fn static_upper_body_limbs() -> Vec<LimbConfig> {
-        vec![
-            LimbConfig {
-                name: "left".into(),
-                frame: "left_gripper_tcp".into(),
-                look_forward: None,
-                approach: Some([1.0, 0.0, 0.0]),
-            },
-            LimbConfig {
-                name: "right".into(),
-                frame: "right_gripper_tcp".into(),
-                look_forward: None,
-                approach: Some([1.0, 0.0, 0.0]),
-            },
-            LimbConfig {
-                name: "head".into(),
-                frame: "ZED_camera".into(),
-                look_forward: Some([1.0, 0.0, 0.0]),
-                approach: None,
-            },
-        ]
+    /// The hands' names, in the order [`Targets`] carries them: the pose limbs, in order.
+    pub fn hands(&self) -> impl Iterator<Item = &str> {
+        self.limbs
+            .iter()
+            .filter(|limb| limb.look_forward.is_none())
+            .map(|limb| limb.name.as_str())
     }
 
     /// Parse a config.
@@ -351,18 +345,19 @@ impl TeleopConfig {
 /// One tick's ask, the operator's intent as the solve takes it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Targets {
-    /// Per hand in [`HANDS`] order: the tool point, absent when that hand is not driven.
-    pub tcp: [Option<Pose>; 2],
+    /// Per hand, in the config's order ([`TeleopConfig::hands`]): the tool point, absent when
+    /// that hand is not driven.
+    pub tcp: [Option<Pose>; MAX_HANDS],
     /// Per hand: the gripper opening in metres.
-    pub gripper_width_m: [Option<f64>; 2],
+    pub gripper_width_m: [Option<f64>; MAX_HANDS],
     /// Per hand: hold only `tcp`'s approach axis (the limb's [`LimbConfig::approach`] turned
     /// by `tcp`'s rotation) and let the roll about it float: a grasp or a press whose roll
     /// does not matter.
-    pub free_roll: [bool; 2],
+    pub free_roll: [bool; MAX_HANDS],
     /// Per hand: the most its tool may move and turn ([`crate::Ik::set_tool_speed`]): a
     /// program's goal or timed plan at the robot's caps. `None`: as fast as the joints' caps
     /// allow (an operator's hands, whose own motion is the speed).
-    pub tool_speed: [Option<ToolSpeed>; 2],
+    pub tool_speed: [Option<ToolSpeed>; MAX_HANDS],
     /// The operator's head when they look through the robot (remote): its local +x is the
     /// gaze, and the camera follows it. Absent (beside the robot, or no operator): the camera
     /// looks between the commanded hands.
@@ -371,7 +366,7 @@ pub struct Targets {
     /// frame, for the solve to follow it by ([`crate::Ik::set_target_velocity`]): a person's
     /// hand as the station measured it (`Intent::motion`), a goal's path speed. `None`: for a
     /// person's hand the tremor filter's own estimate, for a goal none.
-    pub velocity: [Option<([f64; 3], [f64; 3])>; 2],
+    pub velocity: [Option<([f64; 3], [f64; 3])>; MAX_HANDS],
     /// How old the hands' sample is, seconds (the link's latency on arrival plus the time held
     /// since): a person's hand is carried forward by it after its tremor is filtered out, along
     /// the filter's own tremor-free motion ([`LEAD_MAX_S`], [`LEAD_MAX_M`], [`LEAD_MAX_RAD`]),
@@ -423,27 +418,33 @@ impl Gripper {
         }
     }
 
-    /// `side`'s gripper of `body` (axes `<side>_gripper_*`), each finger from the end of its
-    /// range nearest zero to the far end; the end at which the fingertips stand further apart
-    /// is open. `None` when the body has no such gripper.
+    /// The gripper on `body`'s limb `limb`: the joints that move anything below the link its
+    /// frame rides rigidly with (a gripper's base, on the arm's last joint), each finger from
+    /// the end of its range nearest zero to the far end; the end at which the fingertips stand
+    /// further apart is open. A fingertip is the end of a finger link's collision capsule
+    /// furthest from its hinge. `None` when the limb carries no two fingers.
     #[must_use]
-    pub fn of(body: &Body, side: &str) -> Option<Self> {
+    pub fn of(body: &Body, limb: usize) -> Option<Self> {
         let model = body.model();
-        let prefix = format!("{side}_gripper_");
-        let axes: Vec<(usize, [f64; 2])> = model
-            .axes()
+        let mut base = body.limbs.get(limb)?.frame;
+        while let Some((parent, true)) = model.parent(base) {
+            base = parent;
+        }
+        let moved = model.axes_below(base);
+        let axes: Vec<(usize, [f64; 2])> = moved
             .iter()
-            .enumerate()
-            .filter(|(_, axis)| axis.name.starts_with(&prefix))
-            .filter_map(|(index, axis)| axis.limits.map(|limits| (index, limits)))
+            .filter_map(|&index| model.axes()[index].limits.map(|limits| (index, limits)))
             .collect();
         let norm = |v: [f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let tips: Vec<(usize, [f64; 3])> = model
-            .links()
-            .iter()
-            .enumerate()
-            .filter(|(_, link)| link.starts_with(&prefix) && link.contains("finger"))
-            .filter_map(|(index, _)| {
+        let tips: Vec<(usize, [f64; 3])> = (0..model.links().len())
+            .filter(|&link| {
+                model
+                    .above(link)
+                    .last()
+                    .is_some_and(|term| moved.contains(&term.axis))
+                    && model.descends(link, base)
+            })
+            .filter_map(|index| {
                 body.proxies()
                     .capsules
                     .iter()
@@ -529,14 +530,16 @@ pub struct Teleop {
     config: TeleopConfig,
     /// Per axis, the limbs it moves, one bit per limb.
     limbs_of: Vec<u64>,
-    /// Per limb, its index in [`HANDS`] (`None` for the head).
+    /// Per limb, its hand's index in [`Targets`] (`None` for the look).
     hand_of: Vec<Option<usize>>,
+    /// The hands' names, in [`Targets`] order ([`TeleopConfig::hands`]).
+    hands: Vec<String>,
     /// Per limb, its approach axis in its frame ([`LimbConfig::approach`]).
     approach: Vec<Option<[f64; 3]>>,
     head: Option<usize>,
     /// Axes the config holds.
     held: Vec<bool>,
-    grippers: [Option<Gripper>; 2],
+    grippers: [Option<Gripper>; MAX_HANDS],
     /// Whether the next step seeds from the measured joints (after [`Teleop::reset`]).
     seed: bool,
     q: Vec<f64>,
@@ -563,7 +566,7 @@ pub struct Teleop {
     /// The operator's tremor filter ([`Teleop::set_input_filter`]), each hand's state, and the
     /// solve's own clock for it (the sum of its ticks).
     input_filter: Option<OneEuro>,
-    filters: [PoseFilter; 2],
+    filters: [PoseFilter; MAX_HANDS],
     clock_s: f64,
     /// The last step's targets as the solve took them, the operator's hands filtered.
     taken: Targets,
@@ -585,12 +588,12 @@ pub struct Teleop {
     /// Per axis, the readings smoothed over [`STEADY_S`]: where the gap and a stall are judged.
     steady: Vec<f64>,
     /// Per hand, how its filtered target moves (the filter's estimate, or the caller's).
-    rates: [Option<([f64; 3], [f64; 3])>; 2],
+    rates: [Option<([f64; 3], [f64; 3])>; MAX_HANDS],
     /// Per axis, its jerk cap ([`TeleopConfig::jerk`]).
     jerk: Vec<f64>,
     /// Per hand, its target's shaper ([`crate::shaper`]); the camera's look-at point's; the map
     /// their bounds are read from.
-    shapers: [ToolShaper; 2],
+    shapers: [ToolShaper; MAX_HANDS],
     gaze: ToolShaper,
     map: ToolMap,
     /// Per limb, the axes its tool's bounds are carried from; per axis, whether it moves this
@@ -601,14 +604,14 @@ pub struct Teleop {
     jw: Vec<[f64; 3]>,
     /// Per hand, whether its target went while its arm still moved: its joints come to rest
     /// ([`Target::Rest`]) until they can be held without a jolt ([`holds`]).
-    resting: [bool; 2],
+    resting: [bool; MAX_HANDS],
     /// Per axis, the velocity the step before the last commanded.
     qdot_before: Vec<f64>,
     /// Whether targets pass their shapers ([`Teleop::set_target_shaping`]).
     shaping: bool,
     /// Per hand, and the camera's look: seconds since its target went while it still comes to
     /// rest ([`COAST_MAX_S`]).
-    gone_s: [f64; 2],
+    gone_s: [f64; MAX_HANDS],
     gaze_gone_s: f64,
     /// Whether the camera's look went while the neck still moved: it comes to rest as a hand does.
     gaze_resting: bool,
@@ -701,11 +704,24 @@ impl Teleop {
                 limbs_of[axis] |= 1 << index;
             }
         }
-        let hand_of = limb_names
-            .iter()
-            .map(|name| HANDS.iter().position(|hand| hand == name))
-            .collect();
-        let head = limb_names.iter().position(|name| *name == "head");
+        // Each pose limb is a hand, in order; the limb that looks is the head.
+        let mut hands = Vec::new();
+        let mut hand_of = Vec::with_capacity(limb_names.len());
+        let mut head = None;
+        for (index, name) in limb_names.iter().enumerate() {
+            if matches!(body.limbs[index].task, Task::LookAt { .. }) {
+                head = head.or(Some(index));
+                hand_of.push(None);
+            } else {
+                if hands.len() == MAX_HANDS {
+                    return Err(IkError::Caps(format!(
+                        "more than {MAX_HANDS} hands: the solve carries {MAX_HANDS}"
+                    )));
+                }
+                hand_of.push(Some(hands.len()));
+                hands.push((*name).to_owned());
+            }
+        }
         let mut approach = Vec::with_capacity(limb_names.len());
         for name in &limb_names {
             let axis = config
@@ -727,7 +743,12 @@ impl Teleop {
             .iter()
             .map(|name| config.held.contains(name))
             .collect();
-        let grippers = HANDS.map(|side| Gripper::of(&body, side));
+        let mut grippers: [Option<Gripper>; MAX_HANDS] = Default::default();
+        for (limb, hand) in hand_of.iter().enumerate() {
+            if let Some(hand) = *hand {
+                grippers[hand] = Gripper::of(&body, limb);
+            }
+        }
         // The axes a hand's tool bounds are carried from: its own, not one it shares (a torso,
         // held unless every limb is driven, which the damped least-squares motion would hand a
         // share its low caps never take: the bounds fell to a third and it still saturated).
@@ -780,6 +801,7 @@ impl Teleop {
             config: config.clone(),
             limbs_of,
             hand_of,
+            hands,
             approach,
             head,
             held: held_axes,
@@ -805,22 +827,22 @@ impl Teleop {
             gated: vec![None; width],
             steady: vec![f64::NAN; width],
             input_filter: Some(OneEuro::TOOL),
-            filters: [PoseFilter::default(); 2],
+            filters: [PoseFilter::default(); MAX_HANDS],
             clock_s: 0.0,
             taken: Targets::default(),
-            rates: [None; 2],
+            rates: [None; MAX_HANDS],
             jerk,
-            shapers: [ToolShaper::default(); 2],
+            shapers: [ToolShaper::default(); MAX_HANDS],
             gaze: ToolShaper::default(),
             map: ToolMap::with_capacity(3 * width),
             shape_axes,
             shape_moving: vec![false; width],
             jv: vec![[0.0; 3]; width],
             jw: vec![[0.0; 3]; width],
-            resting: [false; 2],
+            resting: [false; MAX_HANDS],
             qdot_before: vec![0.0; width],
             shaping: true,
-            gone_s: [0.0; 2],
+            gone_s: [0.0; MAX_HANDS],
             gaze_gone_s: 0.0,
             gaze_resting: false,
         })
@@ -832,7 +854,7 @@ impl Teleop {
     /// a tick, which the shaper takes jerk-limited). Every shaper starts afresh.
     pub fn set_target_shaping(&mut self, shaping: bool) {
         self.shaping = shaping;
-        self.shapers = [ToolShaper::default(); 2];
+        self.shapers = [ToolShaper::default(); MAX_HANDS];
         self.gaze = ToolShaper::default();
     }
 
@@ -840,7 +862,7 @@ impl Teleop {
     /// them as given (a measurement of the filter itself). Each hand's filter starts afresh.
     pub fn set_input_filter(&mut self, filter: Option<OneEuro>) {
         self.input_filter = filter;
-        self.filters = [PoseFilter::default(); 2];
+        self.filters = [PoseFilter::default(); MAX_HANDS];
     }
 
     /// The last step's targets as the solve took them: the operator's hands with their tremor
@@ -937,17 +959,23 @@ impl Teleop {
         self.ik.body().model()
     }
 
-    /// Each hand's gripper, in [`HANDS`] order.
+    /// Each hand's gripper, in [`Targets`] order.
     #[must_use]
-    pub const fn grippers(&self) -> &[Option<Gripper>; 2] {
+    pub const fn grippers(&self) -> &[Option<Gripper>; MAX_HANDS] {
         &self.grippers
     }
 
+    /// The hands' names, in [`Targets`] order ([`TeleopConfig::hands`]).
+    #[must_use]
+    pub fn hands(&self) -> &[String] {
+        &self.hands
+    }
+
     /// Each hand's gripper tool point at `q` (every axis, [`Teleop::model`] order), in
-    /// [`HANDS`] order; `None` for a hand this body has no gripper limb for, or a `q` of the
+    /// [`Targets`] order; `None` for a hand this body has no limb for, or a `q` of the
     /// wrong width. What a [`Clutch`] takes hold with.
-    pub fn tool_poses(&mut self, q: &[f64]) -> [Option<Pose>; 2] {
-        let mut poses = [None; 2];
+    pub fn tool_poses(&mut self, q: &[f64]) -> [Option<Pose>; MAX_HANDS] {
+        let mut poses = [None; MAX_HANDS];
         if q.len() != self.q.len() {
             return poses;
         }
@@ -1000,11 +1028,11 @@ impl Teleop {
     pub fn reset(&mut self) {
         self.ik.reset();
         self.seed = true;
-        self.filters = [PoseFilter::default(); 2];
-        self.shapers = [ToolShaper::default(); 2];
+        self.filters = [PoseFilter::default(); MAX_HANDS];
+        self.shapers = [ToolShaper::default(); MAX_HANDS];
         self.gaze = ToolShaper::default();
-        self.gone_s = [0.0; 2];
-        self.resting = [false; 2];
+        self.gone_s = [0.0; MAX_HANDS];
+        self.resting = [false; MAX_HANDS];
         self.gaze_gone_s = 0.0;
         self.gaze_resting = false;
     }
@@ -1024,7 +1052,7 @@ impl Teleop {
 
     /// Each hand's target as the solve last followed it, shaped ([`crate::shaper`]).
     #[must_use]
-    pub fn shaped(&self) -> [Option<Pose>; 2] {
+    pub fn shaped(&self) -> [Option<Pose>; MAX_HANDS] {
         self.shapers.map(|s| s.shaped().map(|s| s.pose))
     }
 
@@ -1045,7 +1073,7 @@ impl Teleop {
         // The limbs driven this tick, as the step will hold them: an axis moves only while every
         // limb it carries is (a torso carries both arms and the neck).
         let mut driven = 0_u64;
-        let hands = (0..HANDS.len()).any(|hand| {
+        let hands = (0..MAX_HANDS).any(|hand| {
             targets.tcp[hand].is_some() || self.shapers[hand].is_active() || self.resting[hand]
         });
         for (index, hand) in self.hand_of.iter().enumerate().take(64) {
@@ -1272,7 +1300,7 @@ impl Teleop {
                 (Some(p), false) => Some(Target::Pose(p)),
                 (Some(p), true) => {
                     let axis = self.approach[limb]
-                        .ok_or_else(|| IkError::Target(HANDS[hand].to_owned()))?;
+                        .ok_or_else(|| IkError::Target(self.hands[hand].clone()))?;
                     Some(Target::Axis {
                         translation_m: p.translation_m,
                         axis,
@@ -1597,15 +1625,20 @@ impl Teleop {
                     .iter()
                     .all(|x| x.is_finite())
         };
-        for (hand, name) in HANDS.iter().enumerate() {
+        for hand in 0..MAX_HANDS {
             if targets.tcp[hand].is_some_and(|p| !pose_finite(&p))
                 || targets.gripper_width_m[hand].is_some_and(|w| !w.is_finite())
             {
-                return Err(IkError::Target((*name).to_owned()));
+                return Err(IkError::Target(
+                    self.hands
+                        .get(hand)
+                        .cloned()
+                        .unwrap_or_else(|| format!("hand {hand}")),
+                ));
             }
         }
         if targets.head.is_some_and(|p| !pose_finite(&p)) {
-            return Err(IkError::Target("head".to_owned()));
+            return Err(IkError::Target(crate::HEAD.to_owned()));
         }
         // A motion that is not a number is no motion (as the solve took it before the shaper).
         let mut cleaned = *targets;
@@ -1620,8 +1653,8 @@ impl Teleop {
         let targets = &self.filtered(targets, dt);
         let mut asked = *targets;
         if self.seed {
-            self.shapers = [ToolShaper::default(); 2];
-            self.resting = [false; 2];
+            self.shapers = [ToolShaper::default(); MAX_HANDS];
+            self.resting = [false; MAX_HANDS];
             self.gaze = ToolShaper::default();
             self.gaze_resting = false;
         }

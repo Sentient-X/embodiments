@@ -34,8 +34,13 @@
 use std::time::Instant;
 
 use serde_json::Value;
-use sx_embodiment_ik::{Active, Body, Caps, Ik, Reach, Settings, Target};
+use sx_embodiment_ik::{Active, Caps, Ik, Reach, Settings, Target};
 use sx_frames::{Pose, Quaternion, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 /// Every axis available.
 const ALL: [bool; 64] = [true; 64];
@@ -139,7 +144,7 @@ fn main() {
     let out = args.next();
     let document: Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
-    let station_body = Body::static_upper_body();
+    let station_body = static_files().body().expect("the static upper body solves");
     let station_caps = Caps::declared(&station_body, 0.25).expect("caps");
     let mut ghost_caps = station_caps.clone();
     for (speed, accel) in ghost_caps.speed.iter_mut().zip(ghost_caps.accel.iter_mut()) {

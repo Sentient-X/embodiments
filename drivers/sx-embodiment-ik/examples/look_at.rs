@@ -15,7 +15,12 @@
 #![allow(clippy::cast_precision_loss)]
 
 use serde_json::{Value, json};
-use sx_embodiment_ik::{Body, Caps, Ik, Settings, Target};
+use sx_embodiment_ik::{Caps, Ik, Settings, Target};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const MAX_TICKS: usize = 2000;
@@ -24,7 +29,7 @@ fn main() {
     let path = std::env::args().nth(1).expect("joints.json");
     let measured: Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let axes = body.model().axes().to_vec();
     let mut caps = Caps::declared(&body, 0.25).expect("caps");
     for (speed, accel) in caps.speed.iter_mut().zip(caps.accel.iter_mut()) {

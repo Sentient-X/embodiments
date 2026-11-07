@@ -28,7 +28,11 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const BINDINGS: &str = include_str!("../../sx-damiao-can/bindings/sentient-static-upper-body.json");
@@ -106,7 +110,7 @@ fn main() {
     let share = args.first().copied().unwrap_or(1.0);
     let ramp_s = args.get(1).copied().unwrap_or(0.0);
     let caps = caps(share);
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let names: Vec<String> = body.model().axes().iter().map(|a| a.name.clone()).collect();
     let speed: BTreeMap<String, f64> = names
         .iter()
@@ -123,7 +127,7 @@ fn main() {
     let fastest = speed.values().copied().fold(0.0, f64::max);
     let config = TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed: speed.clone(),
         accel: accel.clone(),
         jerk: std::collections::BTreeMap::new(),
@@ -142,7 +146,7 @@ fn main() {
     }
     let index_of = |name: &str| names.iter().position(|a| a == name).expect(name);
     let solve0 =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     // The commissioned Ready pose (`sx_embodiments.known.static_upper_body._ARM_READY`): tool
     // points at (0.465, +/-0.238, 0.210) m. `clear` instead starts from the clearest of a grid of
     // symmetric arm poses.
@@ -205,8 +209,8 @@ fn main() {
 
     // One ghost run: the left hand follows `path(t)`, the right holds.
     let run = |path: &dyn Fn(f64) -> [f64; 3], ticks: usize| -> Run {
-        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
-            .expect("solve");
+        let mut solve =
+            Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
         let mut q = start.clone();
         let frames = body.model().poses(&q);
         let (left, right) = (body.frame(&frames, 0).pose(), body.frame(&frames, 1).pose());
@@ -227,7 +231,7 @@ fn main() {
             let mut target = left;
             target.translation_m = path(tick as f64 * DT);
             let targets = Targets {
-                tcp: [Some(target), Some(right)],
+                tcp: sx_embodiment_ik::teleop::hands([Some(target), Some(right)]),
                 ..Targets::default()
             };
             let step = solve

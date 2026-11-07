@@ -10,10 +10,13 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{
-    Body, Caps, Ik, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Settings, Target,
-};
+use sx_embodiment_ik::{Body, Caps, Ik, Settings, Target};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 
@@ -29,7 +32,7 @@ impl Rng {
 }
 
 fn teleop() -> Teleop {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let speed: BTreeMap<String, f64> = body
         .model()
         .axes()
@@ -38,7 +41,7 @@ fn teleop() -> Teleop {
         .collect();
     let config = TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed,
         accel: BTreeMap::new(),
         jerk: std::collections::BTreeMap::new(),
@@ -48,12 +51,12 @@ fn teleop() -> Teleop {
         obstacles: Vec::new(),
         posture: std::collections::BTreeMap::new(),
     };
-    Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve")
+    Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve")
 }
 
 /// Ghost caps: only reach, limits and collision matter.
 fn ghost() -> Ik {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let mut caps = Caps::declared(&body, 0.25).expect("caps");
     for (speed, accel) in caps.speed.iter_mut().zip(caps.accel.iter_mut()) {
         *speed = 4.0;
@@ -122,7 +125,7 @@ fn both_hands_sit_the_same_angle_from_the_centre_however_far_each_is() {
         near.translation_m[k] += 0.35 * (eye[k] - left.translation_m[k]);
     }
     let targets = Targets {
-        tcp: [Some(near), Some(right)],
+        tcp: sx_embodiment_ik::teleop::hands([Some(near), Some(right)]),
         ..Targets::default()
     };
     solve.reset();
@@ -159,7 +162,7 @@ fn only_the_neck_turns_the_camera() {
         rotation: QuaternionLayout::Xyzw.read([-sy * sp, cy * sp, sy * cp, cy * cp]),
     };
     let targets = Targets {
-        tcp: [Some(left), Some(right)],
+        tcp: sx_embodiment_ik::teleop::hands([Some(left), Some(right)]),
         head: Some(gaze),
         ..Targets::default()
     };
@@ -301,7 +304,7 @@ fn the_first_look_down_at_the_hands_settles_without_bouncing() {
     let mut q = zero(&solve);
     let body = solve.ik().body().clone();
     let targets = Targets {
-        tcp: [Some(tcp(&body, &q, 0)), Some(tcp(&body, &q, 1))],
+        tcp: sx_embodiment_ik::teleop::hands([Some(tcp(&body, &q, 0)), Some(tcp(&body, &q, 1))]),
         ..Targets::default()
     };
     let neck: Vec<usize> = solve

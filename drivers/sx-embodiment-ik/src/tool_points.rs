@@ -124,8 +124,12 @@ mod tests {
     use super::*;
 
     fn static_chain() -> String {
-        let pack: serde_json::Value =
-            serde_json::from_str(crate::STATIC_UPPER_BODY_PACK).expect("pack");
+        let pack: serde_json::Value = serde_json::from_str(
+            crate::registered("sentient-static-upper-body")
+                .expect("committed")
+                .pack,
+        )
+        .expect("pack");
         pack["tool_points_checked"]["chain"]
             .as_str()
             .expect("a chain")
@@ -135,8 +139,13 @@ mod tests {
     #[test]
     fn the_static_upper_body_is_checked_for_its_chain() {
         let chain = static_chain();
-        let checked = checked_tool_points(crate::STATIC_UPPER_BODY_PACK, Some(&chain))
-            .expect("the static upper body carries a check");
+        let checked = checked_tool_points(
+            crate::registered("sentient-static-upper-body")
+                .expect("committed")
+                .pack,
+            Some(&chain),
+        )
+        .expect("the static upper body carries a check");
         assert!(checked.drives("left_gripper_tcp") && checked.drives("right_gripper_tcp"));
         assert!(!checked.drives("ZED_camera"));
     }
@@ -145,11 +154,21 @@ mod tests {
     fn another_chain_or_none_or_no_record_or_moved_points_drive_nothing() {
         let chain = static_chain();
         assert!(matches!(
-            checked_tool_points(crate::STATIC_UPPER_BODY_PACK, Some(&"0".repeat(64))),
+            checked_tool_points(
+                crate::registered("sentient-static-upper-body")
+                    .expect("committed")
+                    .pack,
+                Some(&"0".repeat(64))
+            ),
             Err(ToolPointsUnchecked::OtherChain { .. })
         ));
         assert_eq!(
-            checked_tool_points(crate::STATIC_UPPER_BODY_PACK, None),
+            checked_tool_points(
+                crate::registered("sentient-static-upper-body")
+                    .expect("committed")
+                    .pack,
+                None
+            ),
             Err(ToolPointsUnchecked::NoChain)
         );
         let unchecked = r#"{"tcp_candidates": {"left": "left_gripper_link"}, "tcp_frames": {}}"#;
