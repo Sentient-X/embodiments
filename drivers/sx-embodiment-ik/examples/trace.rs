@@ -28,8 +28,12 @@ use std::f64::consts::TAU;
 
 use serde_json::json;
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const END_S: f64 = 11.0;
@@ -197,7 +201,7 @@ fn main() {
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("../tests/fixtures/static-ready.json")).expect("ready");
     let mut solve =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     // Answers, not a loaded host's clock: each tick's time is written beside it instead.
     solve.set_deadline(std::time::Duration::from_secs(3600));
     let names: Vec<String> = solve
@@ -224,8 +228,8 @@ fn main() {
         let (targets, width) = hands(t, &from);
         let widths = [width, OPEN_M];
         let mut ask = Targets {
-            tcp: [Some(targets[0]), Some(targets[1])],
-            gripper_width_m: [Some(widths[0]), Some(widths[1])],
+            tcp: sx_embodiment_ik::teleop::hands([Some(targets[0]), Some(targets[1])]),
+            gripper_width_m: sx_embodiment_ik::teleop::hands([Some(widths[0]), Some(widths[1])]),
             ..Targets::default()
         };
         // `--no-carry`: the station gives the newest sample as read, not carried forward by

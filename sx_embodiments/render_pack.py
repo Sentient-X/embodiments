@@ -21,8 +21,12 @@ A pack is a directory of three files, generated from the body's composed descrip
   body's hardware (:mod:`sx_embodiments.tool_points`): a reader drives ``tcp_frames`` and
   only draws a candidate; ``tools``, each tool's
   grip (:mod:`sx_embodiments.tool_frames`: its frame, and its jaws' closing line, approach and
-  grasp point, or why it has none), and ``frames``, every link's axes and roles
-  (:mod:`sx_embodiments.frames`), which a reader takes in place of a link's name; and, when
+  grasp point, or why it has none; and the side of the body it is on, where the body places
+  one), ``frames``, every link's axes and roles (:mod:`sx_embodiments.frames`), which a reader
+  takes in place of a link's name, and ``superseded_descriptions``, the earlier descriptions
+  the asset tree keeps, which a dynamics fit may still be keyed to. From these alone
+  ``sx_embodiment_ik::BodyFiles`` derives what a station's solve drives (one hand per tool, the
+  head's camera as its look), so no consumer lists a body's limbs by hand; and, when
   the body declares them
   (:mod:`sx_embodiments.viewing`), ``tracking`` (each XR controller's grip frame on a link, by
   side), ``mount`` (the base mount's frame, kind and edge, as ``collision.json``'s
@@ -50,14 +54,14 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final
+from typing import Final, cast
 
 import numpy as np
 import numpy.typing as npt
 from sx_contracts.identity import JsonValue, canonical_bytes
 from sx_geometry.frames import RFU, RUB, QuaternionLayout, basis_quaternion
 
-from .assets import PACKAGE_URI_PREFIX, description_asset_uri
+from .assets import PACKAGE_URI_PREFIX, asset_manifest, description_asset_uri
 from .collision_proxies import support_document
 from .embodiment import Embodiment
 from .errors import EmbodimentError
@@ -866,6 +870,41 @@ def tcp_frames(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str
     return frames
 
 
+def tool_documents(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> list[JsonValue]:
+    """``pack.json``'s ``tools``: each tool's grip (:mod:`~sx_embodiments.tool_frames`) and, where
+    the body places one (:func:`~sx_embodiments.frames.sides`), the ``side`` it is on. A station's
+    solve names the hand that drives a tool by its side (an operator's left and right hand), or
+    by its component where the body places none (a single arm)."""
+    placed = sides(embodiment, [tool.frame for tool in tools])
+    documents: list[JsonValue] = []
+    for tool in tools:
+        document = cast("dict[str, JsonValue]", tool.to_json())
+        side = placed.get(tool.frame)
+        if side is not None:
+            document["side"] = side.value
+        documents.append(document)
+    return documents
+
+
+def superseded_descriptions(embodiment: Embodiment) -> list[str]:
+    """Every earlier revision of the body's description the asset tree keeps
+    (``<package>/_by_digest/<sha256>/<file>``, relative to ``assets/``), oldest digest first by
+    name: a dynamics fit keyed to one still applies where the revision did not reach what it
+    identified (``sx_embodiment_drivers::Dynamics::superseding``), so a corrected camera mount
+    needs no re-fit on the robot."""
+    location = embodiment.urdf.asset.location
+    if not location.startswith(PACKAGE_URI_PREFIX):
+        return []
+    relpath = PurePosixPath(location.removeprefix(PACKAGE_URI_PREFIX))
+    kept = f"{relpath.parts[0]}/_by_digest/"
+    current = f"/{embodiment.urdf.asset.content.sha256}/"
+    return sorted(
+        path
+        for path in asset_manifest()
+        if path.startswith(kept) and path.endswith(f"/{relpath.name}") and current not in path
+    )
+
+
 def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str, JsonValue]:
     """``pack.json``'s tool points: every derived one as ``tcp_candidates`` (drawn), and as
     ``tcp_frames`` (driven) with its ``tool_points_checked`` record only once a person checked
@@ -990,8 +1029,9 @@ def build(
         "links": [{"name": link, "triangles": triangles[link]} for link in links],
         "triangles": sum(triangles.values()),
         **tool_point_fields(embodiment, tools),
-        "tools": [tool.to_json() for tool in tools],
+        "tools": tool_documents(embodiment, tools),
         "frames": [frame.to_json() for frame in body_frames(embodiment)],
+        "superseded_descriptions": [*superseded_descriptions(embodiment)],
         "generated_by": GENERATOR,
     }
     if viewing is not None:

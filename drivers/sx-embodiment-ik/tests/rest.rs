@@ -11,8 +11,12 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use sx_embodiment_ik::teleop::{COAST_MAX_S, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 use sx_frames::Pose;
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 
@@ -33,7 +37,7 @@ fn bench(torso_held: bool) -> Bench {
     }
     let config = TeleopConfig::parse(&json.to_string()).expect("config");
     let mut solve =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     solve.set_deadline(std::time::Duration::from_secs(3600));
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
@@ -142,7 +146,7 @@ fn letting_go_of_a_fast_sweep_rests_every_joint_within_its_jerk_cap() {
             let left = (tick < release).then(|| moved(&from[0], [0.0, 0.5 * t, 0.0]));
             (
                 Targets {
-                    tcp: [left, Some(from[1])],
+                    tcp: sx_embodiment_ik::teleop::hands([left, Some(from[1])]),
                     ..Targets::default()
                 },
                 tick == 1,
@@ -188,7 +192,10 @@ fn letting_go_of_a_fast_sweep_rests_every_joint_within_its_jerk_cap() {
 fn an_engage_at_rest_where_the_tool_stands_moves_nothing_abruptly() {
     let handover = 200;
     let program = |from: [Pose; 2]| Targets {
-        tcp: [Some(moved(&from[0], [0.10, 0.10, 0.2645])), Some(from[1])],
+        tcp: sx_embodiment_ik::teleop::hands([
+            Some(moved(&from[0], [0.10, 0.10, 0.2645])),
+            Some(from[1]),
+        ]),
         ..Targets::default()
     };
     // Where the tool stands when the operator takes it.
@@ -202,7 +209,7 @@ fn an_engage_at_rest_where_the_tool_stands_moves_nothing_abruptly() {
             program(from)
         } else {
             Targets {
-                tcp: [Some(hold[0]), Some(hold[1])],
+                tcp: sx_embodiment_ik::teleop::hands([Some(hold[0]), Some(hold[1])]),
                 ..Targets::default()
             }
         };

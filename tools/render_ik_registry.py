@@ -6,14 +6,18 @@
 
 ``drivers/sx-embodiment-ik/tests/fixtures/registry.json`` holds, for each body of both
 registries (``embodiments`` then ``development_embodiments``) whose ``sx_embodiments.frames.tools``
-names a tool frame: its composed description cut to its kinematics (links, joints, limits,
-mimics; no geometry), its ``collision.json`` capsules and ignored pairs as
-``sx_embodiments.collision_proxies`` fits them (the convex pieces left out: they refine contacts
-only), and its tool frames in the registry's order. A declared support whose frame the
+names a tool frame, the three documents a render pack carries, cut for size: its composed
+description without geometry (links, joints, limits, mimics and inertia, so its dynamics
+hold), its ``collision.json`` capsules and ignored pairs as ``sx_embodiments.collision_proxies``
+fits them (the convex pieces left out: they refine contacts only), and the ``pack.json`` fields
+a solve reads (the body's id, ``tools`` with their grips and sides, ``frames`` with their roles,
+the tool points and their check, ``sx_embodiments.render_pack``). A declared support whose frame the
 description lacks is dropped and listed under ``defects`` (2026-11-04: ``franka`` and
 ``panda_omron`` mount on ``link0`` and ``base``, which their prefixed descriptions call
-``panda_link0``). The solve's tests build each body from
-these bytes, so no body is listed by hand in Rust. ``tests/test_ik_registry.py`` runs the check.
+``panda_link0``). The solve's tests and the station's registry-wide follower test build each
+body from these bytes through the one path a render pack takes
+(``sx_embodiment_ik::BodyFiles``), so no body is listed by hand in Rust.
+``tests/test_ik_registry.py`` runs the check.
 Needs the ``render`` extra (NumPy).
 """
 
@@ -25,17 +29,19 @@ from pathlib import Path
 
 from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.collision_proxies import proxies
-from sx_embodiments.frames import tools
+from sx_embodiments.frames import body_frames, tools
+from sx_embodiments.render_pack import tool_documents, tool_point_fields
 from sx_embodiments.rendered import same_rendering
+from sx_embodiments.tool_frames import tool_frames
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "drivers/sx-embodiment-ik/tests/fixtures/registry.json"
-#: What a description keeps: the tree and its joints' numbers.
-_GEOMETRY = ("visual", "collision", "inertial")
+#: What a description drops: its geometry (the tree, its joints' numbers and its inertia stay).
+_GEOMETRY = ("visual", "collision")
 
 
 def _kinematic(urdf: bytes) -> str:
-    """``urdf`` with every link's geometry and inertia dropped."""
+    """``urdf`` with every link's geometry dropped."""
     root = ET.fromstring(urdf)  # nosec B314 - registry-owned description bytes
     for link in root.findall("link"):
         for child in list(link):
@@ -83,12 +89,18 @@ def rendered() -> dict[Path, str]:
                 continue
             urdf = _kinematic(body.urdf_bytes)
             collision, defects = _collision(str(name), proxies(body, name=str(name)), urdf)
+            grips = tool_frames(body)
             bodies.append(
                 {
                     "embodiment": str(name),
-                    "tools": frames,
                     "urdf": urdf,
                     "collision": collision,
+                    "pack": {
+                        "embodiment_digest": str(body.id),
+                        **tool_point_fields(body, grips),
+                        "tools": tool_documents(body, grips),
+                        "frames": [frame.to_json() for frame in body_frames(body)],
+                    },
                     "defects": defects,
                 }
             )

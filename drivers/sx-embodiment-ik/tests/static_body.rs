@@ -13,10 +13,13 @@
 )]
 
 use sx_embodiment_drivers::kinematics::Tree;
-use sx_embodiment_ik::{
-    Active, Body, Caps, Ik, Reach, STATIC_UPPER_BODY_URDF, Settings, Solve, Target,
-};
+use sx_embodiment_ik::{Active, Caps, Ik, Reach, Settings, Solve, Target};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 /// Default settings with a deadline far past any tick: the tests are about the answer, not
 /// the clock, and run on a loaded machine.
@@ -47,7 +50,7 @@ impl Rng {
 }
 
 fn ik(speed_cap: Option<f64>) -> Ik {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let caps = Caps::declared(&body, 0.25).expect("caps");
     let caps = match speed_cap {
         Some(cap) => caps.at_most(cap),
@@ -58,7 +61,7 @@ fn ik(speed_cap: Option<f64>) -> Ik {
 
 /// Ghost caps: fast enough that only reach, limits and collision matter.
 fn ghost() -> Ik {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let mut caps = Caps::declared(&body, 0.25).expect("caps");
     for (speed, accel) in caps.speed.iter_mut().zip(caps.accel.iter_mut()) {
         *speed = 4.0;
@@ -114,7 +117,7 @@ fn pose_targets(ik: &Ik, q: &[f64]) -> Vec<Option<Target>> {
 
 #[test]
 fn forward_kinematics_is_the_trees() {
-    let tree = Tree::parse(STATIC_UPPER_BODY_URDF).expect("tree");
+    let tree = Tree::parse(static_files().urdf).expect("tree");
     let ik = ik(None);
     let model = ik.body().model();
     let mut rng = Rng(7);
@@ -659,22 +662,17 @@ fn an_arm_fit_keyed_to_the_earlier_description_still_applies() {
     ))
     .expect("fixture");
     let mut calibration = parity["calibration"].clone();
-    let earlier = sx_embodiment_drivers::dynamics::sha256_hex(
-        sx_embodiment_ik::STATIC_UPPER_BODY_SUPERSEDED[0],
-    );
+    let earlier = sx_embodiment_drivers::dynamics::sha256_hex(static_files().superseded[0]);
     calibration["description_sha256"] = serde_json::Value::String(earlier);
     let calibration = sx_embodiment_drivers::DynamicsCalibration::parse(&calibration.to_string())
         .expect("calibration");
     let current = || {
-        sx_embodiment_drivers::Dynamics::of(
-            sx_embodiment_ik::STATIC_UPPER_BODY_URDF,
-            sx_embodiment_drivers::UPRIGHT,
-        )
-        .expect("dynamics")
+        sx_embodiment_drivers::Dynamics::of(static_files().urdf, sx_embodiment_drivers::UPRIGHT)
+            .expect("dynamics")
     };
     assert!(current().calibrated(&calibration).is_err());
     current()
-        .superseding(sx_embodiment_ik::STATIC_UPPER_BODY_SUPERSEDED)
+        .superseding(static_files().superseded)
         .expect("earlier")
         .calibrated(&calibration)
         .expect("the arm fit applies");
@@ -743,7 +741,7 @@ fn a_reading_that_jumps_is_no_speed() {
 /// slower than any one direction.
 #[test]
 fn the_tool_speed_a_pose_allows_is_the_speed_the_solve_reaches() {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let axes = body.model().axes();
     let index = |name: &str| axes.iter().position(|a| a.name == name).expect(name);
     let mut q = vec![0.0; axes.len()];

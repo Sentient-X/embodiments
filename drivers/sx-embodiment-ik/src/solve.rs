@@ -2793,8 +2793,12 @@ fn deadline_after(budget: Duration) -> Option<Instant> {
 mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
+    use crate::Solve;
     use crate::teleop::{Targets, Teleop, TeleopConfig};
-    use crate::{STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve};
+
+    fn static_files() -> crate::BodyFiles<'static> {
+        crate::registered("sentient-static-upper-body").expect("its pack is committed")
+    }
     use sx_frames::Pose;
 
     fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
@@ -2813,8 +2817,8 @@ mod tests {
         let ready: BTreeMap<String, f64> =
             serde_json::from_str(include_str!("../tests/fixtures/static-ready.json"))
                 .expect("ready");
-        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
-            .expect("solve");
+        let mut solve =
+            Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
         solve.set_deadline(std::time::Duration::from_secs(3600));
         let mut q: Vec<f64> = solve
             .model()
@@ -2824,13 +2828,13 @@ mod tests {
             .collect();
         let from = tcp(&solve, &q, 0);
         let targets = Targets {
-            tcp: [
+            tcp: crate::teleop::hands([
                 Some(Pose {
                     translation_m: [0, 1, 2].map(|k| from.translation_m[k] + [0.0, 0.12, 0.0][k]),
                     rotation: from.rotation,
                 }),
                 None,
-            ],
+            ]),
             ..Targets::default()
         };
         let measured = vec![None; q.len()];
@@ -2881,8 +2885,8 @@ mod tests {
         let ready: BTreeMap<String, f64> =
             serde_json::from_str(include_str!("../tests/fixtures/static-ready.json"))
                 .expect("ready");
-        let mut solve = Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config)
-            .expect("solve");
+        let mut solve =
+            Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
         solve.set_deadline(std::time::Duration::from_secs(3600));
         let rest: Vec<f64> = solve
             .model()
@@ -2907,14 +2911,14 @@ mod tests {
             let t = f64::from(tick) * dt;
             let measured: Vec<Option<f64>> = real.iter().copied().map(Some).collect();
             let mut targets = Targets {
-                tcp: [
+                tcp: crate::teleop::hands([
                     Some(Pose {
                         translation_m: [0, 1, 2]
                             .map(|k| left0.translation_m[k] + [0.03, 0.0, -0.04][k]),
                         rotation: left0.rotation,
                     }),
                     None,
-                ],
+                ]),
                 ..Targets::default()
             };
             if t >= 1.0 {

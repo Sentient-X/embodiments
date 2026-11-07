@@ -10,9 +10,13 @@
 
 use std::collections::BTreeMap;
 
-use sx_embodiment_ik::Body;
 use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
 use sx_frames::{Pose, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.02;
 const TOOL_SPEED: f64 = 0.15;
@@ -41,7 +45,7 @@ fn ready() -> BTreeMap<String, f64> {
 }
 
 fn teleop(posture: BTreeMap<String, f64>) -> Teleop {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let speed = body
         .model()
         .axes()
@@ -50,7 +54,7 @@ fn teleop(posture: BTreeMap<String, f64>) -> Teleop {
         .collect();
     let config = TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed,
         accel: BTreeMap::new(),
         jerk: std::collections::BTreeMap::new(),
@@ -60,7 +64,11 @@ fn teleop(posture: BTreeMap<String, f64>) -> Teleop {
         obstacles: Vec::new(),
         posture,
     };
-    Teleop::with_body(Body::static_upper_body(), &config).expect("solve")
+    Teleop::with_body(
+        static_files().body().expect("the static upper body solves"),
+        &config,
+    )
+    .expect("solve")
 }
 
 struct Run {
@@ -328,7 +336,7 @@ fn multiply(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
 
 #[test]
 fn a_free_roll_on_a_limb_with_no_approach_axis_is_refused() {
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let mut config = teleop(ready()).config().clone();
     for limb in &mut config.limbs {
         limb.approach = None;

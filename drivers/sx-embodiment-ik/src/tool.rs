@@ -85,6 +85,10 @@ pub struct ToolFrame {
     pub component: String,
     pub frame: String,
     pub grip: Grip,
+    /// The side of the body the tool is on (`left`, `right`), where the body places one
+    /// (`sx_embodiments.frames.sides`): the hand an operator drives it with.
+    #[serde(default)]
+    pub side: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +138,7 @@ impl ToolFrame {
             component: self.component.clone(),
             frame: frame.to_owned(),
             grip,
+            side: self.side.clone(),
         }
     }
 }

@@ -5,10 +5,10 @@ use sx_embodiment_drivers::kinematics::Tree;
 use sx_frames::linalg::Vec3;
 use sx_frames::{Pose, Rigid};
 
+use crate::IkError;
 use crate::geometry::{Capsule, Proxies};
 use crate::model::{Frames, Model};
 use crate::tool::{ToolFrame, parse_tools};
-use crate::{IkError, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_PACK, STATIC_UPPER_BODY_URDF};
 
 /// What a limb's frame is asked to do.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,7 +84,24 @@ impl Body {
     pub fn new(urdf: &str, collision: &str, limbs: &[Limb]) -> Result<Self, IkError> {
         let model = Model::new(&Tree::parse(urdf)?);
         let proxies = Proxies::parse(collision, &model)?;
-        let limbs = limbs
+        Self {
+            model,
+            proxies,
+            limbs: Vec::new(),
+            solved: Vec::new(),
+            tools: Vec::new(),
+        }
+        .with_limbs(limbs)
+    }
+
+    /// The body with `limbs` in place of the ones it had: its tree, proxies and tools kept.
+    ///
+    /// # Errors
+    ///
+    /// [`IkError::UnknownFrame`] when a limb's frame is not a link.
+    pub fn with_limbs(mut self, limbs: &[Limb]) -> Result<Self, IkError> {
+        let model = &self.model;
+        self.limbs = limbs
             .iter()
             .map(|limb| {
                 let frame = model
@@ -104,16 +121,11 @@ impl Body {
                 })
             })
             .collect::<Result<Vec<_>, IkError>>()?;
-        let mut solved: Vec<usize> = limbs.iter().flat_map(|l| l.axes.clone()).collect();
+        let mut solved: Vec<usize> = self.limbs.iter().flat_map(|l| l.axes.clone()).collect();
         solved.sort_unstable();
         solved.dedup();
-        Ok(Self {
-            model,
-            proxies,
-            limbs,
-            solved,
-            tools: Vec::new(),
-        })
+        self.solved = solved;
+        Ok(self)
     }
 
     /// The body with its tools, from its render pack's `pack.json`.
@@ -158,38 +170,6 @@ impl Body {
         let frames = self.model.poses(&q);
         let (mine, theirs) = (frames.links[own], frames.links[at]);
         Some(tool.restated(frame, (&mine.r, mine.t), (&theirs.r, theirs.t)))
-    }
-
-    /// The Sentient static upper body: both grippers' tool frames, and the ZED looking out
-    /// of its lenses (`ZED_camera` +x) from the SO-101 neck.
-    ///
-    /// # Panics
-    ///
-    /// Never: the committed pack is held to parse by this crate's tests.
-    #[must_use]
-    pub fn static_upper_body() -> Self {
-        let limbs = [
-            Limb {
-                name: "left".into(),
-                frame: "left_gripper_tcp".into(),
-                task: Task::Pose,
-            },
-            Limb {
-                name: "right".into(),
-                frame: "right_gripper_tcp".into(),
-                task: Task::Pose,
-            },
-            Limb {
-                name: "head".into(),
-                frame: "ZED_camera".into(),
-                task: Task::LookAt {
-                    forward: [1.0, 0.0, 0.0],
-                },
-            },
-        ];
-        Self::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &limbs)
-            .and_then(|body| body.with_tools(STATIC_UPPER_BODY_PACK))
-            .expect("the committed static upper body pack solves")
     }
 
     #[must_use]

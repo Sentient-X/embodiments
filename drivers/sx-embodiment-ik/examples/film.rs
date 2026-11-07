@@ -20,8 +20,12 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use sx_embodiment_ik::teleop::{TELEOP_SCHEMA, Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{Body, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF};
 use sx_frames::{Pose, Quaternion, QuaternionLayout};
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const DT: f64 = 0.01;
 const FPS: f64 = 30.0;
@@ -92,7 +96,7 @@ fn main() {
     let head_p = series::<3>(&episode["head"]["p"]);
     let head_q = quaternions(&episode["head"]["q"]);
 
-    let body = Body::static_upper_body();
+    let body = static_files().body().expect("the static upper body solves");
     let mut speed = BTreeMap::new();
     let mut accel = BTreeMap::new();
     for axis in body.model().axes() {
@@ -106,7 +110,7 @@ fn main() {
     }
     let config = TeleopConfig {
         schema: TELEOP_SCHEMA.into(),
-        limbs: TeleopConfig::static_upper_body_limbs(),
+        limbs: static_files().limbs().expect("its limbs"),
         speed,
         accel,
         jerk: std::collections::BTreeMap::new(),
@@ -117,7 +121,7 @@ fn main() {
         posture: std::collections::BTreeMap::new(),
     };
     let mut teleop =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     let rest = teleop.ik().rest().to_vec();
     let head = body
         .limbs()

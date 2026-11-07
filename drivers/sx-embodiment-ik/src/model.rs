@@ -113,6 +113,43 @@ impl Model {
         &self.above[link]
     }
 
+    /// The link `link` hangs from, and whether through a fixed joint; `None` at the root.
+    pub(crate) fn parent(&self, link: usize) -> Option<(usize, bool)> {
+        self.joints
+            .iter()
+            .find(|joint| joint.child == link)
+            .map(|joint| (joint.parent, joint.leader.is_none()))
+    }
+
+    /// The moving joints' axes whose child link is `link`'s or hangs below it (indices into
+    /// [`Model::axes`], ascending): what moves anything riding with `link`, below it.
+    pub(crate) fn axes_below(&self, link: usize) -> Vec<usize> {
+        let mut found: Vec<usize> = self
+            .joints
+            .iter()
+            .filter_map(|joint| {
+                let axis = joint.leader?;
+                self.descends(joint.parent, link).then_some(axis)
+            })
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// Whether `link` is `ancestor` or hangs below it, through any joints.
+    pub(crate) fn descends(&self, mut link: usize, ancestor: usize) -> bool {
+        loop {
+            if link == ancestor {
+                return true;
+            }
+            match self.parent(link) {
+                Some((parent, _)) => link = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Whether `link` hangs below `ancestor` through fixed joints only (or is it).
     pub(crate) fn rigidly_below(&self, ancestor: usize, mut link: usize) -> bool {
         while link != ancestor {

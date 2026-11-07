@@ -6,7 +6,9 @@ tick. It solves one constrained QP over a body's render pack (`robot.urdf` plus
 crate to draw its ghost.
 
 ```rust
-let body = Body::static_upper_body(); // left, right, head
+// Any committed render pack; its hands (one per tool, by side) and the head's look are derived
+// from the pack, not listed by hand (`BodyFiles::limbs`).
+let body = sx_embodiment_ik::registered("sentient-static-upper-body").unwrap().body()?; // left, right, head
 let caps = Caps::declared(&body, 0.25)?.at_most(governor_speed);
 let mut ik = Ik::new(body, caps, Settings::default(), Vec::new())?; // + the body's declared table
 ik.reset(); // on engage

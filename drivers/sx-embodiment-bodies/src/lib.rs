@@ -185,6 +185,12 @@ pub struct Commissioning {
     /// answer, never refusing the body. A port whose every axis is out of service is left
     /// closed.
     pub out_of_service: BTreeSet<String>,
+    /// Joints in service whose dynamics are not yet identified on this robot (the load a
+    /// joint carries is not modelled, so its feed-forward cannot hold it through a motion): a
+    /// station's follower holds each where it stands, under torque, and never solves it, as the
+    /// bench holds it (`--hold`). Taken off once the joint is identified (`sx-identify`). The
+    /// static upper body's torso, which carries both arms, was the first (2026-10-26).
+    pub unidentified: BTreeSet<String>,
     /// Each power rail's measured voltage, by selector (`*`, a port, a model, or
     /// `<port>/<model>`): what derates or refuses an axis over its model's supported supply;
     /// with the derate declared for this robot (`derate`: `max_speed` and `decided`, who
@@ -203,6 +209,8 @@ struct CommissioningDocument {
     ports: BTreeMap<String, String>,
     #[serde(default)]
     out_of_service: BTreeSet<String>,
+    #[serde(default)]
+    unidentified: BTreeSet<String>,
     #[serde(default)]
     rails: BTreeMap<String, f64>,
     #[serde(default)]
@@ -250,7 +258,11 @@ impl Commissioning {
                 .ports
                 .iter()
                 .any(|(name, serial)| invalid(name) || invalid(serial))
-            || parsed.out_of_service.iter().any(|joint| invalid(joint))
+            || parsed
+                .out_of_service
+                .iter()
+                .chain(&parsed.unidentified)
+                .any(|joint| invalid(joint))
         {
             return Err(OpenError::Document(
                 "a pod, its revision and every port, serial and joint are non-empty identities"
@@ -269,6 +281,7 @@ impl Commissioning {
             pod_revision: parsed.pod_revision,
             ports: parsed.ports,
             out_of_service: parsed.out_of_service,
+            unidentified: parsed.unidentified,
             rails,
             exit_poses: parsed.exit_poses,
         })

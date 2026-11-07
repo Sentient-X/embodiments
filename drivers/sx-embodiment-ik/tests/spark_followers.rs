@@ -31,10 +31,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{
-    READING_JITTER, STATIC_UPPER_BODY_COLLISION, STATIC_UPPER_BODY_URDF, Solve, ToolSpeed,
-};
+use sx_embodiment_ik::{READING_JITTER, Solve, ToolSpeed};
 use sx_frames::Pose;
+
+/// The static upper body's committed render pack: one fixture among the registry's bodies.
+fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
+    sx_embodiment_ik::registered("sentient-static-upper-body").expect("its pack is committed")
+}
 
 const SUBSTEPS: usize = 20;
 
@@ -218,7 +221,7 @@ fn pieces(teleop: &Teleop) -> Vec<(usize, Vec<[f64; 3]>)> {
         hulls: Vec<Hull>,
     }
     let proxies: Proxies =
-        serde_json::from_str(STATIC_UPPER_BODY_COLLISION).expect("the collision proxies");
+        serde_json::from_str(static_files().collision).expect("the collision proxies");
     proxies
         .hulls
         .into_iter()
@@ -298,7 +301,7 @@ fn base(obstacles: Vec<[f64; 6]>, m: &Motor) -> (Teleop, Vec<f64>) {
     let ready: BTreeMap<String, f64> =
         serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
     let mut teleop =
-        Teleop::new(STATIC_UPPER_BODY_URDF, STATIC_UPPER_BODY_COLLISION, &config).expect("solve");
+        Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");
     teleop.set_deadline(std::time::Duration::from_secs(3600));
     let rest = teleop
         .model()
@@ -468,7 +471,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
                 rotation: right0.rotation,
             });
         }
-        targets.tool_speed = [tool_speed.map(linear); 2];
+        targets.tool_speed = [tool_speed.map(linear); sx_embodiment_ik::teleop::MAX_HANDS];
         let measured: Vec<Option<f64>> = real.iter().map(|x| Some(x + m.noise * rnd())).collect();
         let before = teleop.model().poses(&reference);
         let step = teleop
