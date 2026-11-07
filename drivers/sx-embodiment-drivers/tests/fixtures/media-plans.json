@@ -707,8 +707,8 @@
   },
   "sentient-static-upper-body": {
     "schema": "sx.media-plan/v3",
-    "embodiment": "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
-    "instance": "d9d4d54856133c10d7aa3c30a2bc2c493d7f9fbb7219b886af6c19f9b984f88f",
+    "embodiment": "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54",
+    "instance": "8d5626c9ea7226b13d203720a55daea2e52b8c6a1a44026fca6979c6acd30ce9",
     "tracks": [
       {
         "track": "head",

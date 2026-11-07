@@ -250,8 +250,8 @@
   "sentient-static-upper-body": {
     "nominal": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
-      "instance": "d9d4d54856133c10d7aa3c30a2bc2c493d7f9fbb7219b886af6c19f9b984f88f",
+      "embodiment": "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54",
+      "instance": "8d5626c9ea7226b13d203720a55daea2e52b8c6a1a44026fca6979c6acd30ce9",
       "joints": [
         {
           "joint": "torso_joint",
@@ -302,6 +302,18 @@
           "calibration": null
         },
         {
+          "joint": "left_gripper_left_finger_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_gripper_right_finger_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
           "joint": "right_shoulder_pitch_joint",
           "zero": 0.0,
           "direction": 1,
@@ -339,18 +351,6 @@
         },
         {
           "joint": "right_wrist_roll_joint",
-          "zero": 0.0,
-          "direction": 1,
-          "calibration": null
-        },
-        {
-          "joint": "left_gripper_left_finger_joint",
-          "zero": 0.0,
-          "direction": 1,
-          "calibration": null
-        },
-        {
-          "joint": "left_gripper_right_finger_joint",
           "zero": 0.0,
           "direction": 1,
           "calibration": null
@@ -407,8 +407,8 @@
     },
     "measured": {
       "schema": "sx.instance-drive/v1",
-      "embodiment": "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
-      "instance": "8b4fa4d6df306436a7b4088c208be793b0a9b8da2178dc5ee339a676d9de53d0",
+      "embodiment": "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54",
+      "instance": "a446fd154fa003be31d1eba8a1881f7049609f20b47589341f47a5b274eb3acc",
       "joints": [
         {
           "joint": "torso_joint",
@@ -459,6 +459,18 @@
           "calibration": null
         },
         {
+          "joint": "left_gripper_left_finger_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
+          "joint": "left_gripper_right_finger_joint",
+          "zero": 0.0,
+          "direction": 1,
+          "calibration": null
+        },
+        {
           "joint": "right_shoulder_pitch_joint",
           "zero": 0.0,
           "direction": 1,
@@ -496,18 +508,6 @@
         },
         {
           "joint": "right_wrist_roll_joint",
-          "zero": 0.0,
-          "direction": 1,
-          "calibration": null
-        },
-        {
-          "joint": "left_gripper_left_finger_joint",
-          "zero": 0.0,
-          "direction": 1,
-          "calibration": null
-        },
-        {
-          "joint": "left_gripper_right_finger_joint",
           "zero": 0.0,
           "direction": 1,
           "calibration": null

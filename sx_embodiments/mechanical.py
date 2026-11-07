@@ -151,6 +151,21 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             "TheRobotStudio/SO-ARM100 SO-101 base, the plate the arm is clamped or screwed by",
         ),
         MechanicalInterface(
+            InterfaceId("sentient-allisa-shoulder"),
+            "Sentient corrected arm shoulder seat",
+            "Sentient-X/humanoid_pkg allisa_bot, *_shoulder_pitch_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("sentient-allisa-wrist"),
+            "Sentient corrected arm gripper seat",
+            "Sentient-X/humanoid_pkg allisa_bot, *_gripper_mount_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("sentient-allisa-neck"),
+            "Sentient corrected SO-101 neck seat",
+            "Sentient-X/humanoid_pkg allisa_bot, so101_mount_joint",
+        ),
+        MechanicalInterface(
             InterfaceId("sentient-humanoid-wrist"),
             "Sentient humanoid wrist, the wrist-yaw link's frame",
             "Sentient-X/humanoid_pkg urdf_robot_acc, *_wrist_yaw_link",
