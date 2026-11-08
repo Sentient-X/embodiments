@@ -405,6 +405,14 @@ def _leg_module(side: Literal["left", "right"], leg: ChainSpec, part: Subtree) -
                 f"{side}_leg", leg, RootMount(f"{side}_hip_pitch_joint_mount"), limb=Limb.LEG
             ),
         ),
+        # Canonical joint pivots, not inferred anatomical centres or sole contacts.
+        # These facts travel with the leg module; adding sites changes body identity
+        # while leaving its URDF, meshes, limits and inertials unchanged.
+        sites=(
+            BodySite(f"{side}_hip", ComponentId(f"{side}_leg"), f"{side}_hip_pitch_link"),
+            BodySite(f"{side}_knee", ComponentId(f"{side}_leg"), f"{side}_knee_link"),
+            BodySite(f"{side}_ankle", ComponentId(f"{side}_leg"), f"{side}_foot2_link"),
+        ),
     )
 
 
