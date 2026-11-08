@@ -258,6 +258,7 @@ def test_ground_only_masks_preserve_geometry_and_allow_floor_contacts(tmp_path, 
 
 def test_legacy_collision_profile_keeps_original_semantics(tmp_path, monkeypatch):
     from dataclasses import asdict
+
     from sx_embodiments.nominal_mujoco import CollisionMode, nominal_profile_from_json
 
     raw = asdict(profile(fixture_body(tmp_path, monkeypatch)))
@@ -266,3 +267,100 @@ def test_legacy_collision_profile_keeps_original_semantics(tmp_path, monkeypatch
     raw["collision_mode"] = "ignored"
     with pytest.raises(ValueError):
         nominal_profile_from_json(json.dumps(raw).encode())
+
+
+def test_mixed_rpy_joint_passive_visual_collision_and_inertia_frames(tmp_path, monkeypatch):
+    """Independent RzRyRx oracle catches intrinsic/extrinsic errors in every path."""
+    import xml.etree.ElementTree as ET
+
+    from sx_embodiments.kinematics import Kinematics
+
+    def rpy(a, b, c):
+        ca, sa, cb, sb, cc, sc = (
+            math.cos(a),
+            math.sin(a),
+            math.cos(b),
+            math.sin(b),
+            math.cos(c),
+            math.sin(c),
+        )
+        rx = np.array([[1, 0, 0], [0, ca, -sa], [0, sa, ca]])
+        ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
+        rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
+        return rz @ ry @ rx
+
+    def transform(position, rotation):
+        matrix = np.eye(4)
+        matrix[:3, :3], matrix[:3, 3] = rotation, position
+        return matrix
+
+    body = fixture_body(tmp_path, monkeypatch)
+    tree = ET.fromstring(body.urdf_bytes)
+    motor_rpy, passive_rpy = (0.4, -0.2, 0.3), (-0.3, 0.1, -0.2)
+    inertia_rpy, visual_rpy, collision_rpy = (0.2, -0.3, 0.4), (-0.2, 0.5, 0.1), (0.3, -0.1, 0.2)
+    tree.find("joint[@name='motor']/origin").set("rpy", " ".join(map(str, motor_rpy)))
+    tree.find("joint[@name='passive']/origin").set("rpy", " ".join(map(str, passive_rpy)))
+    for link in tree.findall("link"):
+        origin = link.find("inertial/origin")
+        origin.set("xyz", ".1 .02 .03")
+        origin.set("rpy", " ".join(map(str, inertia_rpy)))
+        ET.SubElement(
+            link.find("collision"),
+            "origin",
+            xyz=".02 .03 .04",
+            rpy=" ".join(map(str, collision_rpy)),
+        )
+        visual = ET.SubElement(link, "visual")
+        ET.SubElement(visual, "origin", xyz="-.03 .02 .01", rpy=" ".join(map(str, visual_rpy)))
+        ET.SubElement(ET.SubElement(visual, "geometry"), "box", size=".08 .06 .04")
+    data = ET.tostring(tree)
+    (tmp_path / "assets" / "oracle.urdf").write_bytes(data)
+    old = body.assets[0]
+    new = replace(
+        old,
+        asset=AssetRef.from_bytes(
+            data, uri=old.asset.uri, format=AssetFormat.URDF, role=AssetRole.DESCRIPTION
+        ),
+    )
+    body = replace(body, assets=(new,))
+    settings = replace(profile(body), root_quaternion=(math.cos(0.125), 0.0, 0.0, math.sin(0.125)))
+    receipt = export_nominal_mujoco(body, settings, tmp_path / "mixed")
+    assert receipt.schema == "sx-embodiments.nominal-mujoco/v2"
+    assert receipt.rotation_convention == "urdf-rpy-extrinsic-XYZ"
+    model = mujoco.MjModel.from_xml_path(str(tmp_path / "mixed" / "scene.xml"))
+    state = mujoco.MjData(model)
+    q = 0.35
+    state.qpos[model.jnt_qposadr[model.joint("motor").id]] = q
+    mujoco.mj_forward(model, state)
+    base = transform([0, 0, 1], rpy(0, 0, 0.25))
+    arm = base @ transform([0, 0, 1], rpy(*motor_rpy)) @ transform([0, 0, 0], rpy(0, 0, q))
+    tip = arm @ transform([1, 0, 0], rpy(*passive_rpy)) @ transform([0, 0, 0], rpy(0, 0, 0.4))
+    owner = Kinematics.of(data)
+    for name, expected in [("base", base), ("arm", arm), ("tip", tip)]:
+        body_id = model.body(name).id
+        np.testing.assert_allclose(state.xpos[body_id], expected[:3, 3], atol=1e-12)
+        np.testing.assert_allclose(state.xmat[body_id].reshape(3, 3), expected[:3, :3], atol=1e-12)
+        owner_pose = base @ np.asarray(
+            owner.pose("base", name, {"motor": q, "passive": 0.4})
+        ).reshape(4, 4)
+        np.testing.assert_allclose(expected, owner_pose, atol=1e-12)
+        for kind, angles, position in [
+            ("visual", visual_rpy, [-0.03, 0.02, 0.01]),
+            ("collision", collision_rpy, [0.02, 0.03, 0.04]),
+        ]:
+            geometry = model.geom(f"{name}/{kind}/0").id
+            wanted = expected @ transform(position, rpy(*angles))
+            np.testing.assert_allclose(state.geom_xpos[geometry], wanted[:3, 3], atol=1e-12)
+            np.testing.assert_allclose(
+                state.geom_xmat[geometry].reshape(3, 3), wanted[:3, :3], atol=1e-12
+            )
+        np.testing.assert_allclose(
+            state.xipos[body_id], (expected @ [0.1, 0.02, 0.03, 1])[:3], atol=1e-12
+        )
+        inertia_rotation = expected[:3, :3] @ rpy(*inertia_rpy)
+        wanted_tensor = inertia_rotation @ np.diag([0.01, 0.02, 0.025]) @ inertia_rotation.T
+        actual_rotation = state.ximat[body_id].reshape(3, 3)
+        actual_tensor = actual_rotation @ np.diag(model.body_inertia[body_id]) @ actual_rotation.T
+        # MuJoCo diagonalizes fullinertia numerically; retain a tight absolute
+        # tensor tolerance while body/visual/collision frames above use 1e-12.
+        np.testing.assert_allclose(actual_tensor, wanted_tensor, atol=5e-10, rtol=0)

@@ -15,8 +15,9 @@ import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from enum import StrEnum
+from pathlib import Path
+from typing import Literal
 
 from sx_contracts.identity import canonical_json, content_digest
 
@@ -183,6 +184,8 @@ class ExportReceipt:
     profile: NominalProfile
     files: tuple[tuple[str, str], ...]
     scope: str = "nominal simulation only; no physical qualification"
+    schema: Literal["sx-embodiments.nominal-mujoco/v2"] = "sx-embodiments.nominal-mujoco/v2"
+    rotation_convention: Literal["urdf-rpy-extrinsic-XYZ"] = "urdf-rpy-extrinsic-XYZ"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -312,7 +315,9 @@ def _render(
         xml,
         "compiler",
         angle="radian",
-        eulerseq="xyz",
+        # URDF RPY rotates about fixed X, Y, Z axes. MuJoCo lowercase
+        # xyz means moving axes and corrupts every mixed-axis origin.
+        eulerseq="XYZ",
         inertiafromgeom="false",
         fusestatic="false",
         autolimits="true",
