@@ -394,6 +394,17 @@ HEAD_MODULE: Final = Module(
 )
 
 
+# Midpoints of the literal 40 mm front edges of the planar sole-bottom facets
+# in humanoid_pkg/meshes/{left,right}_foot2_link.stl (source CAD 666bc6b5).
+# These binary-STL coordinates are fixed geometric references, not toe joints,
+# pressure centres or measured contacts. Their orientation keeps foot2 link axes;
+# it does not declare a sole-normal frame. The edge and source hashes are tested.
+_TOE_EDGE_MIDPOINTS: Final = {
+    "left": (0.16500000655651093, -0.000641949474811554, -0.04949583671987057),
+    "right": (0.16500000655651093, 0.0, -0.0494999997317791),
+}
+
+
 def _leg_module(side: Literal["left", "right"], leg: ChainSpec, part: Subtree) -> Module:
     return Module(
         module_id=ModuleId(f"sentient-humanoid-{side}-leg"),
@@ -412,6 +423,12 @@ def _leg_module(side: Literal["left", "right"], leg: ChainSpec, part: Subtree) -
             BodySite(f"{side}_hip", ComponentId(f"{side}_leg"), f"{side}_hip_pitch_link"),
             BodySite(f"{side}_knee", ComponentId(f"{side}_leg"), f"{side}_knee_link"),
             BodySite(f"{side}_ankle", ComponentId(f"{side}_leg"), f"{side}_foot2_link"),
+            BodySite(
+                f"{side}_toe_edge",
+                ComponentId(f"{side}_leg"),
+                f"{side}_foot2_link",
+                Pose(_TOE_EDGE_MIDPOINTS[side]),
+            ),
         ),
     )
 
