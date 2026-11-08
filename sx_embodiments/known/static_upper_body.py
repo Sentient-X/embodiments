@@ -380,6 +380,9 @@ STATIC_UPPER_BODY_LEFT_GRIPPER: Final = _gripper("left", -0.823747683095, 0.9295
 STATIC_UPPER_BODY_RIGHT_GRIPPER: Final = _gripper("right", -0.952602069277, 0.788466124973)
 
 STATIC_UPPER_BODY_SITES: Final = (
+    # Pitch-joint origins are physical pivots, shared with every fitted arm build.
+    BodySite("left_shoulder", ComponentId("left_arm"), "left_shoulder_pitch_link"),
+    BodySite("right_shoulder", ComponentId("right_arm"), "right_shoulder_pitch_link"),
     BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_roll_link"),
     BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_roll_link"),
     BodySite("left_hand", ComponentId("left_gripper"), "left_gripper_tcp"),
