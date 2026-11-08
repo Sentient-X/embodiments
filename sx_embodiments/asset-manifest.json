@@ -794,7 +794,7 @@
 {"path": "robosuite/omron_mobile_base/omron_ld.urdf", "sha256": "08347010b49d5a87cceb1b453bed9f99193a47ce11c1140e3d3e6ddff55f4533", "size": 4016, "license_id": "MIT"},
 {"path": "robosuite/omron_mobile_base/omron_mobile_base.xml", "sha256": "703d342e1959e20da635a0983055fe876f1b47951923b279d40a86943a386288", "size": 5630, "license_id": "MIT"},
 {"path": "robosuite/omron_mobile_base/robosuite.commit", "sha256": "829f2a0321432a2df3af7c0867e71daaf2fa41035796f207e67fc01cea0428ff", "size": 41, "license_id": "MIT"},
-{"path": "sentient_humanoid/sentient_humanoid.urdf", "sha256": "a999ac459a8214ae4d70c213917ae337583c6e9e03bd4be94d7630debe213cd3", "size": 259775, "license_id": "BSD-3-Clause AND LicenseRef-Sentient-Proprietary"},
+{"path": "sentient_humanoid/sentient_humanoid.urdf", "sha256": "3cf9f7a9f44d896f6c184a065e1552760c2f428297651aa700c3da7b29d1e6b0", "size": 179761, "license_id": "BSD-3-Clause AND LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_rwh/meshes/Arm_link1.STL", "sha256": "a7f29a351f1bbdb5f9885b64548f427692bd6b99eea7a99e7b81df0357756391", "size": 2573384, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_rwh/meshes/Arm_link2.STL", "sha256": "0793549fcac705ac5ee8fd079dea943dce621a9ec2097a25451cc35cd84fc6b5", "size": 2543684, "license_id": "LicenseRef-Sentient-Proprietary"},
 {"path": "sentient_rwh/meshes/Arm_link3.STL", "sha256": "5f6107375eb590c275acbc3696d8a8d0eea94ae1aeb4deff89dafbe31aa8c86f", "size": 2546084, "license_id": "LicenseRef-Sentient-Proprietary"},

@@ -986,7 +986,7 @@
   },
   {
     "embodiment": "sentient-humanoid",
-    "id": "a2ad7e6e3f2b0cf5a73f1b1255f2e022206a057481ba3b8cb384066b682834b3",
+    "id": "4bb457078c9b42ea74e7c84551a61534d1d19af174faab7d4124e1eab544e08a",
     "axes": [
       {
         "joint": "torso_joint",
@@ -1006,8 +1006,8 @@
           "joint": "torso_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 30.14537006840533,
-        "inertia": 1.0615228782193145
+        "acceleration": 40.41624041241424,
+        "inertia": 0.7917609276238096
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1027,8 +1027,8 @@
           "joint": "left_shoulder_pitch_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 94.955890115685,
-        "inertia": 0.17135758629326367
+        "acceleration": 90.84322346641821,
+        "inertia": 0.17973222378873907
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1048,8 +1048,8 @@
           "joint": "left_shoulder_roll_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 98.50464013473103,
-        "inertia": 0.18420633583771703
+        "acceleration": 96.42897670513021,
+        "inertia": 0.18108092869162215
       },
       {
         "joint": "left_upper_arm_yaw_joint",
@@ -1112,7 +1112,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.038790520256197975
+        "inertia": 0.038826468179434165
       },
       {
         "joint": "left_wrist_pitch_joint",
@@ -1133,7 +1133,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.008515792842495904
+        "inertia": 0.00851686551796008
       },
       {
         "joint": "left_wrist_roll_joint",
@@ -1154,7 +1154,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0021340697122304857
+        "inertia": 0.002116040562494806
       },
       {
         "joint": "left_gripper_left_finger_joint",
@@ -1214,8 +1214,8 @@
           "joint": "right_shoulder_pitch_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 91.52335894477807,
-        "inertia": 0.1796413902215739
+        "acceleration": 88.85084858886384,
+        "inertia": 0.1842270649191331
       },
       {
         "joint": "right_shoulder_roll_joint",
@@ -1235,8 +1235,8 @@
           "joint": "right_shoulder_roll_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 94.2498851221098,
-        "inertia": 0.18398223425754986
+        "acceleration": 93.13137031453763,
+        "inertia": 0.18529038780401597
       },
       {
         "joint": "right_upper_arm_yaw_joint",
@@ -1299,7 +1299,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.03881111708803078
+        "inertia": 0.03874770230056765
       },
       {
         "joint": "right_wrist_pitch_joint",
@@ -1320,7 +1320,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.008517617799627428
+        "inertia": 0.008515868891137344
       },
       {
         "joint": "right_wrist_roll_joint",
@@ -1341,7 +1341,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.0021329076279602154
+        "inertia": 0.002138341890398674
       },
       {
         "joint": "right_gripper_left_finger_joint",
@@ -1382,132 +1382,6 @@
         "speed": 4.71710608647116,
         "acceleration": 47.1710608647116,
         "inertia": 6.556843669276724e-05
-      },
-      {
-        "joint": "so101_shoulder_pan_joint",
-        "lower": -1.91986,
-        "upper": 1.91986,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 1,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.0,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_shoulder_pan_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 22.897745548550336,
-        "inertia": 0.07130557878367
-      },
-      {
-        "joint": "so101_shoulder_lift_joint",
-        "lower": -1.74533,
-        "upper": 1.74533,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 2,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.0,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_shoulder_lift_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 10.784987075828806,
-        "inertia": 0.059919165347726455
-      },
-      {
-        "joint": "so101_elbow_flex_joint",
-        "lower": -1.74,
-        "upper": 1.74,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 3,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.0,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_elbow_flex_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 47.1710608647116,
-        "inertia": 0.026129032458540036
-      },
-      {
-        "joint": "so101_wrist_flex_joint",
-        "lower": -1.8,
-        "upper": 1.8,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 4,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.0,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_wrist_flex_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 47.1710608647116,
-        "inertia": 0.005558664835638272
-      },
-      {
-        "joint": "so101_wrist_roll_joint",
-        "lower": -2.74385,
-        "upper": 2.84121,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 5,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.0,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_wrist_roll_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 47.1710608647116,
-        "inertia": 0.0015768024483893
-      },
-      {
-        "joint": "so101_camera_tilt_joint",
-        "lower": -1.993966704,
-        "upper": 0.885826562,
-        "model": "feetech_sts3215",
-        "bus": "feetech_serial",
-        "port": "neck",
-        "provisional": true,
-        "bus_id": 6,
-        "sign": 1,
-        "reduction": 1.0,
-        "home": 0.4135,
-        "of": {
-          "body": "sentient-static-upper-body",
-          "port": "neck",
-          "joint": "so101_camera_tilt_joint"
-        },
-        "speed": 4.71710608647116,
-        "acceleration": 47.1710608647116,
-        "inertia": 0.0005826839138278334
       }
     ]
   },

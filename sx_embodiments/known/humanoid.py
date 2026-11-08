@@ -2,10 +2,10 @@
 
 The canonical full body is a development candidate. Its pelvis, torso yaw, waist roll/pitch,
 chest and legs remain the original ``humanoid_pkg`` CAD at ``666bc6b5``. Its obsolete arms
-and head are replaced by the same seven-joint arm/gripper and corrected SO-101/ZED modules
-as the static upper body. Original shoulder seats are retained; the head's nominal mount
-aligns shoulder midpoints while preserving common forward/up axes. This is an explicit
-design extrapolation, not a measured attachment or qualified full-body dynamics model.
+are replaced by the same seven-joint arm/gripper modules
+as the static upper body at the original shoulder seats. The original humanoid neck,
+head and D435 retain their exact CAD mounting. The full body requires human engineering
+review; it is not a qualified full-body dynamics model.
 
 The legacy upper-body and upper-body-gripper variants below remain unchanged, including
 five-joint arms and the old D435 head. Their original source facts follow; the corrected
@@ -40,7 +40,7 @@ and the camera's true placement on ``head_link`` are its calibrations, measured 
 on the torso.
 
 The old 28-joint MJCF remains historical source material. It is not an active description
-of the corrected full body, whose action dimension, head and arms differ.
+of the corrected full body, whose action dimension and arms differ.
 """
 
 import math
@@ -94,7 +94,6 @@ from ..parts import (
 from ..sites import BodySite
 from ._authoring import bounded_layout
 from .static_upper_body import (
-    STATIC_UPPER_BODY_HEAD_MODULE,
     STATIC_UPPER_BODY_LEFT_ARM_MODULE,
     STATIC_UPPER_BODY_MODULE,
     STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
@@ -452,33 +451,9 @@ _FULL_LEFT_SHOULDER: Final = Pose((-0.0589999999999941, 0.133920443430172, 0.086
 _FULL_RIGHT_SHOULDER: Final = Pose((-0.0589999999999747, -0.138457890749933, 0.0879582158332528))
 
 
-def _shoulder_centre(left: Pose, right: Pose) -> tuple[float, float, float]:
-    a, b = left.xyz, right.xyz
-    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
-
-
-_OLD_CENTRE: Final = _shoulder_centre(_FULL_LEFT_SHOULDER, _FULL_RIGHT_SHOULDER)
-_CORRECTED_CENTRE: Final = _shoulder_centre(
-    STATIC_UPPER_BODY_MODULE.socket("left_shoulder").pose,
-    STATIC_UPPER_BODY_MODULE.socket("right_shoulder").pose,
-)
-# A translation, not a fitted rotation: both source declarations use x-forward, z-up.
-_CORRECTED_CHEST_IN_FULL: Final = Pose(
-    (
-        _OLD_CENTRE[0] - _CORRECTED_CENTRE[0],
-        _OLD_CENTRE[1] - _CORRECTED_CENTRE[1],
-        _OLD_CENTRE[2] - _CORRECTED_CENTRE[2],
-    )
-)
-FULL_HEAD_MOUNT: Final = _CORRECTED_CHEST_IN_FULL.compose(
-    STATIC_UPPER_BODY_MODULE.socket("neck").pose
-)
-
-# Nominal adoption, not measured mounting: retain the original pelvis, three-joint
-# torso, chest and legs, and replace only the obsolete arms and head. Arm seats stay
-# at their original CAD origins (272.381 mm apart, versus the corrected body's
-# 279.750 mm). The corrected head keeps its offset from the shoulder midpoint and
-# the sources' common forward/up axes. No new full-body CAD or waist calibration exists.
+# Engineering-review candidate: preserve the original pelvis, torso, legs, head
+# and exact CAD neck socket. Only arms/grippers reuse the corrected upper-body
+# modules, at the original shoulder seats. This composition is not qualified.
 FULL_BODY_CORE: Final = Module(
     module_id=ModuleId("sentient-humanoid-core"),
     label="Sentient humanoid retained pelvis, waist and chest",
@@ -511,13 +486,7 @@ FULL_BODY_CORE: Final = Module(
             _FULL_RIGHT_SHOULDER,
             carrier="torso",
         ),
-        Socket(
-            "neck",
-            STATIC_UPPER_BODY_MODULE.socket("neck").interface,
-            "chest_link",
-            FULL_HEAD_MOUNT,
-            carrier="torso",
-        ),
+        UPPER_BODY_MODULE.socket("neck"),
     ),
 )
 
@@ -536,7 +505,7 @@ SENTIENT_HUMANOID_BUILD: Final = Build(
             "right_shoulder",
             namespaced=False,
         ),
-        Mate("head", STATIC_UPPER_BODY_HEAD_MODULE, "core", "neck", namespaced=False),
+        Mate("head", HEAD_MODULE, "core", "neck", namespaced=False),
         Mate("right_leg", LEG_MODULES[0], "core", "right_hip", namespaced=False),
         Mate("left_leg", LEG_MODULES[1], "core", "left_hip", namespaced=False),
     ),
@@ -697,13 +666,13 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         replace(STATIC_UPPER_BODY_URDF, role=AssetRole.OTHER),
         packaged_asset(
             relpath="sentient_humanoid/sentient_humanoid.urdf",
-            sha256="a999ac459a8214ae4d70c213917ae337583c6e9e03bd4be94d7630debe213cd3",
-            size_bytes=259775,
+            sha256="3cf9f7a9f44d896f6c184a065e1552760c2f428297651aa700c3da7b29d1e6b0",
+            size_bytes=179761,
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
             provenance=AssetProvenance(
                 repository="https://github.com/Sentient-X/embodiments",
-                revision="nominal-corrected-upper-body-2026-11-07",
+                revision="engineering-review-original-head-2026-11-08",
                 path="sx_embodiments/known/humanoid.py",
                 license_id="BSD-3-Clause AND LicenseRef-Sentient-Proprietary",
                 generator="sx-embodiments/tools/compose_registered_urdfs.py",

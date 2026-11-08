@@ -1,6 +1,5 @@
 """A nominal full-body upgrade shares corrected parts without inventing lower-body facts."""
 
-import math
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -19,18 +18,16 @@ from sx_embodiments.assets import AssetAudience, AssetFormat, AssetRole, audienc
 from sx_embodiments.kinematics import Kinematics
 from sx_embodiments.known.humanoid import (
     FULL_BODY_CORE,
-    FULL_HEAD_MOUNT,
+    HEAD_MODULE,
     LEG_MODULES,
     SENTIENT_HUMANOID_BUILD,
     SENTIENT_HUMANOID_TORSO,
     SENTIENT_HUMANOID_URDF,
+    UPPER_BODY_MODULE,
 )
 from sx_embodiments.known.static_upper_body import (
-    STATIC_UPPER_BODY_HEAD_MODULE,
     STATIC_UPPER_BODY_LEFT_ARM_MODULE,
-    STATIC_UPPER_BODY_MODULE,
     STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
-    STATIC_UPPER_BODY_URDF,
 )
 from sx_embodiments.layout import UndocumentedDrive
 from sx_embodiments.mechanical import Build, Placed
@@ -49,11 +46,11 @@ def _joint_origin(source, name):
 def test_full_body_shares_corrected_modules_and_keeps_unqualified_lower_body() -> None:
     body = development_embodiments["sentient-humanoid"]
     assert "sentient-humanoid" not in embodiments
-    assert len(body.joint_names) == 39
+    assert len(body.joint_names) == 33
     assert [mate.module for mate in SENTIENT_HUMANOID_BUILD.mates] == [
         STATIC_UPPER_BODY_LEFT_ARM_MODULE,
         STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
-        STATIC_UPPER_BODY_HEAD_MODULE,
+        HEAD_MODULE,
         *LEG_MODULES,
     ]
     by_name = {c.instance: c for c in SENTIENT_HUMANOID_BUILD.components()}
@@ -61,7 +58,6 @@ def test_full_body_shares_corrected_modules_and_keeps_unqualified_lower_body() -
     for part in (
         STATIC_UPPER_BODY_LEFT_ARM_MODULE,
         STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
-        STATIC_UPPER_BODY_HEAD_MODULE,
     ):
         for component in Build.of(part).components():
             assert by_name[component.instance].part is component.part
@@ -78,25 +74,24 @@ def test_full_body_shares_corrected_modules_and_keeps_unqualified_lower_body() -
     assert materialize(body).is_dir()
 
 
-def test_head_registration_is_derived_from_source_shoulders_without_scaling_or_rotation() -> None:
-    old = [
-        _joint_origin(SENTIENT_HUMANOID_URDF, f"{side}_shoulder_pitch_joint")
-        for side in ("left", "right")
-    ]
-    new = [
-        _joint_origin(STATIC_UPPER_BODY_URDF, f"{side}_shoulder_pitch_joint")
-        for side in ("left", "right")
-    ]
-    for i, side in enumerate(("left", "right")):
-        assert FULL_BODY_CORE.socket(f"{side}_shoulder").pose.xyz == old[i]
-        assert STATIC_UPPER_BODY_MODULE.socket(f"{side}_shoulder").pose.xyz == new[i]
-    neck = _joint_origin(STATIC_UPPER_BODY_URDF, "so101_mount_joint")
-    expected = tuple(
-        neck[i] + (old[0][i] + old[1][i] - new[0][i] - new[1][i]) / 2 for i in range(3)
+def test_original_head_mount_and_motion_frames_are_preserved() -> None:
+    source = Kinematics.of(SENTIENT_HUMANOID_URDF.path().read_bytes())
+    full = Kinematics.of(SENTIENT_HUMANOID_BUILD.urdf())
+    assert FULL_BODY_CORE.socket("neck") == UPPER_BODY_MODULE.socket("neck")
+    assert not any("so101" in name for name in full.links | full.joints.keys())
+    assert not any(
+        "so101" in name for name in development_embodiments["sentient-humanoid"].joint_names
     )
-    assert FULL_HEAD_MOUNT.xyz == pytest.approx(expected, abs=1e-15)
-    assert FULL_HEAD_MOUNT.rpy == (0.0, 0.0, 0.0)
-    assert math.dist(*new) - math.dist(*old) == pytest.approx(0.00736878098444205, abs=1e-12)
+    for yaw, pitch in ((0.0, 0.0), (0.4, -0.3), (-0.6, 0.2)):
+        positions = {"neck_yaw_joint": yaw, "head_joint": pitch}
+        for name in ("neck_link", "neck_yaw_link", "head_link", "camera_link"):
+            assert full.pose("chest_link", name, positions) == pytest.approx(
+                source.pose("chest_link", name, positions), abs=1e-12
+            )
+    for side in ("left", "right"):
+        assert FULL_BODY_CORE.socket(f"{side}_shoulder").pose.xyz == _joint_origin(
+            SENTIENT_HUMANOID_URDF, f"{side}_shoulder_pitch_joint"
+        )
 
 
 def test_old_pelvis_waist_and_legs_keep_their_source_fk_under_nonzero_waist() -> None:
@@ -116,7 +111,7 @@ def test_old_pelvis_waist_and_legs_keep_their_source_fk_under_nonzero_waist() ->
     [
         ("left_shoulder", STATIC_UPPER_BODY_LEFT_ARM_MODULE),
         ("right_shoulder", STATIC_UPPER_BODY_RIGHT_ARM_MODULE),
-        ("neck", STATIC_UPPER_BODY_HEAD_MODULE),
+        ("neck", HEAD_MODULE),
     ],
 )
 def test_corrected_parts_retain_their_fk_and_ride_the_waist(socket, module) -> None:
@@ -137,7 +132,11 @@ def test_corrected_parts_retain_their_fk_and_ride_the_waist(socket, module) -> N
     ).items():
         if link in full.links:
             assert full.pose("chest_link", link, positions) == pytest.approx(pose, abs=1e-12)
-    tip = "zed_left_optical" if socket == "neck" else socket.replace("shoulder", "gripper_tcp")
+    tip = (
+        "head_camera_color_optical"
+        if socket == "neck"
+        else socket.replace("shoulder", "gripper_tcp")
+    )
     before = full.pose("pelvis", tip, positions)
     positions.update(waist_roll_joint=0.2, waist_pitch_joint=-0.3)
     after = full.pose("pelvis", tip, positions)
