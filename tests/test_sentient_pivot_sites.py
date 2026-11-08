@@ -38,7 +38,7 @@ def test_only_sites_change_the_prior_body_identity(
     added = {
         f"{side}_{pivot}"
         for side in ("left", "right")
-        for pivot in (("shoulder", "hip", "knee", "ankle") if full else ("shoulder",))
+        for pivot in (("shoulder", "hip", "knee", "ankle", "toe_edge") if full else ("shoulder",))
     }
     prior = replace(body, sites=tuple(site for site in body.sites if site.name not in added))
     # Stronger than equal FK: removing only these sites restores the exact former
