@@ -9,7 +9,9 @@ deployed limits win on conflict because live safety constraints are derived from
 
 from typing import Final
 
-from ..assembly import Subtree
+from sx_contracts import ComponentId
+
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
@@ -23,6 +25,7 @@ from ..identity import EmbodimentKind, EmbodimentName, Lineage, PartId
 from ..layout import CoordinateUnit
 from ..mechanical import Build, InterfaceId, Module, ModuleId, Socket
 from ..parts import ChainSpec, ControlRates, GripperSpec, Limb, MimicJoint, PhysicalSpec
+from ..sites import BodySite
 from ._authoring import bounded_layout
 from .sources import menagerie
 
@@ -83,6 +86,8 @@ PIPER_ARM: Final = ChainSpec(
     physical=PhysicalSpec(payload_kg=1.5, reach_m=0.626, mass_kg=4.2),
 )
 
+_PIPER_GRASP_CENTRE: Final = (0.0, 0.0, 0.10503)
+
 PIPER_GRIPPER: Final = GripperSpec(
     part_id=PartId("piper-gripper"),
     layout=bounded_layout(
@@ -94,7 +99,7 @@ PIPER_GRIPPER: Final = GripperSpec(
     travel_m=(0.0, 0.07),  # parallel jaw: aperture = 2 x finger stroke (0.035 m each)
     # Midpoint of the finger pads along the mount frame's approach (+z) axis; the
     # fingertips reach 0.03 m further, the clearance a grasp must leave below the target.
-    grasp_centre_m=(0.0, 0.0, 0.10503),
+    grasp_centre_m=_PIPER_GRASP_CENTRE,
     mimic_joints=(MimicJoint("joint8", of="joint7", multiplier=-1.0),),
 )
 
@@ -107,6 +112,8 @@ PIPER_GRIPPER_MODULE: Final = Module(
     components=(
         body_component("gripper", PIPER_GRIPPER, RootMount("joint6_to_gripper_base_mount")),
     ),
+    # The already-declared pad midpoint, exposed as a shared physical site.
+    sites=(BodySite("hand", ComponentId("gripper"), "gripper_base", Pose(_PIPER_GRASP_CENTRE)),),
 )
 
 #: The arm as AgileX ships it, its flange fitted with the jaw.

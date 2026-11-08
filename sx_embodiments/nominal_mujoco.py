@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from sx_contracts.identity import canonical_json, content_digest
 
@@ -35,6 +35,11 @@ class NominalExportError(ValueError):
 def _require(condition: object, message: str) -> None:
     if not condition:
         raise NominalExportError(message)
+
+
+def _runtime_instance(value: object, expected: type[object]) -> bool:
+    """Retain guards for untyped Python callers at the public profile boundary."""
+    return isinstance(value, expected)
 
 
 def _finite(values: tuple[float, ...]) -> bool:
@@ -92,6 +97,11 @@ class SupportContact:
         )
 
 
+class RootMode(StrEnum):
+    FLOATING = "floating"
+    FIXED = "fixed"
+
+
 class CollisionMode(StrEnum):
     FULL = "full"
     GROUND_ONLY = "ground_only"
@@ -111,15 +121,20 @@ class NominalProfile:
     friction: tuple[float, float, float]
     assumptions: tuple[str, ...]
     collision_mode: CollisionMode = CollisionMode.FULL
+    root_mode: RootMode = RootMode.FLOATING
 
     def __post_init__(self) -> None:
-        _require(isinstance(self.collision_mode, CollisionMode), "Explicit collision mode required")
         _require(
-            isinstance(self.joints, tuple)
-            and isinstance(self.passive_holds, tuple)
-            and isinstance(self.tracked_links, tuple)
-            and isinstance(self.contacts, tuple)
-            and isinstance(self.assumptions, tuple),
+            _runtime_instance(self.collision_mode, CollisionMode),
+            "Explicit collision mode required",
+        )
+        _require(_runtime_instance(self.root_mode, RootMode), "Explicit root mode required")
+        _require(
+            _runtime_instance(self.joints, tuple)
+            and _runtime_instance(self.passive_holds, tuple)
+            and _runtime_instance(self.tracked_links, tuple)
+            and _runtime_instance(self.contacts, tuple)
+            and _runtime_instance(self.assumptions, tuple),
             "Profiles require immutable tuples",
         )
         _require(
@@ -128,7 +143,10 @@ class NominalProfile:
         )
         _require(
             all(
-                isinstance(pair, tuple) and len(pair) == 2 and pair[0] and math.isfinite(pair[1])
+                _runtime_instance(pair, tuple)
+                and len(pair) == 2
+                and pair[0]
+                and math.isfinite(pair[1])
                 for pair in self.passive_holds
             )
             and len(dict(self.passive_holds)) == len(self.passive_holds),
@@ -139,13 +157,14 @@ class NominalProfile:
             "Repeated or absent tracked links",
         )
         _require(
-            self.contacts
+            (self.contacts or self.root_mode is RootMode.FIXED)
             and len({c.link for c in self.contacts}) == len(self.contacts)
             and all(c.link in self.tracked_links for c in self.contacts),
             "Contact links must be distinct tracked links",
         )
         _require(
-            self.assumptions and all(isinstance(a, str) and a.strip() for a in self.assumptions),
+            self.assumptions
+            and all(_runtime_instance(a, str) and a.strip() for a in self.assumptions),
             "Document the nominal assumptions explicitly",
         )
         for values, length in (
@@ -155,7 +174,7 @@ class NominalProfile:
             (self.friction, 3),
         ):
             _require(
-                isinstance(values, tuple) and len(values) == length and _finite(values),
+                _runtime_instance(values, tuple) and len(values) == length and _finite(values),
                 "Invalid profile vector",
             )
         _require(
@@ -208,14 +227,40 @@ def _matrix_origin(matrix: Transform, dest: ET.Element) -> None:
     dest.set("euler", _numbers((roll, pitch, yaw)))
 
 
+def mimic_projection(kin: Kinematics) -> dict[str, tuple[str, float, float]]:
+    """Flatten only source-declared affine scalar couplings to their independent leader."""
+    projections: dict[str, tuple[str, float, float]] = {}
+    for name, joint in kin.joints.items():
+        if joint.mimic is None:
+            continue
+        current, multiplier, offset = joint, 1.0, 0.0
+        visited: set[str] = set()
+        while current.mimic is not None:
+            _require(current.name not in visited, "Cyclic mimic projection")
+            visited.add(current.name)
+            mimic = current.mimic
+            _require(mimic.leader in kin.joints, "Unknown mimic leader")
+            offset += multiplier * mimic.offset
+            multiplier *= mimic.multiplier
+            current = kin.joints[mimic.leader]
+        _require(
+            current.name in kin.independent and joint.type is current.type,
+            "Mimic must preserve scalar coordinate units",
+        )
+        _require(_finite((multiplier, offset)), "Nonfinite mimic projection")
+        projections[name] = (current.name, multiplier, offset)
+    return projections
+
+
 def export_nominal_mujoco(
     body: Embodiment, profile: NominalProfile, destination: Path
 ) -> ExportReceipt:
     """Write a new portable bundle atomically; never overwrite source or an existing bundle.
 
     Explicit passive holds are projected through canonical FK into fixed link origins.
-    Every native joint remains independently actuated. Unsupported geometry, mimic
-    coordinates and unaccounted motion refuse instead of substituting another robot.
+    Every native joint remains independently actuated. Linear URDF mimic coordinates
+    use exact joint equalities, never independent controls. Unsupported geometry and
+    unaccounted motion refuse instead of substituting another robot.
     The compiled-model check belongs to the simulator consumer, before training.
     """
     _require(
@@ -230,16 +275,14 @@ def export_nominal_mujoco(
     sha = hashlib.sha256(urdf).hexdigest()
     _require(sha == str(body.urdf.asset.content.sha256), "Canonical URDF hash mismatch")
     kin = Kinematics.of(urdf)
-    _require(
-        all(j.mimic is None for j in kin.joints.values()),
-        "Mimic coordinates require an explicit supported projection",
-    )
+    mimics = mimic_projection(kin)
     _require(
         all(
-            j.type in (JointType.FIXED, JointType.REVOLUTE, JointType.CONTINUOUS)
+            j.type
+            in (JointType.FIXED, JointType.REVOLUTE, JointType.CONTINUOUS, JointType.PRISMATIC)
             for j in kin.joints.values()
         ),
-        "Only angular scalar coordinates are supported",
+        "Only scalar revolute and prismatic coordinates are supported",
     )
     passive = dict(profile.passive_holds)
     _require(
@@ -258,8 +301,14 @@ def export_nominal_mujoco(
     for coordinate, nominal in zip(body.state.coordinates, profile.joints, strict=True):
         axis = coordinate.axis
         _require(
-            axis.unit is CoordinateUnit.RADIAN and isinstance(axis.bounds, Bounds),
-            "Bounded angular native state required",
+            axis.unit
+            is (
+                CoordinateUnit.METER
+                if kin.joints[nominal.name].type is JointType.PRISMATIC
+                else CoordinateUnit.RADIAN
+            )
+            and isinstance(axis.bounds, Bounds),
+            "Native coordinate unit must match its bounded URDF scalar joint",
         )
         if not isinstance(axis.bounds, Bounds):
             raise NominalExportError("Native coordinate bounds missing")
@@ -280,11 +329,30 @@ def export_nominal_mujoco(
         _require(_finite((lo, hi)) and lo < hi, f"{name}: invalid limits")
         if name in bounds:
             _require(
-                all(abs(a - b) <= 1e-9 for a, b in zip(bounds[name], (lo, hi), strict=True)),
-                "Native and description bounds disagree",
+                bounds[name][0] >= lo - 1e-9 and bounds[name][1] <= hi + 1e-9,
+                "Native bounds extend outside the canonical description",
             )
         else:
             _require(lo <= passive[name] <= hi, "Passive hold outside description limits")
+    for name, (leader, multiplier, offset) in mimics.items():
+        limit = nodes[name].find("limit")
+        _require(
+            limit is not None and "lower" in limit.attrib and "upper" in limit.attrib,
+            f"{name}: mimic limits absent",
+        )
+        if limit is None:
+            raise NominalExportError("Mimic limits absent")
+        lo, hi = float(limit.attrib["lower"]), float(limit.attrib["upper"])
+        _require(_finite((lo, hi)) and lo < hi, f"{name}: invalid mimic limits")
+        if leader in passive:
+            projected = (multiplier * passive[leader] + offset,) * 2
+        else:
+            projected = tuple(multiplier * value + offset for value in bounds[leader])
+        _require(
+            min(projected) >= lo - 1e-9 and max(projected) <= hi + 1e-9,
+            f"{name}: mimic projection exceeds source limits",
+        )
+        bounds[name] = (lo, hi)
     destination = Path(destination).absolute()
     _require(not destination.exists(), "Destination already exists")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -345,6 +413,10 @@ def _render(
     nodes = {node.attrib["name"]: node for node in source.findall("joint")}
     nominal = {j.name: j for j in profile.joints}
     passive = dict(profile.passive_holds)
+    mimics = mimic_projection(kin)
+    for name, (leader, multiplier, offset) in mimics.items():
+        if leader in passive:
+            passive[name] = multiplier * passive[leader] + offset
     mesh_names: dict[tuple[str, str], str] = {}
     files: dict[str, str] = {}
 
@@ -418,24 +490,25 @@ def _render(
         if name == root_name:
             out.set("pos", _numbers(profile.root_position))
             out.set("quat", _numbers(profile.root_quaternion))
-            ET.SubElement(out, "freejoint", name="floating_root")
+            if profile.root_mode is RootMode.FLOATING:
+                ET.SubElement(out, "freejoint", name="floating_root")
         else:
             joint = kin.joints[kin.parent_joint[name]]
             if joint.name in passive:
                 _matrix_origin(kin.pose(joint.parent, joint.child, passive), out)
             else:
                 _origin(nodes[joint.name].find("origin"), out)
-            if joint.name in nominal:
-                settings = nominal[joint.name]
+            if joint.name in nominal or (joint.name in mimics and joint.name not in passive):
+                settings = nominal.get(joint.name)
                 ET.SubElement(
                     out,
                     "joint",
                     name=joint.name,
-                    type="hinge",
+                    type="slide" if joint.type is JointType.PRISMATIC else "hinge",
                     pos="0 0 0",
                     axis=_numbers(joint.axis),
                     range=_numbers(bounds[joint.name]),
-                    armature=str(settings.armature),
+                    armature=str(settings.armature if settings is not None else 0.0),
                     damping="0",
                 )
         inertial = links[name].find("inertial")
@@ -495,11 +568,34 @@ def _render(
         for tag, visual in (("visual", True), ("collision", False)):
             for i, element in enumerate(links[name].findall(tag)):
                 geometry(element, out, visual, i, name)
+        for site in body.sites:
+            if site.link == name:
+                ET.SubElement(
+                    out,
+                    "site",
+                    name=site.name,
+                    pos=_numbers(site.pose.xyz),
+                    euler=_numbers(site.pose.rpy),
+                    size="0.003",
+                    group="4",
+                )
         for joint in kin.joints.values():
             if joint.parent == name:
                 link(joint.child, out)
 
     link(root_name, world)
+    moving_mimics = {name: relation for name, relation in mimics.items() if name not in passive}
+    if moving_mimics:
+        equality = ET.SubElement(xml, "equality")
+        for name, (leader, multiplier, offset) in moving_mimics.items():
+            ET.SubElement(
+                equality,
+                "joint",
+                name=f"mimic/{name}",
+                joint1=name,
+                joint2=leader,
+                polycoef=_numbers((offset, multiplier, 0.0, 0.0, 0.0)),
+            )
     actuators = ET.SubElement(xml, "actuator")
     for joint in profile.joints:
         ET.SubElement(
@@ -550,18 +646,22 @@ def nominal_profile_from_json(payload: bytes) -> NominalProfile:
             result[key] = value
         return result
 
-    document = json.loads(payload, object_pairs_hook=pairs)
+    document = dict(
+        decode.document(json.loads(payload, object_pairs_hook=pairs), error=NominalExportError)
+    )
     # Initial exporter artifacts predate this explicit collision policy. Preserve
     # their original all-pairs semantics; newly serialized profiles name it.
-    if isinstance(document, dict) and "collision_mode" not in document:
+    if "collision_mode" not in document:
         document["collision_mode"] = CollisionMode.FULL.value
+    if "root_mode" not in document:
+        document["root_mode"] = RootMode.FLOATING.value
     raw = decode.exactly(
         document,
         {f.name for f in fields(NominalProfile)},
         where="nominal profile",
         error=NominalExportError,
     )
-    joints = []
+    joints: list[NominalJoint] = []
     for value in decode.sequence(raw, "joints"):
         row = decode.exactly(
             value,
@@ -582,12 +682,13 @@ def nominal_profile_from_json(payload: bytes) -> NominalProfile:
         )
     holds: list[tuple[str, float]] = []
     for value in decode.sequence(raw, "passive_holds"):
-        _require(isinstance(value, (list, tuple)) and len(value) == 2, "Invalid passive hold")
-        if not isinstance(value, (list, tuple)) or len(value) != 2:
+        if not isinstance(value, (list, tuple)):
             raise NominalExportError("Invalid passive hold")
-        row = decode.document({"name": value[0], "position": value[1]}, error=NominalExportError)
+        pair = cast(list[object] | tuple[object, ...], value)
+        _require(len(pair) == 2, "Invalid passive hold")
+        row = decode.document({"name": pair[0], "position": pair[1]}, error=NominalExportError)
         holds.append((decode.text(row, "name"), decode.number(row, "position")))
-    contacts = []
+    contacts: list[SupportContact] = []
     for value in decode.sequence(raw, "contacts"):
         row = decode.exactly(
             value,
@@ -617,4 +718,5 @@ def nominal_profile_from_json(payload: bytes) -> NominalProfile:
         triple("friction"),
         decode.texts(raw, "assumptions"),
         CollisionMode(decode.text(raw, "collision_mode")),
+        RootMode(decode.text(raw, "root_mode")),
     )
