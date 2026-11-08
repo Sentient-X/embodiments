@@ -146,8 +146,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934",
-    size_bytes=221390,
+    sha256="11fa1ead5302c9f99a2c7a9c83e6d4f193ffe6a93de742d093f75431f3153c76",
+    size_bytes=222778,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -392,6 +392,7 @@ STATIC_UPPER_BODY_SITES: Final = (
 #: subtrees retain the same mesh, inertial, limit and joint bytes when used by another body.
 #: These interfaces name the CAD seats; they do not assert compatibility with the old pelvis.
 _SHOULDER: Final = InterfaceId("sentient-allisa-shoulder")
+_SHOULDER_MOUNT: Final = InterfaceId("sentient-allisa-fixed-shoulder-mount")
 _WRIST: Final = InterfaceId("sentient-allisa-wrist")
 _NECK: Final = InterfaceId("sentient-allisa-neck")
 
@@ -449,6 +450,27 @@ STATIC_UPPER_BODY_LEFT_ARM_MODULE: Final = _arm_module(
 STATIC_UPPER_BODY_RIGHT_ARM_MODULE: Final = _arm_module(
     "right", STATIC_UPPER_BODY_RIGHT_ARM, STATIC_UPPER_BODY_RIGHT_GRIPPER_MODULE
 )
+
+
+def _shoulder_mount_module(side: str, arm: Module) -> Module:
+    """The source's fixed pitch motor, stop and holders, before the moving arm."""
+    return Module(
+        module_id=ModuleId(f"sentient-allisa-{side}-shoulder-mount"),
+        label=f"Sentient {side} fixed shoulder motor and mount",
+        description=Subtree(STATIC_UPPER_BODY_URDF, below=f"{side}_shoulder_mount_joint"),
+        plug=_SHOULDER_MOUNT,
+        sockets=(Socket("arm", _SHOULDER, f"{side}_shoulder_mount_link", fitted=arm),),
+    )
+
+
+STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE: Final = _shoulder_mount_module(
+    "left", STATIC_UPPER_BODY_LEFT_ARM_MODULE
+)
+STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE: Final = _shoulder_mount_module(
+    "right", STATIC_UPPER_BODY_RIGHT_ARM_MODULE
+)
+
+
 STATIC_UPPER_BODY_HEAD_MODULE: Final = Module(
     module_id=ModuleId("sentient-allisa-head"),
     label="Sentient SO-101 neck and ZED 2i head",
@@ -482,19 +504,19 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
     sockets=(
         Socket(
             "left_shoulder",
-            _SHOULDER,
+            _SHOULDER_MOUNT,
             "chest_link",
             Pose((-0.0589988844331, 0.230971850041, 0.0130697889087)),
             carrier="torso",
-            fitted=STATIC_UPPER_BODY_LEFT_ARM_MODULE,
+            fitted=STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
         ),
         Socket(
             "right_shoulder",
-            _SHOULDER,
+            _SHOULDER_MOUNT,
             "chest_link",
             Pose((-0.0590006584727, -0.0487779814531, 0.0130703755106)),
             carrier="torso",
-            fitted=STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+            fitted=STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
         ),
         Socket(
             "neck",

@@ -27,7 +27,9 @@ from sx_embodiments.known.humanoid import (
 )
 from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_LEFT_ARM_MODULE,
+    STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
     STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+    STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
 )
 from sx_embodiments.layout import UndocumentedDrive
 from sx_embodiments.mechanical import Build, Placed
@@ -48,8 +50,8 @@ def test_full_body_shares_corrected_modules_and_keeps_unqualified_lower_body() -
     assert "sentient-humanoid" not in embodiments
     assert len(body.joint_names) == 33
     assert [mate.module for mate in SENTIENT_HUMANOID_BUILD.mates] == [
-        STATIC_UPPER_BODY_LEFT_ARM_MODULE,
-        STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+        STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
+        STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
         HEAD_MODULE,
         *LEG_MODULES,
     ]
@@ -109,8 +111,8 @@ def test_old_pelvis_waist_and_legs_keep_their_source_fk_under_nonzero_waist() ->
 @pytest.mark.parametrize(
     "socket,module",
     [
-        ("left_shoulder", STATIC_UPPER_BODY_LEFT_ARM_MODULE),
-        ("right_shoulder", STATIC_UPPER_BODY_RIGHT_ARM_MODULE),
+        ("left_shoulder", STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE),
+        ("right_shoulder", STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE),
         ("neck", HEAD_MODULE),
     ],
 )

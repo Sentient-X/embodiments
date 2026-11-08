@@ -214,7 +214,7 @@
     <parent link="humanoid_origin" />
     <child link="pelvis" />
   </joint>
-  <link name="left_shoulder_pitch_joint_mount" />
+  <link name="left_shoulder_mount_joint_mount" />
   <material name="3d_printed">
     <color rgba="1.0 0.82 0.12 1.0" />
   </material>
@@ -295,7 +295,8 @@
     </collision>
   </link>
   <joint name="left_shoulder_pitch_joint" type="revolute">
-    <parent link="left_shoulder_pitch_joint_mount" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <parent link="left_shoulder_mount_link" />
     <child link="left_shoulder_pitch_link" />
     <axis xyz="1.21594795288e-05 0.965926877264 0.258815122494" />
     <limit lower="-2.642671854734111" upper="2.889868009460594" effort="40" velocity="10.472" />
@@ -1528,12 +1529,62 @@
     <parent link="left_gripper_base_link" />
     <child link="left_gripper_tcp" />
   </joint>
-  <joint name="chest_link_to_left_arm" type="fixed">
+  <link name="left_shoulder_mount_link">
+    <inertial>
+      <origin xyz="-0.000628789833 -0.0497815248 -0.062419037" rpy="0 0 0" />
+      <mass value="1.03173" />
+      <inertia ixx="0.00563277" ixy="2.23063e-05" ixz="5.08909e-05" iyy="0.00608816" iyz="-0.000567696" izz="0.00143541" />
+    </inertial>
+    <visual name="left_shoulder_mount_link_visual_0">
+      <origin xyz="0 0 0" rpy="-1.57081308 1.30900365 1.5707702" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/J8009P_2EC_RAU_5005______20240809_stp__NONE.stl" scale="1 1 1" />
+      </geometry>
+    </visual>
+    <visual name="left_shoulder_mount_link_visual_1">
+      <origin xyz="-1.777516e-07 -0.00936973149 -0.00251064629" rpy="-1.27075108 -0.504038608 -0.148336069" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/j8009p_mechanical_stop.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <visual name="left_shoulder_mount_link_visual_2">
+      <origin xyz="-4.285565e-07 -0.0487792132 -0.0130701068" rpy="-3.14158213 -1.30900365 -1.57081357" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/Shoulder_Holder_R2__Save_Bodies4_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <visual name="left_shoulder_mount_link_visual_3">
+      <origin xyz="1.0827115e-06 -0.0477481358 -0.0130701825" rpy="-3.14158699 -1.30899352 -1.57081107" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/Shoulder_Holder_R2__Save_Bodies4_2_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <collision name="left_shoulder_mount_link_hull">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/collision/left_shoulder_mount_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="left_shoulder_mount_joint" type="fixed">
+    <parent link="left_shoulder_mount_joint_mount" />
+    <child link="left_shoulder_mount_link" />
+  </joint>
+  <joint name="chest_link_to_left_shoulder" type="fixed">
     <origin xyz="-0.0589999999999941 0.133920443430172 0.0867417663212657" rpy="0 0 0" />
     <parent link="chest_link" />
-    <child link="left_shoulder_pitch_joint_mount" />
+    <child link="left_shoulder_mount_joint_mount" />
   </joint>
-  <link name="right_shoulder_pitch_joint_mount" />
+  <link name="right_shoulder_mount_joint_mount" />
   <material name="3d_printed">
     <color rgba="1.0 0.82 0.12 1.0" />
   </material>
@@ -1614,7 +1665,8 @@
     </collision>
   </link>
   <joint name="right_shoulder_pitch_joint" type="revolute">
-    <parent link="right_shoulder_pitch_joint_mount" />
+    <origin xyz="0 0 0" rpy="0 -0 0" />
+    <parent link="right_shoulder_mount_link" />
     <child link="right_shoulder_pitch_link" />
     <axis xyz="-8.84965060308e-06 -0.96592433326 0.258824616948" />
     <limit lower="-2.9139009689478907" upper="3.1225680933852136" effort="40" velocity="10.472" />
@@ -2847,10 +2899,60 @@
     <parent link="right_gripper_base_link" />
     <child link="right_gripper_tcp" />
   </joint>
-  <joint name="chest_link_to_right_arm" type="fixed">
+  <link name="right_shoulder_mount_link">
+    <inertial>
+      <origin xyz="-0.000613096284 0.0501149343 -0.0624473561" rpy="0 0 0" />
+      <mass value="1.03393" />
+      <inertia ixx="0.00564703" ixy="-2.19806e-05" ixz="5.15771e-05" iyy="0.00609536" iyz="0.000588709" izz="0.0014457" />
+    </inertial>
+    <visual name="right_shoulder_mount_link_visual_0">
+      <origin xyz="0 0 0" rpy="-1.57079831 -1.30899382 1.57078542" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/J8009P_2EC_RAU_5005______20240809_stp__NONE.stl" scale="1 1 1" />
+      </geometry>
+    </visual>
+    <visual name="right_shoulder_mount_link_visual_1">
+      <origin xyz="1.21474e-07 0.00936965241 -0.00251062208" rpy="-1.68515016e-06 1.30899648 -1.57080723" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/j8009p_mechanical_stop.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <visual name="right_shoulder_mount_link_visual_2">
+      <origin xyz="6.324023e-07 0.0487790538 -0.0130704709" rpy="3.14158699 -1.30899382 1.57078542" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/Shoulder_Holder_R2__Save_Bodies4_1_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <visual name="right_shoulder_mount_link_visual_3">
+      <origin xyz="3.454985e-07 0.048779491 -0.0130703735" rpy="3.14158699 -1.30899382 1.57078542" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/Shoulder_Holder_R2__Save_Bodies4_2_.stl" scale="1 1 1" />
+      </geometry>
+      <material name="0.792157_0.819608_0.933333_0.000000_0.000000">
+        <color rgba="0.792157 0.819608 0.933333 1" />
+      </material>
+    </visual>
+    <collision name="right_shoulder_mount_link_hull">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://sx-embodiments/sentient_static_upper_body/meshes/collision/right_shoulder_mount_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="right_shoulder_mount_joint" type="fixed">
+    <parent link="right_shoulder_mount_joint_mount" />
+    <child link="right_shoulder_mount_link" />
+  </joint>
+  <joint name="chest_link_to_right_shoulder" type="fixed">
     <origin xyz="-0.0589999999999747 -0.138457890749933 0.0879582158332528" rpy="0 0 0" />
     <parent link="chest_link" />
-    <child link="right_shoulder_pitch_joint_mount" />
+    <child link="right_shoulder_mount_joint_mount" />
   </joint>
   <link name="neck_joint_mount" />
   <link name="neck_link">

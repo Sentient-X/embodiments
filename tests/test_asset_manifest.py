@@ -48,6 +48,7 @@ def test_every_row_keeps_its_directory_audience() -> None:
     }
     assert entitled == {
         "sentient_rwh",
+        "sentient_humanoid",
         "sentient_static_upper_body",
         "yubi_description",
         "piper_umi_description",
@@ -110,7 +111,17 @@ def test_a_file_under_disagreeing_siblings_is_not_licensed_by_their_union(tmp_pa
 
 def test_no_row_carries_a_union_of_sibling_licences() -> None:
     joined = [e.relpath for e in asset_manifest().values() if " AND " in e.license_id]
-    assert joined == []
+    # These declarations compose the public original core/head with proprietary
+    # corrected arms. They are intentionally entitled; sibling files gain no license.
+    assert set(joined) == {
+        "sentient_humanoid/sentient_humanoid.urdf",
+        "sentient_humanoid/_by_digest/3cf9f7a9f44d896f6c184a065e1552760c2f428297651aa700c3da7b29d1e6b0/sentient_humanoid.urdf",
+    }
+    assert all(
+        asset_manifest()[path].license_id == "BSD-3-Clause AND LicenseRef-Sentient-Proprietary"
+        and asset_manifest()[path].audience is AssetAudience.ENTITLED
+        for path in joined
+    )
     assert all(
         e.license_id == "MIT"
         for e in asset_manifest().values()

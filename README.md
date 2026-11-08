@@ -112,6 +112,42 @@ original shoulder seats remain 272.381 mm apart; the corrected static body's spa
 module is imported into this full-body candidate. Reusing the arm modules and restoring
 the earlier head does not establish that the remaining assembly is correct.
 
+The reusable shoulder seat includes the fixed pitch motor, mechanical stop and two holder
+meshes that the corrected CAD owns on its chest, outside the moving arm subtree. The
+static generator now separates those four visuals per side into fixed shoulder modules;
+both the static assembly and full humanoid fit those same modules. The original shoulder
+joint frames, axes and all retained link poses stay unchanged. The static chest keeps five
+visuals, each mount four: all thirteen source chest visuals occur exactly once.
+
+This split regenerates the entire separated chest and both mount inertials/collisions with
+the existing convex-hull estimator at 600 kg/m³. The old single-hull estimate was 4.79762 kg;
+the new chest is 3.77676 kg and the mounts 1.03173/1.03393 kg, total 5.84242 kg. The change
+is an explicit change to a nominal simulation estimate, **not a measured mass correction**.
+A convex hull of the union is not the sum of the component hulls. The full body retains
+its original core inertials and gains the two mount estimates (2.06566 kg), without copying
+the static table or chest. Earlier documents, URDFs and the old chest collision mesh remain
+available under their original content identities.
+
+For reproducible visual review, from this package with its numerical development dependencies:
+
+```bash
+PYTHONPATH=. python tools/review_humanoid_connections.py --output /absolute/new-review \
+  --previous-urdf /absolute/previous-candidate/robot.urdf
+```
+
+The command refuses an existing output directory. It copies and verifies the portable asset
+closure; writes the exact body/URDF identity, a relative-mesh viewer URDF, topology report,
+1800-pixel front/side/three-quarter plate, source/before/after shoulder plate, and original
+versus current ankle views. It uses owner FK and explicit visual-origin quaternions, never
+collision proxies or a physics export. Display coordinates are zero, not calibrated Ready.
+The November 8 review found all 59 links reachable through 58 joints. The inherited ankle
+pair's sampled-vertex distances (17.2513/17.1120 mm) are identical to the original source;
+they compare parallel linkage bodies, not the whole foot attachment. The visible rods and
+foot seats remain present. Neither these samples nor a connected URDF tree prove mechanical
+fit, clearance through motion, balance or physical qualification. Training remains on hold
+until the owner reviews this candidate.
+
+
 The 33-coordinate candidate has a new identity. Its original neck-yaw and head-pitch
 URDF joints remain description-only, with no invented actuator bindings. Earlier
 25-coordinate recordings retain their exact historical body and public URDF; the stale

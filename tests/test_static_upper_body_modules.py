@@ -1,5 +1,6 @@
 """Corrected upper-body parts detach without changing physical facts or old recordings."""
 
+import hashlib
 import random
 
 import pytest
@@ -10,8 +11,10 @@ from sx_embodiments.kinematics import Kinematics
 from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_HEAD_MODULE,
     STATIC_UPPER_BODY_LEFT_ARM_MODULE,
+    STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
     STATIC_UPPER_BODY_MODULE,
     STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+    STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
     STATIC_UPPER_BODY_SPEC,
     STATIC_UPPER_BODY_URDF,
 )
@@ -28,10 +31,10 @@ def test_previous_recordings_keep_their_native_order_and_physical_facts() -> Non
     assert old.recorded_id == old.embodiment.id == PREVIOUS
     assert current.id != PREVIOUS
     assert successor(str(PREVIOUS)) is None
-    assert (
-        old.embodiment.urdf_bytes
-        == current.urdf_bytes
-        == STATIC_UPPER_BODY_URDF.path().read_bytes()
+    assert old.embodiment.urdf_bytes != current.urdf_bytes
+    assert current.urdf_bytes == STATIC_UPPER_BODY_URDF.path().read_bytes()
+    assert hashlib.sha256(old.embodiment.urdf_bytes).hexdigest() == (
+        "f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934"
     )
     assert tuple(c.instance for c in old.embodiment.components) == (
         "torso",
@@ -56,9 +59,15 @@ def test_previous_recordings_keep_their_native_order_and_physical_facts() -> Non
         "head_imu",
     )
     assert old.embodiment.joint_names != current.joint_names
-    assert {c.instance: c for c in old.embodiment.components} == {
-        c.instance: c for c in current.components
-    }
+    before = {c.instance: c for c in old.embodiment.components}
+    after = {c.instance: c for c in current.components}
+    for name, component in before.items():
+        assert component.part == after[name].part
+        if name in {"left_arm", "right_arm"}:
+            assert after[name].mount.frame == name.replace("arm", "shoulder_mount_link")
+            assert after[name].mount.parent == component.mount.parent
+        else:
+            assert component == after[name]
     assert {site.name: site for site in old.embodiment.sites} == {
         site.name: site for site in current.sites
     }
@@ -67,8 +76,8 @@ def test_previous_recordings_keep_their_native_order_and_physical_facts() -> Non
 @pytest.mark.parametrize(
     ("socket", "module"),
     [
-        ("left_shoulder", STATIC_UPPER_BODY_LEFT_ARM_MODULE),
-        ("right_shoulder", STATIC_UPPER_BODY_RIGHT_ARM_MODULE),
+        ("left_shoulder", STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE),
+        ("right_shoulder", STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE),
         ("neck", STATIC_UPPER_BODY_HEAD_MODULE),
     ],
 )

@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54",
+  "id": "c227a86c973e3e8672c0454d8b713bcf1f62bd50d6c509e8869ac30180f167df",
   "axes": [
     {
       "joint": "torso_joint",
@@ -16,7 +16,7 @@
       "home": 0.0,
       "speed": 0.25,
       "acceleration": 2.5,
-      "inertia": 1.5823303824044566
+      "inertia": 1.601894319145006
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -398,6 +398,9 @@
       "acceleration": 16.0,
       "inertia": 0.0005826839138278334
     }
+  ],
+  "supersedes": [
+    "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54"
   ],
   "approach": {
     "left_gripper": {

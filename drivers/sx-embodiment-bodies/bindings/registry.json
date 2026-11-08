@@ -986,7 +986,7 @@
   },
   {
     "embodiment": "sentient-humanoid",
-    "id": "4bb457078c9b42ea74e7c84551a61534d1d19af174faab7d4124e1eab544e08a",
+    "id": "ca3fb7c3b69a4df643d21904d64b57c7d954c536dbb70660143d75133e53f317",
     "axes": [
       {
         "joint": "torso_joint",
@@ -1006,8 +1006,8 @@
           "joint": "torso_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 40.41624041241424,
-        "inertia": 0.7917609276238096
+        "acceleration": 36.906094234968734,
+        "inertia": 0.8670654715252912
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1091,7 +1091,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.07942882232682799
+        "inertia": 0.07942882232682821
       },
       {
         "joint": "left_forearm_yaw_joint",
@@ -1383,6 +1383,9 @@
         "acceleration": 47.1710608647116,
         "inertia": 6.556843669276724e-05
       }
+    ],
+    "supersedes": [
+      "4bb457078c9b42ea74e7c84551a61534d1d19af174faab7d4124e1eab544e08a"
     ]
   },
   {
@@ -1812,7 +1815,7 @@
   },
   {
     "embodiment": "sentient-static-upper-body",
-    "id": "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54",
+    "id": "c227a86c973e3e8672c0454d8b713bcf1f62bd50d6c509e8869ac30180f167df",
     "axes": [
       {
         "joint": "torso_joint",
@@ -1828,7 +1831,7 @@
         "home": 0.0,
         "speed": 0.25,
         "acceleration": 2.5,
-        "inertia": 1.5823303824044566
+        "inertia": 1.601894319145006
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -2210,6 +2213,9 @@
         "acceleration": 16.0,
         "inertia": 0.0005826839138278334
       }
+    ],
+    "supersedes": [
+      "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54"
     ],
     "approach": {
       "left_gripper": {

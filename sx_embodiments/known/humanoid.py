@@ -94,9 +94,9 @@ from ..parts import (
 from ..sites import BodySite
 from ._authoring import bounded_layout
 from .static_upper_body import (
-    STATIC_UPPER_BODY_LEFT_ARM_MODULE,
+    STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
     STATIC_UPPER_BODY_MODULE,
-    STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+    STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
     STATIC_UPPER_BODY_URDF,
 )
 
@@ -496,11 +496,15 @@ SENTIENT_HUMANOID_BUILD: Final = Build(
     placed=(Placed("core", FULL_BODY_CORE, namespaced=False),),
     mates=(
         Mate(
-            "left_arm", STATIC_UPPER_BODY_LEFT_ARM_MODULE, "core", "left_shoulder", namespaced=False
+            "left_shoulder",
+            STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
+            "core",
+            "left_shoulder",
+            namespaced=False,
         ),
         Mate(
-            "right_arm",
-            STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
+            "right_shoulder",
+            STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
             "core",
             "right_shoulder",
             namespaced=False,
@@ -666,8 +670,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         replace(STATIC_UPPER_BODY_URDF, role=AssetRole.OTHER),
         packaged_asset(
             relpath="sentient_humanoid/sentient_humanoid.urdf",
-            sha256="3cf9f7a9f44d896f6c184a065e1552760c2f428297651aa700c3da7b29d1e6b0",
-            size_bytes=179761,
+            sha256="e7fd42a06794c5d3fce549e55630ea0a9194eee04411b7f06a9d7ed5ada87e67",
+            size_bytes=184919,
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
             provenance=AssetProvenance(
