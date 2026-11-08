@@ -16,6 +16,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from enum import StrEnum
 
 from sx_contracts.identity import canonical_json, content_digest
 
@@ -90,6 +91,11 @@ class SupportContact:
         )
 
 
+class CollisionMode(StrEnum):
+    FULL = "full"
+    GROUND_ONLY = "ground_only"
+
+
 @dataclass(frozen=True, slots=True)
 class NominalProfile:
     expected_embodiment_id: str
@@ -103,8 +109,10 @@ class NominalProfile:
     gravity: tuple[float, float, float]
     friction: tuple[float, float, float]
     assumptions: tuple[str, ...]
+    collision_mode: CollisionMode = CollisionMode.FULL
 
     def __post_init__(self) -> None:
+        _require(isinstance(self.collision_mode, CollisionMode), "Explicit collision mode required")
         _require(
             isinstance(self.joints, tuple)
             and isinstance(self.passive_holds, tuple)
@@ -322,6 +330,8 @@ def _render(
         world,
         "geom",
         name="nominal_floor",
+        contype="1",
+        conaffinity="2" if profile.collision_mode is CollisionMode.GROUND_ONLY else "1",
         type="plane",
         size="0 0 0.1",
         friction=_numbers(profile.friction),
@@ -348,7 +358,9 @@ def _render(
             out,
             "geom",
             name=f"{link_name}/{'visual' if visual else 'collision'}/{index}",
-            contype="0" if visual else "1",
+            contype="0"
+            if visual
+            else ("2" if profile.collision_mode is CollisionMode.GROUND_ONLY else "1"),
             conaffinity="0" if visual else "1",
             group="1" if visual else "0",
             friction=_numbers(profile.friction),
@@ -533,8 +545,13 @@ def nominal_profile_from_json(payload: bytes) -> NominalProfile:
             result[key] = value
         return result
 
+    document = json.loads(payload, object_pairs_hook=pairs)
+    # Initial exporter artifacts predate this explicit collision policy. Preserve
+    # their original all-pairs semantics; newly serialized profiles name it.
+    if isinstance(document, dict) and "collision_mode" not in document:
+        document["collision_mode"] = CollisionMode.FULL.value
     raw = decode.exactly(
-        json.loads(payload, object_pairs_hook=pairs),
+        document,
         {f.name for f in fields(NominalProfile)},
         where="nominal profile",
         error=NominalExportError,
@@ -594,4 +611,5 @@ def nominal_profile_from_json(payload: bytes) -> NominalProfile:
         triple("gravity"),
         triple("friction"),
         decode.texts(raw, "assumptions"),
+        CollisionMode(decode.text(raw, "collision_mode")),
     )

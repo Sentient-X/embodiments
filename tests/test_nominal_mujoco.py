@@ -231,3 +231,38 @@ def test_profile_artifact_roundtrip_and_strict_boundary(tmp_path, monkeypatch):
     document["timestep"] = True
     with pytest.raises(NominalExportError):
         nominal_profile_from_json(json.dumps(document).encode())
+
+
+def test_ground_only_masks_preserve_geometry_and_allow_floor_contacts(tmp_path, monkeypatch):
+    from sx_embodiments.nominal_mujoco import CollisionMode
+
+    body = fixture_body(tmp_path, monkeypatch)
+    settings = replace(profile(body), collision_mode=CollisionMode.GROUND_ONLY)
+    export_nominal_mujoco(body, settings, tmp_path / "ground")
+    model = mujoco.MjModel.from_xml_path(str(tmp_path / "ground" / "scene.xml"))
+    floor = model.geom("nominal_floor").id
+    robot = [i for i in range(model.ngeom) if model.geom_bodyid[i] != 0]
+    assert (model.geom_contype[floor], model.geom_conaffinity[floor]) == (1, 2)
+    assert all((model.geom_contype[i], model.geom_conaffinity[i]) == (2, 1) for i in robot)
+    for a in robot:
+        assert (model.geom_contype[a] & model.geom_conaffinity[floor]) != 0
+        for b in robot:
+            assert (model.geom_contype[a] & model.geom_conaffinity[b]) == 0
+    # A real geometric ground intersection still creates contacts.
+    data = mujoco.MjData(model)
+    data.qpos[2] = 0.02
+    mujoco.mj_forward(model, data)
+    assert data.ncon > 0
+    assert all(floor in (c.geom1, c.geom2) for c in data.contact[: data.ncon])
+
+
+def test_legacy_collision_profile_keeps_original_semantics(tmp_path, monkeypatch):
+    from dataclasses import asdict
+    from sx_embodiments.nominal_mujoco import CollisionMode, nominal_profile_from_json
+
+    raw = asdict(profile(fixture_body(tmp_path, monkeypatch)))
+    raw.pop("collision_mode")
+    assert nominal_profile_from_json(json.dumps(raw).encode()).collision_mode is CollisionMode.FULL
+    raw["collision_mode"] = "ignored"
+    with pytest.raises(ValueError):
+        nominal_profile_from_json(json.dumps(raw).encode())
