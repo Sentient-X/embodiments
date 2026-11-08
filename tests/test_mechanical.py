@@ -8,17 +8,20 @@ from dataclasses import replace
 import pytest
 
 from sx_embodiments.assembly import Pose, Subtree
+from sx_embodiments.assets import asset_manifest, asset_root, description_asset_uri
 from sx_embodiments.compose import MountedOn, RootMount
 from sx_embodiments.composition import compose_build
 from sx_embodiments.errors import CompositionError, InterfaceMismatchError, SocketError
 from sx_embodiments.kinematics import Kinematics, Transform, compose, from_xyz_rpy
 from sx_embodiments.known import definitions, embodiments, modules
 from sx_embodiments.known.b601 import B601_GRIPPER_MODULE
+from sx_embodiments.known.das import DAS_UMI_V4_MODULE
 from sx_embodiments.known.humanoid import HEAD_MODULE, UPPER_BODY_MODULE
 from sx_embodiments.known.panda import PANDA_HAND_MODULE
 from sx_embodiments.known.piper import PIPER_GRIPPER_MODULE, PIPER_MODULE
 from sx_embodiments.known.realsense import realsense_module
 from sx_embodiments.known.so101 import SO101_MODULE
+from sx_embodiments.known.static_upper_body import STATIC_UPPER_BODY_MODULE
 from sx_embodiments.known.universal_robots import UR5E_MODULE
 from sx_embodiments.mechanical import (
     MECHANICAL_INTERFACES,
@@ -32,11 +35,46 @@ from sx_embodiments.mechanical import (
     Socket,
     carrier,
     rigid_module,
+    source,
 )
 from sx_embodiments.parts import ChainSpec, GripperSpec, MobileBaseSpec
 
 ISO = InterfaceId("iso-9409-1-50-4-m6")
 THREAD = InterfaceId("unc-1-4-20")
+
+
+def test_mixed_sources_resolve_foreign_ros_package_aliases_before_relocation() -> None:
+    modules = (DAS_UMI_V4_MODULE, STATIC_UPPER_BODY_MODULE)
+    build = Build(
+        robot="mixed",
+        root="world",
+        placed=tuple(Placed(f"module{i}", module) for i, module in enumerate(modules)),
+    )
+    expected = []
+    for module in modules:
+        original = source(module.description)
+        expected.extend(
+            description_asset_uri(original.provenanced_asset().uri, mesh.attrib["filename"])
+            for mesh in ET.fromstring(Build.of(module).urdf()).iter("mesh")
+        )
+    rendered = [mesh.attrib["filename"] for mesh in ET.fromstring(build.urdf()).iter("mesh")]
+    assert len(rendered) == 519
+    assert sorted(rendered) == sorted(expected)
+    manifest = asset_manifest()
+    for reference in rendered:
+        # The relocated description cannot resolve a vendor package alias using its own directory.
+        assert reference.startswith("package://sx-embodiments/")
+        assert (
+            description_asset_uri(
+                "package://sx-embodiments/sentient_humanoid/mixed.urdf", reference
+            )
+            == reference
+        )
+        relpath = reference.removeprefix("package://sx-embodiments/")
+        assert relpath in manifest
+        assert (asset_root() / relpath).is_file()
+    runtime = compose_build(build, name="mixed", label="Mixed source regression")
+    assert runtime.urdf_bytes == build.urdf()
 
 
 def _close(a: Transform, b: Transform) -> bool:

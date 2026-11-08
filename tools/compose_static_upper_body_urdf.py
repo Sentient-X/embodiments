@@ -41,6 +41,7 @@ import math
 import struct
 import sys
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -445,6 +446,51 @@ def _rated_limits() -> dict[str, tuple[float, float]]:
     return limits
 
 
+def _split_fixed_shoulder_mounts(robot: ET.Element) -> None:
+    """Keep the source's fixed motor, stop and holder with each reusable arm seat.
+
+    The received CAD puts these eight visuals in chest_link, outside the moving
+    arm subtree. Reparent them without moving a visual or a joint. The existing
+    600 kg/m3 hull estimator below then recomputes the remaining chest and each
+    mount consistently; these are nominal simulation estimates, not new mass facts.
+    """
+    chest = robot.find("link[@name='chest_link']")
+    if chest is None:
+        raise ValueError("Source chest missing")
+    visuals = chest.findall("visual")
+    expected = (
+        "J8009P_2EC_RAU_5005______20240809_stp__NONE.stl",
+        "j8009p_mechanical_stop.stl",
+        "Shoulder_Holder_R2__Save_Bodies4_1_.stl",
+        "Shoulder_Holder_R2__Save_Bodies4_2_.stl",
+    )
+    for side, indices in (("left", (5, 7, 9, 11)), ("right", (6, 8, 10, 12))):
+        joint = robot.find(f"joint[@name='{side}_shoulder_pitch_joint']")
+        if joint is None:
+            raise ValueError("Source shoulder missing")
+        mount = _matrix(joint.find("origin"))
+        fixed_link = ET.SubElement(robot, "link", name=f"{side}_shoulder_mount_link")
+        for index, filename in zip(indices, expected, strict=True):
+            visual = visuals[index]
+            mesh = visual.find("geometry/mesh")
+            if mesh is None or not mesh.get("filename", "").endswith("/" + filename):
+                raise ValueError("Source shoulder mount parts changed; review CAD ownership")
+            chest.remove(visual)
+            _set_origin(visual, np.linalg.inv(mount) @ _matrix(visual.find("origin")))
+            fixed_link.append(visual)
+        fixed = ET.SubElement(robot, "joint", name=f"{side}_shoulder_mount_joint", type="fixed")
+        origin = joint.find("origin")
+        if origin is not None:
+            fixed.append(deepcopy(origin))
+        ET.SubElement(fixed, "parent", link="chest_link")
+        ET.SubElement(fixed, "child", link=f"{side}_shoulder_mount_link")
+        parent = joint.find("parent")
+        if parent is None or parent.get("link") != "chest_link":
+            raise ValueError("Source shoulder parent changed")
+        parent.set("link", f"{side}_shoulder_mount_link")
+        _set_origin(joint, np.eye(4))
+
+
 def render() -> dict[Path, bytes]:
     robot = ET.parse(SOURCE).getroot()
     robot.set("name", "sentient_static_upper_body")
@@ -453,6 +499,7 @@ def render() -> dict[Path, bytes]:
     for sensor in robot.findall("sensor"):
         robot.remove(sensor)
     _graft_neck(robot)
+    _split_fixed_shoulder_mounts(robot)
     rated = _rated_limits()
     for joint in robot.findall("joint"):
         limit = joint.find("limit")
@@ -494,7 +541,9 @@ def render() -> dict[Path, bytes]:
         )
         link.insert(0, inertial)
         if link.find("collision") is None:
-            relpath = f"meshes/collision/{name}.stl"
+            # Keep the old monolithic chest hull for historical recordings.
+            hull_name = "chest_core_without_shoulders" if name == "chest_link" else name
+            relpath = f"meshes/collision/{hull_name}.stl"
             stl = ET.Element("collision", {"name": f"{name}_hull"})
             ET.SubElement(stl, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
             geometry = ET.SubElement(stl, "geometry")

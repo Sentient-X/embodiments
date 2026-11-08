@@ -11,9 +11,13 @@ import datetime as dt
 import pytest
 
 from sx_embodiments import (
+    EmbodimentId,
+    EmbodimentName,
     ToolPointCheck,
     development_embodiments,
     embodiments,
+    historical_document,
+    read_recorded,
     tool_points_checked_of,
 )
 from sx_embodiments.embodiment import embodiment_from_definition
@@ -34,6 +38,17 @@ def _body(name: str):
     return embodiments[name] if name in embodiments else development_embodiments[name]
 
 
+def _checked_static_source():
+    # The hardware receipt belongs to the original structural chain. Splitting its
+    # fixed shoulder mounts preserves FK but does not silently transfer acceptance.
+    return read_recorded(
+        historical_document(
+            EmbodimentName("sentient-static-upper-body"),
+            EmbodimentId("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402"),
+        )
+    ).embodiment
+
+
 @pytest.mark.parametrize("name", BODIES)
 def test_only_checked_tool_points_are_driven(name: str) -> None:
     body = _body(name)
@@ -44,15 +59,24 @@ def test_only_checked_tool_points_are_driven(name: str) -> None:
         assert fields["tcp_frames"] == {}
         assert "tool_points_checked" not in fields
     else:
-        # A record is of this revision and these links; a stale one fails here, asking for a
-        # new check (robot-bench), never a silent pass.
+        # Records retain their original chain. The explicit shoulder-module candidate
+        # is unchecked for hardware even though its preserved source FK is tested.
         record = tool_points_checked_of(name)
         assert record is not None
         grips = tool_grips(body, record.points, tools)
-        assert record.chain == tool_chain(body.urdf_bytes, record.points, grips)
         assert dict(record.points) == fields["tcp_candidates"]
-        assert fields["tcp_frames"] == fields["tcp_candidates"]
-        assert fields["tool_points_checked"] == tool_points_checked_of(name).to_json()  # type: ignore[union-attr]
+        if name == "sentient-static-upper-body":
+            original = _checked_static_source()
+            assert record.chain == tool_chain(
+                original.urdf_bytes, record.points, tool_grips(original, record.points)
+            )
+            assert record.chain != tool_chain(body.urdf_bytes, record.points, grips)
+            assert fields["tcp_frames"] == {}
+            assert "tool_points_checked" not in fields
+        else:
+            assert record.chain == tool_chain(body.urdf_bytes, record.points, grips)
+            assert fields["tcp_frames"] == fields["tcp_candidates"]
+            assert fields["tool_points_checked"] == record.to_json()
 
 
 def test_the_checked_bodies_are_the_ones_with_evidence() -> None:
@@ -137,7 +161,7 @@ def _edited(urdf: bytes, joint: str, **change: str) -> bytes:
 def test_the_chain_is_what_was_checked_and_nothing_else() -> None:
     from sx_embodiments.kinematics import Kinematics
 
-    body = _body("sentient-static-upper-body")
+    body = _checked_static_source()
     record = tool_points_checked_of("sentient-static-upper-body")
     assert record is not None
     urdf = body.urdf_bytes
@@ -239,11 +263,13 @@ def test_an_earlier_revisions_chain_is_read_from_its_own_description(
     monkeypatch.setattr(bindings, "tool_grips", same_grips)
     document = bindings.document("sentient-static-upper-body")
     chains = document["tool_chains"]
-    assert chains[document["id"]] == record.chain
+    current_chain = tool_chain(body.urdf_bytes, record.points, grips)
+    assert chains[document["id"]] == current_chain
+    assert current_chain != record.chain  # No transfer of the old hardware check.
     earlier = [identity for identity in chains if identity != document["id"]]
     assert earlier, "the static body supersedes earlier ids"
     for identity in earlier:
-        assert chains[identity] != record.chain, identity
+        assert chains[identity] != current_chain, identity
 
 
 def test_every_id_a_checked_body_may_be_assigned_names_its_chain() -> None:
@@ -263,7 +289,10 @@ def test_every_id_a_checked_body_may_be_assigned_names_its_chain() -> None:
             continue
         ids = [document["id"], *document.get("supersedes", [])]
         assert sorted(document["tool_chains"]) == sorted(ids)
-        assert document["tool_chains"][document["id"]] == record.chain
+        current = _body(document["embodiment"])
+        actual = tool_chain(current.urdf_bytes, record.points, tool_grips(current, record.points))
+        assert document["tool_chains"][document["id"]] == actual
+        assert actual != record.chain  # The structural candidate remains hardware-unchecked.
 
 
 def test_no_two_registered_bodies_share_an_id() -> None:

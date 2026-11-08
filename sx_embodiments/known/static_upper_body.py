@@ -78,8 +78,9 @@ wrong way, and at its own zero pose it penetrates the robot (9 mm into ``base_li
 for the camera); the owner, watching it live, reported it breaking apart. From
 ``so101_shoulder_pan_joint`` down the neck is TheRobotStudio's ``so101_new_calib`` chain
 (SO-ARM100 ``5f6d2b8``, Apache-2.0, vendored as ``source/so101_new_calib.urdf``; its meshes
-are the public ``so101`` package's, the same bytes) under our names: joint origins, axes and limits, inertials and meshes. Its
-zeros are LeRobot's calibrated mid-range, so the readings are the joint angles with no offset.
+are the public ``so101`` package's, the same bytes) under our names: joint origins, axes and
+limits, inertials and meshes. Its zeros are LeRobot's calibrated mid-range, so the readings
+are the joint angles with no offset.
 allisa_bot's base, its custom holder for the camera servo, the camera bracket and the ZED 2i
 meshes ride on it, placed by registering each official part onto allisa_bot's CAD. The base is
 turned half a turn, as the robot is built: with it, a recording taken at the side photo of
@@ -104,6 +105,7 @@ from typing import Final
 
 from sx_contracts import ComponentId
 
+from ..assembly import Pose, Subtree
 from ..assets import AssetFormat, AssetProvenance, AssetRole, packaged_asset
 from ..compose import (
     BaseMount,
@@ -127,7 +129,7 @@ from ..layout import (
     DirectDrive,
     ServoApproach,
 )
-from ..mechanical import Build, Module, ModuleId
+from ..mechanical import Build, InterfaceId, Module, ModuleId, Slot, Socket
 from ..media import MediaRig, StereoPair
 from ..parts import ChainSpec, GripperSpec, Limb
 from ..sites import BodySite
@@ -146,8 +148,8 @@ _SOURCE: Final = AssetProvenance(
 
 STATIC_UPPER_BODY_URDF: Final = packaged_asset(
     relpath="sentient_static_upper_body/sentient_static_upper_body.urdf",
-    sha256="f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934",
-    size_bytes=221390,
+    sha256="11fa1ead5302c9f99a2c7a9c83e6d4f193ffe6a93de742d093f75431f3153c76",
+    size_bytes=222778,
     format=AssetFormat.URDF,
     role=AssetRole.DESCRIPTION,
     provenance=AssetProvenance(
@@ -377,33 +379,108 @@ def _gripper(side: str, left_finger: float, right_finger: float) -> GripperSpec:
 STATIC_UPPER_BODY_LEFT_GRIPPER: Final = _gripper("left", -0.823747683095, 0.929592357459)
 STATIC_UPPER_BODY_RIGHT_GRIPPER: Final = _gripper("right", -0.952602069277, 0.788466124973)
 
-STATIC_UPPER_BODY_MODULE: Final = Module(
-    module_id=ModuleId("sentient-static-upper-body"),
-    label="Sentient static upper body",
-    description=STATIC_UPPER_BODY_URDF,
+STATIC_UPPER_BODY_SITES: Final = (
+    BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_roll_link"),
+    BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_roll_link"),
+    BodySite("left_hand", ComponentId("left_gripper"), "left_gripper_tcp"),
+    BodySite("right_hand", ComponentId("right_gripper"), "right_gripper_tcp"),
+    BodySite("left_elbow", ComponentId("left_arm"), "left_elbow_pitch_link"),
+    BodySite("right_elbow", ComponentId("right_arm"), "right_elbow_pitch_link"),
+    BodySite("chest", ComponentId("torso"), "chest_link"),
+)
+
+
+#: Corrected upper-body parts are fitted modules of the accepted description. Their
+#: subtrees retain the same mesh, inertial, limit and joint bytes when used by another body.
+#: These interfaces name the CAD seats; they do not assert compatibility with the old pelvis.
+_SHOULDER: Final = InterfaceId("sentient-allisa-shoulder")
+_SHOULDER_MOUNT: Final = InterfaceId("sentient-allisa-fixed-shoulder-mount")
+_WRIST: Final = InterfaceId("sentient-allisa-wrist")
+_NECK: Final = InterfaceId("sentient-allisa-neck")
+
+
+def _gripper_module(side: str, gripper: GripperSpec) -> Module:
+    return Module(
+        module_id=ModuleId(f"sentient-allisa-{side}-gripper"),
+        label=f"Sentient {side} parallel gripper",
+        description=Subtree(STATIC_UPPER_BODY_URDF, below=f"{side}_gripper_mount_joint"),
+        plug=_WRIST,
+        components=(
+            body_component(f"{side}_gripper", gripper, RootMount(f"{side}_gripper_base_link")),
+        ),
+        sites=tuple(
+            site for site in STATIC_UPPER_BODY_SITES if site.component_id == f"{side}_gripper"
+        ),
+    )
+
+
+STATIC_UPPER_BODY_LEFT_GRIPPER_MODULE: Final = _gripper_module(
+    "left", STATIC_UPPER_BODY_LEFT_GRIPPER
+)
+STATIC_UPPER_BODY_RIGHT_GRIPPER_MODULE: Final = _gripper_module(
+    "right", STATIC_UPPER_BODY_RIGHT_GRIPPER
+)
+
+
+def _arm_module(side: str, arm: ChainSpec, gripper: Module) -> Module:
+    return Module(
+        module_id=ModuleId(f"sentient-allisa-{side}-arm"),
+        label=f"Sentient {side} seven-joint arm",
+        description=Subtree(STATIC_UPPER_BODY_URDF, below=f"{side}_shoulder_pitch_joint"),
+        plug=_SHOULDER,
+        components=(
+            body_component(
+                f"{side}_arm", arm, RootMount(f"{side}_shoulder_pitch_joint_mount"), limb=Limb.ARM
+            ),
+        ),
+        sockets=(
+            Socket(
+                "wrist",
+                _WRIST,
+                f"{side}_wrist_roll_link",
+                carrier=f"{side}_arm",
+                fitted=gripper,
+            ),
+        ),
+        sites=tuple(site for site in STATIC_UPPER_BODY_SITES if site.component_id == f"{side}_arm"),
+    )
+
+
+STATIC_UPPER_BODY_LEFT_ARM_MODULE: Final = _arm_module(
+    "left", STATIC_UPPER_BODY_LEFT_ARM, STATIC_UPPER_BODY_LEFT_GRIPPER_MODULE
+)
+STATIC_UPPER_BODY_RIGHT_ARM_MODULE: Final = _arm_module(
+    "right", STATIC_UPPER_BODY_RIGHT_ARM, STATIC_UPPER_BODY_RIGHT_GRIPPER_MODULE
+)
+
+
+def _shoulder_mount_module(side: str, arm: Module) -> Module:
+    """The source's fixed pitch motor, stop and holders, before the moving arm."""
+    return Module(
+        module_id=ModuleId(f"sentient-allisa-{side}-shoulder-mount"),
+        label=f"Sentient {side} fixed shoulder motor and mount",
+        description=Subtree(STATIC_UPPER_BODY_URDF, below=f"{side}_shoulder_mount_joint"),
+        plug=_SHOULDER_MOUNT,
+        sockets=(Socket("arm", _SHOULDER, f"{side}_shoulder_mount_link", fitted=arm),),
+    )
+
+
+STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE: Final = _shoulder_mount_module(
+    "left", STATIC_UPPER_BODY_LEFT_ARM_MODULE
+)
+STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE: Final = _shoulder_mount_module(
+    "right", STATIC_UPPER_BODY_RIGHT_ARM_MODULE
+)
+
+
+STATIC_UPPER_BODY_HEAD_MODULE: Final = Module(
+    module_id=ModuleId("sentient-allisa-head"),
+    label="Sentient SO-101 neck and ZED 2i head",
+    description=Subtree(STATIC_UPPER_BODY_URDF, below="so101_mount_joint"),
+    plug=_NECK,
     components=(
-        body_component("torso", STATIC_UPPER_BODY_TORSO, RootMount("base_link"), limb=Limb.TORSO),
         body_component(
-            "left_arm", STATIC_UPPER_BODY_LEFT_ARM, MountedOn("torso", "chest_link"), limb=Limb.ARM
-        ),
-        body_component(
-            "right_arm",
-            STATIC_UPPER_BODY_RIGHT_ARM,
-            MountedOn("torso", "chest_link"),
-            limb=Limb.ARM,
-        ),
-        body_component(
-            "left_gripper",
-            STATIC_UPPER_BODY_LEFT_GRIPPER,
-            MountedOn("left_arm", "left_gripper_base_link"),
-        ),
-        body_component(
-            "right_gripper",
-            STATIC_UPPER_BODY_RIGHT_GRIPPER,
-            MountedOn("right_arm", "right_gripper_base_link"),
-        ),
-        body_component(
-            "neck", STATIC_UPPER_BODY_NECK, MountedOn("torso", "so101_base_link"), limb=Limb.HEAD
+            "neck", STATIC_UPPER_BODY_NECK, RootMount("so101_base_link"), limb=Limb.HEAD
         ),
         *(
             sensor_component(f"head_{eye}", zed_2i_eye(eye), MountedOn("neck", optical_frame(eye)))
@@ -411,17 +488,48 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
         ),
         sensor_component("head_imu", zed_2i_imu(), MountedOn("neck", ZED_FRAME)),
     ),
-    # Link origins: the wrist roll axis centre, the elbow pitch axis, the chest, and the
-    # grippers' tool points (the description's *_gripper_tcp frames).
-    sites=(
-        BodySite("left_wrist", ComponentId("left_arm"), "left_wrist_roll_link"),
-        BodySite("right_wrist", ComponentId("right_arm"), "right_wrist_roll_link"),
-        BodySite("left_hand", ComponentId("left_gripper"), "left_gripper_tcp"),
-        BodySite("right_hand", ComponentId("right_gripper"), "right_gripper_tcp"),
-        BodySite("left_elbow", ComponentId("left_arm"), "left_elbow_pitch_link"),
-        BodySite("right_elbow", ComponentId("right_arm"), "right_elbow_pitch_link"),
-        BodySite("chest", ComponentId("torso"), "chest_link"),
+)
+
+#: Each corrected mechanical part is fitted exactly where the accepted CAD puts it.
+#: Native coordinates now follow mechanical ownership: each arm is followed by its gripper.
+#: The preceding recording revision remains in historical/ with its original coordinate order.
+STATIC_UPPER_BODY_MODULE: Final = Module(
+    module_id=ModuleId("sentient-static-upper-body"),
+    label="Sentient static upper body",
+    description=STATIC_UPPER_BODY_URDF,
+    components=(
+        body_component("torso", STATIC_UPPER_BODY_TORSO, RootMount("base_link"), limb=Limb.TORSO),
+        Slot("left_shoulder"),
+        Slot("right_shoulder"),
+        Slot("neck"),
     ),
+    sockets=(
+        Socket(
+            "left_shoulder",
+            _SHOULDER_MOUNT,
+            "chest_link",
+            Pose((-0.0589988844331, 0.230971850041, 0.0130697889087)),
+            carrier="torso",
+            fitted=STATIC_UPPER_BODY_LEFT_SHOULDER_MODULE,
+        ),
+        Socket(
+            "right_shoulder",
+            _SHOULDER_MOUNT,
+            "chest_link",
+            Pose((-0.0590006584727, -0.0487779814531, 0.0130703755106)),
+            carrier="torso",
+            fitted=STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
+        ),
+        Socket(
+            "neck",
+            _NECK,
+            "chest_link",
+            Pose((-0.0777334982, 0.0916071236, 0.0471956738)),
+            carrier="torso",
+            fitted=STATIC_UPPER_BODY_HEAD_MODULE,
+        ),
+    ),
+    sites=tuple(site for site in STATIC_UPPER_BODY_SITES if site.component_id == "torso"),
 )
 
 #: How fast each Feetech bus's servos approach any goal on the servo itself, by port. An

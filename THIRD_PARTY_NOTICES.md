@@ -58,3 +58,14 @@ Test fixtures carrying third-party facts:
 | File | Origin | License |
 |------|--------|---------|
 | `drivers/sx-realsense/tests/fixtures/factory-luvira-d435i-color.json` | The colour profile of [`ilaydayaman/LuViRA_Dataset`](https://github.com/ilaydayaman/LuViRA_Dataset), `db30d579a24aec5f784de866f1b1a81bb9aaa4e8`, `vision/camera_factory_cal.txt` (a RealSense D435i's `rs-enumerate-devices -c` output), re-rendered as `sx.factory-intrinsics/v1`; the dump names no serial or firmware, so those are placeholders. | CC-BY-4.0 |
+
+## Corrected Sentient full-body composition
+
+`assets/sentient_humanoid/sentient_humanoid.urdf` combines the retained
+`humanoid_pkg` pelvis/waist/chest/legs (BSD-3-Clause, source commit
+`666bc6b5e00c76b8388a70fcc40a6987e0f1da7a`) with the corrected
+`sentient_static_upper_body` arm/gripper/head modules (the existing
+LicenseRef-Sentient-Proprietary asset declaration, including its separately retained
+SO-101 attribution). Both source declarations remain attached to the body. The composite
+is entitled; it does not relicense the corrected geometry as BSD. Older full-body
+recordings retain their original public description and licensing.
