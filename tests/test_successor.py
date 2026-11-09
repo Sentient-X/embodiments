@@ -1,4 +1,4 @@
-"""A successor preserves ordered drive semantics; old recordings retain their own bodies."""
+"""An earlier id of a body that drives as it does stands for the current body."""
 
 import pytest
 
@@ -19,29 +19,23 @@ REWIRED = "35e41a6209ee550da7ef857e8fef4f5011a388c68f9bc47834f8ca925a248c6f"
         "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
         # Before the work-ready posture: a station sealed episodes against this revision.
         "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
+        # Before the arms and grippers became reusable modules on fixed shoulder mounts.
+        "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
     ],
 )
-def test_pre_module_revisions_remain_readable_without_a_positional_successor(identity: str) -> None:
-    """These revisions once succeeded one another; fitted arms now interleave their grippers.
-    An unchanged actuator set does not make those ordered coordinate arrays interchangeable.
-    """
+def test_an_earlier_revision_wired_the_same_way_is_the_same_robot(identity: str) -> None:
+    """The modules moved no coordinate: both arms on the CAN bus, then each gripper's bus, then
+    the neck's, in the order a station composes its chains, so the robot assigned an earlier
+    id opens as the current body."""
     body = current(STATIC)
-    recorded = read_recorded(historical_document(EmbodimentName(STATIC), EmbodimentId(identity)))
-    old = recorded.embodiment
-    assert str(recorded.recorded_id) == identity
-    assert identity not in superseded_ids(STATIC)
-    assert successor(identity) is None
-    assert wiring(old) != wiring(body)
-    assert set(wiring(old)) == set(wiring(body))
-    assert set(old.joint_names) == set(body.joint_names)
-    assert old.joint_names.index("right_shoulder_pitch_joint") < old.joint_names.index(
-        "left_gripper_left_finger_joint"
-    )
-    assert body.joint_names.index("left_gripper_left_finger_joint") < body.joint_names.index(
-        "right_shoulder_pitch_joint"
-    )
-    # The historical description resolves with its own content identity.
-    assert old.urdf_bytes
+    old = read_recorded(
+        historical_document(EmbodimentName(STATIC), EmbodimentId(identity))
+    ).embodiment
+    assert identity in superseded_ids(STATIC)
+    found = successor(identity)
+    assert found is not None and found.id == body.id
+    assert wiring(old) == wiring(body)
+    assert old.joint_names == body.joint_names
 
 
 def test_a_rewired_or_unknown_id_has_no_successor() -> None:

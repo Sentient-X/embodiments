@@ -26,11 +26,13 @@ PREVIOUS = EmbodimentId("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c
 
 
 def test_previous_recordings_keep_their_native_order_and_physical_facts() -> None:
+    """The modules change the shoulder mounts' geometry, never the coordinate order: a station
+    composes one chain per bus in state order, and the CAN bus carries the torso and both arms."""
     old = read_recorded(historical_document(EmbodimentName("sentient-static-upper-body"), PREVIOUS))
     current = embodiment_from_definition(STATIC_UPPER_BODY_SPEC)
     assert old.recorded_id == old.embodiment.id == PREVIOUS
     assert current.id != PREVIOUS
-    assert successor(str(PREVIOUS)) is None
+    assert successor(str(PREVIOUS)) is not None
     assert old.embodiment.urdf_bytes != current.urdf_bytes
     assert current.urdf_bytes == STATIC_UPPER_BODY_URDF.path().read_bytes()
     assert hashlib.sha256(old.embodiment.urdf_bytes).hexdigest() == (
@@ -50,15 +52,15 @@ def test_previous_recordings_keep_their_native_order_and_physical_facts() -> Non
     assert tuple(c.instance for c in current.components) == (
         "torso",
         "left_arm",
-        "left_gripper",
         "right_arm",
+        "left_gripper",
         "right_gripper",
         "neck",
         "head_left",
         "head_right",
         "head_imu",
     )
-    assert old.embodiment.joint_names != current.joint_names
+    assert old.embodiment.joint_names == current.joint_names
     before = {c.instance: c for c in old.embodiment.components}
     after = {c.instance: c for c in current.components}
     for name, component in before.items():

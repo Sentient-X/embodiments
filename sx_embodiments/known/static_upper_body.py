@@ -490,9 +490,10 @@ STATIC_UPPER_BODY_HEAD_MODULE: Final = Module(
     ),
 )
 
-#: Each corrected mechanical part is fitted exactly where the accepted CAD puts it.
-#: Native coordinates now follow mechanical ownership: each arm is followed by its gripper.
-#: The preceding recording revision remains in historical/ with its original coordinate order.
+#: Each corrected mechanical part is fitted exactly where the accepted CAD puts it. Each arm
+#: module owns its gripper, but the state order stays the buses': the torso and both arms on
+#: the one CAN bus, then each gripper's serial bus, then the neck's, as every station opens the
+#: body (one chain per bus, composed in state order) and as the preceding revision recorded it.
 STATIC_UPPER_BODY_MODULE: Final = Module(
     module_id=ModuleId("sentient-static-upper-body"),
     label="Sentient static upper body",
@@ -501,6 +502,8 @@ STATIC_UPPER_BODY_MODULE: Final = Module(
         body_component("torso", STATIC_UPPER_BODY_TORSO, RootMount("base_link"), limb=Limb.TORSO),
         Slot("left_shoulder"),
         Slot("right_shoulder"),
+        Slot("left_shoulder/arm/wrist"),
+        Slot("right_shoulder/arm/wrist"),
         Slot("neck"),
     ),
     sockets=(

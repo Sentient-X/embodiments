@@ -78,7 +78,7 @@ from ..layout import (
     UndocumentedDrive,
     Unobserved,
 )
-from ..mechanical import Build, InterfaceId, Mate, Module, ModuleId, Placed, Socket
+from ..mechanical import Build, InterfaceId, Mate, Module, ModuleId, Placed, Slot, Socket
 from ..media import MediaRig, StereoPair
 from ..parts import (
     CameraModality,
@@ -467,7 +467,15 @@ FULL_BODY_CORE: Final = Module(
             "right_shoulder_pitch_joint",
         ),
     ),
-    components=(UPPER_BODY_COMPONENTS[0],),
+    # The torso and both arms share one CAN bus and each gripper has its own, so both arms
+    # come before either gripper (see STATIC_UPPER_BODY_MODULE).
+    components=(
+        UPPER_BODY_COMPONENTS[0],
+        Slot("left_shoulder"),
+        Slot("right_shoulder"),
+        Slot("left_shoulder/arm/wrist"),
+        Slot("right_shoulder/arm/wrist"),
+    ),
     sites=tuple(site for site in UPPER_BODY_MODULE.sites if site.component_id == "torso"),
     sockets=(
         UPPER_BODY_MODULE.socket("right_hip"),

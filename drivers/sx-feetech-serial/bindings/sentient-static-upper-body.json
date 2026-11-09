@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "c227a86c973e3e8672c0454d8b713bcf1f62bd50d6c509e8869ac30180f167df",
+  "id": "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc",
   "axes": [
     {
       "joint": "torso_joint",
@@ -131,38 +131,6 @@
       "inertia": 0.002687941764959243
     },
     {
-      "joint": "left_gripper_left_finger_joint",
-      "lower": -0.823747683095,
-      "upper": 0.0,
-      "model": "feetech_sts3215",
-      "bus": "feetech_serial",
-      "port": "left_gripper",
-      "provisional": true,
-      "bus_id": 3,
-      "sign": 1,
-      "reduction": 1.0,
-      "gripper": true,
-      "speed": 4.0,
-      "acceleration": 16.0,
-      "inertia": 6.536337245757577e-05
-    },
-    {
-      "joint": "left_gripper_right_finger_joint",
-      "lower": 0.0,
-      "upper": 0.929592357459,
-      "model": "feetech_sts3215",
-      "bus": "feetech_serial",
-      "port": "left_gripper",
-      "provisional": true,
-      "bus_id": 4,
-      "sign": 1,
-      "reduction": 1.0,
-      "gripper": true,
-      "speed": 4.0,
-      "acceleration": 16.0,
-      "inertia": 6.556846749010761e-05
-    },
-    {
       "joint": "right_shoulder_pitch_joint",
       "lower": -2.9139009689478907,
       "upper": 3.1225680933852136,
@@ -273,6 +241,38 @@
       "speed": 12.56637061435917,
       "acceleration": 125.6637061435917,
       "inertia": 0.0026778403028602715
+    },
+    {
+      "joint": "left_gripper_left_finger_joint",
+      "lower": -0.823747683095,
+      "upper": 0.0,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "left_gripper",
+      "provisional": true,
+      "bus_id": 3,
+      "sign": 1,
+      "reduction": 1.0,
+      "gripper": true,
+      "speed": 4.0,
+      "acceleration": 16.0,
+      "inertia": 6.536337245757577e-05
+    },
+    {
+      "joint": "left_gripper_right_finger_joint",
+      "lower": 0.0,
+      "upper": 0.929592357459,
+      "model": "feetech_sts3215",
+      "bus": "feetech_serial",
+      "port": "left_gripper",
+      "provisional": true,
+      "bus_id": 4,
+      "sign": 1,
+      "reduction": 1.0,
+      "gripper": true,
+      "speed": 4.0,
+      "acceleration": 16.0,
+      "inertia": 6.556846749010761e-05
     },
     {
       "joint": "right_gripper_left_finger_joint",
@@ -404,11 +404,21 @@
     }
   ],
   "supersedes": [
-    "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54"
+    "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97",
+    "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
+    "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
+    "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
+    "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
+    "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
   ],
   "tool_chains": {
-    "adf5a8a1e6621b0300cf3b316d2caf778e2ceef9c9aab63f9f9f58cb6981ac54": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
-    "c227a86c973e3e8672c0454d8b713bcf1f62bd50d6c509e8869ac30180f167df": "1db68773ac9c088d1d2522ae93ed5630dabfbecc592d0d014dda38b5f4d4caa8"
+    "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834": "4ce2d0d469d89442a5dc4706310ac050b2cbdd68bf1f3b041a189014110db49f",
+    "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc": "1db68773ac9c088d1d2522ae93ed5630dabfbecc592d0d014dda38b5f4d4caa8"
   },
   "approach": {
     "left_gripper": {
