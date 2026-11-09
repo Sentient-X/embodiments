@@ -157,6 +157,11 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             "Sentient-X/humanoid_pkg allisa_bot, *_shoulder_pitch_joint",
         ),
         MechanicalInterface(
+            InterfaceId("sentient-allisa-fixed-shoulder-mount"),
+            "Sentient fixed shoulder motor, stop and holder seat on the chest",
+            "Sentient-X/humanoid_pkg allisa_bot, *_shoulder_mount_joint",
+        ),
+        MechanicalInterface(
             InterfaceId("sentient-allisa-wrist"),
             "Sentient corrected arm gripper seat",
             "Sentient-X/humanoid_pkg allisa_bot, *_gripper_mount_joint",

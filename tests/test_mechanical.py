@@ -58,7 +58,7 @@ def test_mixed_sources_resolve_foreign_ros_package_aliases_before_relocation() -
             for mesh in ET.fromstring(Build.of(module).urdf()).iter("mesh")
         )
     rendered = [mesh.attrib["filename"] for mesh in ET.fromstring(build.urdf()).iter("mesh")]
-    assert len(rendered) == 519
+    assert len(rendered) == 521  # the static body's two fixed shoulder mounts draw
     assert sorted(rendered) == sorted(expected)
     manifest = asset_manifest()
     for reference in rendered:

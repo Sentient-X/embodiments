@@ -235,6 +235,8 @@ PANDA_OMRON_SPEC: Final = EmbodimentDefinition(
         EmbodimentId("05db30ab443a7bd5fb9ecef055fbca2a12fcd3f244adfca6f7712c1f8a847140"),
         # Same joints and ready references; source-qualified mesh URIs only.
         EmbodimentId("deaf877f9718a58a04937177c9eed9f8f3c5397afefb303a5d14aa9febd86d6d"),
+        # The same revision as Catalog stored it at schema 15.
+        EmbodimentId("8bcee990b5aca22193fa9b1a178d09fdb7559071d519f59ee9f319e17fba0264"),
     ),
     rates=ControlRates(policy_hz=20.0),
     # Omron LD-60 chassis footprint (datasheet 699 x 500 mm); it drives on the floor

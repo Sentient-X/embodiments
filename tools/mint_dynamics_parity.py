@@ -102,8 +102,10 @@ def main() -> None:
     tree = RigidBodyTree.of(urdf)
     model = mujoco_model(urdf)
     names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, j) for j in range(model.njnt)]
-    if names != list(tree.axes) or model.nv != len(tree.axes):
-        raise SystemExit("MuJoCo's joints are not the tree's independent axes in order")
+    if sorted(names) != sorted(tree.axes) or model.nv != len(tree.axes):
+        raise SystemExit("MuJoCo's joints are not the tree's independent axes")
+    # MuJoCo numbers joints in body order; the fixture is in the tree's axis order.
+    dof = [int(model.jnt_dofadr[names.index(axis)]) for axis in tree.axes]
     data = mujoco.MjData(model)
     rng = np.random.default_rng(20261026)
 
@@ -183,9 +185,9 @@ def main() -> None:
         body = mujoco.mj_name2id(calibrated, mujoco.mjtObj.mjOBJ_BODY, item.link)
         write_inertia(calibrated, body, np.array([item.mass, *item.first_moment, *item.inertia]))
     for item in calibration.joints:
-        dof = calibrated.jnt_dofadr[tree.axes.index(item.joint)]
-        calibrated.dof_armature[dof] = item.armature
-        calibrated.dof_damping[dof] = item.viscous
+        at = dof[tree.axes.index(item.joint)]
+        calibrated.dof_armature[at] = item.armature
+        calibrated.dof_damping[at] = item.viscous
     calibrated_data = mujoco.MjData(calibrated)
     coulomb = np.zeros(len(tree.axes))
     for item in calibration.joints:
@@ -210,12 +212,14 @@ def main() -> None:
         q = rng.uniform(-math.pi, math.pi, model.nv)
         qd = rng.uniform(-3.0, 3.0, model.nv)
         qdd = rng.uniform(-10.0, 10.0, model.nv)
-        data.qpos[:], data.qvel[:], data.qacc[:] = q, qd, qdd
+        data.qpos[dof], data.qvel[dof], data.qacc[dof] = q, qd, qdd
         mujoco.mj_inverse(model, data)
-        design = data.qfrc_inverse.copy()
-        calibrated_data.qpos[:], calibrated_data.qvel[:], calibrated_data.qacc[:] = q, qd, qdd
+        design = data.qfrc_inverse[dof].copy()
+        calibrated_data.qpos[dof] = q
+        calibrated_data.qvel[dof] = qd
+        calibrated_data.qacc[dof] = qdd
         mujoco.mj_inverse(calibrated, calibrated_data)
-        rubbed = calibrated_data.qfrc_inverse + coulomb * np.tanh(qd / STICTION)
+        rubbed = calibrated_data.qfrc_inverse[dof] + coulomb * np.tanh(qd / STICTION)
         worst_python = max(
             worst_python,
             float(np.max(np.abs(tree.inverse(tree.parameters(), q, qd, qdd) - design))),
