@@ -2317,13 +2317,17 @@ fn a_rail_over_the_supported_supply_derates_its_axes_until_one_in_range_is_recor
     assert!(body.derated().is_empty());
     let governed = Governor::new(body, limits.clone()).expect("limits");
     // Every axis at the speed asked; no derate's 1.5 rad/s² (each its gains' ceiling).
-    assert!(
-        governed
-            .limits()
-            .iter()
-            .all(|limit| (limit.max_speed - 0.5).abs() < 1e-12
-                && limit.max_acceleration.is_some_and(|a| a > 1.5))
-    );
+    // The torso's own ceiling (its gains over the arms and shoulder mounts it carries, 1.60
+    // kg m² since the mounts of 2026-11-08) is 0.4997 rad/s, a hair under the 0.5 asked.
+    for (axis, limit) in governed.axes().iter().zip(governed.limits()) {
+        assert!(
+            limit.max_speed <= 0.5 + 1e-12
+                && limit.max_speed > 0.499
+                && limit.max_acceleration.is_some_and(|a| a > 1.5),
+            "{}: {limit:?}",
+            axis.joint
+        );
+    }
 }
 
 #[test]

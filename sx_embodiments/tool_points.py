@@ -12,7 +12,8 @@ pack's check names the chain of the revision the robot is assigned (the bindings
 
 A check is of the body design's tool points as they hang off its root: it names the links it
 checked and the digest of the kinematic chain from the description's root to each of them
-(:func:`tool_chain`: every joint on the path, its type, origin, axis and mimic, and the grip of
+(:func:`tool_chain`: every joint on the path, its type, origin, axis and mimic, a fixed joint
+composed into the joint after it, and the grip of
 the tool each point rides with, its grasp point, approach and closing line). A render pack
 fills ``tcp_frames`` only while both still match, so a revision that moves a tool point, any
 joint on its chain or where its jaws close (a finger's collision geometry) asks for a new check,
@@ -103,6 +104,30 @@ def _joint(joint: Joint) -> JsonValue:
     }
 
 
+def _placed(path: list[Joint]) -> list[JsonValue]:
+    """The path's joints as they place the tool point: each fixed joint before another joint
+    composed into that one's origin, which then hangs from the fixed run's first parent. A
+    fixed link inserted on the path that leaves every joint below it where it was (the static
+    upper body's shoulder mounts, 2026-11-08) changes nothing here; one that moves them does."""
+    from dataclasses import replace
+
+    from .kinematics import JointType, compose
+
+    out: list[JsonValue] = []
+    pending: Joint | None = None
+    for index, joint in enumerate(path):
+        if pending is not None:
+            joint = replace(
+                joint, parent=pending.parent, origin=compose(pending.origin, joint.origin)
+            )
+        if joint.type is JointType.FIXED and index + 1 < len(path):
+            pending = joint
+            continue
+        pending = None
+        out.append(_joint(joint))
+    return out
+
+
 def tool_chain(urdf: bytes, points: Mapping[str, str], grips: Mapping[str, JsonValue]) -> str:
     """The digest of the kinematic chain from ``urdf``'s root to each tool point in ``points``.
 
@@ -127,7 +152,7 @@ def tool_chain(urdf: bytes, points: Mapping[str, str], grips: Mapping[str, JsonV
         while (above := kinematics.parent_joint.get(root)) is not None:
             root = kinematics.joints[above].parent
         _, down = kinematics.path(root, link)
-        joints: list[JsonValue] = [_joint(joint) for joint in down]
+        joints = _placed(down)
         # The tool: the joints below the link the tool point hangs from, other than the path.
         mount = down[-1].parent if down else root
         on_path = {joint.name for joint in down}

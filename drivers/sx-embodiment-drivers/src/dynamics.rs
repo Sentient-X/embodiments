@@ -438,6 +438,80 @@ pub struct Dynamics {
     leader: Vec<Option<usize>>,
 }
 
+/// The moving joints from the root down to `joint` (which ends it, moving or not), each with its
+/// placement on the moving joint above it: the fixed joints between them composed into it.
+fn moving_path(tree: &Tree, joint: usize) -> Vec<(usize, Transform)> {
+    let above = |link: usize| tree.joints.iter().position(|j| j.child == link);
+    let mut up = vec![joint];
+    let mut at = joint;
+    while let Some(next) = above(tree.joints[at].parent) {
+        up.push(next);
+        at = next;
+    }
+    let mut out: Vec<(usize, Transform)> = Vec::new();
+    let mut placed: Option<Transform> = None;
+    for &index in up.iter().rev() {
+        let step = &tree.joints[index];
+        let at = placed.map_or(step.origin, |p| compose(&p, &step.origin));
+        if step.kind == JointType::Fixed && index != joint {
+            placed = Some(at);
+        } else {
+            out.push((index, at));
+            placed = None;
+        }
+    }
+    out
+}
+
+/// Whether what `joint` carries in `new` is what `theirs` carries in `old`, link by link and
+/// joint by joint, by name, to the bit.
+fn carries_the_same(new: &Tree, old: &Tree, joint: usize, theirs: usize) -> bool {
+    let bits = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+    let same_joint = |a: &TreeJoint, b: &TreeJoint| {
+        a.kind == b.kind
+            && bits(&a.axis, &b.axis)
+            && a.leader == b.leader
+            && a.multiplier.to_bits() == b.multiplier.to_bits()
+            && a.offset.to_bits() == b.offset.to_bits()
+            && bits(&a.origin, &b.origin)
+    };
+    let children = |tree: &Tree, at: usize| -> Vec<usize> {
+        tree.joints
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.parent == at)
+            .map(|(index, _)| index)
+            .collect()
+    };
+    let mut below = vec![(new.joints[joint].child, old.joints[theirs].child)];
+    while let Some((link, earlier_link)) = below.pop() {
+        if new.links()[link] != old.links()[earlier_link]
+            || new.inertials[link] != old.inertials[earlier_link]
+        {
+            return false;
+        }
+        let (mine, them) = (children(new, link), children(old, earlier_link));
+        if mine.len() != them.len() {
+            return false;
+        }
+        for index in mine {
+            let name = &new.links()[new.joints[index].child];
+            let Some(other) = them
+                .iter()
+                .copied()
+                .find(|&other| &old.links()[old.joints[other].child] == name)
+            else {
+                return false;
+            };
+            if !same_joint(&new.joints[index], &old.joints[other]) {
+                return false;
+            }
+            below.push((new.joints[index].child, old.joints[other].child));
+        }
+    }
+    true
+}
+
 /// Where the default stiction speed sits when no calibration chose one; it only matters once
 /// a calibration supplies Coulomb friction, which then also supplies its own.
 const DEFAULT_STICTION_VELOCITY: f64 = 0.02;
@@ -555,30 +629,6 @@ impl Dynamics {
                 }
             }
         }
-        // The moving joints from the root down to `joint` (which ends it, moving or not), each
-        // with its placement on the moving joint above it: the fixed joints between them
-        // composed into it.
-        let path = |tree: &Tree, joint: usize| -> Vec<(usize, Transform)> {
-            let mut up = vec![joint];
-            let mut at = joint;
-            while let Some(next) = above(tree, tree.joints[at].parent) {
-                up.push(next);
-                at = next;
-            }
-            let mut out: Vec<(usize, Transform)> = Vec::new();
-            let mut placed: Option<Transform> = None;
-            for &index in up.iter().rev() {
-                let step = &tree.joints[index];
-                let at = placed.map_or(step.origin, |p| compose(&p, &step.origin));
-                if step.kind == JointType::Fixed && index != joint {
-                    placed = Some(at);
-                } else {
-                    out.push((index, at));
-                    placed = None;
-                }
-            }
-            out
-        };
         for joint in fitted {
             let child = &new.links()[new.joints[joint].child];
             let Some(theirs) = named(old, child).and_then(|link| above(old, link)) else {
@@ -587,50 +637,21 @@ impl Dynamics {
             if new.root() != old.root() {
                 return false;
             }
-            let (mine, earlier) = (path(new, joint), path(old, theirs));
+            let (mine, earlier) = (moving_path(new, joint), moving_path(old, theirs));
             if mine.len() != earlier.len()
                 || !mine.iter().zip(&earlier).all(|((a, at_a), (b, at_b))| {
                     moves_alike(&new.joints[*a], &old.joints[*b])
                         && new.links()[new.joints[*a].child] == old.links()[old.joints[*b].child]
-                        && at_a.iter().zip(at_b).all(|(x, y)| (x - y).abs() <= PLACEMENT_EPSILON)
+                        && at_a
+                            .iter()
+                            .zip(at_b)
+                            .all(|(x, y)| (x - y).abs() <= PLACEMENT_EPSILON)
                 })
             {
                 return false;
             }
-            // Everything it carries, link by link and joint by joint.
-            let mut below = vec![(new.joints[joint].child, old.joints[theirs].child)];
-            while let Some((link, earlier_link)) = below.pop() {
-                if new.links()[link] != old.links()[earlier_link]
-                    || new.inertials[link] != old.inertials[earlier_link]
-                {
-                    return false;
-                }
-                let children = |tree: &Tree, at: usize| -> Vec<usize> {
-                    tree.joints
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, j)| j.parent == at)
-                        .map(|(index, _)| index)
-                        .collect()
-                };
-                let (mine, theirs) = (children(new, link), children(old, earlier_link));
-                if mine.len() != theirs.len() {
-                    return false;
-                }
-                for index in mine {
-                    let name = &new.links()[new.joints[index].child];
-                    let Some(other) = theirs
-                        .iter()
-                        .copied()
-                        .find(|&other| &old.links()[old.joints[other].child] == name)
-                    else {
-                        return false;
-                    };
-                    if !same_joint(&new.joints[index], &old.joints[other]) {
-                        return false;
-                    }
-                    below.push((new.joints[index].child, old.joints[other].child));
-                }
+            if !carries_the_same(new, old, joint, theirs) {
+                return false;
             }
         }
         true
