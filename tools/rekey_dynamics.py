@@ -11,11 +11,13 @@ changes only
   finite positive number), or
 * links outside every identified joint's reach: no document identifies the link, no joint a
   document identifies lies between the root and it (a changed joint counts as a change to its
-  child), and no joint above an identified one moves. The torque at an identified joint
-  depends only on the links it carries and the joints above it, so a fit of the arms keeps
-  when the neck's camera mount is corrected. ``Dynamics::superseding`` applies the same rule
-  at the station, so a calibration keyed to an earlier description the package keeps
-  (``_by_digest``) needs no re-key; this tool moves the repository's own documents.
+  child), and no joint above an identified one moves. A fixed link inserted above an
+  identified joint that leaves it where it was is no move: the moving joints above it are the
+  same and so is where each sits on the next, fixed joints composed in. The torque at an
+  identified joint depends only on the links it carries and the joints above it, so a fit of
+  the arms keeps when the neck's camera mount is corrected. ``Dynamics::superseding`` applies
+  the same rule at the station, so a calibration keyed to an earlier description the package
+  keeps (``_by_digest``) needs no re-key; this tool moves the repository's own documents.
 
 Anything else is refused, and the calibration must be identified again.
 
@@ -98,62 +100,172 @@ def _identified(node: object) -> tuple[set[str], set[str]]:
     return links, joints
 
 
-def _parts(path: Path) -> tuple[dict[str, bytes], dict[str, bytes], dict[str, tuple[str, str]]]:
-    """Each link's and joint's element (velocity and effort dropped), and each joint's parent
-    and child link."""
-    root = ET.fromstring(_without_unread(path))
-    links = {link.get("name", ""): ET.tostring(link) for link in root.findall("link")}
-    joints: dict[str, bytes] = {}
-    tree: dict[str, tuple[str, str]] = {}
-    for joint in root.findall("joint"):
-        name = joint.get("name", "")
-        joints[name] = ET.tostring(joint)
-        parent, child = joint.find("parent"), joint.find("child")
-        if parent is None or child is None:
-            raise RekeyError(f"{path}: joint {name} names no parent or child")
-        tree[name] = (parent.get("link", ""), child.get("link", ""))
-    return links, joints, tree
+#: How far two placements of one joint may differ, per transform entry, and still be one: a
+#: fixed joint composed into the next moves the last bits, never a millimetre.
+PLACEMENT_EPSILON = 1e-12
+
+Matrix = tuple[tuple[float, ...], ...]
+
+
+class _Description:
+    """One description's links and joints (velocity and effort dropped), by name."""
+
+    def __init__(self, path: Path) -> None:
+        root = ET.fromstring(_without_unread(path))
+        self.file = path
+        self.links = {link.get("name", ""): link for link in root.findall("link")}
+        self.joints = {joint.get("name", ""): joint for joint in root.findall("joint")}
+        self.tree: dict[str, tuple[str, str]] = {}
+        for name, joint in self.joints.items():
+            parent, child = joint.find("parent"), joint.find("child")
+            if parent is None or child is None:
+                raise RekeyError(f"{path}: joint {name} names no parent or child")
+            self.tree[name] = (parent.get("link", ""), child.get("link", ""))
+        self.above = {child: joint for joint, (_, child) in self.tree.items()}
+
+    def kind(self, joint: str) -> str:
+        return self.joints[joint].get("type", "")
+
+    def moves(self, joint: str) -> bytes:
+        """The joint as it moves, without where it sits: its element less origin and parent."""
+        element = ET.fromstring(ET.tostring(self.joints[joint]))
+        for tag in ("origin", "parent"):
+            for found in element.findall(tag):
+                element.remove(found)
+        return ET.tostring(element)
+
+    def placement(self, joint: str) -> Matrix:
+        origin = self.joints[joint].find("origin")
+        xyz = _floats(origin.get("xyz") if origin is not None else None)
+        rpy = _floats(origin.get("rpy") if origin is not None else None)
+        return _transform(xyz, rpy)
+
+    def path(self, joint: str) -> list[tuple[str, Matrix]]:
+        """The moving joints from the root down to ``joint`` (which ends it, moving or not),
+        each with its placement on the moving joint above it, fixed joints composed in."""
+        up = [joint]
+        while (parent := self.tree[up[-1]][0]) in self.above:
+            up.append(self.above[parent])
+        out: list[tuple[str, Matrix]] = []
+        placed: Matrix | None = None
+        for name in reversed(up):
+            at = self.placement(name) if placed is None else _compose(placed, self.placement(name))
+            if self.kind(name) == "fixed" and name != joint:
+                placed = at
+            else:
+                out.append((name, at))
+                placed = None
+        return out
+
+
+def _floats(text: str | None) -> tuple[float, float, float]:
+    values = [float(value) for value in (text or "0 0 0").split()]
+    if len(values) != 3:
+        raise RekeyError(f"an origin {text!r} is not three numbers")
+    return values[0], values[1], values[2]
+
+
+def _transform(xyz: tuple[float, float, float], rpy: tuple[float, float, float]) -> Matrix:
+    """A URDF origin: translation, then fixed-axis roll, pitch, yaw."""
+    (cr, sr), (cp, sp), (cy, sy) = ((math.cos(a), math.sin(a)) for a in rpy)
+    return (
+        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, xyz[0]),
+        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, xyz[1]),
+        (-sp, cp * sr, cp * cr, xyz[2]),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
+def _compose(a: Matrix, b: Matrix) -> Matrix:
+    return tuple(
+        tuple(sum(a[row][k] * b[k][column] for k in range(4)) for column in range(4))
+        for row in range(4)
+    )
+
+
+def _same_place(a: Matrix, b: Matrix) -> bool:
+    return all(
+        abs(x - y) <= PLACEMENT_EPSILON
+        for row_a, row_b in zip(a, b, strict=True)
+        for x, y in zip(row_a, row_b, strict=True)
+    )
 
 
 def check_rekeyable(old: Path, new: Path, identified: tuple[set[str], set[str]]) -> None:
     """Refuse two descriptions whose difference reaches an identified link or joint (see the
-    module), and a new one whose velocity or effort limits are not finite positive numbers."""
+    module), and a new one whose velocity or effort limits are not finite positive numbers.
+
+    For each identified joint (and the joint above each identified link) the links and joints
+    it carries must be the same, by name and element, and so must the moving joints between
+    the root and it and where each sits on the one above: a fixed link inserted above it that
+    leaves it in place (the static upper body's shoulder mounts) reaches no fit. Anything else
+    may differ."""
     _limits_are_numbers(new)
     if _without_unread(old) == _without_unread(new):
         return
     links, joints = identified
-    old_links, old_joints, tree = _parts(old)
-    new_links, new_joints, new_tree = _parts(new)
-    if set(old_links) != set(new_links) or tree != new_tree:
-        raise RekeyError(f"{new} has other links or joints than {old}: identify again")
-    changed = {name for name in old_links if old_links[name] != new_links[name]}
-    moved = {name for name in old_joints if old_joints[name] != new_joints[name]}
-    parent_joint = {child: joint for joint, (_, child) in tree.items()}
-    for name in moved:
-        if name in joints:
-            raise RekeyError(f"{new} changes identified joint {name}: identify again")
-        changed.add(tree[name][1])
-    # Nor may a joint between the root and an identified joint move: it turns gravity.
-    for joint in sorted(joints & set(tree)):
-        at = tree[joint][0]
-        while at in parent_joint:
-            if parent_joint[at] in moved:
-                raise RekeyError(
-                    f"{new} moves {parent_joint[at]}, above identified joint {joint}: "
-                    "identify again"
-                )
-            at = tree[parent_joint[at]][0]
-    for link in sorted(changed):
-        if link in links:
-            raise RekeyError(f"{new} changes identified link {link}: identify again")
-        at = link
-        while at in parent_joint:
-            joint = parent_joint[at]
-            if joint in joints:
+    before, after = _Description(old), _Description(new)
+    fitted = {joint for joint in joints if joint in after.tree}
+    for link in links:
+        if link not in after.links:
+            raise RekeyError(f"{new} has no identified link {link}: identify again")
+        if link not in after.above:
+            raise RekeyError(
+                f"{new} changes the root link {link}, which carries all: identify again"
+            )
+        fitted.add(after.above[link])
+    if joints - set(after.tree):
+        raise RekeyError(f"{new} has no identified joint {sorted(joints - set(after.tree))}")
+    for joint in sorted(fitted):
+        child = after.tree[joint][1]
+        if child not in before.above:
+            raise RekeyError(f"{new} has other links or joints than {old}: identify again")
+        earlier = before.above[child]
+        mine, theirs = after.path(joint), before.path(earlier)
+        if len(mine) != len(theirs):
+            raise RekeyError(
+                f"{new} moves the joints above identified joint {joint}: identify again"
+            )
+        for (name, placed), (other, was) in zip(mine, theirs, strict=True):
+            same = (
+                after.tree[name][1] == before.tree[other][1]
+                and after.moves(name) == before.moves(other)
+                and _same_place(placed, was)
+            )
+            if same:
+                continue
+            if name == joint and joint in joints:
+                raise RekeyError(f"{new} changes identified joint {joint}: identify again")
+            if name == joint:
+                raise RekeyError(f"{new} changes identified link {child}: identify again")
+            raise RekeyError(f"{new} moves {name}, above identified joint {joint}: identify again")
+        # Everything it carries, by name and element.
+        below = [child]
+        while below:
+            link = below.pop()
+            if link not in before.links or ET.tostring(after.links[link]) != ET.tostring(
+                before.links[link]
+            ):
+                if link in links:
+                    raise RekeyError(f"{new} changes identified link {link}: identify again")
                 raise RekeyError(
                     f"{new} changes {link}, which identified joint {joint} carries: identify again"
                 )
-            at = tree[joint][0]
+            mine_below = {n for n, (parent, _) in after.tree.items() if parent == link}
+            theirs_below = {n for n, (parent, _) in before.tree.items() if parent == link}
+            for name in sorted(mine_below | theirs_below):
+                if (
+                    name not in mine_below
+                    or name not in theirs_below
+                    or ET.tostring(after.joints[name]) != ET.tostring(before.joints[name])
+                ):
+                    if name in joints:
+                        raise RekeyError(f"{new} changes identified joint {name}: identify again")
+                    raise RekeyError(
+                        f"{new} changes {name}, which identified joint {joint} carries: "
+                        "identify again"
+                    )
+                below.append(after.tree[name][1])
 
 
 def check_only_velocity(old: Path, new: Path) -> None:

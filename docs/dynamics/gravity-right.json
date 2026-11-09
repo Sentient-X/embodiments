@@ -1,6 +1,6 @@
 {
  "schema": "sx.dynamics-identification-plan/v1",
- "description_sha256": "f6c3b37ffb70d06ad5bc3077137e354d63b01c12aa93eb52a3902bfe538cc934",
+ "description_sha256": "11fa1ead5302c9f99a2c7a9c83e6d4f193ffe6a93de742d093f75431f3153c76",
  "speed_rad_s": 0.25,
  "acceleration_rad_s2": 1.0,
  "holds": {

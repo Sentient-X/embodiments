@@ -50,7 +50,6 @@ _ALL_SPECS: Final[tuple[EmbodimentDefinition, ...]] = (
     UR10E_SPEC,
     UR5E_SPEC,
     YOR_SPEC,
-    SENTIENT_HUMANOID_SPEC,
     SENTIENT_HUMANOID_UPPER_BODY_SPEC,
     PANDA_OMRON_SPEC,
     FRANKA_SPEC,
@@ -80,6 +79,10 @@ class DevelopmentEmbodiment:
 
 
 DEVELOPMENT_EMBODIMENTS: Final[Mapping[EmbodimentName, DevelopmentEmbodiment]] = {
+    SENTIENT_HUMANOID_SPEC.name: DevelopmentEmbodiment(
+        spec=SENTIENT_HUMANOID_SPEC,
+        reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,
+    ),
     STARARM102_SPEC.name: DevelopmentEmbodiment(
         spec=STARARM102_SPEC,
         reason=DevelopmentReason.MISSING_AUTHORITATIVE_DESCRIPTION,

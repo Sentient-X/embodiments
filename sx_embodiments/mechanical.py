@@ -29,12 +29,13 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, NewType
 
 from sx_contracts import ComponentId
 
 from .assembly import Assembly, Frame, Member, MountJoint, Pose, Subtree, namespaced
-from .assets import PackagedAsset
+from .assets import PackagedAsset, description_asset_uri
 from .compose import Component, MountedOn, RootMount
 from .errors import CompositionError, InterfaceMismatchError, SocketError
 from .sites import BodySite
@@ -151,6 +152,26 @@ MECHANICAL_INTERFACES: Final[Mapping[InterfaceId, MechanicalInterface]] = {
             "TheRobotStudio/SO-ARM100 SO-101 base, the plate the arm is clamped or screwed by",
         ),
         MechanicalInterface(
+            InterfaceId("sentient-allisa-shoulder"),
+            "Sentient corrected arm shoulder seat",
+            "Sentient-X/humanoid_pkg allisa_bot, *_shoulder_pitch_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("sentient-allisa-fixed-shoulder-mount"),
+            "Sentient fixed shoulder motor, stop and holder seat on the chest",
+            "Sentient-X/humanoid_pkg allisa_bot, *_shoulder_mount_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("sentient-allisa-wrist"),
+            "Sentient corrected arm gripper seat",
+            "Sentient-X/humanoid_pkg allisa_bot, *_gripper_mount_joint",
+        ),
+        MechanicalInterface(
+            InterfaceId("sentient-allisa-neck"),
+            "Sentient corrected SO-101 neck seat",
+            "Sentient-X/humanoid_pkg allisa_bot, so101_mount_joint",
+        ),
+        MechanicalInterface(
             InterfaceId("sentient-humanoid-wrist"),
             "Sentient humanoid wrist, the wrist-yaw link's frame",
             "Sentient-X/humanoid_pkg urdf_robot_acc, *_wrist_yaw_link",
@@ -219,11 +240,23 @@ class Socket:
 
 @dataclass(frozen=True, slots=True)
 class Slot:
-    """Where, in a module's component order, the components of the module fitted on ``socket``
-    go. Without one they follow the module's own, in socket order; with one, a vendor's state
-    order (left arm, left gripper, right arm, right gripper) stays the vendor's."""
+    """Where, in a module's component order, the components of the module fitted or mated on
+    ``socket`` go. Without one they follow the module's own, in socket order (a mated module's,
+    in mate order); with one, a vendor's state order (left arm, left gripper, right arm, right
+    gripper) stays the vendor's.
+
+    ``socket`` may be a path into what sits on a socket (``left_shoulder/arm/wrist``): that
+    module's components go here instead of after their carrier's. A body whose buses span
+    modules keeps each bus's axes together this way while every module stays whole: the static
+    upper body's arms share one CAN bus and its grippers have their own, so its state order is
+    both arms, then both grippers. A path's first socket is slotted on its own as well.
+    """
 
     socket: str
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        return tuple(self.socket.split("/"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,10 +290,22 @@ class Module:
         names = [socket.name for socket in self.sockets]
         if len(set(names)) != len(names):
             raise SocketError(str(self.module_id), "socket names must be unique")
-        slotted = [entry.socket for entry in self.components if isinstance(entry, Slot)]
-        fitted = {socket.name for socket in self.sockets if socket.fitted is not None}
-        if len(set(slotted)) != len(slotted) or not set(slotted) <= fitted:
-            raise SocketError(str(self.module_id), "a slot names each fitted socket at most once")
+        paths = [entry.path for entry in self.components if isinstance(entry, Slot)]
+        if len(set(paths)) != len(paths) or not {path[0] for path in paths} <= set(names):
+            raise SocketError(str(self.module_id), "a slot names each of its sockets at most once")
+        for path in paths:
+            if len(path) > 1 and path[:1] not in paths:
+                raise SocketError(
+                    str(self.module_id), f"slot {'/'.join(path)!r} needs {path[0]!r} slotted too"
+                )
+            module = self
+            for name in path[:-1]:
+                fitted = module.socket(name).fitted
+                if fitted is None:
+                    break
+                module = fitted
+            else:
+                module.socket(path[-1])
         instances = {entry.instance for entry in self.components if not isinstance(entry, Slot)}
         if len({site.name for site in self.sites}) != len(self.sites):
             raise CompositionError(str(self.module_id), "body site names must be unique")
@@ -434,11 +479,21 @@ class Build:
     ) -> Assembly:
         """The rendering: placed modules, then mates, each on its socket's link and pose.
 
-        ``mesh_uri`` gives each module's mesh-reference rewrite, for bytes that will not sit
-        beside their sources (a runtime composition); the registry's sit beside them.
+        ``mesh_uri`` gives each module's mesh-reference rewrite. Mixed-source builds resolve
+        references in their original source context by default; runtime compositions also
+        resolve single-source builds because their output can live in another directory.
         """
         if self.root is None or self.robot is None:
             raise CompositionError(str(self.robot), "a build without a root renders no assembly")
+        # A multi-source build has no single directory for relative mesh references.
+        # Keep single-source renderings stable; resolve mixed sources through their owner.
+        directories = {
+            str(PurePosixPath(file.relpath).parent)
+            for entry in (*self.placed, *self.mates)
+            if isinstance(file := source(entry.module.description), PackagedAsset)
+        }
+        if mesh_uri is None and len(directories) > 1:
+            mesh_uri = source_mesh_uri
         prefixes: dict[str, str] = {}
         members: list[Member] = []
         modules: dict[str, Module] = {}
@@ -540,6 +595,8 @@ class Build:
         modules: dict[str, Module] = {}
         prefixes: dict[str, str] = {}
         carriers: dict[str, str | None] = {}
+        seats: dict[str, tuple[str, str] | None] = {}
+        on: dict[tuple[str, str], str] = {}
         for entry in self.placed:
             prefix = entry.name + self.separator if entry.namespaced and self.root else ""
             modules[entry.name], prefixes[entry.name], carriers[entry.name] = (
@@ -547,7 +604,7 @@ class Build:
                 prefix,
                 None,
             )
-            out.extend(_carried(entry.module, self._opened(entry.name), prefix, None, None))
+            seats[entry.name] = None
         for mate in self.mates:
             socket = modules[mate.host].socket(mate.socket)
             host = prefixes[mate.host]
@@ -556,7 +613,7 @@ class Build:
             rides = carriers[mate.host] if socket.carrier is None else host + socket.carrier
             prefix = mate.name + self.separator if mate.namespaced else ""
             cut = mate.module.description
-            seat = (
+            seats[mate.name] = (
                 (cut.mount_link, host + socket.link)
                 if not mate.namespaced and isinstance(cut, Subtree) and cut.mount_link is not None
                 else None
@@ -566,8 +623,45 @@ class Build:
                 prefix,
                 rides,
             )
-            out.extend(_carried(mate.module, self._opened(mate.name), prefix, rides, seat))
+            on[(mate.host, mate.socket)] = mate.name
+        # A member goes where its host slots it, else in build order.
+        emitted: set[str] = set()
+
+        def member(
+            name: str, path: tuple[str, ...], taken: frozenset[tuple[str, ...]]
+        ) -> list[Component]:
+            def mated(
+                socket: str, rest: tuple[str, ...], below: frozenset[tuple[str, ...]]
+            ) -> list[Component]:
+                return member(on[(name, socket)], rest, below)
+
+            opened = self._opened(name)
+            if path:
+                return _at(
+                    modules[name], path, opened, prefixes[name], carriers[name], taken, mated
+                )
+            emitted.add(name)
+            return _carried(
+                modules[name], opened, prefixes[name], carriers[name], seats[name], taken, mated
+            )
+
+        for name in (*(entry.name for entry in self.placed), *(mate.name for mate in self.mates)):
+            if name not in emitted:
+                out.extend(member(name, (), frozenset()))
         return tuple(out)
+
+
+def source_mesh_uri(module: Module) -> Callable[[str], str] | None:
+    """Resolve every mesh reference in the module's original description context."""
+    file = source(module.description)
+    if not isinstance(file, PackagedAsset):
+        return None
+    return lambda reference: description_asset_uri(file.provenanced_asset().uri, reference)
+
+
+#: What a member mated on one of its sockets carries, following a path into it, leaving out
+#: the paths taken elsewhere; ``None`` outside a build.
+Mated = Callable[[str, tuple[str, ...], frozenset[tuple[str, ...]]], list[Component]] | None
 
 
 def _carried(
@@ -576,17 +670,28 @@ def _carried(
     prefix: str,
     rides: str | None,
     seat: tuple[str, str] | None,
+    taken: frozenset[tuple[str, ...]] = frozenset(),
+    mated: Mated = None,
 ) -> list[Component]:
     """A module's own components and its fitted modules', in its declared order, namespaced.
 
     ``rides`` is the component a root-mounted one rides on; ``seat`` renames the module's root
-    link (its own name) to the link it sits on (a rendered name).
+    link (its own name) to the link it sits on (a rendered name). ``taken`` are socket paths a
+    module carrying this one slots elsewhere, left out here; ``mated`` gives what sits on an
+    opened socket a :class:`Slot` names.
     """
+    paths = [entry.path for entry in module.components if isinstance(entry, Slot)]
+    elsewhere = taken | {path for path in paths if len(path) > 1}
+
+    def below(path: tuple[str, ...]) -> frozenset[tuple[str, ...]]:
+        n = len(path)
+        return frozenset(other[n:] for other in elsewhere if other[:n] == path and len(other) > n)
+
     out: list[Component] = []
-    slotted = {entry.socket for entry in module.components if isinstance(entry, Slot)}
     for entry in module.components:
         if isinstance(entry, Slot):
-            out.extend(_fitted(module.socket(entry.socket), opened, prefix, rides))
+            if entry.path not in taken:
+                out.extend(_at(module, entry.path, opened, prefix, rides, below(entry.path), mated))
             continue
         component = namespaced(entry, prefix, prefix)
         if seat is not None and component.mount.frame == prefix + seat[0]:
@@ -595,23 +700,38 @@ def _carried(
             component = replace(component, mount=MountedOn(rides, component.mount.frame))
         out.append(component)
     for socket in module.sockets:
-        if socket.name not in slotted:
-            out.extend(_fitted(socket, opened, prefix, rides))
+        path = (socket.name,)
+        if path not in paths and path not in taken and socket.name not in opened:
+            out.extend(_at(module, path, opened, prefix, rides, below(path), None))
     return out
 
 
-def _fitted(
-    socket: Socket, opened: frozenset[str], prefix: str, host: str | None
+def _at(
+    module: Module,
+    path: tuple[str, ...],
+    opened: frozenset[str],
+    prefix: str,
+    host: str | None,
+    taken: frozenset[tuple[str, ...]],
+    mated: Mated,
 ) -> list[Component]:
-    """What the module fitted on ``socket`` carries, in the host's names, riding on the socket's
-    carrier or else on the host's own; nothing when the socket is opened for a mate."""
+    """What sits at ``path`` from ``module``, in the host's names, riding on each socket's
+    carrier or else on the host's own: a fitted module's components, or through ``mated`` a
+    mated one's; nothing on an opened socket outside a build."""
+    socket = module.socket(path[0])
+    if socket.name in opened:
+        return [] if mated is None else mated(socket.name, path[1:], taken)
     fitted = socket.fitted
-    if fitted is None or socket.name in opened:
+    if fitted is None:
         return []
     cut = fitted.description
     assert isinstance(cut, Subtree) and cut.mount_link is not None
     rides = host if socket.carrier is None else prefix + socket.carrier
-    return _carried(fitted, frozenset(), prefix, rides, (cut.mount_link, prefix + socket.link))
+    if len(path) > 1:
+        return _at(fitted, path[1:], frozenset(), prefix, rides, taken, None)
+    return _carried(
+        fitted, frozenset(), prefix, rides, (cut.mount_link, prefix + socket.link), taken
+    )
 
 
 def _sites(

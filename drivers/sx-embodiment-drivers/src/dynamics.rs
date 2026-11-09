@@ -24,7 +24,9 @@
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::kinematics::{JointType, PlacementError, Transform, Tree, about, along, compose};
+use crate::kinematics::{
+    JointType, PlacementError, Transform, Tree, TreeJoint, about, along, compose,
+};
 
 /// Standard gravity, m/s².
 pub const STANDARD_GRAVITY: f64 = 9.806_65;
@@ -436,9 +438,87 @@ pub struct Dynamics {
     leader: Vec<Option<usize>>,
 }
 
+/// The moving joints from the root down to `joint` (which ends it, moving or not), each with its
+/// placement on the moving joint above it: the fixed joints between them composed into it.
+fn moving_path(tree: &Tree, joint: usize) -> Vec<(usize, Transform)> {
+    let above = |link: usize| tree.joints.iter().position(|j| j.child == link);
+    let mut up = vec![joint];
+    let mut at = joint;
+    while let Some(next) = above(tree.joints[at].parent) {
+        up.push(next);
+        at = next;
+    }
+    let mut out: Vec<(usize, Transform)> = Vec::new();
+    let mut placed: Option<Transform> = None;
+    for &index in up.iter().rev() {
+        let step = &tree.joints[index];
+        let at = placed.map_or(step.origin, |p| compose(&p, &step.origin));
+        if step.kind == JointType::Fixed && index != joint {
+            placed = Some(at);
+        } else {
+            out.push((index, at));
+            placed = None;
+        }
+    }
+    out
+}
+
+/// Whether what `joint` carries in `new` is what `theirs` carries in `old`, link by link and
+/// joint by joint, by name, to the bit.
+fn carries_the_same(new: &Tree, old: &Tree, joint: usize, theirs: usize) -> bool {
+    let bits = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+    let same_joint = |a: &TreeJoint, b: &TreeJoint| {
+        a.kind == b.kind
+            && bits(&a.axis, &b.axis)
+            && a.leader == b.leader
+            && a.multiplier.to_bits() == b.multiplier.to_bits()
+            && a.offset.to_bits() == b.offset.to_bits()
+            && bits(&a.origin, &b.origin)
+    };
+    let children = |tree: &Tree, at: usize| -> Vec<usize> {
+        tree.joints
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.parent == at)
+            .map(|(index, _)| index)
+            .collect()
+    };
+    let mut below = vec![(new.joints[joint].child, old.joints[theirs].child)];
+    while let Some((link, earlier_link)) = below.pop() {
+        if new.links()[link] != old.links()[earlier_link]
+            || new.inertials[link] != old.inertials[earlier_link]
+        {
+            return false;
+        }
+        let (mine, them) = (children(new, link), children(old, earlier_link));
+        if mine.len() != them.len() {
+            return false;
+        }
+        for index in mine {
+            let name = &new.links()[new.joints[index].child];
+            let Some(other) = them
+                .iter()
+                .copied()
+                .find(|&other| &old.links()[old.joints[other].child] == name)
+            else {
+                return false;
+            };
+            if !same_joint(&new.joints[index], &old.joints[other]) {
+                return false;
+            }
+            below.push((new.joints[index].child, old.joints[other].child));
+        }
+    }
+    true
+}
+
 /// Where the default stiction speed sits when no calibration chose one; it only matters once
 /// a calibration supplies Coulomb friction, which then also supplies its own.
 const DEFAULT_STICTION_VELOCITY: f64 = 0.02;
+
+/// How far two placements of one moving joint may differ, per transform entry, and still be one
+/// placement: composing a fixed joint into the next moves its last bits, never a millimetre.
+const PLACEMENT_EPSILON: f64 = 1e-12;
 
 impl Dynamics {
     /// A description's dynamics, remembering its digest so only a calibration identified
@@ -501,31 +581,28 @@ impl Dynamics {
     }
 
     /// Whether `earlier` and this description agree on everything `calibration` identified
-    /// depends on: the same links and joints, and for each joint the calibration fits (a
-    /// listed joint, or the joint above a listed link) every link and joint it carries and
-    /// every joint between the root and it, as the dynamics read them. Anything else may
-    /// differ: torque at a fitted joint depends on nothing else.
+    /// depends on: for each joint the calibration fits (a listed joint, or the joint above a
+    /// listed link), every link and joint it carries, by name, and the moving joints between
+    /// the root and it with where each sits on the one above, as the dynamics read them.
+    /// Anything else may differ: torque at a fitted joint depends on nothing else. So a fixed
+    /// link inserted above a fitted joint that leaves it where it was (the static upper body's
+    /// shoulder mounts, 2026-11-08) keeps an arm's fit; a fit of the root link needs the whole
+    /// tree unchanged.
     fn reaches_the_same(&self, earlier: &Tree, calibration: &DynamicsCalibration) -> bool {
         let (new, old) = (&self.tree, earlier);
-        let shaped = |tree: &Tree| {
-            tree.joints
-                .iter()
-                .map(|j| (j.kind, j.parent, j.child, j.leader.clone()))
-                .collect::<Vec<_>>()
-        };
-        if new.links() != old.links() || shaped(new) != shaped(old) {
-            return false;
-        }
+        let above = |tree: &Tree, link: usize| tree.joints.iter().position(|j| j.child == link);
+        let named = |tree: &Tree, name: &str| tree.links().iter().position(|l| l == name);
         // Both read from text: the same text is the same bits.
         let bits = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
-        let same_joint = |index: usize| {
-            let (a, b) = (&new.joints[index], &old.joints[index]);
-            bits(&a.origin, &b.origin)
+        let moves_alike = |a: &TreeJoint, b: &TreeJoint| {
+            a.kind == b.kind
                 && bits(&a.axis, &b.axis)
+                && a.leader == b.leader
                 && a.multiplier.to_bits() == b.multiplier.to_bits()
                 && a.offset.to_bits() == b.offset.to_bits()
         };
-        let above = |link: usize| new.joints.iter().position(|joint| joint.child == link);
+        let same_joint =
+            |a: &TreeJoint, b: &TreeJoint| moves_alike(a, b) && bits(&a.origin, &b.origin);
         let mut fitted: Vec<usize> = Vec::new();
         for (joint, _) in &calibration.joints {
             fitted.extend(
@@ -537,43 +614,44 @@ impl Dynamics {
             );
         }
         for (link, _) in &calibration.links {
-            if let Some(index) = new.links().iter().position(|name| name == link) {
-                match above(index) {
+            if let Some(index) = named(new, link) {
+                match above(new, index) {
                     Some(joint) => fitted.push(joint),
                     // The root link: everything hangs from it.
                     None => {
-                        return new.inertials == old.inertials
-                            && (0..new.joints.len()).all(same_joint);
+                        return new.links() == old.links()
+                            && new.inertials == old.inertials
+                            && new.joints.len() == old.joints.len()
+                            && new.joints.iter().zip(&old.joints).all(|(a, b)| {
+                                (a.parent, a.child) == (b.parent, b.child) && same_joint(a, b)
+                            });
                     }
                 }
             }
         }
         for joint in fitted {
-            // Every joint from the root down to this one.
-            let mut at = Some(joint);
-            while let Some(index) = at {
-                if !same_joint(index) {
-                    return false;
-                }
-                at = above(new.joints[index].parent);
+            let child = &new.links()[new.joints[joint].child];
+            let Some(theirs) = named(old, child).and_then(|link| above(old, link)) else {
+                return false;
+            };
+            if new.root() != old.root() {
+                return false;
             }
-            // Everything it carries.
-            let mut below = vec![new.joints[joint].child];
-            while let Some(link) = below.pop() {
-                if new.inertials[link] != old.inertials[link] {
-                    return false;
-                }
-                for (index, child) in new
-                    .joints
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, j)| j.parent == link)
-                {
-                    if !same_joint(index) {
-                        return false;
-                    }
-                    below.push(child.child);
-                }
+            let (mine, earlier) = (moving_path(new, joint), moving_path(old, theirs));
+            if mine.len() != earlier.len()
+                || !mine.iter().zip(&earlier).all(|((a, at_a), (b, at_b))| {
+                    moves_alike(&new.joints[*a], &old.joints[*b])
+                        && new.links()[new.joints[*a].child] == old.links()[old.joints[*b].child]
+                        && at_a
+                            .iter()
+                            .zip(at_b)
+                            .all(|(x, y)| (x - y).abs() <= PLACEMENT_EPSILON)
+                })
+            {
+                return false;
+            }
+            if !carries_the_same(new, old, joint, theirs) {
+                return false;
             }
         }
         true
@@ -1234,6 +1312,84 @@ mod tests {
         <axis xyz="0 1 0"/><limit lower="-3" upper="3"/></joint>
     </robot>"#
         )
+    }
+
+    /// The torso, then the arm on its shoulder at `shoulder`; with `mount`, the shoulder sits
+    /// on a fixed mount link (mass `mount_mass`) placed at `mount` on the torso instead.
+    fn mounted(mount: Option<(&str, &str)>, mount_mass: &str) -> String {
+        let arm = r#"<link name="arm"><inertial><origin xyz="0 0 -0.5"/><mass value="2"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+      <link name="hand"><inertial><mass value="0.5"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial></link>
+      <joint name="wrist" type="revolute"><parent link="arm"/><child link="hand"/>
+        <origin xyz="0 0 -1"/><axis xyz="1 0 0"/><limit lower="-3" upper="3"/></joint>"#;
+        let torso = r#"<link name="base"/><link name="torso"><inertial><mass value="5"/>
+        <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/></inertial></link>
+      <joint name="waist" type="revolute"><parent link="base"/><child link="torso"/>
+        <axis xyz="0 0 1"/><limit lower="-3" upper="3"/></joint>"#;
+        let shoulder = match mount {
+            None => r#"<joint name="shoulder" type="revolute"><parent link="torso"/>
+        <child link="arm"/><origin xyz="0 0.2 0.3"/><axis xyz="0 1 0"/>
+        <limit lower="-3" upper="3"/></joint>"#
+                .to_owned(),
+            Some((at, then)) => format!(
+                r#"<link name="mount"><inertial><mass value="{mount_mass}"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial></link>
+      <joint name="mount_joint" type="fixed"><parent link="torso"/><child link="mount"/>
+        <origin xyz="{at}"/></joint>
+      <joint name="shoulder" type="revolute"><parent link="mount"/><child link="arm"/>
+        <origin xyz="{then}"/><axis xyz="0 1 0"/><limit lower="-3" upper="3"/></joint>"#
+            ),
+        };
+        format!(r#"<robot name="mounted">{torso}{arm}{shoulder}</robot>"#)
+    }
+
+    /// A fixed mount inserted between the torso and an arm that leaves the shoulder where it
+    /// was keeps the arm's fit, whatever the mount and the torso now weigh; one that moves the
+    /// shoulder does not, nor does any fit of the waist, which carries the mount.
+    #[test]
+    fn a_fixed_mount_above_a_fitted_arm_that_leaves_it_in_place_keeps_its_fit() {
+        let old = mounted(None, "0");
+        let fit = |joint: &str, link: &str| DynamicsCalibration {
+            description_sha256: digest(&old),
+            stiction_velocity: 0.05,
+            links: vec![(
+                link.into(),
+                LinkInertia {
+                    mass: 2.1,
+                    first_moment: [0.0, 0.0, -1.0],
+                    inertia: [0.5, 0.0, 0.0, 0.5, 0.0, 0.01],
+                },
+            )],
+            joints: vec![(joint.into(), JointFriction::default())],
+        };
+        let knowing = |urdf: &str| {
+            Dynamics::of(urdf, UPRIGHT)
+                .expect("dynamics")
+                .superseding(&[&old])
+                .expect("earlier")
+        };
+        let kept = mounted(Some(("0 0.2 0.3", "0 0 0")), "0.4");
+        assert!(knowing(&kept).calibrated(&fit("shoulder", "arm")).is_ok());
+        assert!(knowing(&kept).calibrated(&fit("wrist", "arm")).is_ok());
+        // Split differently between the mount and the shoulder's own origin: the same place.
+        let split = mounted(Some(("0 0.1 0.3", "0 0.1 0")), "0.4");
+        assert!(knowing(&split).calibrated(&fit("shoulder", "arm")).is_ok());
+        // The shoulder moved by a millimetre.
+        let moved = mounted(Some(("0 0.2 0.301", "0 0 0")), "0.4");
+        assert!(matches!(
+            knowing(&moved).calibrated(&fit("shoulder", "arm")),
+            Err(DynamicsError::Description { .. })
+        ));
+        // The waist carries the mount: its fit depends on it.
+        assert!(matches!(
+            knowing(&kept).calibrated(&fit("waist", "arm")),
+            Err(DynamicsError::Description { .. })
+        ));
+        assert!(matches!(
+            knowing(&kept).calibrated(&fit("shoulder", "torso")),
+            Err(DynamicsError::Description { .. })
+        ));
     }
 
     /// A calibration of the arm survives a re-render that only moves the neck's camera, and

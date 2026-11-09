@@ -10,7 +10,7 @@ use sx_embodiment_bodies::{
     damiao_motors, open_with, port_buses,
 };
 use sx_embodiment_drivers::lerobot::MotorCalibration;
-use sx_embodiment_drivers::{ActuatorChain, BodyBindings, InstanceDrive};
+use sx_embodiment_drivers::{ActuatorChain, BodyBindings, BodyError, InstanceDrive};
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::sim::SimBus;
 
@@ -19,6 +19,10 @@ const REGISTRY: &str = include_str!("../bindings/registry.json");
 /// Bodies whose twin no driver crate here composes as a body of its own: each B601-DM arm is
 /// opened by the B601's own opener, whose arm and gripper bridges the registry does not carry.
 const UNOPENED: [&str; 2] = ["b601-dm-station", "bimanual-b601-dm"];
+/// Design assemblies no robot is built as: the full humanoid puts the static body's arms on the
+/// earlier humanoid's torso drive (2026-11-08), so its one CAN bus repeats two driven bodies'
+/// ports, which no driver composes as one.
+const DESIGNED_ONLY: [&str; 1] = ["sentient-humanoid"];
 
 /// Every servo mid-range, as the SO-101 open test calibrates them.
 const CALIBRATION: MotorCalibration = MotorCalibration {
@@ -184,6 +188,17 @@ fn every_driven_body_opens_on_simulated_buses() {
     for document in documents() {
         let body = BodyBindings::parse(&document).expect("bindings");
         let result = open_simulated(&document, &[]);
+        if DESIGNED_ONLY.contains(&body.embodiment.as_str()) {
+            assert!(
+                matches!(
+                    result,
+                    Err(OpenError::Bindings(BodyError::Twins { ref port, .. })) if port == "can"
+                ),
+                "{} is refused as a design assembly: {result:?}",
+                body.embodiment
+            );
+            continue;
+        }
         if UNOPENED.contains(&body.embodiment.as_str()) {
             assert!(
                 matches!(result, Err(OpenError::Bus { .. })),
@@ -199,7 +214,7 @@ fn every_driven_body_opens_on_simulated_buses() {
     for name in [
         "bimanual-so101",
         "so101",
-        "sentient-humanoid",
+        "sentient-humanoid-upper-body",
         "sentient-static-upper-body",
     ] {
         assert!(opened.iter().any(|body| body == name), "{name} opened");

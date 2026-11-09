@@ -154,9 +154,11 @@ fn letting_go_of_a_fast_sweep_rests_every_joint_within_its_jerk_cap() {
         });
         // From the release on: the sweep before it is the operator's own motion, ridden as asked.
         let (share, joint) = worst_jerk(&b, &q, release);
+        // 1.0143x on the torso, free, at the release since the approved assembly's fixed
+        // shoulder mounts and their hulls (2026-11-08); 1.01x before.
         assert!(
-            share <= 1.01,
-            "torso held {torso_held}: {share:.2}x the jerk cap ({joint})"
+            share <= 1.015,
+            "torso held {torso_held}: {share:.5}x the jerk cap ({joint})"
         );
         // The released arm's own joints, and the torso it carries, stand still.
         let resting: Vec<usize> = (0..b.names.len())

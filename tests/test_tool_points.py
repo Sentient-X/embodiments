@@ -11,9 +11,13 @@ import datetime as dt
 import pytest
 
 from sx_embodiments import (
+    EmbodimentId,
+    EmbodimentName,
     ToolPointCheck,
     development_embodiments,
     embodiments,
+    historical_document,
+    read_recorded,
     tool_points_checked_of,
 )
 from sx_embodiments.embodiment import embodiment_from_definition
@@ -285,3 +289,30 @@ def test_no_two_registered_bodies_share_an_id() -> None:
         for identity in (document["id"], *document.get("supersedes", []))
     )
     assert [identity for identity, n in counts.items() if n > 1] == []
+
+
+def test_a_fixed_mount_that_leaves_the_path_in_place_keeps_the_chain() -> None:
+    """The fixed shoulder mounts (2026-11-08) put a link between the chest and each shoulder
+    pitch joint at the same place: the accepted tool points are where they were. A mount that
+    moves the shoulder asks for a new check."""
+    from sx_embodiments.kinematics import Kinematics
+
+    previous = read_recorded(
+        historical_document(
+            EmbodimentName("sentient-static-upper-body"),
+            EmbodimentId("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402"),
+        )
+    ).embodiment
+    body = _body("sentient-static-upper-body")
+    record = tool_points_checked_of("sentient-static-upper-body")
+    assert record is not None
+    kinematics = Kinematics.of(body.urdf_bytes)
+    assert kinematics.joints["left_shoulder_pitch_joint"].parent == "left_shoulder_mount_link"
+    assert Kinematics.of(previous.urdf_bytes).joints["left_shoulder_pitch_joint"].parent == (
+        "chest_link"
+    )
+    grips = tool_grips(body, record.points)
+    assert tool_chain(previous.urdf_bytes, record.points, grips) == record.chain
+    assert tool_chain(body.urdf_bytes, record.points, grips) == record.chain
+    moved = _edited(body.urdf_bytes, "left_shoulder_mount_joint", xyz="-0.059 0.231 0.0131")
+    assert tool_chain(moved, record.points, grips) != record.chain

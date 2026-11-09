@@ -100,15 +100,64 @@ reach of a work surface (warnings), payload against a base's rating (a refusal),
 of mass over the support polygon at rest (a refusal) and with the arms reaching together (a
 warning). `tests/test_checks.py` holds it to an interactive budget.
 
-`Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves, and a
-part mated with `namespaced=False` keeps its source's names. The Sentient humanoid is built this
-way from its one vendor URDF: the upper body (the robot in service) offers a neck seat, two hip
-seats and two wrists; the full humanoid mates the legs back on, and `tests/test_humanoid.py`
-holds the rejoined parts to the vendor's robot by forward kinematics. The head's camera holder is
-a socket fitted with the CAD's D435, a camera module that adds its own optical frame (a module's
-`frames`) and carries the colour stream, riding on the torso that turns the chest. Its parallel
-grippers are modules whose servo and jaw no source describes, so the body with them,
-`sentient-humanoid-upper-body-grippers`, is a development body.
+`Subtree` keeps the cut joint under a `<joint>_mount` root, so a revolute hip still moves,
+and `namespaced=False` keeps the source's names. The legacy Sentient humanoid upper-body
+variants remain cut from their original vendor URDF, with five-joint arms and a D435 head.
+
+The canonical `sentient-humanoid` is a **development candidate requiring human engineering
+review**: the original pelvis, three-joint torso, waist, chest, legs, and humanoid head
+with its D435, plus the corrected static body's seven-joint arm/gripper modules. The
+original shoulder seats remain 272.381 mm apart; the corrected static body's span is
+279.750 mm. The head uses its exact original CAD neck socket. No SO-101 neck or ZED
+module is imported into this full-body candidate. Reusing the arm modules and restoring
+the earlier head does not establish that the remaining assembly is correct.
+
+The reusable shoulder seat includes the fixed pitch motor, mechanical stop and two holder
+meshes that the corrected CAD owns on its chest, outside the moving arm subtree. The
+static generator now separates those four visuals per side into fixed shoulder modules;
+both the static assembly and full humanoid fit those same modules. The original shoulder
+joint frames, axes and all retained link poses stay unchanged. The static chest keeps five
+visuals, each mount four: all thirteen source chest visuals occur exactly once.
+
+This split regenerates the entire separated chest and both mount inertials/collisions with
+the existing convex-hull estimator at 600 kg/m³. The old single-hull estimate was 4.79762 kg;
+the new chest is 3.77676 kg and the mounts 1.03173/1.03393 kg, total 5.84242 kg. The change
+is an explicit change to a nominal simulation estimate, **not a measured mass correction**.
+A convex hull of the union is not the sum of the component hulls. The full body retains
+its original core inertials and gains the two mount estimates (2.06566 kg), without copying
+the static table or chest. Earlier documents, URDFs and the old chest collision mesh remain
+available under their original content identities.
+
+For reproducible visual review, from this package with its numerical development dependencies:
+
+```bash
+PYTHONPATH=. python tools/review_humanoid_connections.py --output /absolute/new-review \
+  --previous-urdf /absolute/previous-candidate/robot.urdf
+```
+
+The command refuses an existing output directory. It copies and verifies the portable asset
+closure; writes the exact body/URDF identity, a relative-mesh viewer URDF, topology report,
+1800-pixel front/side/three-quarter plate, source/before/after shoulder plate, and original
+versus current ankle views. It uses owner FK and explicit visual-origin quaternions, never
+collision proxies or a physics export. Display coordinates are zero, not calibrated Ready.
+The November 8 review found all 59 links reachable through 58 joints. The inherited ankle
+pair's sampled-vertex distances (17.2513/17.1120 mm) are identical to the original source;
+they compare parallel linkage bodies, not the whole foot attachment. The visible rods and
+foot seats remain present. Neither these samples nor a connected URDF tree prove mechanical
+fit, clearance through motion, balance or physical qualification. Training remains on hold
+until the owner reviews this candidate.
+
+
+The 33-coordinate candidate has a new identity. Its original neck-yaw and head-pitch
+URDF joints remain description-only, with no invented actuator bindings. Earlier
+25-coordinate recordings retain their exact historical body and public URDF; the stale
+28-joint MJCF is not the active simulation model. The composite URDF lives in the entitled
+`sentient_humanoid/` directory, retaining BSD and proprietary source provenance. Inherited
+arm ready references are not an accepted standing pose or full-body Ready. The static
+clamp, table height, mass margin, unit calibration and torso tuning are not transferred.
+Waist and leg drives remain undocumented. Training promotion is held pending human
+engineering review; full-body dynamics, bus compatibility and physical operation remain
+unqualified. The separate table-mounted upper body retains its own SO-101/ZED head.
 
 `sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
 arms, parallel grippers and an SO-101 neck carrying a ZED camera, clamped to a table edge
@@ -605,3 +654,12 @@ Consumers serve its verified bytes through their own asset endpoint and use the 
 caching; they do not infer source-tree paths. Worlds generates these small publications with
 `worlds/sim-envs/scripts/render_embodiment_previews.py` using the arm-practice initial pose.
 The image retains the source assets' publication audience.
+
+### Preserved static hardware-check boundary
+
+The explicit fixed-shoulder split retains the static upper body's original tool-point
+hardware receipt on its historical chain. Its new structural-chain digest differs,
+so the generated candidate pack exposes `tcp_candidates` but `tcp_frames={}`.
+No tool-point hardware acceptance is transferred by a nominal humanoid simulation
+approval. The historical 51db79c… document still resolves the exact checked chain;
+source-preserving FK tests do not silently rewrite that receipt.

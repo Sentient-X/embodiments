@@ -243,7 +243,19 @@ def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None
         if name in neck or name == "zed2i_left_optical_joint" or name == "so101_mount_joint":
             continue  # the official neck's, below
         ours = rendered[name]
-        for tag in ("origin", "axis", "parent", "child"):
+        shoulder = name in {"left_shoulder_pitch_joint", "right_shoulder_pitch_joint"}
+        if shoulder:
+            side = name.split("_")[0]
+            mount = rendered[f"{side}_shoulder_mount_joint"]
+            assert mount.find("origin").attrib == joint.find("origin").attrib
+            assert mount.find("parent").attrib == joint.find("parent").attrib
+            assert ours.find("parent").get("link") == mount.find("child").get("link")
+            assert all(
+                float(v) == 0
+                for value in ours.find("origin").attrib.values()
+                for v in value.split()
+            )
+        for tag in ("axis", "child") if shoulder else ("origin", "axis", "parent", "child"):
             theirs, mine = joint.find(tag), ours.find(tag)
             assert (theirs is None) == (mine is None), (name, tag)
             if theirs is not None and mine is not None:
@@ -278,7 +290,16 @@ def test_every_link_off_the_neck_draws_allisa_bots_meshes_where_it_does() -> Non
             continue  # the official neck, carrying allisa_bot's base, holder, bracket and ZED
         if name == "base_link":  # the camera tilt horn moves onto the bracket it turns with
             parts = [part for part in parts if part[0] != "_________step__Body1_1_.stl"]
-        assert rendered[name] == parts, name
+        if name == "chest_link":
+            # Fixed mounts now own the remaining eight visuals. Their full source-space
+            # equivalence and exact-once membership are tested in test_shoulder_mount_ownership.
+            assert rendered[name] == parts[:5], name
+            assert (
+                sum(len(rendered[f"{side}_shoulder_mount_link"]) for side in ("left", "right"))
+                == len(parts) - 5
+            )
+        else:
+            assert rendered[name] == parts, name
 
 
 def test_the_neck_is_bound_provisionally_as_an_so101_on_its_own_port() -> None:
