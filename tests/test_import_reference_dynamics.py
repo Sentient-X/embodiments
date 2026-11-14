@@ -64,6 +64,9 @@ def _importer() -> ModuleType:
 IMPORTER = _importer()
 
 
+# max_residual_nm 0.1 is for this fixture only: its drive has nominal zeros that disagree with
+# the handoff's encoder offsets. The importer's default stays 1e-3 N·m, and a real assignment
+# needs the zeros settled and a residual under it.
 def _build(
     reference: Path = REFERENCE,
     drive: bytes = DRIVE,

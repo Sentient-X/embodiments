@@ -74,6 +74,9 @@ fn full(dynamics: &Dynamics, rows: &[usize], arm_q: &[f64]) -> Vec<f64> {
 /// from that drive's (elbow 5.8°, wrist pitch 8.1°, wrist roll 104°), which turns its distal
 /// links against the description's; with a drive that agrees, the importer's fit is exact to
 /// 2e-5 N·m (`tests/test_import_reference_dynamics.py`).
+/// The 0.045 N·m bound belongs to this fixture only: its drive has nominal zeros that disagree
+/// with the handoff's encoder offsets. The importer's default bound stays 1e-3 N·m, and a real
+/// assignment needs the zeros settled and a residual under it.
 #[test]
 fn the_calibrated_description_reproduces_the_reference_gravity_oracle() {
     let dynamics = calibrated();
