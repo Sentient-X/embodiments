@@ -1,0 +1,9 @@
+{
+  "schema": "sx.station-commissioning/v1",
+  "instance": "f0d5e450cfc47b625df560f2f84d1c17c4ad4d6490a886a337584a00e14f71d9",
+  "pod_id": "fixture-pod",
+  "pod_revision": 1,
+  "ports": {
+    "can": "fixture-can-serial:1"
+  }
+}

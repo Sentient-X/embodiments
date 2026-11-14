@@ -1,0 +1,31 @@
+{
+  "algorithm": "sha256",
+  "note": "Minimal AST-only test inputs, excerpted from handoff20261114; original gravity oracle is separate.",
+  "files": [
+    {
+      "path": "reference_snapshot/can_bus.py",
+      "bytes": 673,
+      "sha256": "6580f1a144a8678c60e249ffd257a7316e82d99539afe5518f6b0bf0f30c0ed8"
+    },
+    {
+      "path": "reference_snapshot/left_arm_calibrated_config.json",
+      "bytes": 1546,
+      "sha256": "24cb0d636e99b8a0dfbafeed119a1d438384bfec48a39eb7cdc543910a547b05"
+    },
+    {
+      "path": "reference_snapshot/left_arm_calibrated_inertials.json",
+      "bytes": 1598,
+      "sha256": "3a65a5b82dbc4ae104ba1e41465539d1281fd698d8ffc9deee89517724b93eb4"
+    },
+    {
+      "path": "reference_snapshot/left_arm_dynamics.py",
+      "bytes": 3378,
+      "sha256": "24ecd9da959d1a4d0b4973c9b6365b272f6617af77cb9669628da52caeaac5a3"
+    },
+    {
+      "path": "reference_snapshot/left_arm_freedrive.py",
+      "bytes": 1828,
+      "sha256": "b73cf46aee6a85ca267fd073a7110cb9545f2764052d45cbb1a9a0861ca4d65a"
+    }
+  ]
+}

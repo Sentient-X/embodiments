@@ -1,0 +1,83 @@
+{
+  "schema": "sx.quasi-static-compensation/v1",
+  "description_sha256": "11fa1ead5302c9f99a2c7a9c83e6d4f193ffe6a93de742d093f75431f3153c76",
+  "drive_sha256": "75fa5d5a00f9a7e166e20330b0a2e4ebafc8b9983f3e4287f13eeaff916cdbc0",
+  "source_urdf": "<robot name=\"accepted_left_arm_gravity\"><link name=\"chest_link\" /><link name=\"left_shoulder_pitch_link\"><inertial><origin xyz=\"0.00014100000000000001 -0.0093749999999999997 -0.0023869999999999998\" /><mass value=\"1.28\" /><inertia ixx=\"1.28e-06\" iyy=\"1.28e-06\" izz=\"1.28e-06\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_shoulder_pitch_joint\" type=\"revolute\"><parent link=\"chest_link\" /><child link=\"left_shoulder_pitch_link\" /><origin xyz=\"-0.058999999999999997 0.23097000000000001 0.012999999999999999\" rpy=\"0 0 0\" /><axis xyz=\"0 0.96592599999999995 0.25881500000000002\" /><limit lower=\"-2.64\" upper=\"2.89\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_shoulder_roll_link\"><inertial><origin xyz=\"-0.011136 -0.000195 -0.0037569999999999999\" /><mass value=\"1.2\" /><inertia ixx=\"1.1999999999999999e-06\" iyy=\"1.1999999999999999e-06\" izz=\"1.1999999999999999e-06\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_shoulder_roll_joint\" type=\"revolute\"><parent link=\"left_shoulder_pitch_link\" /><child link=\"left_shoulder_roll_link\" /><origin xyz=\"0.030849999999999999 0.058250000000000003 0.015599999999999999\" rpy=\"0 0 0\" /><axis xyz=\"1 0 0\" /><limit lower=\"-0.387\" upper=\"1.202\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_upper_arm_yaw_link\"><inertial><origin xyz=\"2.3e-05 -0.0062740000000000001 -0.015827000000000001\" /><mass value=\"0.55000000000000004\" /><inertia ixx=\"5.5000000000000003e-07\" iyy=\"5.5000000000000003e-07\" izz=\"5.5000000000000003e-07\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_upper_arm_yaw_joint\" type=\"revolute\"><parent link=\"left_shoulder_roll_link\" /><child link=\"left_upper_arm_yaw_link\" /><origin xyz=\"-0.030849999999999999 0.01268 -0.14230000000000001\" rpy=\"0 0 0\" /><axis xyz=\"0 0 -1\" /><limit lower=\"-5.12\" upper=\"2.356\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_elbow_pitch_link\"><inertial><origin xyz=\"-0.000184 -0.014834999999999999 -0.0034039999999999999\" /><mass value=\"0.54000000000000004\" /><inertia ixx=\"5.4000000000000002e-07\" iyy=\"5.4000000000000002e-07\" izz=\"5.4000000000000002e-07\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_elbow_pitch_joint\" type=\"revolute\"><parent link=\"left_upper_arm_yaw_link\" /><child link=\"left_elbow_pitch_link\" /><origin xyz=\"0 -0.038249999999999999 -0.066500000000000004\" rpy=\"0 -1.5707963267948966 0\" /><axis xyz=\"0 -1 0\" /><limit lower=\"-2.975\" upper=\"0.087\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_forearm_yaw_link\"><inertial><origin xyz=\"0 0 -0.057225999999999999\" /><mass value=\"0.40000000000000002\" /><inertia ixx=\"3.9999999999999998e-07\" iyy=\"3.9999999999999998e-07\" izz=\"3.9999999999999998e-07\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_forearm_yaw_joint\" type=\"revolute\"><parent link=\"left_elbow_pitch_link\" /><child link=\"left_forearm_yaw_link\" /><origin xyz=\"0 0.038249999999999999 -0.067000000000000004\" rpy=\"0 0 0\" /><axis xyz=\"0 0 -1\" /><limit lower=\"-6.83\" upper=\"1.88\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_wrist_pitch_link\"><inertial><origin xyz=\"0 0 -0.01\" /><mass value=\"0.34000000000000002\" /><inertia ixx=\"3.4000000000000003e-07\" iyy=\"3.4000000000000003e-07\" izz=\"3.4000000000000003e-07\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_wrist_pitch_joint\" type=\"revolute\"><parent link=\"left_forearm_yaw_link\" /><child link=\"left_wrist_pitch_link\" /><origin xyz=\"0 0 -0.123\" rpy=\"0 0 0\" /><axis xyz=\"0 -1 0\" /><limit lower=\"-2.13\" upper=\"2.44\" effort=\"1\" velocity=\"1\" /></joint><link name=\"left_wrist_roll_link\"><inertial><origin xyz=\"-0.00029999999999999997 -0.00020000000000000001 -0.014999999999999999\" /><mass value=\"0.31\" /><inertia ixx=\"3.1e-07\" iyy=\"3.1e-07\" izz=\"3.1e-07\" ixy=\"0\" ixz=\"0\" iyz=\"0\" /></inertial></link><joint name=\"left_wrist_roll_joint\" type=\"revolute\"><parent link=\"left_wrist_pitch_link\" /><child link=\"left_wrist_roll_link\" /><origin xyz=\"0 0 -0.095500000000000002\" rpy=\"0 0 0\" /><axis xyz=\"0 0 -1\" /><limit lower=\"-2.1\" upper=\"2.1\" effort=\"1\" velocity=\"1\" /></joint></robot>",
+  "gravity_scale": 0.95,
+  "torque_slew_nm_s": 20.0,
+  "joints": [
+    {
+      "joint": "left_shoulder_pitch_joint",
+      "source_joint": "left_shoulder_pitch_joint",
+      "scale": 1.0,
+      "offset": 0.011635,
+      "coulomb": 0.0,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 21.6
+    },
+    {
+      "joint": "left_shoulder_roll_joint",
+      "source_joint": "left_shoulder_roll_joint",
+      "scale": 1.0,
+      "offset": -0.013924,
+      "coulomb": 0.0,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 21.6
+    },
+    {
+      "joint": "left_upper_arm_yaw_joint",
+      "source_joint": "left_upper_arm_yaw_joint",
+      "scale": 1.0,
+      "offset": 0.008583,
+      "coulomb": 0.2,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 11.200000000000001
+    },
+    {
+      "joint": "left_elbow_pitch_joint",
+      "source_joint": "left_elbow_pitch_joint",
+      "scale": 1.0,
+      "offset": -0.101925,
+      "coulomb": 0.22,
+      "velocity_deadband": 0.02,
+      "transition_velocity": 0.03,
+      "max_torque": 11.200000000000001
+    },
+    {
+      "joint": "left_forearm_yaw_joint",
+      "source_joint": "left_forearm_yaw_joint",
+      "scale": 1.0,
+      "offset": 0.000954,
+      "coulomb": 0.16,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 0.4
+    },
+    {
+      "joint": "left_wrist_pitch_joint",
+      "source_joint": "left_wrist_pitch_joint",
+      "scale": 1.0,
+      "offset": 0.141337,
+      "coulomb": 0.0,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 0.75
+    },
+    {
+      "joint": "left_wrist_roll_joint",
+      "source_joint": "left_wrist_roll_joint",
+      "scale": -1.0,
+      "offset": -1.820974,
+      "coulomb": 0.1,
+      "velocity_deadband": 0.0,
+      "transition_velocity": 0.01,
+      "max_torque": 0.4
+    }
+  ],
+  "units": [
+    "fixture-can-serial:1"
+  ]
+}
