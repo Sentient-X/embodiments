@@ -77,6 +77,7 @@ from sx_embodiments.calibration import (  # noqa: E402
     is_physical_inertia,
 )
 from sx_embodiments.kinematics import JointType  # noqa: E402
+from sx_embodiments.successor import successor  # noqa: E402
 
 # The reviewed clamp/deadband/friction policy the reference controller applied. Its friction
 # table and elbow deadband are read below; a changed policy needs this importer reviewed.
@@ -426,7 +427,14 @@ def build_calibration(
     inertials = json.loads(sources["left_arm_calibrated_inertials.json"])
     drive = json.loads(drive_bytes)
     binding = json.loads(bindings)
-    if drive.get("schema") != "sx.instance-drive/v1" or drive.get("embodiment") != binding["id"]:
+    # A robot assigned before a correction carries its body's earlier id; Fleet re-renders the
+    # drive with today's id (same zeros and directions) at its next assignment.
+    body = drive.get("embodiment")
+    later = successor(body) if isinstance(body, str) else None
+    if drive.get("schema") != "sx.instance-drive/v1" or binding["id"] not in {
+        body,
+        None if later is None else str(later.id),
+    }:
         raise ReferenceImportError("drive and bindings name different bodies")
     ports = _commissioned_ports(commissioning_bytes, drive.get("instance"))
     driven = {item["joint"]: item for item in drive["joints"]}
@@ -626,8 +634,8 @@ def superseded(existing: DynamicsCalibration, by: DynamicsCalibration) -> Dynami
     link and joint, so a calibration that takes over part of an older one (this arm, out of a
     whole-body fit) ships with the older one trimmed. Everything else is kept as fitted."""
 
-    if existing.description_sha256 != by.description_sha256:
-        raise ReferenceImportError("the two calibrations name different descriptions")
+    # The two may name different revisions of the description: the station checks each file
+    # against its own (an earlier one applies where the re-render reached nothing it fitted).
     links = {item.link for item in by.links}
     joints = {item.joint for item in by.joints}
     links_kept = tuple(item for item in existing.links if item.link not in links)

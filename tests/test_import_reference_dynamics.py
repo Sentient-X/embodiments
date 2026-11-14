@@ -227,3 +227,17 @@ def test_a_whole_body_fit_gives_up_what_the_reference_takes_over(
     assert trimmed.stiction_velocity == 0.02
     with pytest.raises(IMPORTER.ReferenceImportError, match="all of the old one"):
         IMPORTER.superseded(calibration, calibration)
+
+
+def test_a_drive_rendered_for_an_earlier_revision_of_the_body_is_accepted() -> None:
+    # The Spark (Fleet revision 2, read 2026-11-14) still carries the body's earlier id; Fleet
+    # re-renders the drive with today's at the next assignment, with the same zeros.
+    drive = json.loads(DRIVE)
+    drive["embodiment"] = "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402"
+    calibration, _ = _build(drive=json.dumps(drive).encode())
+    assert calibration_to_dict(calibration) == json.loads(
+        (FIXTURES / "left-arm.dynamics.json").read_text()
+    )
+    drive["embodiment"] = "0" * 64
+    with pytest.raises(IMPORTER.ReferenceImportError, match="different bodies"):
+        _build(drive=json.dumps(drive).encode())

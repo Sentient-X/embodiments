@@ -164,6 +164,10 @@ python tools/import_reference_dynamics.py --reference-root <handoff>/reference_s
   - With a drive whose zeros match the handoff's encoder offsets, the fit is exact to 2e-5 N·m.
   - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range and 0.038 N·m on the handoff's own 24-pose oracle.
   - A large residual means the drive and the handoff disagree about where zero is. Fix the zero calibration. Never raise the bound for a robot.
+  - **The real Spark has the same disagreement.** Fleet revision 2 (digest `f13ee49d`, read 2026-11-14) carries a nominal drive: every left-arm zero is 0. The importer refuses it at 0.061 N·m.
+    - Which zero is physically right has to be settled at the robot, before anything is assigned.
+    - Choosing wrong moves the fed-forward gravity by up to 0.26 N·m at the shoulders and 0.24 N·m at the elbow over the joint range.
+    - The wrist roll's 104° matters little to gravity (0.002 N·m), because its centre of mass sits nearly on its axis.
 - **Receipt.** `<name>.receipt.json` records the per-joint offsets, the residuals, and the masses against the description's.
 - **Not carried.** The handoff's gravity share, feed-forward slew and torque clamps are controller settings, not the arm's physics.
 - **One fit per link and joint.** The station refuses two calibrations that name the same link or joint. `--supersede` therefore writes the robot's existing whole-body fit without what the new file names, as `<name>.trimmed.dynamics.json`; assign both files.
