@@ -199,10 +199,13 @@ impl Clutch {
                 self.held[hand] = Some((offset, local));
             }
             if let Some((offset, local)) = self.held[hand] {
-                targets.tcp[hand] = Some(Pose {
-                    translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
-                    rotation: target.rotation * local,
-                });
+                let moved = |pose: Pose| Pose {
+                    translation_m: [0, 1, 2].map(|k| pose.translation_m[k] + offset[k]),
+                    rotation: pose.rotation * local,
+                };
+                targets.tcp[hand] = Some(moved(target));
+                // The hand's knots move with it.
+                targets.ahead[hand] = targets.ahead[hand].map(|knots| knots.map(moved));
             }
         }
     }
@@ -387,6 +390,24 @@ pub struct Targets {
     /// reads it on the sender's clock (now less its age). `None`: as read, filtered on the
     /// solve's clock.
     pub age_s: Option<f64>,
+    /// Per hand: where its target will be `horizon_s[0]` and `horizon_s[0] + horizon_s[1]`
+    /// seconds from now ([`crate::Settings::horizon_s`]), when the caller knows it rather than
+    /// guesses it: the solve takes each one's displacement from the target now as the target's
+    /// motion over that knot, past the end of this tick. The station plays the operator's hands back a lag behind their
+    /// newest reading, so it knows them up to that reading and holds the newest one past it
+    /// ([`crate::Ik::set_target_ahead`]). `None`: the solve carries the target by its velocity.
+    pub ahead: [Option<[Pose; 2]>; MAX_HANDS],
+}
+
+/// Each knot's displacement from `now` (point metres; turn as a rotation vector), root frame.
+fn displacement(now: Pose, ahead: [Pose; 2]) -> [([f64; 3], [f64; 3]); 2] {
+    let inverse = now.rotation.conjugate();
+    ahead.map(|pose| {
+        (
+            [0, 1, 2].map(|k| pose.translation_m[k] - now.translation_m[k]),
+            sx_frames::matrix_rotation_vector(&(pose.rotation * inverse).matrix()),
+        )
+    })
 }
 
 /// The longest a shaped target may still run after its target went, seconds: then the limb is
@@ -934,6 +955,18 @@ impl Teleop {
                         &sx_frames::rotation_vector_matrix(turn),
                     ) * carried.rotation;
                     out.tcp[hand] = Some(carried);
+                    // The knots keep their displacement from the hand, now taken from the
+                    // filtered hand: the filter's delay is the hand's, not the future's.
+                    out.ahead[hand] = targets.ahead[hand].map(|knots| {
+                        let inverse = pose.rotation.conjugate();
+                        knots.map(|knot| Pose {
+                            translation_m: [0, 1, 2].map(|k| {
+                                carried.translation_m[k] + knot.translation_m[k]
+                                    - pose.translation_m[k]
+                            }),
+                            rotation: knot.rotation * inverse * carried.rotation,
+                        })
+                    });
                     Some(targets.velocity[hand].unwrap_or((v, turning)))
                 }
                 // A person's hand unfiltered, or a program's goal: followed by the velocity the
@@ -1078,6 +1111,7 @@ impl Teleop {
             for (limb, hand) in self.hand_of.iter().enumerate() {
                 if let Some(hand) = *hand {
                     self.ik.set_target_velocity(limb, self.rates[hand]);
+                    self.ik.set_target_ahead(limb, self.ahead_of(targets, hand));
                 }
             }
             return;
@@ -1137,6 +1171,7 @@ impl Teleop {
                 );
                 asked.tcp[hand] = None;
                 self.ik.set_target_velocity(limb, None);
+                self.ik.set_target_ahead(limb, None);
                 continue;
             }
             self.resting[hand] = false;
@@ -1187,7 +1222,19 @@ impl Teleop {
             asked.tcp[hand] = next.map(|s| s.at(-dt));
             self.ik
                 .set_target_velocity(limb, next.map(|s| (s.velocity, s.turning)));
+            let ahead = next.and(self.ahead_of(targets, hand));
+            self.ik.set_target_ahead(limb, ahead);
         }
+    }
+
+    /// `hand`'s knots ([`Targets::ahead`]) as displacements from where its target is now, for a
+    /// person's hand the caller knows ahead; none for a program's goal (its pace is its tool
+    /// speed's).
+    fn ahead_of(&self, targets: &Targets, hand: usize) -> Option<[([f64; 3], [f64; 3]); 2]> {
+        if targets.tool_speed[hand].is_some() {
+            return None;
+        }
+        Some(displacement(targets.tcp[hand]?, targets.ahead[hand]?))
     }
 
     /// Where the camera looks, shaped as a hand's target is: its look direction turned
