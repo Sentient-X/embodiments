@@ -178,6 +178,13 @@ pub struct JointFriction {
     /// `m_s` and `e_s`: the same near standstill.
     pub load_motor_stribeck: f64,
     pub load_external_stribeck: f64,
+    /// rad/s (m/s): below this speed feed-forward adds no friction, and above it the smooth
+    /// sign rises from zero as `tanh((|q̇| − deadband) / stiction_velocity)`. A joint whose
+    /// reference velocity jitters about zero (an operator's hand at rest, an encoder's
+    /// quantum) otherwise gets a friction push that flips with the noise. Zero by default:
+    /// the plain smooth sign.
+    #[serde(default)]
+    pub velocity_deadband: f64,
 }
 
 impl JointFriction {
@@ -193,6 +200,7 @@ impl JointFriction {
             self.load_external,
             self.load_motor_stribeck,
             self.load_external_stribeck,
+            self.velocity_deadband,
         ];
         let stribeck_used = self.stribeck > 0.0
             || self.load_motor_stribeck > 0.0
@@ -239,7 +247,8 @@ impl JointFriction {
     }
 
     /// What the drive adds to move at `speed` and `acceleration`: armature, viscous, and the
-    /// budget with the smooth sign `tanh(speed / stiction_velocity)`.
+    /// budget with the smooth sign `tanh(speed / stiction_velocity)`, nothing of it inside
+    /// [`JointFriction::velocity_deadband`].
     #[must_use]
     pub fn torque(
         &self,
@@ -249,9 +258,11 @@ impl JointFriction {
         external: f64,
         stiction_velocity: f64,
     ) -> f64 {
+        let sliding = (speed.abs() - self.velocity_deadband).max(0.0);
         self.armature * acceleration
             + self.viscous * speed
-            + (speed / stiction_velocity).tanh() * self.budget(speed, motor, external)
+            + (sliding / stiction_velocity).tanh().copysign(speed)
+                * self.budget(speed, motor, external)
     }
 }
 
@@ -318,6 +329,8 @@ struct JointEntry {
     load_external: f64,
     load_motor_stribeck: f64,
     load_external_stribeck: f64,
+    #[serde(default)]
+    velocity_deadband: f64,
 }
 
 #[derive(Deserialize)]
@@ -398,6 +411,7 @@ impl DynamicsCalibration {
                         load_external: entry.load_external,
                         load_motor_stribeck: entry.load_motor_stribeck,
                         load_external_stribeck: entry.load_external_stribeck,
+                        velocity_deadband: entry.velocity_deadband,
                     },
                 )
             })
@@ -426,7 +440,9 @@ pub struct Dynamics {
     inertia: Vec<LinkInertia>,
     /// In [`Tree::joints`] order.
     friction: Vec<JointFriction>,
-    stiction_velocity: f64,
+    /// In [`Tree::joints`] order: each joint's from the calibration that supplied its
+    /// friction, so two calibrations fitted with different ones apply side by side.
+    stiction_velocity: Vec<f64>,
     /// Whether any joint's friction depends on load, so a tick also needs gravity alone.
     loaded: bool,
     /// The digest of the description bytes, when read from them.
@@ -554,7 +570,7 @@ impl Dynamics {
         Self {
             inertia: tree.inertials.clone(),
             friction: vec![JointFriction::default(); tree.joints().len()],
-            stiction_velocity: DEFAULT_STICTION_VELOCITY,
+            stiction_velocity: vec![DEFAULT_STICTION_VELOCITY; tree.joints().len()],
             loaded: false,
             description_sha256: None,
             superseded: Vec::new(),
@@ -739,8 +755,8 @@ impl Dynamics {
                 .position(|axis| &axis.name == joint)
                 .ok_or_else(|| DynamicsError::Absent(joint.clone()))?;
             self.friction[index] = *friction;
+            self.stiction_velocity[index] = calibration.stiction_velocity;
         }
-        self.stiction_velocity = calibration.stiction_velocity;
         self.loaded = self.friction.iter().any(JointFriction::is_loaded);
         Ok(self)
     }
@@ -836,7 +852,7 @@ impl Dynamics {
                 acceleration[index],
                 torque[index],
                 external,
-                self.stiction_velocity,
+                self.stiction_velocity[index],
             );
         }
         Ok(())

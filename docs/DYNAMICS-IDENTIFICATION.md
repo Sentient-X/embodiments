@@ -148,6 +148,29 @@ python tools/identify_dynamics.py fit --holds holds.csv --excitation left.csv --
    - then `DamiaoChain::set_feedforward_limits` with each axis' torque bound.
    - then `command_with` each tick.
 
+## From a reference model accepted on the robot
+
+A model tuned on the robot outside sx becomes the same calibration. The first one is the November 14 left-arm handoff: calibrated link masses and centres, plus the Coulomb friction its controller fed forward. `tools/import_reference_dynamics.py` reads the handoff's files as text and AST, and only after its `MANIFEST.json` verifies them. It maps the handoff's joint coordinates onto the description through the robot's drive, then fits the seven links' first moments to the handoff's gravity by least squares. Masses stay at the handoff's values.
+
+```bash
+python tools/import_reference_dynamics.py --reference-root <handoff>/reference_snapshot \
+  --urdf render_packs/sentient-static-upper-body/robot.urdf --drive drive.json \
+  --bindings drivers/sx-damiao-can/bindings/sentient-static-upper-body.json \
+  --commissioning commissioning.json --mass-scale 1 --friction-multiplier 1 \
+  --supersede static-upper-body.dynamics.json --out left-arm.dynamics.json
+```
+
+- **Residual.** The worst gravity residual must stay under `--max-residual-nm` (default 1e-3 N·m).
+  - With a drive whose zeros match the handoff's encoder offsets, the fit is exact to 2e-5 N·m.
+  - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range and 0.038 N·m on the handoff's own 24-pose oracle.
+  - A large residual means the drive and the handoff disagree about where zero is. Fix the zero calibration. Never raise the bound for a robot.
+- **Receipt.** `<name>.receipt.json` records the per-joint offsets, the residuals, and the masses against the description's.
+- **Not carried.** The handoff's gravity share, feed-forward slew and torque clamps are controller settings, not the arm's physics.
+- **One fit per link and joint.** The station refuses two calibrations that name the same link or joint. `--supersede` therefore writes the robot's existing whole-body fit without what the new file names, as `<name>.trimmed.dynamics.json`; assign both files.
+- **Stiction velocity.** Each joint's friction turns on over the stiction velocity of the calibration that supplied it, so the two files may differ (0.02 and 0.01 rad/s).
+
+`JointFriction.velocity_deadband`, which defaults to zero, feeds no friction forward below that speed. The handoff's elbow uses 0.02 rad/s. Its friction then rises over the file's single stiction velocity (0.01 rad/s), not the handoff's 0.03. That differs from the handoff by at most about 0.1 N·m, and only between 0.02 and 0.08 rad/s.
+
 ## Not yet covered
 
 - Gear backlash, torque ripple and thermal drift. BAM's bench procedure identifies them per motor model and is the next model.

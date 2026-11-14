@@ -39,7 +39,6 @@ pub mod bus_timing;
 pub mod can;
 pub mod chain;
 pub mod chains;
-pub mod compensation;
 pub mod composite;
 pub mod drive;
 pub mod dynamics;

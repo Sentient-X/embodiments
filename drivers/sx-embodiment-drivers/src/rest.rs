@@ -18,7 +18,10 @@
 //! joint that was under torque is held ([`unmodelled`]): no gravity is known, so none is
 //! assumed absent. A joint with no reading at all is held too, at its last commanded position
 //! with no feed-forward (it may still answer: one missed answer is no reason to drop it); a
-//! caller releases it only once it stays silent (the station's `HOLD_SILENCE`).
+//! caller releases it only once it stays silent (the station's `HOLD_SILENCE`). Its silence
+//! also leaves every joint above or below it on the same branch unmodelled (held, no
+//! feed-forward): their gravity depends on where it is, and a guessed angle must never be
+//! what releases an arm (the left-arm compensation trial's finding, 2026-11-14).
 
 use crate::axes::Axes;
 use crate::binding::{ActuatorRating, BoundAxis};
@@ -91,15 +94,49 @@ pub fn unmodelled(axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
 /// already applied), mapped to a chain's axes by joint name, with buffers sized once.
 #[derive(Clone, Debug)]
 pub struct RestModel {
-    compensation: Option<crate::compensation::QuasiStaticCompensation>,
-    chain_q: Vec<f64>,
-    chain_gravity: Vec<f64>,
     dynamics: Dynamics,
     scratch: Scratch,
     /// For each description joint ([`crate::Tree::joints`]), the chain axis it is.
     axis_of: Vec<Option<usize>>,
+    /// `related[j * n + k]`: description joints `j` and `k` lie on one branch (one above the
+    /// other, or the same), so `j`'s gravity depends on where `k` is.
+    related: Vec<bool>,
     q: Vec<f64>,
     torque: Vec<f64>,
+}
+
+/// For `tree`'s independent joints, `related[j * n + k]`: whether one is above the other in the
+/// tree (or they are the same joint), the joints whose positions a joint's gravity torque reads.
+fn related(tree: &crate::Tree) -> Vec<bool> {
+    let axes = tree.joints();
+    let n = axes.len();
+    let leader = |joint: &crate::kinematics::TreeJoint| {
+        (joint.kind != crate::kinematics::JointType::Fixed)
+            .then(|| axes.iter().position(|axis| axis.name == joint.leader))
+            .flatten()
+    };
+    // Each link's moving joints above it, root down (joints are parent before child).
+    let mut above = vec![vec![false; n]; tree.links().len()];
+    for joint in &tree.joints {
+        let mut carried = above[joint.parent].clone();
+        if let Some(index) = leader(joint) {
+            carried[index] = true;
+        }
+        above[joint.child] = carried;
+    }
+    let mut out = vec![false; n * n];
+    for joint in &tree.joints {
+        let Some(below) = leader(joint) else {
+            continue;
+        };
+        for (upper, is_above) in above[joint.child].iter().enumerate() {
+            if *is_above {
+                out[upper * n + below] = true;
+                out[below * n + upper] = true;
+            }
+        }
+    }
+    out
 }
 
 impl RestModel {
@@ -114,9 +151,7 @@ impl RestModel {
             .collect();
         let width = axis_of.len();
         Self {
-            compensation: None,
-            chain_q: vec![0.0; axes.len()],
-            chain_gravity: vec![0.0; axes.len()],
+            related: related(dynamics.tree()),
             scratch: dynamics.scratch(),
             dynamics,
             axis_of,
@@ -125,21 +160,12 @@ impl RestModel {
         }
     }
 
-    /// Use the imported measured gravity for the selected chain, with no friction or slew.
-    #[must_use]
-    pub fn with_compensation(
-        mut self,
-        compensation: Option<crate::compensation::QuasiStaticCompensation>,
-    ) -> Self {
-        self.compensation = compensation;
-        self
-    }
-
     /// Each axis's rest at `measured` (one per axis, `None` where it has no reading at all): a
     /// joint the description carries is held with its gravity torque where it [`falls`], else
     /// released; one the description does not carry (its gravity unknown), and one with no
     /// reading, is held without feed-forward unless braked. A description joint with no
-    /// reading is placed at zero for the others' gravity.
+    /// reading leaves every joint on its branch held the same way: their gravity depends on
+    /// its angle, which is unknown. One the chain does not drive is placed at zero.
     pub fn rests(&mut self, axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
         for (q, axis) in self.q.iter_mut().zip(&self.axis_of) {
             *q = axis
@@ -154,51 +180,31 @@ impl RestModel {
         if !modelled {
             return rests;
         }
-        if let Some(compensation) = &mut self.compensation {
-            // Incomplete selected geometry cannot establish a gravity torque. Keep all
-            // selected brakeless axes held by unmodelled(), rather than guessing zero angles.
-            let complete = compensation
-                .affected_indices()
-                .all(|axis| measured.get(axis).copied().flatten().is_some());
-            if !complete {
-                return rests;
-            }
-            for (q, reading) in self.chain_q.iter_mut().zip(measured) {
-                *q = reading.unwrap_or(0.0);
-            }
-            if compensation
-                .gravity_into(&self.chain_q, &mut self.chain_gravity)
-                .is_err()
-            {
-                return rests;
-            }
-            for (joint, axis) in self.axis_of.iter().enumerate() {
-                if let Some(axis) = axis
-                    && compensation
-                        .affected_indices()
-                        .any(|selected| selected == *axis)
-                {
-                    self.torque[joint] = self.chain_gravity[*axis];
-                }
-            }
-        }
         let friction = self.dynamics.friction();
+        let n = self.axis_of.len();
+        let unread = |axis: &Option<usize>| {
+            axis.is_some_and(|index| measured.get(index).copied().flatten().is_none())
+        };
         for (joint, axis) in self.axis_of.iter().enumerate() {
             let Some(index) = *axis else {
                 continue;
             };
             // Unread: held as it is, no feed-forward, until its silence releases it.
-            if !rests[index].holds() || measured.get(index).copied().flatten().is_none() {
+            if !rests[index].holds() || unread(axis) {
+                continue;
+            }
+            // A joint on its branch unread: its gravity is unknown, so it stays held.
+            if self
+                .axis_of
+                .iter()
+                .enumerate()
+                .any(|(other, at)| self.related[joint * n + other] && unread(at))
+            {
                 continue;
             }
             let gravity = self.torque[joint];
             let rating = axes[index].binding.model.rating();
-            rests[index] = if self
-                .compensation
-                .as_ref()
-                .is_some_and(|model| model.affected_indices().any(|axis| axis == index))
-                || falls(&rating, gravity, &friction[joint])
-            {
+            rests[index] = if falls(&rating, gravity, &friction[joint]) {
                 Rest::Hold { gravity }
             } else {
                 Rest::Release
@@ -372,6 +378,50 @@ mod tests {
         assert_eq!(hanging[1], Rest::Hold { gravity: 0.0 });
         let silent = model.rests(&axes, &[None, Some(0.0)]);
         assert_eq!(silent[0], Rest::Hold { gravity: 0.0 });
+    }
+
+    /// A shoulder carrying an elbow, and a neck on another branch of the same base.
+    const BRANCHES: &str = r#"<robot name="b">
+      <link name="base"/>
+      <link name="upper"><inertial><origin xyz="0.3 0 0"/><mass value="1"/>
+        <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial></link>
+      <link name="fore"><inertial><origin xyz="0.2 0 0"/><mass value="0.5"/>
+        <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial></link>
+      <link name="head"><inertial><origin xyz="0.1 0 0"/><mass value="0.5"/>
+        <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial></link>
+      <joint name="shoulder" type="revolute"><parent link="base"/><child link="upper"/>
+        <axis xyz="0 1 0"/><limit lower="-3" upper="3" effort="10" velocity="1"/></joint>
+      <joint name="elbow" type="revolute"><parent link="upper"/><child link="fore"/>
+        <origin xyz="0.3 0 0"/>
+        <axis xyz="0 1 0"/><limit lower="-3" upper="3" effort="10" velocity="1"/></joint>
+      <joint name="neck" type="revolute"><parent link="base"/><child link="head"/>
+        <axis xyz="0 1 0"/><limit lower="-3" upper="3" effort="10" velocity="1"/></joint>
+    </robot>"#;
+
+    /// The left-arm compensation trial's finding (2026-11-14): an unread joint used to be
+    /// placed at zero for the others' gravity, so a guessed shoulder angle could release an
+    /// elbow that falls at the real one. Now every joint on its branch stays held without
+    /// feed-forward, and a joint on another branch keeps its own rule.
+    #[test]
+    fn an_unread_joint_never_releases_a_joint_on_its_branch() {
+        let dynamics = Dynamics::new(Tree::parse(BRANCHES).expect("tree"), crate::UPRIGHT);
+        let axes = [axis("shoulder"), axis("elbow"), axis("neck")];
+        let mut model = RestModel::new(dynamics, &axes);
+        // Read throughout, the hanging elbow (q_shoulder + q_elbow = -pi/2) is released.
+        let hanging = -std::f64::consts::FRAC_PI_2;
+        let read = model.rests(&axes, &[Some(0.0), Some(hanging), Some(hanging)]);
+        assert_eq!(read[1], Rest::Release, "{read:?}");
+        assert_eq!(read[2], Rest::Release, "{read:?}");
+        // The shoulder unread: the elbow's gravity is unknown, so it is held, and the
+        // shoulder, whose gravity reads the elbow, too. The neck is on another branch.
+        let silent = model.rests(&axes, &[None, Some(hanging), Some(hanging)]);
+        assert_eq!(silent[0], Rest::Hold { gravity: 0.0 });
+        assert_eq!(silent[1], Rest::Hold { gravity: 0.0 });
+        assert_eq!(silent[2], Rest::Release, "{silent:?}");
+        // The elbow unread: the shoulder above it is held without feed-forward too.
+        let below = model.rests(&axes, &[Some(0.0), None, Some(0.0)]);
+        assert_eq!(below[0], Rest::Hold { gravity: 0.0 });
+        assert!(matches!(below[2], Rest::Hold { gravity } if gravity.abs() > 0.4));
     }
 
     #[test]

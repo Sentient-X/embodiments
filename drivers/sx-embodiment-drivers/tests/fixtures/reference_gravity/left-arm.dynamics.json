@@ -1,0 +1,238 @@
+{
+  "schema": "sx.calibration/v1",
+  "kind": "dynamics",
+  "description_sha256": "11fa1ead5302c9f99a2c7a9c83e6d4f193ffe6a93de742d093f75431f3153c76",
+  "stiction_velocity": 0.01,
+  "links": [
+    {
+      "link": "left_elbow_pitch_link",
+      "mass": 0.54,
+      "first_moment": [
+        0.001392175689918506,
+        -0.008362172292447668,
+        -0.0196801104514722
+      ],
+      "inertia": [
+        0.0011707413522618329,
+        2.4842363898956318e-05,
+        4.945891853390914e-05,
+        0.0010617852127767008,
+        -0.0003057611484234394,
+        0.0006944169811335407
+      ]
+    },
+    {
+      "link": "left_forearm_yaw_link",
+      "mass": 0.4,
+      "first_moment": [
+        0.02263743493570907,
+        -0.0003593172321631605,
+        -0.0002313582888160846
+      ],
+      "inertia": [
+        0.00019313091553462399,
+        2.9540154814649095e-05,
+        1.347688996212957e-05,
+        0.0020498461048148735,
+        -2.0399856337396873e-07,
+        0.002057347055003818
+      ]
+    },
+    {
+      "link": "left_shoulder_pitch_link",
+      "mass": 1.28,
+      "first_moment": [
+        -0.0026267417788999807,
+        -0.011913713133733588,
+        -0.0034754279351814354
+      ],
+      "inertia": [
+        0.0018727335353753065,
+        2.267644978598244e-05,
+        7.970044654518344e-06,
+        0.0012421426494981806,
+        -9.983092744420509e-05,
+        0.0015679364390968349
+      ]
+    },
+    {
+      "link": "left_shoulder_roll_link",
+      "mass": 1.2,
+      "first_moment": [
+        -0.01622406966814017,
+        -0.007281989620006652,
+        -0.004529906961472673
+      ],
+      "inertia": [
+        0.0025542388992812358,
+        -0.0001034799877094052,
+        -5.70918207423641e-05,
+        0.0030177886066565093,
+        0.00014667124758350103,
+        0.0010993316108766765
+      ]
+    },
+    {
+      "link": "left_upper_arm_yaw_link",
+      "mass": 0.55,
+      "first_moment": [
+        -7.884709847541314e-05,
+        -0.003431458216173282,
+        -0.008433050774563015
+      ],
+      "inertia": [
+        0.0007091934785112548,
+        -8.525076996193909e-08,
+        -3.6561945057138786e-07,
+        0.0005813676301051702,
+        -5.421075051785543e-05,
+        0.0003414327387279609
+      ]
+    },
+    {
+      "link": "left_wrist_pitch_link",
+      "mass": 0.34,
+      "first_moment": [
+        0.003054309893488235,
+        -0.008124976111193992,
+        0.00488903748921995
+      ],
+      "inertia": [
+        0.00041168592447932823,
+        0.00012706229081585658,
+        -4.3736240367277503e-05,
+        0.00041215631581857485,
+        0.00011677377829558345,
+        0.0005581762295136692
+      ]
+    },
+    {
+      "link": "left_wrist_roll_link",
+      "mass": 0.20724660000000003,
+      "first_moment": [
+        -0.0021443659959392075,
+        -8.544998796406555e-06,
+        -5.317599085488807e-05
+      ],
+      "inertia": [
+        0.00019887160097598392,
+        5.293139699373169e-08,
+        -1.4759662966116525e-05,
+        0.00019481071467418549,
+        9.233076163967744e-07,
+        0.0001689014078079179
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "joint": "left_elbow_pitch_joint",
+      "coulomb": 0.22,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0,
+      "velocity_deadband": 0.02
+    },
+    {
+      "joint": "left_forearm_yaw_joint",
+      "coulomb": 0.16,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    },
+    {
+      "joint": "left_shoulder_pitch_joint",
+      "coulomb": 0.0,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    },
+    {
+      "joint": "left_shoulder_roll_joint",
+      "coulomb": 0.0,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    },
+    {
+      "joint": "left_upper_arm_yaw_joint",
+      "coulomb": 0.2,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    },
+    {
+      "joint": "left_wrist_pitch_joint",
+      "coulomb": 0.0,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    },
+    {
+      "joint": "left_wrist_roll_joint",
+      "coulomb": 0.1,
+      "viscous": 0.0,
+      "armature": 0.0,
+      "stribeck": 0.0,
+      "stribeck_velocity": 0.0,
+      "stribeck_exponent": 0.0,
+      "load_motor": 0.0,
+      "load_external": 0.0,
+      "load_motor_stribeck": 0.0,
+      "load_external_stribeck": 0.0
+    }
+  ],
+  "units": [
+    "fixture-can-serial:1"
+  ],
+  "measurement": {
+    "method": "reference_model_fit",
+    "measured_at": "2026-11-12T09:44:38.150462Z",
+    "residual": {
+      "value": 0.06120717316443325,
+      "unit": "newton_metre"
+    },
+    "evidence": [
+      {
+        "kind": "sealed_document",
+        "reference": "8fd418ef84b0f3fe1b62557aef29ee5b75aab086d1801a6a37d817f756bd8697"
+      }
+    ]
+  }
+}
