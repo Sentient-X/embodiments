@@ -54,6 +54,23 @@
 //!   shaped target with every row in force. A program's goal is shaped too, under its tool
 //!   speed. Each joint's jerk cap is [`TeleopConfig::jerk`].
 //!
+//! - **the operator's arm** (IAIE Bimanual-Teleoperation, MIT, commit 9c30cf8): a hand whose
+//!   ask carries the operator's shoulder, elbow and wrist ([`Targets::arm`]) on a limb whose
+//!   arm the config names ([`LimbConfig::arm`]) is placed by shoulder-wrist geometric
+//!   retargeting: the robot's shoulder plus the operator's shoulder-to-wrist vector scaled by
+//!   the robot's reach over theirs ([`TeleopConfig::human_reach_m`]), with no clutch offset;
+//!   its turn is still the clutch's (the controller's turn since the hand took hold, on the
+//!   gripper's). Its elbow is turned toward the side of the operator's (adaptive elbow control,
+//!   [`ElbowAim`]: weighted by how far their elbow stands off their shoulder-wrist line past
+//!   [`ELBOW_DEADBAND_M`], both low-passed over [`ELBOW_FILTER_S`]) in what the tool leaves
+//!   free, and its posture falls back to the preferred one at the reference's home gain
+//!   ([`Settings::home_gain`]). A hand without an arm is clutched as before. Where this departs
+//!   from the reference: the turn is the clutch's, not the controller's absolute turn through a
+//!   calibrated per-arm offset (the clutch takes that offset at each hold, for any body); the
+//!   robot's shoulder is read where it stood at the hold, not every tick (a shoulder riding a
+//!   free torso chased its own anchor); the elbow gain is 10, not 0.5 ([`Settings::elbow_gain`]);
+//!   no 0.08 s engage blend (the shaper brings an engage in within the joints' jerk caps).
+//!
 //! Nothing here allocates per step after [`Teleop::new`], and nothing reads a clock.
 
 use std::collections::BTreeMap;
@@ -68,7 +85,8 @@ use crate::model::{Frames, Model};
 use crate::shaper::{Aim, Shaped, ToolMap, ToolShaper};
 use crate::smoothing::{OneEuro, PoseFilter};
 use crate::solve::{
-    Caps, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve, ToolSpeed,
+    Caps, ElbowAim, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings, Solve,
+    ToolSpeed, elbow_direction,
 };
 
 /// The config's schema, written in every config and refused when another.
@@ -168,7 +186,10 @@ pub const STALL_RELEASE: f64 = 0.01;
 pub struct Clutch {
     /// Per hand: the translation added to the hand, and the rotation applied after the hand's
     /// own (its rotation at hold, inverted, then the gripper's).
-    held: [Option<([f64; 3], Quaternion)>; MAX_HANDS],
+    /// Whether it took hold with the operator's arm ([`Targets::arm`]): such a hand is placed
+    /// by its arm, so only its turn is clutched, and a hand that gains or loses its arm takes
+    /// hold afresh where the gripper stands.
+    held: [Option<([f64; 3], Quaternion, bool)>; MAX_HANDS],
 }
 
 impl Clutch {
@@ -183,22 +204,39 @@ impl Clutch {
         self.held.get(hand).is_some_and(Option::is_some)
     }
 
+    /// Whether [`Clutch::apply`] takes hold of any of `targets`' hands, so needs the grippers'
+    /// tool points: a hand seen first, or one that gained or lost its arm.
+    #[must_use]
+    pub fn takes_hold(&self, targets: &Targets) -> bool {
+        (0..MAX_HANDS).any(|hand| {
+            targets.tcp[hand].is_some()
+                && self.held[hand].is_none_or(|(_, _, arm)| arm != targets.arm[hand].is_some())
+        })
+    }
+
     /// `targets`' hands moved onto the grippers they hold, taking hold with `tools` (each
     /// gripper's tool point where the robot stands, [`Teleop::tool_poses`]) for a hand seen
-    /// first; a hand whose gripper has no pose is left as given.
+    /// first; a hand whose gripper has no pose is left as given. A hand with the operator's
+    /// arm keeps its point (the solve places it by the arm) and is only turned.
     pub fn apply(&mut self, tools: &[Option<Pose>; MAX_HANDS], targets: &mut Targets) {
         for hand in 0..MAX_HANDS {
             let Some(target) = targets.tcp[hand] else {
                 self.held[hand] = None;
                 continue;
             };
-            if self.held[hand].is_none() {
+            let arm = targets.arm[hand].is_some();
+            if self.held[hand].is_none_or(|(_, _, held)| held != arm) {
+                self.held[hand] = None;
                 let Some(tool) = tools[hand] else { continue };
-                let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
+                let offset = if arm {
+                    [0.0; 3]
+                } else {
+                    [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k])
+                };
                 let local = target.rotation.conjugate() * tool.rotation;
-                self.held[hand] = Some((offset, local));
+                self.held[hand] = Some((offset, local, arm));
             }
-            if let Some((offset, local)) = self.held[hand] {
+            if let Some((offset, local, _)) = self.held[hand] {
                 targets.tcp[hand] = Some(Pose {
                     translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
                     rotation: target.rotation * local,
@@ -281,6 +319,133 @@ pub struct LimbConfig {
     /// ([`Targets::free_roll`]). `None`: the limb is only ever asked for whole poses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approach: Option<[f64; 3]>,
+    /// A pose limb's arm as an operator's is matched to it ([`Targets::arm`]): its shoulder,
+    /// elbow and wrist links. `None`: the hand is always clutched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arm: Option<ArmLinks>,
+}
+
+/// The links a robot arm's shoulder, elbow and wrist are at: each link's origin is the point.
+/// `crate::BodyFiles` names them for every registry arm by one rule.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArmLinks {
+    pub shoulder: String,
+    pub elbow: String,
+    pub wrist: String,
+}
+
+/// An operator's arm for one hand, in the robot's root frame as the hand's pose is: shoulder,
+/// elbow and wrist, metres (`TeleoperationArmPose`, tracked by the headset or estimated). The
+/// shoulder anchors SWGR's shoulder-to-hand vector (the hand is the tool point); the three
+/// together give the elbow's direction off the shoulder-wrist line.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OperatorArm {
+    pub shoulder_m: [f64; 3],
+    pub elbow_m: [f64; 3],
+    pub wrist_m: [f64; 3],
+}
+
+impl OperatorArm {
+    fn finite(&self) -> bool {
+        self.shoulder_m
+            .iter()
+            .chain(&self.elbow_m)
+            .chain(&self.wrist_m)
+            .all(|v| v.is_finite())
+    }
+}
+
+/// The operator's shoulder-to-wrist reach the robot's is scaled against, metres, when the
+/// config names none: the reference's `HUMAN_REACH`.
+pub const HUMAN_REACH_M: f64 = 0.58;
+
+/// An operator's elbow nearer their shoulder-wrist line than this aims no robot elbow, metres:
+/// the reference's `elbow_deadband`.
+pub const ELBOW_DEADBAND_M: f64 = 0.04;
+
+/// The most an aimed elbow weighs: the reference's `elbow_weight_max`.
+pub const ELBOW_WEIGHT_MAX: f64 = 1.0;
+
+/// The time constant the operator's elbow direction and weight are low-passed over, seconds:
+/// the reference's `elbow_filter_alpha` 0.35 a tick at its 60 Hz, `-dt / ln(1 - 0.35)`, so
+/// every control rate filters alike.
+pub const ELBOW_FILTER_S: f64 = 0.038_69;
+
+/// How much an operator's elbow `radius_m` off their shoulder-wrist line weighs, for an
+/// operator of reach `reach_m`: none within [`ELBOW_DEADBAND_M`], rising to
+/// [`ELBOW_WEIGHT_MAX`] at their reach (the reference's `adaptive_elbow_weight`).
+#[must_use]
+pub fn elbow_weight(radius_m: f64, reach_m: f64) -> f64 {
+    ((radius_m - ELBOW_DEADBAND_M) / (reach_m - ELBOW_DEADBAND_M).max(1e-6)).clamp(0.0, 1.0)
+        * ELBOW_WEIGHT_MAX
+}
+
+const fn human_reach() -> f64 {
+    HUMAN_REACH_M
+}
+
+/// One limb's arm as the solve reads it: its links' indices and its reach.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Arm {
+    shoulder: usize,
+    elbow: usize,
+    wrist: usize,
+    /// From the shoulder through each joint below it to the tool frame, metres: the reach of
+    /// the arm stretched straight (the reference's `robot_reach`).
+    reach_m: f64,
+}
+
+impl Arm {
+    fn of(body: &Body, limb: usize, links: &ArmLinks) -> Result<Self, IkError> {
+        let model = body.model();
+        let link = |name: &str| {
+            model.link(name).ok_or_else(|| {
+                IkError::Caps(format!("arm link {name:?} is not in the description"))
+            })
+        };
+        let (shoulder, elbow, wrist) = (
+            link(&links.shoulder)?,
+            link(&links.elbow)?,
+            link(&links.wrist)?,
+        );
+        let tool = body.limbs[limb].frame;
+        if !(model.descends(tool, wrist)
+            && model.descends(wrist, elbow)
+            && model.descends(elbow, shoulder)
+            && shoulder != elbow
+            && elbow != wrist)
+        {
+            return Err(IkError::Caps(format!(
+                "arm {links:?} is not a shoulder above an elbow above a wrist above the tool"
+            )));
+        }
+        let mut rest = vec![0.0; model.axes().len()];
+        for (slot, axis) in rest.iter_mut().zip(model.axes()) {
+            if let Some([lower, upper]) = axis.limits {
+                *slot = 0.0_f64.clamp(lower, upper);
+            }
+        }
+        let frames = model.poses(&rest);
+        let distance =
+            |a: [f64; 3], b: [f64; 3]| (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f64>().sqrt();
+        let mut last = frames.links[shoulder].t;
+        let mut reach_m = 0.0;
+        for term in model.above(tool) {
+            let child = model.child(term.joint);
+            if child != shoulder && model.descends(child, shoulder) {
+                reach_m += distance(frames.links[child].t, last);
+                last = frames.links[child].t;
+            }
+        }
+        reach_m += distance(frames.links[tool].t, last);
+        Ok(Self {
+            shoulder,
+            elbow,
+            wrist,
+            reach_m,
+        })
+    }
 }
 
 /// Everything the solve is built from besides the description, so a station and a headset
@@ -316,6 +481,10 @@ pub struct TeleopConfig {
     /// joint it does not name stays at its own value at engage.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub posture: BTreeMap<String, f64>,
+    /// The operator's shoulder-to-wrist reach, metres: a hand placed by the operator's arm
+    /// moves the robot's reach over this for each metre theirs moves ([`LimbConfig::arm`]).
+    #[serde(default = "human_reach")]
+    pub human_reach_m: f64,
 }
 
 impl TeleopConfig {
@@ -387,6 +556,10 @@ pub struct Targets {
     /// reads it on the sender's clock (now less its age). `None`: as read, filtered on the
     /// solve's clock.
     pub age_s: Option<f64>,
+    /// Per hand: the operator's arm, when the sender knows it: the hand is then placed by it
+    /// on a limb whose arm the config names ([`LimbConfig::arm`]; see the module docs), and
+    /// otherwise clutched.
+    pub arm: [Option<OperatorArm>; MAX_HANDS],
 }
 
 /// The longest a shaped target may still run after its target went, seconds: then the limb is
@@ -628,6 +801,15 @@ pub struct Teleop {
     gaze_gone_s: f64,
     /// Whether the camera's look went while the neck still moved: it comes to rest as a hand does.
     gaze_resting: bool,
+    /// Per limb, its arm ([`LimbConfig::arm`]); per hand, its operator's elbow direction and
+    /// weight as low-passed ([`ELBOW_FILTER_S`]); the positions the robot's shoulders are read
+    /// at.
+    arms: Vec<Option<Arm>>,
+    elbows: [Option<([f64; 3], f64)>; MAX_HANDS],
+    /// Per hand, where its robot shoulder stood when its arm was first given since the hand
+    /// took hold: the hand's anchor.
+    shoulders: [Option<[f64; 3]>; MAX_HANDS],
+    arm_q: Vec<f64>,
 }
 
 impl Teleop {
@@ -678,6 +860,11 @@ impl Teleop {
         let positive = |value: f64| value.is_finite() && value > 0.0;
         if !positive(config.ramp_s) || !positive(config.max_step_rad) {
             return Err(IkError::Caps("ramp and step must be positive".into()));
+        }
+        if !positive(config.human_reach_m) {
+            return Err(IkError::Caps(
+                "the operator's reach must be positive".into(),
+            ));
         }
         let mut speed = Vec::with_capacity(names.len());
         let mut accel = Vec::with_capacity(names.len());
@@ -781,7 +968,20 @@ impl Teleop {
             }
         }
         let frames = body.model().poses(&q);
+        let arm_q = q.clone();
         let limb_count = limb_names.len();
+        let mut arms = Vec::with_capacity(limb_count);
+        for (index, name) in limb_names.iter().enumerate() {
+            let links = config
+                .limbs
+                .iter()
+                .find(|limb| limb.name == *name)
+                .and_then(|limb| limb.arm.as_ref());
+            arms.push(match (links, hand_of[index]) {
+                (Some(links), Some(_)) => Some(Arm::of(&body, index, links)?),
+                _ => None,
+            });
+        }
         let mut ik = Ik::new(body, Caps { speed, accel }, settings, scene)?;
         if !config.posture.is_empty() {
             let posture: Vec<f64> = names
@@ -802,7 +1002,8 @@ impl Teleop {
                     residual_m: 0.0,
                     residual_rad: 0.0,
                     reach: Reach::Idle,
-                    active: Vec::new(),
+                    // Sized as the solve's own, so copying its reports each tick never grows it.
+                    active: Vec::with_capacity(ik.report_capacity()),
                     hidden_by: None,
                 })
                 .collect(),
@@ -858,7 +1059,97 @@ impl Teleop {
             gone_s: [0.0; MAX_HANDS],
             gaze_gone_s: 0.0,
             gaze_resting: false,
+            arms,
+            arm_q,
+            elbows: [None; MAX_HANDS],
+            shoulders: [None; MAX_HANDS],
         })
+    }
+
+    /// Each limb's arm reach, metres, in [`Body::limbs`] order: `None` for a limb the config
+    /// names no arm for ([`LimbConfig::arm`]).
+    #[must_use]
+    pub fn arm_reach(&self) -> Vec<Option<f64>> {
+        self.arms
+            .iter()
+            .map(|arm| arm.map(|arm| arm.reach_m))
+            .collect()
+    }
+
+    /// Place each hand given with its operator's arm by shoulder-wrist geometric retargeting,
+    /// and aim its elbow (see the module docs); every other limb's elbow goes unaimed and its
+    /// posture weighs as before. The robot's shoulders are read where `reference` puts them
+    /// (the last command), a joint it gives no number for where the solve last stood.
+    fn retarget(&mut self, targets: &mut Targets, reference: &[f64], dt: f64) {
+        let mut placed = false;
+        let blend = 1.0 - (-dt / ELBOW_FILTER_S).exp();
+        let human = self.config.human_reach_m;
+        for (limb, hand) in self.hand_of.iter().enumerate() {
+            let Some(hand) = *hand else { continue };
+            let (Some(arm), Some(tcp), Some(operator)) =
+                (self.arms[limb], targets.tcp[hand], targets.arm[hand])
+            else {
+                self.elbows[hand] = None;
+                self.shoulders[hand] = None;
+                self.ik.set_elbow_aim(limb, None);
+                self.ik.set_home_pull(limb, false);
+                continue;
+            };
+            if self.shoulders[hand].is_none() && !placed {
+                for ((slot, given), standing) in self.arm_q.iter_mut().zip(reference).zip(&self.q) {
+                    *slot = if given.is_finite() { *given } else { *standing };
+                }
+                self.ik
+                    .body()
+                    .model()
+                    .poses_into(&self.arm_q, &mut self.frames);
+                placed = true;
+            }
+            // Anchored where the shoulder stood as the hand took hold, not where it stands now:
+            // on a body whose shoulders ride a free torso, an anchor that moved with them chased
+            // its own torso (a reach's tracking 11 -> 23 mm RMS, `tests/arm_retarget.rs`). On a
+            // body whose shoulders stand still (the reference's) the two are the same.
+            let shoulder = *self.shoulders[hand].get_or_insert(self.frames.links[arm.shoulder].t);
+            // SWGR's one scale on the operator's shoulder-to-hand vector. The hand is the tool
+            // point as given (`tcp`), not the arm's wrist: a page's wrist stands 8 cm behind the
+            // grip, and the tool point is the reading played on the hands' curve while the arm
+            // rides only the newest sample. The reference's wrist is its controller, so the two
+            // agree there.
+            let scale = arm.reach_m / human;
+            targets.tcp[hand] = Some(Pose {
+                translation_m: [0, 1, 2].map(|k| {
+                    scale.mul_add(tcp.translation_m[k] - operator.shoulder_m[k], shoulder[k])
+                }),
+                rotation: tcp.rotation,
+            });
+            // The operator's elbow off their shoulder-wrist line, weighted past the deadband;
+            // a straight arm, or one within the deadband, aims nothing and forgets its filter.
+            let seen = elbow_direction(operator.shoulder_m, operator.elbow_m, operator.wrist_m)
+                .map(|(direction, radius)| (direction, elbow_weight(radius, human)))
+                .filter(|(_, weight)| *weight > 0.0);
+            self.elbows[hand] = seen.map(|(direction, weight)| match self.elbows[hand] {
+                Some((before, weighed)) => {
+                    let mixed = [0, 1, 2].map(|k| before[k] + blend * (direction[k] - before[k]));
+                    let length = mixed.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-9);
+                    (
+                        mixed.map(|x| x / length),
+                        weighed + blend * (weight - weighed),
+                    )
+                }
+                None => (direction, weight),
+            });
+            self.ik.set_elbow_aim(
+                limb,
+                self.elbows[hand].map(|(direction, weight)| ElbowAim {
+                    shoulder: arm.shoulder,
+                    elbow: arm.elbow,
+                    wrist: arm.wrist,
+                    direction,
+                    weight,
+                }),
+            );
+            self.ik.set_home_pull(limb, true);
+        }
     }
 
     /// Whether each target passes its shaper ([`crate::shaper`], the default); `false` hands the
@@ -1048,6 +1339,8 @@ impl Teleop {
         self.resting = [false; MAX_HANDS];
         self.gaze_gone_s = 0.0;
         self.gaze_resting = false;
+        self.elbows = [None; MAX_HANDS];
+        self.shoulders = [None; MAX_HANDS];
     }
 
     /// Whether a shaped target still has motion to bring to rest: a caller whose targets went
@@ -1641,6 +1934,7 @@ impl Teleop {
         for hand in 0..MAX_HANDS {
             if targets.tcp[hand].is_some_and(|p| !pose_finite(&p))
                 || targets.gripper_width_m[hand].is_some_and(|w| !w.is_finite())
+                || targets.arm[hand].is_some_and(|arm| !arm.finite())
             {
                 return Err(IkError::Target(
                     self.hands
@@ -1660,6 +1954,9 @@ impl Teleop {
                 *velocity = None;
             }
         }
+        // A hand with the operator's arm is placed by it before its tremor is filtered, as the
+        // reference filters its retargeted pose.
+        self.retarget(&mut cleaned, reference, dt);
         let targets = &cleaned;
         // Filtered once the step is taken: a refused step leaves the filter and `taken` as
         // they were.

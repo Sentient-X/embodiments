@@ -845,6 +845,7 @@ fn synth(body: &Body, caps: Option<&str>, tick: Option<&String>) {
         held: vec!["torso_joint".into()],
         obstacles: Vec::new(),
         posture: BTreeMap::new(),
+        human_reach_m: sx_embodiment_ik::teleop::HUMAN_REACH_M,
     };
     println!(
         "caps: {}, tick {:.1} ms, max step {:.3} rad\n",

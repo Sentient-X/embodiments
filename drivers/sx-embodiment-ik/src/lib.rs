@@ -80,8 +80,8 @@ pub use geometry::{
 };
 pub use model::{Frames, Model};
 pub use solve::{
-    Active, Caps, Clearance, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach, Settings,
-    Solve, Step, ToolSpeed,
+    Active, Caps, Clearance, ElbowAim, FOLLOWER_SPEED, Ik, LimbReport, READING_JITTER, Reach,
+    Settings, Solve, Step, ToolSpeed, elbow_direction,
 };
 pub use tool::{Grip, JawKind, Jaws, NoJawsReason, ToolFrame};
 
