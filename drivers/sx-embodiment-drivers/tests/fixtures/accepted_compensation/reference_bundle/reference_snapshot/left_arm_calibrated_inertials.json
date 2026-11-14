@@ -1,0 +1,72 @@
+{
+  "left_shoulder_pitch_link": {
+    "mass_kg": 1.28,
+    "com_m": [
+      0.000141,
+      -0.009375,
+      -0.002387
+    ],
+    "motor_actuator": "DM8009",
+    "notes": "CNC bracket ~0.384 kg + DM8009 actuator 0.896 kg"
+  },
+  "left_shoulder_roll_link": {
+    "mass_kg": 1.20,
+    "com_m": [
+      -0.011136,
+      -0.000195,
+      -0.003757
+    ],
+    "motor_actuator": "DM8009",
+    "notes": "CNC roll bracket ~0.475 kg + DM8009 rotor & DM4340 stator 0.725 kg"
+  },
+  "left_upper_arm_yaw_link": {
+    "mass_kg": 0.55,
+    "com_m": [
+      2.3e-05,
+      -0.006274,
+      -0.015827
+    ],
+    "motor_actuator": "DM4340",
+    "notes": "CNC yaw tube ~0.175 kg + DM4340 actuator 0.375 kg"
+  },
+  "left_elbow_pitch_link": {
+    "mass_kg": 0.54,
+    "com_m": [
+      -0.000184,
+      -0.014835,
+      -0.003404
+    ],
+    "motor_actuator": "DM4340",
+    "notes": "CNC elbow pitch bracket ~0.165 kg + DM4340 actuator 0.375 kg"
+  },
+  "left_forearm_yaw_link": {
+    "mass_kg": 0.40,
+    "com_m": [
+      0.0,
+      0.0,
+      -0.057226
+    ],
+    "motor_actuator": "DM4340",
+    "notes": "Forearm tube + DM4310 pitch motor, calibrated to telemetry 1.429 Nm"
+  },
+  "left_wrist_pitch_link": {
+    "mass_kg": 0.34,
+    "com_m": [
+      0.0,
+      0.0,
+      -0.01
+    ],
+    "motor_actuator": "DM4310",
+    "notes": "Wrist pitch bracket + DM4310 roll motor stator ~0.340 kg"
+  },
+  "left_wrist_roll_link": {
+    "mass_kg": 0.31,
+    "com_m": [
+      -0.0003,
+      -0.0002,
+      -0.015
+    ],
+    "motor_actuator": "DM4310",
+    "notes": "Output tool flange + DM4310 rotor & base mount ~0.310 kg"
+  }
+}

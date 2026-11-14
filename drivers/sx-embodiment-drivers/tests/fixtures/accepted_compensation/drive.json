@@ -1,0 +1,157 @@
+{
+  "schema": "sx.instance-drive/v1",
+  "embodiment": "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc",
+  "instance": "f0d5e450cfc47b625df560f2f84d1c17c4ad4d6490a886a337584a00e14f71d9",
+  "joints": [
+    {
+      "joint": "torso_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_shoulder_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_shoulder_roll_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_upper_arm_yaw_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_elbow_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_forearm_yaw_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_wrist_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_wrist_roll_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_shoulder_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_shoulder_roll_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_upper_arm_yaw_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_elbow_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_forearm_yaw_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_wrist_pitch_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_wrist_roll_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_gripper_left_finger_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "left_gripper_right_finger_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_gripper_left_finger_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "right_gripper_right_finger_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_shoulder_pan_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_shoulder_lift_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_elbow_flex_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_wrist_flex_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_wrist_roll_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    },
+    {
+      "joint": "so101_camera_tilt_joint",
+      "zero": 0.0,
+      "direction": 1,
+      "calibration": null
+    }
+  ]
+}

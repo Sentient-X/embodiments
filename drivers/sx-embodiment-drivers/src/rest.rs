@@ -91,6 +91,9 @@ pub fn unmodelled(axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
 /// already applied), mapped to a chain's axes by joint name, with buffers sized once.
 #[derive(Clone, Debug)]
 pub struct RestModel {
+    compensation: Option<crate::compensation::QuasiStaticCompensation>,
+    chain_q: Vec<f64>,
+    chain_gravity: Vec<f64>,
     dynamics: Dynamics,
     scratch: Scratch,
     /// For each description joint ([`crate::Tree::joints`]), the chain axis it is.
@@ -111,12 +114,25 @@ impl RestModel {
             .collect();
         let width = axis_of.len();
         Self {
+            compensation: None,
+            chain_q: vec![0.0; axes.len()],
+            chain_gravity: vec![0.0; axes.len()],
             scratch: dynamics.scratch(),
             dynamics,
             axis_of,
             q: vec![0.0; width],
             torque: vec![0.0; width],
         }
+    }
+
+    /// Use the imported measured gravity for the selected chain, with no friction or slew.
+    #[must_use]
+    pub fn with_compensation(
+        mut self,
+        compensation: Option<crate::compensation::QuasiStaticCompensation>,
+    ) -> Self {
+        self.compensation = compensation;
+        self
     }
 
     /// Each axis's rest at `measured` (one per axis, `None` where it has no reading at all): a
@@ -138,6 +154,34 @@ impl RestModel {
         if !modelled {
             return rests;
         }
+        if let Some(compensation) = &mut self.compensation {
+            // Incomplete selected geometry cannot establish a gravity torque. Keep all
+            // selected brakeless axes held by unmodelled(), rather than guessing zero angles.
+            let complete = compensation
+                .affected_indices()
+                .all(|axis| measured.get(axis).copied().flatten().is_some());
+            if !complete {
+                return rests;
+            }
+            for (q, reading) in self.chain_q.iter_mut().zip(measured) {
+                *q = reading.unwrap_or(0.0);
+            }
+            if compensation
+                .gravity_into(&self.chain_q, &mut self.chain_gravity)
+                .is_err()
+            {
+                return rests;
+            }
+            for (joint, axis) in self.axis_of.iter().enumerate() {
+                if let Some(axis) = axis
+                    && compensation
+                        .affected_indices()
+                        .any(|selected| selected == *axis)
+                {
+                    self.torque[joint] = self.chain_gravity[*axis];
+                }
+            }
+        }
         let friction = self.dynamics.friction();
         for (joint, axis) in self.axis_of.iter().enumerate() {
             let Some(index) = *axis else {
@@ -149,7 +193,12 @@ impl RestModel {
             }
             let gravity = self.torque[joint];
             let rating = axes[index].binding.model.rating();
-            rests[index] = if falls(&rating, gravity, &friction[joint]) {
+            rests[index] = if self
+                .compensation
+                .as_ref()
+                .is_some_and(|model| model.affected_indices().any(|axis| axis == index))
+                || falls(&rating, gravity, &friction[joint])
+            {
                 Rest::Hold { gravity }
             } else {
                 Rest::Release
