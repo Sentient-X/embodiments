@@ -1,14 +1,22 @@
 //! The left arm's reference model (the November 14 handoff, accepted on the robot) as an
 //! identified-dynamics calibration: `fixtures/reference_gravity/left-arm.dynamics.json`,
 //! written by `tools/import_reference_dynamics.py` from the fixture bundle and the nominal
-//! drive. Ported from the compensation trial's tests (embodiments #279, Kripansh Sharma) onto
-//! the one dynamics model every body uses.
+//! drive, beside the Spark's whole-body fit (`static-upper-body.dynamics.json`, Fleet revision
+//! 2) trimmed of the arm (`static-upper-body.trimmed.dynamics.json`). Both are applied here as
+//! the station applies them. Ported from the compensation trial's tests (embodiments #279,
+//! Kripansh Sharma) onto the one dynamics model every body uses.
 
 use serde_json::Value;
 use sx_embodiment_drivers::{Dynamics, DynamicsCalibration, UPRIGHT};
 
 const URDF: &str = include_str!("../../../render_packs/sentient-static-upper-body/robot.urdf");
 const CALIBRATION: &str = include_str!("fixtures/reference_gravity/left-arm.dynamics.json");
+const TRIMMED: &str =
+    include_str!("fixtures/reference_gravity/static-upper-body.trimmed.dynamics.json");
+/// The description revision the Spark's whole-body fit names.
+const EARLIER: &str = include_str!(
+    "../../../assets/sentient_static_upper_body/_by_digest/a15896916502f5f9a0a5bdbd0c58d6f943a294f569b48dc83cb355a1b62ebab7/sentient_static_upper_body.urdf"
+);
 const ORACLE: &str = include_str!("fixtures/reference_gravity/gravity.json");
 const ARM: [&str; 7] = [
     "left_shoulder_pitch_joint",
@@ -23,10 +31,16 @@ const ARM: [&str; 7] = [
 /// (the arm's physics) does not.
 const ACCEPTED_GRAVITY_RATIO: f64 = 0.95;
 
+/// The model the station runs: the description, the trimmed whole-body fit and the arm's.
 fn calibrated() -> Dynamics {
     let calibration = DynamicsCalibration::parse(CALIBRATION).expect("a dynamics calibration");
+    let trimmed = DynamicsCalibration::parse(TRIMMED).expect("the trimmed whole-body fit");
     Dynamics::of(URDF, UPRIGHT)
         .expect("description")
+        .superseding(&[EARLIER])
+        .expect("the earlier description")
+        .calibrated(&trimmed)
+        .expect("the whole-body fit, less the arm")
         .calibrated(&calibration)
         .expect("inside the plausibility bounds, for this description")
 }
@@ -53,8 +67,10 @@ fn full(dynamics: &Dynamics, rows: &[usize], arm_q: &[f64]) -> Vec<f64> {
     q
 }
 
-/// The reference's own gravity oracle, 24 poses: the description with the fitted links
-/// reproduces it to 0.041 N·m under the nominal drive. The reference's encoder zeros differ
+/// The reference's own gravity oracle, 24 poses: the model the station runs (the description,
+/// the trimmed whole-body fit and the arm's) reproduces it to 0.039 N·m under the nominal
+/// drive. Fitted without the whole-body fit beside it, the arm's file differed from this by
+/// up to 0.21 N·m (the refute of 2026-11-14): its carried gripper was the description's. The reference's encoder zeros differ
 /// from that drive's (elbow 5.8°, wrist pitch 8.1°, wrist roll 104°), which turns its distal
 /// links against the description's; with a drive that agrees, the importer's fit is exact to
 /// 2e-5 N·m (`tests/test_import_reference_dynamics.py`).

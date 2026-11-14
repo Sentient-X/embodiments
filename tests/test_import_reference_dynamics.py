@@ -14,6 +14,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 
@@ -34,6 +35,19 @@ URDF = (ROOT / "render_packs/sentient-static-upper-body/robot.urdf").read_bytes(
 BINDINGS = (ROOT / "drivers/sx-damiao-can/bindings/sentient-static-upper-body.json").read_bytes()
 DRIVE = (FIXTURES / "drive.json").read_bytes()
 COMMISSIONING = json.loads((FIXTURES / "commissioning.json").read_text())
+ARM = (
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_upper_arm_yaw_joint",
+    "left_elbow_pitch_joint",
+    "left_forearm_yaw_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_roll_joint",
+)
+# The Spark's whole-body fit (Fleet revision 2, read 2026-11-14), which the arm's sits beside.
+WHOLE_BYTES = (FIXTURES / "static-upper-body.dynamics.json").read_bytes()
+WHOLE = calibration_from_dict(json.loads(WHOLE_BYTES))
+assert isinstance(WHOLE, DynamicsCalibration)
 
 
 def _importer() -> ModuleType:
@@ -55,6 +69,7 @@ def _build(
     drive: bytes = DRIVE,
     commissioning: object = COMMISSIONING,
     max_residual_nm: float = 0.1,
+    beside: DynamicsCalibration | None = WHOLE,
 ) -> tuple[DynamicsCalibration, dict[str, object]]:
     return IMPORTER.build_calibration(
         reference,
@@ -65,6 +80,7 @@ def _build(
         mass_scale=1.0,
         friction_multiplier=1.0,
         max_residual_nm=max_residual_nm,
+        beside=beside,
     )
 
 
@@ -221,12 +237,75 @@ def test_a_whole_body_fit_gives_up_what_the_reference_takes_over(
         units=calibration.units,
         measurement=calibration.measurement,
     )
-    trimmed = IMPORTER.superseded(whole, calibration)
+    trimmed = IMPORTER.superseded(whole, calibration, "ab" * 32)
     assert [item.link for item in trimmed.links] == ["right_elbow_pitch_link"]
     assert [item.joint for item in trimmed.joints] == ["right_elbow_pitch_joint"]
     assert trimmed.stiction_velocity == 0.02
     with pytest.raises(IMPORTER.ReferenceImportError, match="all of the old one"):
-        IMPORTER.superseded(calibration, calibration)
+        IMPORTER.superseded(calibration, calibration, "ab" * 32)
+
+
+def test_the_trimmed_fit_is_a_subset_that_claims_no_residual(
+    nominal: tuple[DynamicsCalibration, dict[str, object]],
+) -> None:
+    # It keeps the original's method, time and evidence, names the document it was cut from,
+    # and claims none of the whole fit's residual (over joints it no longer carries).
+    calibration, _ = nominal
+    digest = hashlib.sha256(WHOLE_BYTES).hexdigest()
+    trimmed = IMPORTER.superseded(WHOLE, calibration, digest)
+    assert trimmed.measurement.method == WHOLE.measurement.method
+    assert trimmed.measurement.measured_at == WHOLE.measurement.measured_at
+    assert trimmed.measurement.residual is None
+    assert [item.reference for item in trimmed.measurement.evidence][-1] == digest
+    assert calibration_to_dict(trimmed) == json.loads(
+        (FIXTURES / "static-upper-body.trimmed.dynamics.json").read_text()
+    )
+
+
+def _station_theta(*calibrations: DynamicsCalibration) -> object:
+    from sx_embodiments.calibrate.dynamics import RigidBodyTree
+
+    tree = RigidBodyTree.of(URDF)
+    theta = tree.parameters()
+    for calibration in calibrations:
+        applied = tree.parameters(calibration)
+        for item in calibration.links:
+            at = 10 * tree.links.index(item.link)
+            theta[at : at + 10] = applied[at : at + 10]
+    return theta
+
+
+def test_the_arm_is_fitted_in_the_model_the_station_runs_beside_the_whole_body_fit(
+    nominal: tuple[DynamicsCalibration, dict[str, object]],
+) -> None:
+    # The refute of 2026-11-14: fitted against the description's gripper, the arm's file put
+    # beside the whole-body fit (whose gripper base is 0.086 kg, not 0.048) moved the arm's
+    # gravity by up to 0.21 N·m. Fitted beside it, the station's model is what was certified.
+    calibration, receipt = nominal
+    trimmed = IMPORTER.superseded(WHOLE, calibration, hashlib.sha256(WHOLE_BYTES).hexdigest())
+    alone, _ = _build(beside=None)
+    oracle = json.loads((FIXTURES / "gravity.json").read_text())
+    from sx_embodiments.calibrate.dynamics import RigidBodyTree
+
+    tree = RigidBodyTree.of(URDF)
+    rows = [tree.axes.index(name) for name in ARM]
+    rest = np.zeros(len(tree.axes))
+
+    def oracle_error(theta: object) -> float:
+        worst = 0.0
+        for case in oracle["cases"]:
+            q = rest.copy()
+            q[rows] = case["q"]
+            got = 0.95 * (tree.regressor(q, rest, rest) @ theta)[rows]
+            worst = max(worst, float(np.abs(got - np.array(case["gravity"])).max()))
+        return worst
+
+    assert oracle_error(_station_theta(trimmed, calibration)) < 0.045
+    assert oracle_error(_station_theta(trimmed, alone)) > 0.1
+    assert oracle_error(_station_theta(alone)) < 0.045
+    residual = cast("dict[str, float]", receipt["residual_nm"])
+    assert 1e-3 < max(residual.values()) < 0.1
+    assert "existing fit" in cast("str", receipt["beside"])
 
 
 def test_a_drive_rendered_for_an_earlier_revision_of_the_body_is_accepted() -> None:

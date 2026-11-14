@@ -16,14 +16,17 @@ How the reference becomes link parameters:
    * reduction``); torque maps back by virtual work, ``tau = scale * tau_ref``.
 2. Each reference link's mass and centre, placed in the description's link frame at the
    description's zero pose, is the prior. Rigidly carried links the reference lumps in (the
-   gripper under the wrist) are taken out of the link that carries them.
+   gripper under the wrist) are taken out of the link that carries them, at the values the
+   station will run: the robot's existing fit this one sits beside (``--supersede``), where
+   it names them, else the description's.
 3. Gravity torque is linear in each link's mass and first moment, so a least-squares fit of
    the seven links' first moments (masses stay at the prior: gravity alone cannot tell a
    link's mass from its parent's first moment) to the reference's gravity over the joint
    range makes the description reproduce it. Inertia tensors keep the description's shape,
    scaled to the fitted mass and moved to the fitted centre; gravity does not read them.
 
-The fit's worst torque residual over a held-out set of poses is the calibration's residual
+The fit's worst torque residual over a held-out set of poses, on the exact model the station
+runs (the description, the trimmed existing fit and this one), is the calibration's residual
 and must stay below ``--max-residual-nm``. It is near zero only when the drive's zeros agree
 with the reference's encoder offsets; a disagreement (a nominal drive) leaves a residual the
 receipt reports per joint. The accepted run's gravity share (``gravity_ratio``), its
@@ -327,9 +330,9 @@ def _frames(tree: RigidBodyTree, q: Array) -> dict[int, Array]:
     return placed
 
 
-def _carried(tree: RigidBodyTree, link: int, fitted: set[int]) -> list[int]:
-    """Links with mass below ``link`` that no other fitted link carries: what the reference
-    lumps into it (a gripper under the wrist)."""
+def _carried(tree: RigidBodyTree, theta: Array, link: int, fitted: set[int]) -> list[int]:
+    """Links with mass in ``theta`` below ``link`` that no other fitted link carries: what the
+    reference lumps into it (a gripper under the wrist)."""
     out: list[int] = []
     frontier = [link]
     while frontier:
@@ -337,25 +340,26 @@ def _carried(tree: RigidBodyTree, link: int, fitted: set[int]) -> list[int]:
         for joint in tree.joints:
             if joint.parent == at and joint.child not in fitted:
                 frontier.append(joint.child)
-                if tree.prior[PER_LINK * joint.child] > 0.0:
+                if theta[PER_LINK * joint.child] > 0.0:
                     out.append(joint.child)
     return out
 
 
 def _gravity_rows(
-    tree: RigidBodyTree, columns: Sequence[int], rows: Sequence[int], q: Array
+    tree: RigidBodyTree, theta: Array, columns: Sequence[int], rows: Sequence[int], q: Array
 ) -> tuple[Array, Array]:
     """At ``q``: the gravity regressor's fitted ``columns`` on ``rows``, and the torque the
-    unfitted parameters (the description's) add there."""
+    unfitted parameters (``theta``'s, the model the station runs) add there."""
     rest = np.zeros(len(tree.axes))
     regressor = tree.regressor(q, rest, rest)[list(rows)]
-    theta = np.concatenate([tree.prior, np.zeros(regressor.shape[1] - len(tree.prior))])
     fixed = theta.copy()
     fixed[list(columns)] = 0.0
     return regressor[:, list(columns)], regressor @ fixed
 
 
-def _inertia(tree: RigidBodyTree, link: int, mass: float, first_moment: Array) -> tuple[float, ...]:
+def _inertia(
+    tree: RigidBodyTree, link: int, mass: float, first_moment: Array
+) -> tuple[float, float, float, float, float, float]:
     """The description's tensor about its centre, scaled to ``mass``, about the new centre,
     then about the link origin: physical whenever the description's is."""
     at = PER_LINK * link
@@ -390,8 +394,11 @@ def build_calibration(
     mass_scale: float,
     friction_multiplier: float,
     max_residual_nm: float,
+    beside: DynamicsCalibration | None = None,
 ) -> tuple[DynamicsCalibration, dict[str, object]]:
-    """The calibration and its receipt; every run-dependent multiplier is explicit."""
+    """The calibration and its receipt; every run-dependent multiplier is explicit. ``beside``
+    is the robot's existing fit this one is assigned with (trimmed by :func:`superseded`):
+    what it fits outside the arm is the model the arm's fit is solved and certified in."""
     if not math.isfinite(mass_scale) or mass_scale <= 0:
         raise ReferenceImportError("mass scale is positive and finite")
     if not math.isfinite(friction_multiplier) or friction_multiplier < 0:
@@ -483,7 +490,13 @@ def build_calibration(
     theirs = _frames(source, offset)
     root = tree.links.index(joints[0].parent)
     their_root = source.links.index(joints[0].parent)
-    prior = np.concatenate([tree.prior, np.zeros(3 * len(tree.axes))])
+    try:
+        base = tree.parameters(beside)
+    except ValueError as error:
+        raise ReferenceImportError(
+            f"the fit beside names what the description has not: {error}"
+        ) from error
+    prior = base.copy()
     for link, name in zip(fitted, links, strict=True):
         at, there = PER_LINK * link, PER_LINK * source.links.index(name)
         mass = float(source_theta[there])
@@ -492,9 +505,9 @@ def build_calibration(
         )
         centre = (relative @ np.append(source_theta[there + 1 : there + 4] / mass, 1.0))[:3]
         moment = mass * centre
-        for carried in _carried(tree, link, set(fitted)):
-            m = float(tree.prior[PER_LINK * carried])
-            c = tree.prior[PER_LINK * carried + 1 : PER_LINK * carried + 4] / m
+        for carried in _carried(tree, base, link, set(fitted)):
+            m = float(base[PER_LINK * carried])
+            c = base[PER_LINK * carried + 1 : PER_LINK * carried + 4] / m
             placed = (np.linalg.inv(own[link]) @ own[carried] @ np.append(c, 1.0))[:3]
             mass -= m
             moment = moment - m * placed
@@ -516,7 +529,7 @@ def build_calibration(
     for _ in range(_FIT_POSES):
         q = np.zeros(len(tree.axes))
         q[rows] = generator.uniform(lower, upper)
-        block, fixed = _gravity_rows(tree, [*masses, *moments], rows, q)
+        block, fixed = _gravity_rows(tree, prior, [*masses, *moments], rows, q)
         # The prior's masses stay: only first moments are fitted.
         blocks.append(block[:, len(masses) :])
         targets.append(reference_gravity(q[rows]) - fixed - block[:, : len(masses)] @ prior[masses])
@@ -599,6 +612,12 @@ def build_calibration(
         "source_files": {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()},
         "manifest_sha256": manifest,
         "drive_sha256": hashlib.sha256(drive_bytes).hexdigest(),
+        "beside": (
+            "the description alone"
+            if beside is None
+            else "the robot's existing fit, trimmed: its links outside the arm are part of the "
+            "model the residual is certified on"
+        ),
         "parameters": {
             "mass_scale": mass_scale,
             "friction_multiplier": friction_multiplier,
@@ -629,10 +648,15 @@ def build_calibration(
     return calibration, receipt
 
 
-def superseded(existing: DynamicsCalibration, by: DynamicsCalibration) -> DynamicsCalibration:
+def superseded(
+    existing: DynamicsCalibration, by: DynamicsCalibration, existing_sha256: str
+) -> DynamicsCalibration:
     """``existing`` without every link and joint ``by`` names: a robot carries one fit per
     link and joint, so a calibration that takes over part of an older one (this arm, out of a
-    whole-body fit) ships with the older one trimmed. Everything else is kept as fitted."""
+    whole-body fit) ships with the older one trimmed. Everything else is kept as fitted. The
+    trimmed file is a subset of a measurement: it keeps the original's method, time and
+    evidence, names the document it was cut from (``existing_sha256``, its bytes' digest),
+    and claims no residual, since the whole fit's was over joints it no longer carries."""
 
     # The two may name different revisions of the description: the station checks each file
     # against its own (an earlier one applies where the re-render reached nothing it fitted).
@@ -642,7 +666,15 @@ def superseded(existing: DynamicsCalibration, by: DynamicsCalibration) -> Dynami
     joints_kept = tuple(item for item in existing.joints if item.joint not in joints)
     if not links_kept and not joints_kept:
         raise ReferenceImportError("the new calibration takes over all of the old one")
-    return replace(existing, links=links_kept, joints=joints_kept)
+    measurement = existing.measurement
+    source = Evidence(EvidenceKind.SEALED_DOCUMENT, existing_sha256)
+    evidence = measurement.evidence
+    trimmed = replace(
+        measurement,
+        residual=None,
+        evidence=evidence if source in evidence else (*evidence, source),
+    )
+    return replace(existing, links=links_kept, joints=joints_kept, measurement=trimmed)
 
 
 def main() -> None:
@@ -673,6 +705,13 @@ def main() -> None:
         help="Refuse a fit whose worst gravity residual exceeds this, N·m",
     )
     args = parser.parse_args()
+    beside = None
+    beside_bytes = b""
+    if args.supersede is not None:
+        beside_bytes = args.supersede.read_bytes()
+        beside = calibration_from_dict(json.loads(beside_bytes))
+        if not isinstance(beside, DynamicsCalibration):
+            raise ReferenceImportError("--supersede names a dynamics calibration")
     calibration, receipt = build_calibration(
         args.reference_root,
         args.urdf.read_bytes(),
@@ -682,6 +721,7 @@ def main() -> None:
         mass_scale=args.mass_scale,
         friction_multiplier=args.friction_multiplier,
         max_residual_nm=args.max_residual_nm,
+        beside=beside,
     )
     if not args.out.name.endswith(".dynamics.json"):
         raise ReferenceImportError("the station reads <name>.dynamics.json")
@@ -689,13 +729,11 @@ def main() -> None:
     args.out.with_name(args.out.name.removesuffix(".dynamics.json") + ".receipt.json").write_text(
         json.dumps(receipt, indent=2) + "\n"
     )
-    if args.supersede is not None:
-        existing = calibration_from_dict(json.loads(args.supersede.read_text()))
-        if not isinstance(existing, DynamicsCalibration):
-            raise ReferenceImportError("--supersede names a dynamics calibration")
+    if args.supersede is not None and beside is not None:
         trimmed = args.supersede.name.removesuffix(".dynamics.json") + ".trimmed.dynamics.json"
+        cut = superseded(beside, calibration, hashlib.sha256(beside_bytes).hexdigest())
         args.out.with_name(trimmed).write_text(
-            json.dumps(calibration_to_dict(superseded(existing, calibration)), indent=2) + "\n"
+            json.dumps(calibration_to_dict(cut), indent=2) + "\n"
         )
     summary = {"residual_nm": receipt["residual_nm"], "offsets_rad": receipt["offsets_rad"]}
     sys.stdout.write(json.dumps(summary) + "\n")

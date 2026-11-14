@@ -162,7 +162,7 @@ python tools/import_reference_dynamics.py --reference-root <handoff>/reference_s
 
 - **Residual.** The worst gravity residual must stay under `--max-residual-nm` (default 1e-3 N·m).
   - With a drive whose zeros match the handoff's encoder offsets, the fit is exact to 2e-5 N·m.
-  - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range and 0.038 N·m on the handoff's own 24-pose oracle.
+  - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range and 0.038 N·m on the handoff's own 24-pose oracle, both with the Spark's trimmed whole-body fit loaded beside it.
   - A large residual means the drive and the handoff disagree about where zero is. Fix the zero calibration. Never raise the bound for a robot.
   - **The real Spark has the same disagreement.** Fleet revision 2 (digest `f13ee49d`, read 2026-11-14) carries a nominal drive: every left-arm zero is 0. The importer refuses it at 0.061 N·m.
     - Which zero is physically right has to be settled at the robot, before anything is assigned.
@@ -171,6 +171,9 @@ python tools/import_reference_dynamics.py --reference-root <handoff>/reference_s
 - **Receipt.** `<name>.receipt.json` records the per-joint offsets, the residuals, and the masses against the description's.
 - **Not carried.** The handoff's gravity share, feed-forward slew and torque clamps are controller settings, not the arm's physics.
 - **One fit per link and joint.** The station refuses two calibrations that name the same link or joint. `--supersede` therefore writes the robot's existing whole-body fit without what the new file names, as `<name>.trimmed.dynamics.json`; assign both files.
+  - **The arm is fitted beside that fit.** The handoff lumps the gripper into its wrist link. The importer takes the gripper back out at the values the station will run: the existing fit's, where it names them (the Spark's gripper base is 0.086 kg; the description's is 0.048 kg). The residual is certified on that whole model: the description, the trimmed file and the new one.
+  - Fitted against the description's gripper instead, the arm's file moved the arm's gravity by up to 0.21 N·m at the shoulders once it sat beside the whole-body fit. Its oracle error rose from 0.038 to 0.134 N·m (the refute of 2026-11-14). Always pass `--supersede` when the robot carries a fit.
+  - The trimmed file is a subset of a measurement. It keeps the original's method, time and evidence, adds the digest of the document it was cut from, and claims no residual, because the whole fit's residual covered joints it no longer carries.
 - **Stiction velocity.** Each joint's friction turns on over the stiction velocity of the calibration that supplied it, so the two files may differ (0.02 and 0.01 rad/s).
 
 `JointFriction.velocity_deadband`, which defaults to zero, feeds no friction forward below that speed. The handoff's elbow uses 0.02 rad/s. Its friction then rises over the file's single stiction velocity (0.01 rad/s), not the handoff's 0.03. That differs from the handoff by at most about 0.1 N·m, and only between 0.02 and 0.08 rad/s.

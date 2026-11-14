@@ -94,11 +94,15 @@ def moving_friction(
     external: Array,
     stiction_velocity: float,
 ) -> Array:
-    """``JointFriction::torque``: armature, viscous, and the budget with a smooth sign."""
+    """``JointFriction::torque``: armature, viscous, and the budget with a smooth sign that
+    turns on only past the velocity deadband."""
+    sliding = np.maximum(np.abs(speed) - friction.velocity_deadband, 0.0)
     return (
         friction.armature * acceleration
         + friction.viscous * speed
-        + np.tanh(speed / stiction_velocity) * budget(friction, speed, motor, external)
+        + np.tanh(sliding / stiction_velocity)
+        * np.sign(speed)
+        * budget(friction, speed, motor, external)
     )
 
 
