@@ -77,12 +77,20 @@ fn the_calibrated_description_reproduces_the_reference_gravity_oracle() {
         dynamics
             .gravity_torque_into(&full(&dynamics, &rows, &q), &mut scratch, &mut torque)
             .expect("gravity");
-        for (index, want) in case["gravity"].as_array().expect("gravity").iter().enumerate() {
+        for (index, want) in case["gravity"]
+            .as_array()
+            .expect("gravity")
+            .iter()
+            .enumerate()
+        {
             let got = ACCEPTED_GRAVITY_RATIO * torque[rows[index]];
             worst = worst.max((got - want.as_f64().expect("number")).abs());
         }
     }
-    println!("{} reference gravity cases: worst {worst:.6} N·m", cases.len());
+    println!(
+        "{} reference gravity cases: worst {worst:.6} N·m",
+        cases.len()
+    );
     assert!(worst < 0.045, "worst gravity mismatch {worst} N·m");
 }
 
@@ -105,7 +113,10 @@ fn friction_inside_the_deadband_is_none_and_past_it_follows_the_motion() {
         let mut qd = rest.clone();
         qd[elbow] = speed;
         let moving = dynamics.inverse(&q, &qd, &rest).expect("moving");
-        assert!((moving[elbow] - held[elbow]).abs() < 1e-12, "{speed}: {moving:?}");
+        assert!(
+            (moving[elbow] - held[elbow]).abs() < 1e-12,
+            "{speed}: {moving:?}"
+        );
     }
     for speed in [-0.2_f64, 0.2] {
         let mut qd = rest.clone();
