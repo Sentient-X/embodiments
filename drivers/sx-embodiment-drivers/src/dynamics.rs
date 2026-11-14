@@ -37,6 +37,13 @@ pub const UPRIGHT: [f64; 3] = [0.0, 0.0, -STANDARD_GRAVITY];
 /// The `kind` of a dynamics calibration document (`sx.calibration/v1`).
 pub const DYNAMICS_KIND: &str = "dynamics";
 
+/// The worst gravity residual, N·m, a reference model fit may record and still be applied
+/// (`sx_embodiments.calibration.REFERENCE_RESIDUAL_BOUND_NM`): it is near zero only when the
+/// drive's zeros agree with the reference's encoder offsets, and a fit above it feeds forward a
+/// gravity the robot was never measured to have. Until 2026-11-15 the bound was the importer's
+/// default and this parser ignored the recorded residual (the second refute of the merge).
+pub const REFERENCE_RESIDUAL_BOUND_NM: f64 = 1e-3;
+
 /// One link's mass properties, in its own frame: what joint torque is linear in.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -279,6 +286,9 @@ pub enum DynamicsError {
     Repeated(String),
     #[error("{0:?} has mass properties no body has, or friction that is negative")]
     Unphysical(String),
+    /// A reference model fit would run in a model other than the one it was certified in.
+    #[error("{file}: {reason}")]
+    Uncertified { file: String, reason: String },
     #[error(
         "{link:?} is fitted at {mass} kg (described: {design} kg), its centre of mass {shift} m from the description's"
     )]
@@ -343,7 +353,96 @@ struct Document {
     links: Vec<LinkEntry>,
     joints: Vec<JointEntry>,
     units: Vec<String>,
-    measurement: serde::de::IgnoredAny,
+    measurement: MeasurementEntry,
+}
+
+#[derive(Deserialize)]
+struct MeasurementEntry {
+    method: String,
+    #[serde(default)]
+    residual: Option<ResidualEntry>,
+    #[serde(default)]
+    evidence: Vec<EvidenceEntry>,
+}
+
+#[derive(Deserialize)]
+struct ResidualEntry {
+    value: f64,
+    unit: String,
+}
+
+#[derive(Deserialize)]
+struct EvidenceEntry {
+    kind: String,
+    reference: String,
+}
+
+/// What a dynamics calibration's numbers were certified in, as far as applying it depends on
+/// it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Certification {
+    /// Identified on the robot (or by anything but a reference model): applied beside any fit
+    /// that names other links and joints.
+    #[default]
+    Fitted,
+    /// A reference model fitted onto the description, its residual under
+    /// [`REFERENCE_RESIDUAL_BOUND_NM`] in the model the description and the fit `beside` (that
+    /// file's sha256, which its trimmed copy names as a source) make; `None`: the description
+    /// alone.
+    Reference { beside: Option<String> },
+}
+
+/// How `measurement` certifies a dynamics calibration, and the documents it was read or cut
+/// from: a reference model fit records its residual in N·m, under
+/// [`REFERENCE_RESIDUAL_BOUND_NM`], and at most one fit it was certified beside.
+fn certification(
+    measurement: &MeasurementEntry,
+) -> Result<(Certification, Vec<String>), DynamicsError> {
+    let named = |kind: &str| -> Vec<String> {
+        measurement
+            .evidence
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| item.reference.clone())
+            .collect()
+    };
+    let mut beside = named("certified_beside");
+    let sources = named("sealed_document");
+    let certification = if measurement.method == "reference_model_fit" {
+        match &measurement.residual {
+            Some(residual) if residual.unit == "newton_metre" => {
+                if residual.value.is_nan() || residual.value > REFERENCE_RESIDUAL_BOUND_NM {
+                    return Err(DynamicsError::Document(format!(
+                        "a reference model fit reproduces its reference only to {} N·m, over \
+                         the {REFERENCE_RESIDUAL_BOUND_NM} N·m bound: settle the drive's zeros \
+                         against the reference's encoder offsets and import again",
+                        residual.value
+                    )));
+                }
+            }
+            _ => {
+                return Err(DynamicsError::Document(
+                    "a reference model fit records its residual in N·m".into(),
+                ));
+            }
+        }
+        if beside.len() > 1 {
+            return Err(DynamicsError::Document(
+                "a reference model fit was certified beside one fit".into(),
+            ));
+        }
+        Certification::Reference {
+            beside: beside.pop(),
+        }
+    } else {
+        if !beside.is_empty() {
+            return Err(DynamicsError::Document(
+                "only a reference model fit is certified beside another".into(),
+            ));
+        }
+        Certification::Fitted
+    };
+    Ok((certification, sources))
 }
 
 /// One built robot's identified dynamics, as `sx_embodiments.calibration.DynamicsCalibration`
@@ -356,6 +455,10 @@ pub struct DynamicsCalibration {
     pub stiction_velocity: f64,
     pub links: Vec<(String, LinkInertia)>,
     pub joints: Vec<(String, JointFriction)>,
+    pub certification: Certification,
+    /// The sha256 of each document this one was read or cut from (its `sealed_document`
+    /// evidence).
+    pub sources: Vec<String>,
 }
 
 impl DynamicsCalibration {
@@ -363,8 +466,9 @@ impl DynamicsCalibration {
     ///
     /// # Errors
     ///
-    /// [`DynamicsError::Document`] for any other document, and [`DynamicsError::Unphysical`]
-    /// for parameters no body has.
+    /// [`DynamicsError::Document`] for any other document, or a reference model fit whose
+    /// recorded residual is missing or over [`REFERENCE_RESIDUAL_BOUND_NM`], and
+    /// [`DynamicsError::Unphysical`] for parameters no body has.
     pub fn parse(document: &str) -> Result<Self, DynamicsError> {
         let parsed: Document = serde_json::from_str(document)
             .map_err(|error| DynamicsError::Document(error.to_string()))?;
@@ -374,7 +478,8 @@ impl DynamicsCalibration {
                 parsed.schema, parsed.kind
             )));
         }
-        let _ = (&parsed.units, parsed.measurement);
+        let _ = &parsed.units;
+        let (certification, sources) = certification(&parsed.measurement)?;
         if !(parsed.stiction_velocity.is_finite() && parsed.stiction_velocity > 0.0) {
             return Err(DynamicsError::Document(
                 "stiction_velocity is a positive speed".into(),
@@ -427,8 +532,61 @@ impl DynamicsCalibration {
             stiction_velocity: parsed.stiction_velocity,
             links,
             joints,
+            certification,
+            sources,
         })
     }
+}
+
+/// Refuse a robot's set of dynamics calibrations (each with its file name) in which a reference
+/// model fit would run in a model other than the one it was certified in: one certified beside
+/// a fit needs exactly one other file, the trimmed fit naming that fit as its source; one
+/// certified on the description alone needs to be the only file. Before 2026-11-15 the arm's
+/// file could be assigned without its trimmed companion and run on the description's gripper
+/// (the second refute of the reference-model merge). `sx_embodiments.calibration.
+/// certified_together` refuses the same sets at Fleet.
+///
+/// # Errors
+///
+/// [`DynamicsError::Uncertified`] naming the reference fit's file.
+pub fn certified_together(
+    calibrations: &[(&str, &DynamicsCalibration)],
+) -> Result<(), DynamicsError> {
+    for (name, calibration) in calibrations {
+        let Certification::Reference { beside } = &calibration.certification else {
+            continue;
+        };
+        let others: Vec<&(&str, &DynamicsCalibration)> = calibrations
+            .iter()
+            .filter(|(other, _)| other != name)
+            .collect();
+        let refuse = |reason: String| DynamicsError::Uncertified {
+            file: (*name).to_owned(),
+            reason,
+        };
+        let Some(beside) = beside else {
+            if others.is_empty() {
+                continue;
+            }
+            return Err(refuse(format!(
+                "it was certified on the description alone, and the robot also carries {:?}",
+                others.iter().map(|(other, _)| *other).collect::<Vec<_>>()
+            )));
+        };
+        let companions = others
+            .iter()
+            .filter(|(_, other)| other.sources.iter().any(|source| source == beside))
+            .count();
+        if others.len() != 1 || companions != 1 {
+            return Err(refuse(format!(
+                "it was certified beside the fit {} trimmed, and is assigned with {:?}: assign it \
+                 with exactly the trimmed file the importer wrote beside it",
+                beside.get(..12).unwrap_or(beside),
+                others.iter().map(|(other, _)| *other).collect::<Vec<_>>()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A description's rigid-body dynamics, with its drives' friction, under one gravity.
@@ -1184,6 +1342,8 @@ mod tests {
     fn friction_adds_armature_viscous_and_a_smooth_coulomb() {
         let tree = Tree::parse(PENDULUM).expect("tree");
         let calibration = DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
             description_sha256: digest(PENDULUM),
             stiction_velocity: 0.05,
             links: vec![],
@@ -1217,6 +1377,8 @@ mod tests {
     fn a_calibration_of_another_description_or_absent_link_is_refused() {
         let tree = Tree::parse(PENDULUM).expect("tree");
         let mut calibration = DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
             description_sha256: digest(PENDULUM),
             stiction_velocity: 0.02,
             links: vec![("elsewhere".into(), LinkInertia::ZERO)],
@@ -1261,6 +1423,8 @@ mod tests {
             .first_moment
             .map(|moment| moment / design);
         let fit = |mass: f64, shift: f64| DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
             description_sha256: digest(PENDULUM),
             stiction_velocity: 0.02,
             links: vec![(
@@ -1367,6 +1531,8 @@ mod tests {
     fn a_fixed_mount_above_a_fitted_arm_that_leaves_it_in_place_keeps_its_fit() {
         let old = mounted(None, "0");
         let fit = |joint: &str, link: &str| DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
             description_sha256: digest(&old),
             stiction_velocity: 0.05,
             links: vec![(
@@ -1416,6 +1582,8 @@ mod tests {
         let old = branched("0.03 0 0", "2");
         let moved = branched("0 0.03 0", "2");
         let fit = |joint: &str| DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
             description_sha256: digest(&old),
             stiction_velocity: 0.05,
             links: vec![(

@@ -27,9 +27,12 @@ How the reference becomes link parameters:
 
 The fit's worst torque residual over a held-out set of poses, on the exact model the station
 runs (the description, the trimmed existing fit and this one), is the calibration's residual
-and must stay below ``--max-residual-nm``. It is near zero only when the drive's zeros agree
-with the reference's encoder offsets; a disagreement (a nominal drive) leaves a residual the
-receipt reports per joint. The accepted run's gravity share (``gravity_ratio``), its
+and must stay below ``REFERENCE_RESIDUAL_BOUND_NM`` (1e-3 N·m), which the calibration itself
+and the station both hold. It is near zero only when the drive's zeros agree with the
+reference's encoder offsets; a disagreement (a nominal drive) is refused with the residual
+and the offset per joint. With ``--supersede`` the calibration names the fit it was certified
+beside (``certified_beside``, that file's sha256), and the trimmed file names it too: Fleet and
+the station apply the arm's file only together with that one. The accepted run's gravity share (``gravity_ratio``), its
 feed-forward slew and its per-joint torque clamps are controller settings, not the arm's
 physics, and are not carried: the receipt lists them.
 
@@ -72,6 +75,7 @@ from sx_embodiments.calibration import (  # noqa: E402
     JointFriction,
     LinkInertia,
     Measurement,
+    REFERENCE_RESIDUAL_BOUND_NM,
     Residual,
     ResidualUnit,
     UnitSerial,
@@ -393,18 +397,18 @@ def build_calibration(
     *,
     mass_scale: float,
     friction_multiplier: float,
-    max_residual_nm: float,
-    beside: DynamicsCalibration | None = None,
+    beside: tuple[DynamicsCalibration, str] | None = None,
 ) -> tuple[DynamicsCalibration, dict[str, object]]:
     """The calibration and its receipt; every run-dependent multiplier is explicit. ``beside``
-    is the robot's existing fit this one is assigned with (trimmed by :func:`superseded`):
-    what it fits outside the arm is the model the arm's fit is solved and certified in."""
+    is the robot's existing fit this one is assigned with (trimmed by :func:`superseded`), and
+    its file's sha256: what it fits outside the arm is the model the arm's fit is solved and
+    certified in, and the calibration names it."""
+    beside_sha256 = None if beside is None else beside[1]
+    fit_beside = None if beside is None else beside[0]
     if not math.isfinite(mass_scale) or mass_scale <= 0:
         raise ReferenceImportError("mass scale is positive and finite")
     if not math.isfinite(friction_multiplier) or friction_multiplier < 0:
         raise ReferenceImportError("friction multiplier is nonnegative and finite")
-    if not math.isfinite(max_residual_nm) or max_residual_nm <= 0:
-        raise ReferenceImportError("the residual bound is positive and finite")
     sources = _checked_sources(reference)
     model = ast.parse(sources["left_arm_dynamics.py"])
     controller = ast.parse(sources["left_arm_freedrive.py"])
@@ -491,7 +495,7 @@ def build_calibration(
     root = tree.links.index(joints[0].parent)
     their_root = source.links.index(joints[0].parent)
     try:
-        base = tree.parameters(beside)
+        base = tree.parameters(fit_beside)
     except ValueError as error:
         raise ReferenceImportError(
             f"the fit beside names what the description has not: {error}"
@@ -551,13 +555,14 @@ def build_calibration(
         q[rows] = check.uniform(lower, upper)
         worst = np.maximum(worst, np.abs(calibrated_gravity(q) - reference_gravity(q[rows])))
     residual = float(worst.max())
-    if residual > max_residual_nm:
+    if residual > REFERENCE_RESIDUAL_BOUND_NM:
         raise ReferenceImportError(
             f"the description reproduces the reference's gravity only to {residual:.4g} N·m "
-            f"(bound {max_residual_nm:g}); per joint "
+            f"(bound {REFERENCE_RESIDUAL_BOUND_NM:g}); per joint "
             + ", ".join(f"{n} {w:.3g}" for n, w in zip(names, worst, strict=True))
             + ". A drive whose zeros disagree with the reference's encoder offsets does this; "
-            "see the receipt's offsets"
+            "the offsets, rad: "
+            + ", ".join(f"{item.joint} {item.offset:.4g}" for item in maps)
         )
 
     link_inertias: list[LinkInertia] = []
@@ -605,7 +610,14 @@ def build_calibration(
             method=CalibrationMethod.REFERENCE_MODEL_FIT,
             measured_at=measured_at,
             residual=Residual(residual, ResidualUnit.NEWTON_METRE),
-            evidence=(Evidence(EvidenceKind.SEALED_DOCUMENT, manifest),),
+            evidence=(
+                Evidence(EvidenceKind.SEALED_DOCUMENT, manifest),
+                *(
+                    ()
+                    if beside_sha256 is None
+                    else (Evidence(EvidenceKind.CERTIFIED_BESIDE, beside_sha256),)
+                ),
+            ),
         ),
     )
     receipt: dict[str, object] = {
@@ -614,14 +626,14 @@ def build_calibration(
         "drive_sha256": hashlib.sha256(drive_bytes).hexdigest(),
         "beside": (
             "the description alone"
-            if beside is None
+            if fit_beside is None
             else "the robot's existing fit, trimmed: its links outside the arm are part of the "
             "model the residual is certified on"
         ),
         "parameters": {
             "mass_scale": mass_scale,
             "friction_multiplier": friction_multiplier,
-            "max_residual_nm": max_residual_nm,
+            "max_residual_nm": REFERENCE_RESIDUAL_BOUND_NM,
         },
         "offsets_rad": {item.joint: item.offset for item in maps},
         "scales": {item.joint: item.scale for item in maps},
@@ -643,6 +655,8 @@ def build_calibration(
             "the reference's friction was fed forward while hand-guiding; as tracking "
             "feed-forward it follows the reference velocity",
             "the reference hardcodes wire PMAX/VMAX/TMAX; the driver reads the registers",
+            "the reference skips friction for J6_NAME, which its excerpt never defines: "
+            "whether it fed the wrist roll's 0.1 N·m is unknown, and this file feeds it",
         ],
     }
     return calibration, receipt
@@ -698,12 +712,6 @@ def main() -> None:
         help="A dynamics calibration the robot already carries: written beside --out without "
         "what the new one names, as <name>.trimmed.dynamics.json",
     )
-    parser.add_argument(
-        "--max-residual-nm",
-        type=float,
-        default=1e-3,
-        help="Refuse a fit whose worst gravity residual exceeds this, N·m",
-    )
     args = parser.parse_args()
     beside = None
     beside_bytes = b""
@@ -720,8 +728,7 @@ def main() -> None:
         args.commissioning.read_bytes(),
         mass_scale=args.mass_scale,
         friction_multiplier=args.friction_multiplier,
-        max_residual_nm=args.max_residual_nm,
-        beside=beside,
+        beside=None if beside is None else (beside, hashlib.sha256(beside_bytes).hexdigest()),
     )
     if not args.out.name.endswith(".dynamics.json"):
         raise ReferenceImportError("the station reads <name>.dynamics.json")

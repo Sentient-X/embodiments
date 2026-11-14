@@ -1,13 +1,15 @@
 //! The left arm's reference model (the November 14 handoff, accepted on the robot) as an
 //! identified-dynamics calibration: `fixtures/reference_gravity/left-arm.dynamics.json`,
-//! written by `tools/import_reference_dynamics.py` from the fixture bundle and the nominal
-//! drive, beside the Spark's whole-body fit (`static-upper-body.dynamics.json`, Fleet revision
+//! written by `tools/import_reference_dynamics.py` from the fixture bundle and the drive with
+//! its zeros settled at the handoff's encoder offsets (the importer refuses the nominal one), beside the Spark's whole-body fit (`static-upper-body.dynamics.json`, Fleet revision
 //! 2) trimmed of the arm (`static-upper-body.trimmed.dynamics.json`). Both are applied here as
 //! the station applies them. Ported from the compensation trial's tests (embodiments #279,
 //! Kripansh Sharma) onto the one dynamics model every body uses.
 
 use serde_json::Value;
-use sx_embodiment_drivers::{Dynamics, DynamicsCalibration, UPRIGHT};
+use sx_embodiment_drivers::{
+    Certification, Dynamics, DynamicsCalibration, DynamicsError, UPRIGHT, certified_together,
+};
 
 const URDF: &str = include_str!("../../../render_packs/sentient-static-upper-body/robot.urdf");
 const CALIBRATION: &str = include_str!("fixtures/reference_gravity/left-arm.dynamics.json");
@@ -67,16 +69,13 @@ fn full(dynamics: &Dynamics, rows: &[usize], arm_q: &[f64]) -> Vec<f64> {
     q
 }
 
-/// The reference's own gravity oracle, 24 poses: the model the station runs (the description,
-/// the trimmed whole-body fit and the arm's) reproduces it to 0.039 N·m under the nominal
-/// drive. Fitted without the whole-body fit beside it, the arm's file differed from this by
-/// up to 0.21 N·m (the refute of 2026-11-14): its carried gripper was the description's. The reference's encoder zeros differ
-/// from that drive's (elbow 5.8°, wrist pitch 8.1°, wrist roll 104°), which turns its distal
-/// links against the description's; with a drive that agrees, the importer's fit is exact to
-/// 2e-5 N·m (`tests/test_import_reference_dynamics.py`).
-/// The 0.045 N·m bound belongs to this fixture only: its drive has nominal zeros that disagree
-/// with the handoff's encoder offsets. The importer's default bound stays 1e-3 N·m, and a real
-/// assignment needs the zeros settled and a residual under it.
+/// The reference's own gravity oracle, 24 poses, against the model the station runs (the
+/// description, the trimmed whole-body fit and the arm's). An open limit, pinned so a change is
+/// seen, not a pass: the fit reproduces the importer's reading of the reference to 2e-5 N·m
+/// (`tests/test_import_reference_dynamics.py`), yet this independent oracle only to 0.136 N·m
+/// (the nominal drive's fit, which the bound now refuses, came to 0.039). The oracle's poses are
+/// not in the coordinates a drive settled at the handoff's offsets gives; which zero is
+/// physically right is the supervised trial's first check.
 #[test]
 fn the_calibrated_description_reproduces_the_reference_gravity_oracle() {
     let dynamics = calibrated();
@@ -110,7 +109,10 @@ fn the_calibrated_description_reproduces_the_reference_gravity_oracle() {
         "{} reference gravity cases: worst {worst:.6} N·m",
         cases.len()
     );
-    assert!(worst < 0.045, "worst gravity mismatch {worst} N·m");
+    assert!(
+        (0.13..0.14).contains(&worst),
+        "worst gravity mismatch {worst} N·m"
+    );
 }
 
 /// A reference velocity jittering about zero inside the elbow's deadband (an operator's hand
@@ -236,6 +238,8 @@ fn two_calibrations_keep_their_own_stiction_velocity() {
         .expect("digest")
         .to_owned();
     let right = DynamicsCalibration {
+        certification: Certification::Fitted,
+        sources: Vec::new(),
         description_sha256: digest,
         stiction_velocity: 0.02,
         links: Vec::new(),
@@ -265,4 +269,46 @@ fn two_calibrations_keep_their_own_stiction_velocity() {
     let moving = dynamics.inverse(&q, &qd, &rest).expect("moving");
     assert!((moving[left] - held[left] - 0.22 * (0.01_f64 / 0.01).tanh()).abs() < 1e-3);
     assert!((moving[right] - held[right] - 0.77 * (0.01_f64 / 0.02).tanh()).abs() < 1e-3);
+}
+
+/// The second refute of the reference-model merge (2026-11-15): the arm's file names the fit it
+/// was certified beside, and applies only with the trimmed file cut from that fit; a residual
+/// over the bound is no calibration at all.
+#[test]
+fn the_arm_s_file_applies_only_with_its_trimmed_companion() {
+    let calibration = DynamicsCalibration::parse(CALIBRATION).expect("the arm's file");
+    let trimmed = DynamicsCalibration::parse(TRIMMED).expect("the trimmed whole-body fit");
+    let whole = DynamicsCalibration::parse(include_str!(
+        "fixtures/reference_gravity/static-upper-body.dynamics.json"
+    ))
+    .expect("the whole-body fit");
+    let Certification::Reference {
+        beside: Some(beside),
+    } = &calibration.certification
+    else {
+        panic!("certified beside a fit: {:?}", calibration.certification);
+    };
+    assert!(trimmed.sources.contains(beside));
+    certified_together(&[("left-arm", &calibration), ("static-upper-body", &trimmed)])
+        .expect("the pair the importer wrote");
+    for set in [
+        vec![("left-arm", &calibration)],
+        vec![("left-arm", &calibration), ("static-upper-body", &whole)],
+        vec![
+            ("left-arm", &calibration),
+            ("static-upper-body", &trimmed),
+            ("right", &whole),
+        ],
+    ] {
+        assert!(matches!(
+            certified_together(&set),
+            Err(DynamicsError::Uncertified { file, .. }) if file == "left-arm"
+        ));
+    }
+    let over = CALIBRATION.replacen("\"value\": 1.938168995352374e-05", "\"value\": 0.061", 1);
+    assert_ne!(over, CALIBRATION, "the fixture's residual");
+    assert!(matches!(
+        DynamicsCalibration::parse(&over),
+        Err(DynamicsError::Document(reason)) if reason.contains("over the 0.001 N·m bound")
+    ));
 }

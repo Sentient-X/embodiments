@@ -37,6 +37,11 @@ CALIBRATION_SCHEMA: Final = "sx.calibration/v1"
 #: map every driver applies is ``actuator = sign * (joint - zero_offset) * reduction``; a
 #: measured unit supplies ``zero_offset`` and multiplies the design ``sign`` by its direction.
 UNCALIBRATED_ZERO: Final = 0.0
+#: The worst gravity residual, N·m, a reference model fit may record and still be applied: it
+#: is near zero only when the drive's zeros agree with the reference's encoder offsets, and a
+#: fit above it feeds forward a gravity the robot was never measured to have. The station's
+#: ``DynamicsCalibration::parse`` holds the same bound.
+REFERENCE_RESIDUAL_BOUND_NM: Final = 1e-3
 
 UnitSerial = NewType("UnitSerial", str)
 """The identity a physical unit reports or carries: a serial, a flash UID, a bus serial."""
@@ -79,6 +84,9 @@ class EvidenceKind(StrEnum):
     IMAGE = "image"  # sha256 of one calibration view
     EPISODE = "episode"  # an episode id the solve or its check used
     SEALED_DOCUMENT = "sealed_document"  # sha256 of the sealed form this was parsed from
+    #: sha256 of the dynamics fit a reference model was certified beside: the robot's existing
+    #: fit, which ships trimmed and names the same digest as its ``sealed_document``
+    CERTIFIED_BESIDE = "certified_beside"
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,6 +489,70 @@ class DynamicsCalibration:
             _require_unit(unit)
         if len(set(self.units)) != len(self.units) or list(self.units) != sorted(self.units):
             raise CalibrationError("dynamics units are unique and sorted")
+        measurement = self.measurement
+        beside = [e for e in measurement.evidence if e.kind is EvidenceKind.CERTIFIED_BESIDE]
+        if measurement.method is CalibrationMethod.REFERENCE_MODEL_FIT:
+            residual = measurement.residual
+            if residual is None or residual.unit is not ResidualUnit.NEWTON_METRE:
+                raise CalibrationError("a reference model fit records its residual in N·m")
+            if residual.value > REFERENCE_RESIDUAL_BOUND_NM:
+                raise CalibrationError(
+                    f"a reference model fit reproduces its reference only to {residual.value:.4g}"
+                    f" N·m, over the {REFERENCE_RESIDUAL_BOUND_NM:g} N·m bound: settle the"
+                    " drive's zeros against the reference's encoder offsets and import again"
+                )
+            if len(beside) > 1:
+                raise CalibrationError("a reference model fit was certified beside one fit")
+        elif beside:
+            raise CalibrationError("only a reference model fit is certified beside another")
+
+    @property
+    def certified_beside(self) -> str | None:
+        """The digest of the fit this one was certified beside, for a reference model fit
+        imported with ``--supersede``."""
+        return next(
+            (
+                item.reference
+                for item in self.measurement.evidence
+                if item.kind is EvidenceKind.CERTIFIED_BESIDE
+            ),
+            None,
+        )
+
+
+def certified_together(calibrations: Mapping[str, DynamicsCalibration]) -> None:
+    """Refuse a robot's set of dynamics files (by name) in which a reference model fit would
+    run in a model other than the one it was certified in: one certified beside a fit needs
+    exactly one other file, the trimmed fit naming that same digest as its source; one
+    certified on the description alone needs to be the only file. The station's
+    ``identified_dynamics`` refuses the same sets."""
+
+    for name, calibration in calibrations.items():
+        if calibration.measurement.method is not CalibrationMethod.REFERENCE_MODEL_FIT:
+            continue
+        others = {key: value for key, value in calibrations.items() if key != name}
+        beside = calibration.certified_beside
+        if beside is None:
+            if others:
+                raise CalibrationError(
+                    f"{name} was certified on the description alone, and the robot also"
+                    f" carries {sorted(others)}"
+                )
+            continue
+        companions = [
+            key
+            for key, value in others.items()
+            if any(
+                item.kind is EvidenceKind.SEALED_DOCUMENT and item.reference == beside
+                for item in value.measurement.evidence
+            )
+        ]
+        if companions != list(others) or len(companions) != 1:
+            raise CalibrationError(
+                f"{name} was certified beside the fit {beside[:12]} trimmed, and is assigned"
+                f" with {sorted(others)}: assign it with exactly the trimmed file the"
+                " importer wrote beside it"
+            )
 
 
 Calibration = CameraUnitCalibration | RigidCalibration | JointUnitCalibration | DynamicsCalibration

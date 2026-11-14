@@ -24,10 +24,14 @@
 //! torque ([`RestModel::gravity_bounds`]). Held, the joint feeds forward the middle of that
 //! interval; it is released only where it would not fall anywhere in it. A silent gripper
 //! finger moves an arm's gravity by hundredths of a newton-metre, so the arm keeps its full
-//! feed-forward; a silent shoulder leaves the elbow an interval of newton-metres, held. Before
-//! 2026-11-14 an unread joint was placed at zero (a guessed angle could release an arm), and
-//! then for a day its relatives were held with no feed-forward at all (a silent finger sagged
-//! a whole arm; the refute of the reference-model merge).
+//! feed-forward; a silent shoulder leaves the elbow an interval of newton-metres, held. A joint
+//! with two or more unread relatives (joints above or below it) has no interval: gravity has
+//! cross terms between them, so sweeping each alone and adding the spans is not a bound (the
+//! second refute of 2026-11-14 found a forearm yaw released on [0.0001, 0.0055] N·m whose true
+//! gravity reaches 0.157). It is held with the gravity at the unread joints' mid-range and
+//! never released. Before 2026-11-14 an unread joint was placed at zero (a guessed angle could
+//! release an arm), and then for a day its relatives were held with no feed-forward at all (a
+//! silent finger sagged a whole arm; the refute of the reference-model merge).
 
 use crate::axes::Axes;
 use crate::binding::{ActuatorRating, BoundAxis};
@@ -111,6 +115,11 @@ pub struct RestModel {
     /// For each description joint, the range an unread position is searched over: its
     /// limits, or a whole turn.
     range: Vec<[f64; 2]>,
+    /// For each pair of description joints, whether one is above the other (an ancestor):
+    /// only then does either's position enter the other's gravity torque.
+    related: Vec<Vec<bool>>,
+    /// Each joint's gravity with every unread joint at the middle of its range.
+    centre: Vec<f64>,
     q: Vec<f64>,
     torque: Vec<f64>,
     low: Vec<f64>,
@@ -158,6 +167,52 @@ fn shapes(tree: &crate::Tree) -> Vec<Shape> {
         .collect()
 }
 
+/// For each pair of independent joints, whether a tree joint of one is an ancestor of a tree
+/// joint of the other.
+fn relatives(tree: &crate::Tree) -> Vec<Vec<bool>> {
+    use crate::kinematics::JointType;
+    let independent = tree.joints();
+    let joints = &tree.joints;
+    let links = joints
+        .iter()
+        .map(|joint| joint.parent.max(joint.child) + 1)
+        .max()
+        .unwrap_or(0);
+    let mut incoming = vec![None; links];
+    for (index, joint) in joints.iter().enumerate() {
+        incoming[joint.child] = Some(index);
+    }
+    let leader: Vec<Option<usize>> = joints
+        .iter()
+        .map(|joint| {
+            if joint.kind == JointType::Fixed {
+                None
+            } else {
+                independent
+                    .iter()
+                    .position(|axis| axis.name == joint.leader)
+            }
+        })
+        .collect();
+    let mut related = vec![vec![false; independent.len()]; independent.len()];
+    for (index, joint) in joints.iter().enumerate() {
+        let Some(below) = leader[index] else {
+            continue;
+        };
+        let mut link = joint.parent;
+        while let Some(up) = incoming[link] {
+            if let Some(above) = leader[up]
+                && above != below
+            {
+                related[above][below] = true;
+                related[below][above] = true;
+            }
+            link = joints[up].parent;
+        }
+    }
+    related
+}
+
 impl RestModel {
     /// The model `dynamics` over a chain whose axes are named `axes`.
     #[must_use]
@@ -171,6 +226,8 @@ impl RestModel {
         let width = axis_of.len();
         Self {
             shape: shapes(dynamics.tree()),
+            related: relatives(dynamics.tree()),
+            centre: vec![0.0; width],
             range: dynamics
                 .tree()
                 .joints()
@@ -191,9 +248,12 @@ impl RestModel {
     }
 
     /// Gravity's torque on each description joint over every position its unread joints may
-    /// have, into `self.low` and `self.high`: exact for one unread joint, its intervals summed
-    /// over several. A joint the chain does not drive is placed at zero, as the description
-    /// stands. False when the model gives nothing finite.
+    /// have, into `self.low` and `self.high`. Exact where at most one unread joint is a
+    /// relative (above or below it): an unread joint on another branch leaves its torque
+    /// alone, so the spans add without cross terms. With two or more unread relatives the
+    /// interval is the whole line (`-inf`, `inf`): no sweep of one at a time bounds it. A joint
+    /// the chain does not drive is placed at zero, as the description stands. False when the
+    /// model gives nothing finite.
     fn bound(&mut self, measured: &[Option<f64>]) -> bool {
         let mut unread = Vec::new();
         for (k, (q, axis)) in self.q.iter_mut().zip(&self.axis_of).enumerate() {
@@ -212,7 +272,13 @@ impl RestModel {
         };
         self.low.copy_from_slice(&nominal);
         self.high.copy_from_slice(&nominal);
-        for k in unread {
+        self.centre.copy_from_slice(&nominal);
+        let unbounded: Vec<bool> = self
+            .related
+            .iter()
+            .map(|related| unread.iter().filter(|&&k| related[k]).count() >= 2)
+            .collect();
+        for &k in &unread {
             let [lower, upper] = self.range[k];
             // Each torque's lowest and highest over the range, less its nominal value.
             let mut span = vec![[0.0_f64, 0.0_f64]; nominal.len()];
@@ -273,10 +339,18 @@ impl RestModel {
                 *high += up;
             }
         }
-        self.low
+        let finite = self
+            .low
             .iter()
             .chain(&self.high)
-            .all(|value| value.is_finite())
+            .all(|value| value.is_finite());
+        for ((low, high), unbounded) in self.low.iter_mut().zip(&mut self.high).zip(unbounded) {
+            if unbounded {
+                *low = f64::NEG_INFINITY;
+                *high = f64::INFINITY;
+            }
+        }
+        finite
     }
 
     /// Gravity's torque on every description joint at `self.q`, with joint `k` at `at` when
@@ -296,8 +370,9 @@ impl RestModel {
 
     /// The gravity torque each axis may carry at `measured` (one per axis, `None` where it has
     /// no reading at all), lowest and highest: one number twice when every joint it depends on
-    /// is read, an interval when one is not (each unread joint searched over its whole range),
-    /// `None` where the description does not carry the axis or it has no reading itself.
+    /// is read, an interval when one is not (the unread joint searched over its whole range),
+    /// `[-inf, inf]` when two or more are not, `None` where the description does not carry the
+    /// axis or it has no reading itself.
     pub fn gravity_bounds(
         &mut self,
         axes: &[BoundAxis],
@@ -321,8 +396,9 @@ impl RestModel {
     /// A joint the description carries is released only where it would not fall
     /// ([`falls`]) anywhere in its gravity interval ([`RestModel::gravity_bounds`]); held, its
     /// feed-forward is the interval's middle, the value nearest every torque it may need. One
-    /// the description does not carry (its gravity unknown), and one with no reading, is held
-    /// without feed-forward unless braked.
+    /// with no interval (two or more unread relatives) is held with its gravity at their
+    /// mid-range, never released. One the description does not carry (its gravity unknown),
+    /// and one with no reading, is held without feed-forward unless braked.
     pub fn rests(&mut self, axes: &[BoundAxis], measured: &[Option<f64>]) -> Axes<Rest> {
         let bounds = self.gravity_bounds(axes, measured);
         let mut rests = unmodelled(axes, measured);
@@ -335,6 +411,12 @@ impl RestModel {
                 continue;
             };
             if !rests[index].holds() {
+                continue;
+            }
+            if !(low.is_finite() && high.is_finite()) {
+                rests[index] = Rest::Hold {
+                    gravity: self.centre[joint],
+                };
                 continue;
             }
             let rating = axes[index].binding.model.rating();
@@ -640,6 +722,123 @@ mod tests {
             panic!("the shoulder roll is held: {silent:?}");
         };
         assert!(gravity.abs() > 2.0, "{gravity}");
+    }
+
+    const LEFT_ARM: [&str; 7] = [
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_upper_arm_yaw_joint",
+        "left_elbow_pitch_joint",
+        "left_forearm_yaw_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_roll_joint",
+    ];
+
+    /// Each read arm joint's reported and true gravity interval, the rests, the arm's indices.
+    type Probe = (Vec<([f64; 2], [f64; 2])>, Axes<Rest>, Vec<usize>);
+
+    /// The static upper body's left arm with `unread` silent and every other joint at `at`:
+    /// each read arm joint's reported interval against its true lowest and highest gravity
+    /// over a grid of the two unread joints' ranges, and the rests.
+    fn two_unread(unread: [&str; 2], at: f64) -> Probe {
+        const STEPS: u32 = 48;
+        const URDF: &str =
+            include_str!("../../../render_packs/sentient-static-upper-body/robot.urdf");
+        let dynamics = Dynamics::of(URDF, crate::UPRIGHT).expect("description");
+        let names: Vec<String> = dynamics
+            .tree()
+            .joints()
+            .iter()
+            .map(|joint| joint.name.clone())
+            .collect();
+        let ranges: Vec<[f64; 2]> = dynamics
+            .tree()
+            .joints()
+            .iter()
+            .map(|joint| {
+                joint
+                    .limits
+                    .unwrap_or([-std::f64::consts::PI, std::f64::consts::PI])
+            })
+            .collect();
+        let axes: Vec<BoundAxis> = names.iter().map(|name| axis(name)).collect();
+        let index = |name: &str| names.iter().position(|n| n == name).expect(name);
+        let silent = unread.map(index);
+        let mut measured: Vec<Option<f64>> = vec![Some(at); names.len()];
+        for k in silent {
+            measured[k] = None;
+        }
+        let grid = dynamics.clone();
+        let mut scratch = grid.scratch();
+        let mut torque = vec![0.0; names.len()];
+        let arm: Vec<usize> = LEFT_ARM
+            .iter()
+            .map(|name| index(name))
+            .filter(|k| !silent.contains(k))
+            .collect();
+        let mut truth = vec![[f64::INFINITY, f64::NEG_INFINITY]; names.len()];
+        for a in 0..=STEPS {
+            for b in 0..=STEPS {
+                let mut q: Vec<f64> = measured.iter().map(|m| m.unwrap_or(0.0)).collect();
+                for (k, step) in silent.into_iter().zip([a, b]) {
+                    let [lower, upper] = ranges[k];
+                    q[k] = lower + f64::from(step) / f64::from(STEPS) * (upper - lower);
+                }
+                grid.gravity_torque_into(&q, &mut scratch, &mut torque)
+                    .expect("gravity");
+                for &k in &arm {
+                    truth[k][0] = truth[k][0].min(torque[k]);
+                    truth[k][1] = truth[k][1].max(torque[k]);
+                }
+            }
+        }
+        let mut model = RestModel::new(dynamics, &axes);
+        let bounds = model.gravity_bounds(&axes, &measured);
+        let rests = model.rests(&axes, &measured);
+        let pairs = arm
+            .iter()
+            .map(|&k| (bounds[k].expect("a read arm joint is bounded"), truth[k]))
+            .collect();
+        (pairs, rests, arm)
+    }
+
+    /// The second refute of 2026-11-14: with the upper-arm yaw and the elbow unread and the
+    /// rest at 0.7 rad, spans swept one joint at a time and added gave the shoulder
+    /// [0.844, 2.487] N·m where its gravity reaches [-0.139, 2.826]. Every reported interval
+    /// now contains the true one.
+    #[test]
+    fn refute_two_unread_joints_never_narrow_an_interval() {
+        let (pairs, rests, arm) =
+            two_unread(["left_upper_arm_yaw_joint", "left_elbow_pitch_joint"], 0.7);
+        for ([low, high], [least, most]) in pairs {
+            assert!(
+                low <= least + 1e-9 && most <= high + 1e-9,
+                "[{low}, {high}] against [{least}, {most}]"
+            );
+        }
+        for k in arm {
+            assert!(rests[k].holds(), "{k}: {:?}", rests[k]);
+        }
+    }
+
+    /// The same refute's wrong release: the shoulder pitch and wrist pitch unread, the arm at
+    /// zero. The forearm yaw was released on [0.0001, 0.0055] N·m; its gravity reaches about
+    /// 0.157 between them. Two unread relatives leave it no interval, so it is held at its
+    /// mid-range gravity.
+    #[test]
+    fn refute_two_unread_relatives_never_release_a_joint() {
+        let (pairs, rests, arm) =
+            two_unread(["left_shoulder_pitch_joint", "left_wrist_pitch_joint"], 0.0);
+        let mut reaches = 0.0_f64;
+        for (&k, ([low, high], [least, most])) in arm.iter().zip(pairs) {
+            assert!(
+                low <= least + 1e-9 && most <= high + 1e-9,
+                "{k}: [{low}, {high}] against [{least}, {most}]"
+            );
+            reaches = reaches.max(least.abs()).max(most.abs());
+            assert!(rests[k].holds(), "{k}: {:?}", rests[k]);
+        }
+        assert!(reaches > 0.1, "{reaches}");
     }
 
     #[test]
