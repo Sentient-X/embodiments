@@ -1,9 +1,11 @@
 //! The operator's arm in the teleoperation solve (IAIE Bimanual-Teleoperation, MIT, commit
-//! 9c30cf8): shoulder-wrist geometric retargeting (SWGR) places the hand, adaptive elbow
-//! control (AEAC) turns the elbow, and the posture falls back home at the reference's gain.
-//! The reference's own tests (`tests/test_swgr_retargeting.py`, `tests/test_aeac_geometry.py`)
-//! are ported where they test geometry, and a synthesized operator shows the robot's elbow
-//! swivel moving to a person's while the tool tracks as before.
+//! 9c30cf8): adaptive elbow control (AEAC) turns the elbow and the posture falls back home at
+//! the reference's gain, while the hand stays clutched as every hand is. The reference's
+//! shoulder-wrist geometric retargeting (SWGR) placed the hand absolutely and was taken out
+//! (refute of 2026-11-14): the probes it failed are tests here (a press, a head turn swinging
+//! an estimated shoulder, a tracked/estimated flicker). The reference's AEAC geometry test is
+//! ported, and a synthesized operator shows the robot's elbow swivel moving to a person's
+//! while the tool tracks as before.
 
 // Evaluation code: geometry's one-letter names, counts as f64, one long scripted run.
 #![allow(
@@ -147,66 +149,147 @@ fn human_arm(shoulder: [f64; 3], wrist: [f64; 3], swivel: f64, outward: [f64; 3]
     }
 }
 
-// ---- The reference's geometry, ported ----
+// ---- The hand is the clutch's: what the operator's arm must never do to it ----
 
-/// `test_full_extension_lands_on_robot_reach`, `test_bent_arm_scales_proportionally`,
-/// `test_direction_is_preserved` and `test_vr_world_origin_cancels`, through the solve: the hand
-/// the solve takes is the robot's shoulder plus the operator's shoulder-to-hand vector times
-/// the robot's reach over theirs, wherever the operator stands.
-#[test]
-fn swgr_places_the_hand_by_the_shoulder_wrist_vector_scaled_to_the_robots_reach() {
-    let config = station_config(true);
-    let mut teleop = solve(&config);
-    let body = teleop.ik().body().clone();
-    let q0 = ready(&teleop);
-    let reach = teleop.arm_reach()[0].expect("the left hand has an arm");
-    // The arm stretched straight: shoulder roll, upper arm, elbow, forearm, wrist, gripper.
-    assert!((0.6..0.75).contains(&reach), "reach {reach}");
-    let shoulder_robot = at(&body, &q0, "left_shoulder_roll_link");
-    let tool = teleop.tool_poses(&q0)[0].expect("left tool");
-    let cases: [([f64; 3], [f64; 3]); 4] = [
-        // Full extension along +x lands on the robot's reach.
-        ([0.0, 0.0, 1.4], [HUMAN_REACH_M, 0.0, 0.0]),
-        // Half the reach, bent off every axis, lands on half the robot's.
-        ([0.1, -0.3, 1.2], [0.0, 0.6 * 0.29, -0.8 * 0.29]),
-        ([0.2, 0.1, 1.3], [0.31, -0.42, 0.19]),
-        // The same arm 4 m away: the origin cancels.
-        ([3.9, -2.0, 2.1], [0.31, -0.42, 0.19]),
-    ];
-    let mut placed = Vec::new();
-    for (shoulder, span) in cases {
-        let wrist = [0, 1, 2].map(|k| shoulder[k] + span[k]);
-        let arm = human_arm(shoulder, wrist, 0.3, [0.0, 1.0, 0.0]);
-        // The operator's hand, in the arm's frame, at the wrist (the reference's controller).
-        let hand = Pose {
-            translation_m: wrist,
-            ..tool
+/// The static body standing at Ready, the station's served solve with the body's home, the
+/// left gripper's tool point there, and an operator's left arm standing 1 m off the robot (a
+/// person beside it, or anywhere in their own room) whose hand is the controller.
+fn probe_start() -> (Teleop, Vec<f64>, Pose, [f64; 3], [f64; 3]) {
+    let mut teleop = solve(&station_config_with(Posture::Body));
+    teleop.reset();
+    let q = ready(&teleop);
+    let tool = teleop.tool_poses(&q)[0].expect("left tool");
+    let shoulder = [-0.6, 0.9, 1.4];
+    let hand = [-0.25, 1.05, 1.05];
+    (teleop, q, tool, shoulder, hand)
+}
+
+/// `ticks` steps of the left hand clutched at `hand` (its turn the tool's), the operator's arm
+/// from `arm_at(tick)`, from Ready: the farthest the tool went from where it stood, millimetres,
+/// and the most it moved in one tick.
+fn clutched_run(
+    ticks: usize,
+    hand: [f64; 3],
+    arm_at: impl Fn(usize) -> Option<OperatorArm>,
+) -> (f64, f64) {
+    let (mut teleop, mut q, tool, _, _) = probe_start();
+    let mut clutch = Clutch::default();
+    let (mut farthest, mut most, mut last) = (0.0_f64, 0.0_f64, tool.translation_m);
+    for tick in 0..ticks {
+        let mut targets = Targets {
+            tcp: hands([Some(Pose {
+                translation_m: hand,
+                ..tool
+            })]),
+            arm: hands([arm_at(tick)]),
+            ..Targets::default()
         };
-        let targets = Targets {
-            tcp: hands([Some(hand)]),
+        let tools = if clutch.takes_hold(&targets) {
+            teleop.tool_poses(&q)
+        } else {
+            [None; MAX_HANDS]
+        };
+        clutch.apply(&tools, &mut targets);
+        step_once(&mut teleop, &mut q, &targets);
+        let now = teleop.tool_poses(&q)[0].expect("left tool").translation_m;
+        farthest = farthest.max(norm(sub(now, tool.translation_m)) * 1e3);
+        most = most.max(norm(sub(now, last)) * 1e3);
+        last = now;
+    }
+    (farthest, most)
+}
+
+/// A press (the deadman taken, beside the robot or through it) with the operator's arm 1 m off
+/// the robot moves the tool no more than the same press without the arm: the hand is held
+/// where the gripper stands. With SWGR's absolute place it threw the tool 0.89 m at 2.1 m/s.
+#[test]
+fn a_press_with_the_operators_arm_moves_the_tool_no_more_than_without_it() {
+    let (_, _, _, shoulder, hand) = probe_start();
+    let arm = human_arm(shoulder, sub(hand, [0.0, 0.0, -0.02]), 0.3, [0.0, 1.0, 0.0]);
+    let (with, _) = clutched_run(100, hand, |_| Some(arm));
+    let (without, _) = clutched_run(100, hand, |_| None);
+    assert!(with < 5.0, "the press moved the tool {with:.1} mm");
+    assert!(
+        (with - without).abs() < 0.5,
+        "{with:.2} mm with the arm, {without:.2} without"
+    );
+}
+
+/// A still hand while the head turns 30 degrees: the page's estimated shoulders hang off the
+/// head's yaw and swing 0.10 m. The tool stays where it is (the arm only aims the elbow). With
+/// SWGR's shoulder-anchored place it moved 0.12 m.
+#[test]
+fn a_head_turn_that_swings_the_estimated_shoulder_leaves_a_still_hand_still() {
+    let (_, _, _, shoulder, hand) = probe_start();
+    let neck = [shoulder[0], shoulder[1] - 0.19, shoulder[2] + 0.1];
+    let (farthest, _) = clutched_run(150, hand, |tick| {
+        // Turning over 0.5 s from 0.2 s, to 30 degrees.
+        let yaw = (30.0_f64.to_radians() * ((tick as f64 * DT - 0.2) / 0.5)).clamp(0.0, 0.52);
+        let r = sub(shoulder, neck);
+        let turned = [
+            neck[0] + yaw.cos() * r[0] - yaw.sin() * r[1],
+            neck[1] + yaw.sin() * r[0] + yaw.cos() * r[1],
+            shoulder[2],
+        ];
+        Some(human_arm(turned, hand, 0.3, [0.0, 1.0, 0.0]))
+    });
+    let swing = 2.0 * 0.19 * (15.0_f64.to_radians()).sin();
+    assert!(swing > 0.09, "the shoulder swings {swing:.3} m");
+    assert!(
+        farthest < 5.0,
+        "the still hand's tool moved {farthest:.1} mm"
+    );
+}
+
+/// The page flipping between body tracking and its estimate every frame (the shoulder 5 cm
+/// apart between the two) gives the tool no buzz. With SWGR each flip stepped the hand by 1.16
+/// times the shoulder's jump, a buzzing hand at 1 m/s.
+#[test]
+fn a_flickering_shoulder_gives_the_tool_no_buzz() {
+    let (_, _, _, shoulder, hand) = probe_start();
+    let (farthest, most) = clutched_run(150, hand, |tick| {
+        let jump = if tick % 2 == 0 { 0.0 } else { 0.05 };
+        Some(human_arm(
+            [shoulder[0], shoulder[1] + jump, shoulder[2]],
+            hand,
+            0.3,
+            [0.0, 1.0, 0.0],
+        ))
+    });
+    assert!(farthest < 5.0, "the tool wandered {farthest:.1} mm");
+    assert!(most < 0.5, "the tool jumped {most:.2} mm in a tick");
+}
+
+/// A sample that comes without the arm (a page that lost its head pose for a frame) steps
+/// exactly as if the last arm had come, within [`ARM_HOLD_S`]: the elbow stays aimed and the
+/// home pull stays on, instead of both dropping and coming back.
+#[test]
+fn an_arm_missing_for_a_sample_is_kept() {
+    let (mut a, mut qa, tool, shoulder, hand) = probe_start();
+    let (mut b, _, _, _, _) = probe_start();
+    let mut qb = qa.clone();
+    let arm = human_arm(shoulder, hand, 0.8, [0.0, 1.0, 0.0]);
+    for tick in 0..60 {
+        let given = Targets {
+            tcp: hands([Some(tool)]),
             arm: hands([Some(arm)]),
             ..Targets::default()
         };
-        teleop.reset();
-        let mut q = q0.clone();
-        step_once(&mut teleop, &mut q, &targets);
-        let taken = teleop.taken().tcp[0].expect("taken");
-        let got = sub(taken.translation_m, shoulder_robot);
-        let expected = span.map(|x| x * reach / HUMAN_REACH_M);
-        for k in 0..3 {
-            assert!(
-                (got[k] - expected[k]).abs() < 1e-9,
-                "{got:?} against {expected:?}"
-            );
-        }
-        // The turn is the hand's own: no clutch offset, no change.
-        assert_eq!(taken.rotation, tool.rotation);
-        placed.push(taken.translation_m);
+        let dropped = Targets {
+            arm: if tick % 7 == 3 {
+                hands([None])
+            } else {
+                given.arm
+            },
+            ..given
+        };
+        step_once(&mut a, &mut qa, &given);
+        step_once(&mut b, &mut qb, &dropped);
+        assert_eq!(qa, qb, "tick {tick}");
     }
-    assert!((norm(sub(placed[0], shoulder_robot)) - reach).abs() < 1e-9);
-    assert!((norm(sub(placed[1], shoulder_robot)) - reach / 2.0).abs() < 1e-9);
-    assert!(norm(sub(placed[2], placed[3])) < 1e-12);
 }
+
+// ---- The reference's geometry, ported ----
 
 /// `test_elbow_direction_turns_off_when_arm_is_straight`,
 /// `test_elbow_direction_is_perpendicular_to_shoulder_wrist_axis`,
@@ -260,10 +343,10 @@ fn a_hand_without_the_operators_arm_steps_exactly_as_before() {
     }
 }
 
-/// The clutch leaves a hand with an arm where its arm puts it and only turns it; a hand that
-/// gains or loses its arm takes hold afresh where the gripper stands.
+/// The clutch holds a hand with an arm as any hand: offset onto the gripper at the hold, and
+/// gaining or losing its arm takes no new hold.
 #[test]
-fn the_clutch_never_offsets_a_hand_placed_by_its_arm() {
+fn the_clutch_holds_a_hand_with_an_arm_as_any_hand() {
     let mut clutch = Clutch::default();
     let gripper = Pose {
         translation_m: [0.4, 0.2, 0.1],
@@ -285,25 +368,16 @@ fn the_clutch_never_offsets_a_hand_placed_by_its_arm() {
     assert!(clutch.takes_hold(&targets));
     clutch.apply(&tools, &mut targets);
     let held = targets.tcp[0].expect("held");
-    assert_eq!(held.translation_m, hand.translation_m);
-    assert!(
-        norm(sub(
-            held.rotation.rotate([1.0, 0.0, 0.0]),
-            gripper.rotation.rotate([1.0, 0.0, 0.0])
-        )) < 1e-12
-    );
-    // Losing the arm: taken hold of afresh, clutched where the gripper stands.
+    for k in 0..3 {
+        assert!((held.translation_m[k] - gripper.translation_m[k]).abs() < 1e-12);
+    }
     let mut targets = Targets {
         tcp: hands([Some(hand)]),
         ..Targets::default()
     };
-    assert!(clutch.takes_hold(&targets));
-    clutch.apply(&tools, &mut targets);
-    let held = targets.tcp[0].expect("held");
-    for k in 0..3 {
-        assert!((held.translation_m[k] - gripper.translation_m[k]).abs() < 1e-12);
-    }
     assert!(!clutch.takes_hold(&targets));
+    clutch.apply(&[None; MAX_HANDS], &mut targets);
+    assert_eq!(targets.tcp[0], Some(held));
 }
 
 // ---- The robot's elbow, against a synthesized operator ----
@@ -559,11 +633,10 @@ fn run(scenario: Scenario, variant: Variant, seconds: f64, twisted: bool) -> Out
                     if variant == Variant::SwgrEstimated {
                         arm.elbow_m = estimated_elbow(*side, s, w, &mut memory[hand]);
                     }
-                    // The operator's hand where their wrist is, in the arm's frame.
-                    targets.tcp[hand] = Some(Pose {
-                        translation_m: w,
-                        ..tool
-                    });
+                    // The same hand as every variant (the clutch places it, not the arm).
+                    let mut pose = tool;
+                    pose.translation_m = [0, 1, 2].map(|k| s[k] + wrist[k] * reach / HUMAN_REACH_M);
+                    targets.tcp[hand] = Some(pose);
                     targets.arm[hand] = Some(arm);
                 }
             }

@@ -56,20 +56,20 @@
 //!
 //! - **the operator's arm** (IAIE Bimanual-Teleoperation, MIT, commit 9c30cf8): a hand whose
 //!   ask carries the operator's shoulder, elbow and wrist ([`Targets::arm`]) on a limb whose
-//!   arm the config names ([`LimbConfig::arm`]) is placed by shoulder-wrist geometric
-//!   retargeting: the robot's shoulder plus the operator's shoulder-to-wrist vector scaled by
-//!   the robot's reach over theirs ([`TeleopConfig::human_reach_m`]), with no clutch offset;
-//!   its turn is still the clutch's (the controller's turn since the hand took hold, on the
-//!   gripper's). Its elbow is turned toward the side of the operator's (adaptive elbow control,
-//!   [`ElbowAim`]: weighted by how far their elbow stands off their shoulder-wrist line past
-//!   [`ELBOW_DEADBAND_M`], both low-passed over [`ELBOW_FILTER_S`]) in what the tool leaves
-//!   free, and its posture falls back to the preferred one at the reference's home gain
-//!   ([`Settings::home_gain`]). A hand without an arm is clutched as before. Where this departs
-//!   from the reference: the turn is the clutch's, not the controller's absolute turn through a
-//!   calibrated per-arm offset (the clutch takes that offset at each hold, for any body); the
-//!   robot's shoulder is read where it stood at the hold, not every tick (a shoulder riding a
-//!   free torso chased its own anchor); the elbow gain is 10, not 0.5 ([`Settings::elbow_gain`]);
-//!   no 0.08 s engage blend (the shaper brings an engage in within the joints' jerk caps).
+//!   arm the config names ([`LimbConfig::arm`]) has its elbow turned toward the side of the
+//!   operator's (adaptive elbow control, [`ElbowAim`]: weighted by how far their elbow stands
+//!   off their shoulder-wrist line past [`ELBOW_DEADBAND_M`], both low-passed over
+//!   [`ELBOW_FILTER_S`]) in what the tool leaves free, and its posture falls back to the
+//!   preferred one at the reference's home gain ([`Settings::home_gain`]). An arm that stops
+//!   coming is kept for [`ARM_HOLD_S`]. The arm never places the hand: every hand is clutched
+//!   alike ([`Clutch`]), so it moves as the operator's hand has moved since the hold. The
+//!   reference's shoulder-wrist geometric retargeting (SWGR, the robot's shoulder plus the
+//!   operator's shoulder-to-hand vector scaled to the robot's reach) was tried and taken out
+//!   (refute of 2026-11-14): an absolute place threw the arm 0.89 m at a press, an estimated
+//!   shoulder that swings with the head (30 degrees: 0.10 m) moved a still hand 0.12 m, and a
+//!   tracked/estimated flicker buzzed the tool. Where this departs from the reference: the elbow
+//!   gain is 10, not 0.5 ([`Settings::elbow_gain`]); no 0.08 s engage blend (the shaper brings
+//!   an engage in within the joints' jerk caps).
 //!
 //! Nothing here allocates per step after [`Teleop::new`], and nothing reads a clock.
 
@@ -185,11 +185,10 @@ pub const STALL_RELEASE: f64 = 0.01;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Clutch {
     /// Per hand: the translation added to the hand, and the rotation applied after the hand's
-    /// own (its rotation at hold, inverted, then the gripper's).
-    /// Whether it took hold with the operator's arm ([`Targets::arm`]): such a hand is placed
-    /// by its arm, so only its turn is clutched, and a hand that gains or loses its arm takes
-    /// hold afresh where the gripper stands.
-    held: [Option<([f64; 3], Quaternion, bool)>; MAX_HANDS],
+    /// own (its rotation at hold, inverted, then the gripper's). A hand with the operator's arm
+    /// is held as any other ([`Targets::arm`] only aims the elbow), so gaining or losing its
+    /// arm takes no new hold.
+    held: [Option<([f64; 3], Quaternion)>; MAX_HANDS],
 }
 
 impl Clutch {
@@ -205,38 +204,28 @@ impl Clutch {
     }
 
     /// Whether [`Clutch::apply`] takes hold of any of `targets`' hands, so needs the grippers'
-    /// tool points: a hand seen first, or one that gained or lost its arm.
+    /// tool points: a hand seen first.
     #[must_use]
     pub fn takes_hold(&self, targets: &Targets) -> bool {
-        (0..MAX_HANDS).any(|hand| {
-            targets.tcp[hand].is_some()
-                && self.held[hand].is_none_or(|(_, _, arm)| arm != targets.arm[hand].is_some())
-        })
+        (0..MAX_HANDS).any(|hand| targets.tcp[hand].is_some() && self.held[hand].is_none())
     }
 
     /// `targets`' hands moved onto the grippers they hold, taking hold with `tools` (each
     /// gripper's tool point where the robot stands, [`Teleop::tool_poses`]) for a hand seen
-    /// first; a hand whose gripper has no pose is left as given. A hand with the operator's
-    /// arm keeps its point (the solve places it by the arm) and is only turned.
+    /// first; a hand whose gripper has no pose is left as given.
     pub fn apply(&mut self, tools: &[Option<Pose>; MAX_HANDS], targets: &mut Targets) {
         for hand in 0..MAX_HANDS {
             let Some(target) = targets.tcp[hand] else {
                 self.held[hand] = None;
                 continue;
             };
-            let arm = targets.arm[hand].is_some();
-            if self.held[hand].is_none_or(|(_, _, held)| held != arm) {
-                self.held[hand] = None;
+            if self.held[hand].is_none() {
                 let Some(tool) = tools[hand] else { continue };
-                let offset = if arm {
-                    [0.0; 3]
-                } else {
-                    [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k])
-                };
+                let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
                 let local = target.rotation.conjugate() * tool.rotation;
-                self.held[hand] = Some((offset, local, arm));
+                self.held[hand] = Some((offset, local));
             }
-            if let Some((offset, local, _)) = self.held[hand] {
+            if let Some((offset, local)) = self.held[hand] {
                 targets.tcp[hand] = Some(Pose {
                     translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
                     rotation: target.rotation * local,
@@ -337,8 +326,8 @@ pub struct ArmLinks {
 
 /// An operator's arm for one hand, in the robot's root frame as the hand's pose is: shoulder,
 /// elbow and wrist, metres (`TeleoperationArmPose`, tracked by the headset or estimated). The
-/// shoulder anchors SWGR's shoulder-to-hand vector (the hand is the tool point); the three
-/// together give the elbow's direction off the shoulder-wrist line.
+/// three give only the elbow's direction off the shoulder-wrist line; the hand is the tool
+/// point, clutched.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OperatorArm {
     pub shoulder_m: [f64; 3],
@@ -356,9 +345,14 @@ impl OperatorArm {
     }
 }
 
-/// The operator's shoulder-to-wrist reach the robot's is scaled against, metres, when the
-/// config names none: the reference's `HUMAN_REACH`.
+/// The operator's shoulder-to-wrist reach, metres, when the config names none: the reference's
+/// `HUMAN_REACH`, the elbow radius an aim weighs fully at ([`elbow_weight`]).
 pub const HUMAN_REACH_M: f64 = 0.58;
+
+/// How long an operator's arm that stops coming with its hand is kept, seconds: a page that
+/// loses its head pose or body tracking for a sample or two (20 ms each at 50 Hz) keeps the
+/// elbow aimed and the home pull on, instead of dropping and re-taking both.
+pub const ARM_HOLD_S: f64 = 0.25;
 
 /// An operator's elbow nearer their shoulder-wrist line than this aims no robot elbow, metres:
 /// the reference's `elbow_deadband`.
@@ -481,8 +475,8 @@ pub struct TeleopConfig {
     /// joint it does not name stays at its own value at engage.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub posture: BTreeMap<String, f64>,
-    /// The operator's shoulder-to-wrist reach, metres: a hand placed by the operator's arm
-    /// moves the robot's reach over this for each metre theirs moves ([`LimbConfig::arm`]).
+    /// The operator's shoulder-to-wrist reach, metres: an operator's elbow this far off their
+    /// shoulder-wrist line aims the robot's at full weight ([`elbow_weight`]).
     #[serde(default = "human_reach")]
     pub human_reach_m: f64,
 }
@@ -556,9 +550,9 @@ pub struct Targets {
     /// reads it on the sender's clock (now less its age). `None`: as read, filtered on the
     /// solve's clock.
     pub age_s: Option<f64>,
-    /// Per hand: the operator's arm, when the sender knows it: the hand is then placed by it
-    /// on a limb whose arm the config names ([`LimbConfig::arm`]; see the module docs), and
-    /// otherwise clutched.
+    /// Per hand: the operator's arm, when the sender knows it: on a limb whose arm the config
+    /// names ([`LimbConfig::arm`]) it aims the elbow and turns the home pull on (see the module
+    /// docs). The hand itself is clutched either way.
     pub arm: [Option<OperatorArm>; MAX_HANDS],
 }
 
@@ -802,14 +796,11 @@ pub struct Teleop {
     /// Whether the camera's look went while the neck still moved: it comes to rest as a hand does.
     gaze_resting: bool,
     /// Per limb, its arm ([`LimbConfig::arm`]); per hand, its operator's elbow direction and
-    /// weight as low-passed ([`ELBOW_FILTER_S`]); the positions the robot's shoulders are read
-    /// at.
+    /// weight as low-passed ([`ELBOW_FILTER_S`]).
     arms: Vec<Option<Arm>>,
     elbows: [Option<([f64; 3], f64)>; MAX_HANDS],
-    /// Per hand, where its robot shoulder stood when its arm was first given since the hand
-    /// took hold: the hand's anchor.
-    shoulders: [Option<[f64; 3]>; MAX_HANDS],
-    arm_q: Vec<f64>,
+    /// Per hand, the operator's arm last given and the seconds since ([`ARM_HOLD_S`]).
+    operator_arms: [Option<(OperatorArm, f64)>; MAX_HANDS],
 }
 
 impl Teleop {
@@ -968,7 +959,6 @@ impl Teleop {
             }
         }
         let frames = body.model().poses(&q);
-        let arm_q = q.clone();
         let limb_count = limb_names.len();
         let mut arms = Vec::with_capacity(limb_count);
         for (index, name) in limb_names.iter().enumerate() {
@@ -1060,9 +1050,8 @@ impl Teleop {
             gaze_gone_s: 0.0,
             gaze_resting: false,
             arms,
-            arm_q,
             elbows: [None; MAX_HANDS],
-            shoulders: [None; MAX_HANDS],
+            operator_arms: [None; MAX_HANDS],
         })
     }
 
@@ -1076,52 +1065,29 @@ impl Teleop {
             .collect()
     }
 
-    /// Place each hand given with its operator's arm by shoulder-wrist geometric retargeting,
-    /// and aim its elbow (see the module docs); every other limb's elbow goes unaimed and its
-    /// posture weighs as before. The robot's shoulders are read where `reference` puts them
-    /// (the last command), a joint it gives no number for where the solve last stood.
-    fn retarget(&mut self, targets: &mut Targets, reference: &[f64], dt: f64) {
-        let mut placed = false;
+    /// Aim the elbow of each hand given with its operator's arm (an arm that stopped coming is
+    /// kept for [`ARM_HOLD_S`]) and pull its posture home (see the module docs); every other
+    /// limb's elbow goes unaimed and its posture weighs as before. The hand is never moved.
+    fn aim_elbows(&mut self, targets: &Targets, dt: f64) {
         let blend = 1.0 - (-dt / ELBOW_FILTER_S).exp();
         let human = self.config.human_reach_m;
         for (limb, hand) in self.hand_of.iter().enumerate() {
             let Some(hand) = *hand else { continue };
-            let (Some(arm), Some(tcp), Some(operator)) =
-                (self.arms[limb], targets.tcp[hand], targets.arm[hand])
-            else {
+            let kept = &mut self.operator_arms[hand];
+            *kept = match (targets.tcp[hand], targets.arm[hand], *kept) {
+                (Some(_), Some(given), _) => Some((given, 0.0)),
+                (Some(_), None, Some((last, since))) if since + dt <= ARM_HOLD_S => {
+                    Some((last, since + dt))
+                }
+                // No hand, or an arm gone longer than the hold.
+                _ => None,
+            };
+            let (Some(arm), Some((operator, _))) = (self.arms[limb], *kept) else {
                 self.elbows[hand] = None;
-                self.shoulders[hand] = None;
                 self.ik.set_elbow_aim(limb, None);
                 self.ik.set_home_pull(limb, false);
                 continue;
             };
-            if self.shoulders[hand].is_none() && !placed {
-                for ((slot, given), standing) in self.arm_q.iter_mut().zip(reference).zip(&self.q) {
-                    *slot = if given.is_finite() { *given } else { *standing };
-                }
-                self.ik
-                    .body()
-                    .model()
-                    .poses_into(&self.arm_q, &mut self.frames);
-                placed = true;
-            }
-            // Anchored where the shoulder stood as the hand took hold, not where it stands now:
-            // on a body whose shoulders ride a free torso, an anchor that moved with them chased
-            // its own torso (a reach's tracking 11 -> 23 mm RMS, `tests/arm_retarget.rs`). On a
-            // body whose shoulders stand still (the reference's) the two are the same.
-            let shoulder = *self.shoulders[hand].get_or_insert(self.frames.links[arm.shoulder].t);
-            // SWGR's one scale on the operator's shoulder-to-hand vector. The hand is the tool
-            // point as given (`tcp`), not the arm's wrist: a page's wrist stands 8 cm behind the
-            // grip, and the tool point is the reading played on the hands' curve while the arm
-            // rides only the newest sample. The reference's wrist is its controller, so the two
-            // agree there.
-            let scale = arm.reach_m / human;
-            targets.tcp[hand] = Some(Pose {
-                translation_m: [0, 1, 2].map(|k| {
-                    scale.mul_add(tcp.translation_m[k] - operator.shoulder_m[k], shoulder[k])
-                }),
-                rotation: tcp.rotation,
-            });
             // The operator's elbow off their shoulder-wrist line, weighted past the deadband;
             // a straight arm, or one within the deadband, aims nothing and forgets its filter.
             let seen = elbow_direction(operator.shoulder_m, operator.elbow_m, operator.wrist_m)
@@ -1340,7 +1306,7 @@ impl Teleop {
         self.gaze_gone_s = 0.0;
         self.gaze_resting = false;
         self.elbows = [None; MAX_HANDS];
-        self.shoulders = [None; MAX_HANDS];
+        self.operator_arms = [None; MAX_HANDS];
     }
 
     /// Whether a shaped target still has motion to bring to rest: a caller whose targets went
@@ -1954,9 +1920,8 @@ impl Teleop {
                 *velocity = None;
             }
         }
-        // A hand with the operator's arm is placed by it before its tremor is filtered, as the
-        // reference filters its retargeted pose.
-        self.retarget(&mut cleaned, reference, dt);
+        // The operator's arm aims the elbow; the hand stays as given.
+        self.aim_elbows(&cleaned, dt);
         let targets = &cleaned;
         // Filtered once the step is taken: a refused step leaves the filter and `taken` as
         // they were.
