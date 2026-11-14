@@ -1,0 +1,93 @@
+{
+  "source_files": {
+    "left_arm_dynamics.py": "24ecd9da959d1a4d0b4973c9b6365b272f6617af77cb9669628da52caeaac5a3",
+    "left_arm_freedrive.py": "b73cf46aee6a85ca267fd073a7110cb9545f2764052d45cbb1a9a0861ca4d65a",
+    "can_bus.py": "6580f1a144a8678c60e249ffd257a7316e82d99539afe5518f6b0bf0f30c0ed8",
+    "left_arm_calibrated_config.json": "24cb0d636e99b8a0dfbafeed119a1d438384bfec48a39eb7cdc543910a547b05",
+    "left_arm_calibrated_inertials.json": "3a65a5b82dbc4ae104ba1e41465539d1281fd698d8ffc9deee89517724b93eb4"
+  },
+  "manifest_sha256": "8fd418ef84b0f3fe1b62557aef29ee5b75aab086d1801a6a37d817f756bd8697",
+  "drive_sha256": "75fa5d5a00f9a7e166e20330b0a2e4ebafc8b9983f3e4287f13eeaff916cdbc0",
+  "beside": "the robot's existing fit, trimmed: its links outside the arm are part of the model the residual is certified on",
+  "parameters": {
+    "mass_scale": 1.0,
+    "friction_multiplier": 1.0,
+    "max_residual_nm": 0.1
+  },
+  "offsets_rad": {
+    "left_shoulder_pitch_joint": 0.011635,
+    "left_shoulder_roll_joint": -0.013924,
+    "left_upper_arm_yaw_joint": 0.008583,
+    "left_elbow_pitch_joint": -0.101925,
+    "left_forearm_yaw_joint": 0.000954,
+    "left_wrist_pitch_joint": 0.141337,
+    "left_wrist_roll_joint": -1.820974
+  },
+  "scales": {
+    "left_shoulder_pitch_joint": 1.0,
+    "left_shoulder_roll_joint": 1.0,
+    "left_upper_arm_yaw_joint": 1.0,
+    "left_elbow_pitch_joint": 1.0,
+    "left_forearm_yaw_joint": 1.0,
+    "left_wrist_pitch_joint": 1.0,
+    "left_wrist_roll_joint": -1.0
+  },
+  "residual_nm": {
+    "left_shoulder_pitch_joint": 0.04919484080795922,
+    "left_shoulder_roll_joint": 0.06120717316443347,
+    "left_upper_arm_yaw_joint": 0.03792417988153818,
+    "left_elbow_pitch_joint": 0.052270356878066915,
+    "left_forearm_yaw_joint": 0.029436871243801413,
+    "left_wrist_pitch_joint": 0.0384061148418412,
+    "left_wrist_roll_joint": 0.001611342271174087
+  },
+  "links": {
+    "left_shoulder_pitch_link": {
+      "mass_kg": 1.28,
+      "description_mass_kg": 0.346967,
+      "centre_shift_m": 0.0624105425487938
+    },
+    "left_shoulder_roll_link": {
+      "mass_kg": 1.2,
+      "description_mass_kg": 0.360351,
+      "centre_shift_m": 0.061709854794525745
+    },
+    "left_upper_arm_yaw_link": {
+      "mass_kg": 0.55,
+      "description_mass_kg": 0.181364,
+      "centre_shift_m": 0.03216478783419005
+    },
+    "left_elbow_pitch_link": {
+      "mass_kg": 0.54,
+      "description_mass_kg": 0.133283,
+      "centre_shift_m": 0.0649342465878216
+    },
+    "left_forearm_yaw_link": {
+      "mass_kg": 0.4,
+      "description_mass_kg": 0.263184,
+      "centre_shift_m": 0.01830245770444178
+    },
+    "left_wrist_pitch_link": {
+      "mass_kg": 0.34,
+      "description_mass_kg": 0.141803,
+      "centre_shift_m": 0.04471346125519504
+    },
+    "left_wrist_roll_link": {
+      "mass_kg": 0.16161192822593423,
+      "description_mass_kg": 0.2007,
+      "centre_shift_m": 0.049884817043777806
+    }
+  },
+  "not_carried": {
+    "gravity_ratio": "the accepted run fed forward a share of gravity; the calibration is the arm's physics, and the station feeds all of it forward",
+    "torque_slew_nm_s": 20.0,
+    "torque_clamps_nm": "0.4 forearm yaw and wrist roll, 0.75 wrist pitch, a fraction of each motor's limit: the station's feed-forward bound and the governor hold it",
+    "elbow_transition_rad_s": "0.03 in the reference; the calibration keeps one stiction velocity, 0.01"
+  },
+  "limits": [
+    "masses are the reference's calibrated values; gravity cannot separate a link's mass from its parent's first moment, so only first moments are fitted",
+    "inertia tensors keep the description's shape; nothing here identifies them",
+    "the reference's friction was fed forward while hand-guiding; as tracking feed-forward it follows the reference velocity",
+    "the reference hardcodes wire PMAX/VMAX/TMAX; the driver reads the registers"
+  ]
+}

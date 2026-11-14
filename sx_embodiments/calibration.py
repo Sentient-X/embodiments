@@ -62,6 +62,9 @@ class CalibrationMethod(StrEnum):
     HOMING = "homing"  # the unit was set at a known pose and its reading taken as the zero
     #: Held poses and an excitation trajectory, motor torque fitted by weighted least squares
     DYNAMICS_IDENTIFICATION = "dynamics_identification"
+    #: Another model's gravity, accepted on the robot, fitted onto this description's links by
+    #: least squares (``tools/import_reference_dynamics.py``)
+    REFERENCE_MODEL_FIT = "reference_model_fit"
     UNRECORDED = "unrecorded"  # a sealed form that never said how it was measured
 
 
@@ -387,7 +390,12 @@ class JointFriction:
     """What one joint's drive adds to rigid-body torque, in BAM's friction family (Rhoban's
     "Better Actuator Models", models M1 to M5; ``sx_embodiment_drivers::JointFriction`` holds
     the formula): reflected rotor inertia, viscous friction, and a friction budget of Coulomb,
-    Stribeck and drive- and load-torque terms. Every term past ``armature`` is zero for M1."""
+    Stribeck and drive- and load-torque terms. Every term past ``armature`` is zero for M1.
+
+    ``velocity_deadband`` (rad/s) is how feed-forward reads the reference speed, not a friction
+    term: below it no friction is fed forward, so a reference that jitters about zero gets no
+    push that flips with the noise. The document carries it only when it is not zero, so a
+    calibration without one keeps its identity."""
 
     joint: str
     coulomb: float
@@ -400,11 +408,12 @@ class JointFriction:
     load_external: float = 0.0
     load_motor_stribeck: float = 0.0
     load_external_stribeck: float = 0.0
+    velocity_deadband: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.joint.strip() or self.joint != self.joint.strip():
             raise CalibrationError("a joint friction names its joint")
-        values = (self.coulomb, self.viscous, self.armature, *self.extra)
+        values = (self.coulomb, self.viscous, self.armature, *self.extra, self.velocity_deadband)
         if not all(math.isfinite(value) and value >= 0.0 for value in values):
             raise CalibrationError(f"{self.joint}: friction terms are finite and >= 0")
         stribeck_used = (
@@ -524,7 +533,15 @@ def calibration_to_dict(calibration: Calibration) -> dict[str, JsonValue]:
                     for item in calibration.links
                 ],
                 "joints": [
-                    {"joint": item.joint, **{name: getattr(item, name) for name in FRICTION_TERMS}}
+                    {
+                        "joint": item.joint,
+                        **{name: getattr(item, name) for name in FRICTION_TERMS},
+                        **(
+                            {"velocity_deadband": item.velocity_deadband}
+                            if item.velocity_deadband
+                            else {}
+                        ),
+                    }
                     for item in calibration.joints
                 ],
                 "units": list(calibration.units),
@@ -630,10 +647,16 @@ def _dynamics_from_dict(
     parsed_joints: list[JointFriction] = []
     for item in cast("list[object]", joints):
         entry = _object(item, "joint friction")
-        if set(entry) != {"joint", *FRICTION_TERMS}:
-            raise CalibrationError(f"a joint friction has exactly joint and {FRICTION_TERMS}")
+        if set(entry) - {"velocity_deadband"} != {"joint", *FRICTION_TERMS}:
+            raise CalibrationError(
+                f"a joint friction has exactly joint and {FRICTION_TERMS}, and may carry "
+                "velocity_deadband"
+            )
         terms = {name: _number(entry, name) for name in FRICTION_TERMS}
-        parsed_joints.append(JointFriction(_text(entry, "joint"), **terms))
+        deadband = _number(entry, "velocity_deadband") if "velocity_deadband" in entry else 0.0
+        parsed_joints.append(
+            JointFriction(_text(entry, "joint"), **terms, velocity_deadband=deadband)
+        )
     return DynamicsCalibration(
         description_sha256=Sha256Digest(_text(document, "description_sha256")),
         stiction_velocity=_number(document, "stiction_velocity"),

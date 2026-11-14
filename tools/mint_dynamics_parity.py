@@ -302,6 +302,25 @@ def mint_friction() -> None:
                 "torque": torque.tolist(),
             }
         )
+    # The last case adds a velocity deadband (the reference arm's elbow): no friction below it,
+    # rising over the stiction velocity past it, with speeds on both sides of it.
+    deadband = {**cases[0]["friction"], "velocity_deadband": 0.3}
+    friction = JointFriction("j", **deadband)
+    speed = np.concatenate([rng.uniform(-0.3, 0.3, 8), rng.uniform(-1.0, 1.0, 8)])
+    acceleration = rng.uniform(-5.0, 5.0, 16)
+    motor = rng.uniform(-20.0, 20.0, 16)
+    external = rng.uniform(-20.0, 20.0, 16)
+    torque = moving_friction(friction, speed, acceleration, motor, external, STICTION)
+    cases.append(
+        {
+            "friction": deadband,
+            "speed": speed.tolist(),
+            "acceleration": acceleration.tolist(),
+            "motor": motor.tolist(),
+            "external": external.tolist(),
+            "torque": torque.tolist(),
+        }
+    )
     FRICTION_FIXTURE.write_text(
         json.dumps(
             {
