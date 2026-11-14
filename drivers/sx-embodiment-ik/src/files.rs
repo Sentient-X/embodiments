@@ -14,7 +14,14 @@
 //!   link is placed on the jaws by the description's author, along the way they close in, where
 //!   the derived approach runs from the mount to the grasp point (4 degrees off on the static
 //!   upper body, whose grasp point sits 1 cm above its mount's axis). A tool no joint carries
-//!   (a handheld rig) is no hand;
+//!   (a handheld rig) is no hand. Its **arm** ([`ArmLinks`], what an operator's shoulder,
+//!   elbow and wrist are matched to) is read from the joints that move only it, root first
+//!   (a torso both arms ride is left out): with `n` of them, at least five, the shoulder is the
+//!   link the second moves, the wrist the link the second-last moves and the elbow the link the
+//!   one midway between moves (`(n - 1) / 2`): a 7-joint arm's 2, 4 and 6 (the static upper
+//!   body's shoulder roll, elbow pitch and wrist pitch), a 6-joint arm's shoulder lift, elbow and
+//!   second wrist joint, a 5-joint arm's shoulder lift, elbow flex and wrist flex. An arm of
+//!   fewer joints has no elbow to place;
 //! - **the head's camera as its look** ([`HEAD`]): the camera frames (`frames` role `view`)
 //!   riding rigidly with the head chain's last link (role `head`), looked through from the
 //!   deepest link they all ride rigidly with, along their view (+z of an optical frame). A body
@@ -31,7 +38,7 @@ use std::collections::BTreeMap;
 
 use crate::IkError;
 use crate::body::{Body, Limb, Task};
-use crate::teleop::{LimbConfig, MAX_HANDS};
+use crate::teleop::{ArmLinks, LimbConfig, MAX_HANDS};
 use crate::tool::Grip;
 
 /// The look limb's name: the head's camera (`sx_embodiments.frames.FrameRole.HEAD`).
@@ -188,8 +195,10 @@ impl BodyFiles<'_> {
                 frame,
                 look_forward: None,
                 approach,
+                arm: None,
             });
         }
+        name_arms(model, &mut limbs);
         if limbs.len() > MAX_HANDS {
             return Err(IkError::Tools(format!(
                 "{} hands; the solve carries at most {MAX_HANDS}",
@@ -202,9 +211,43 @@ impl BodyFiles<'_> {
                 frame,
                 look_forward: Some(forward),
                 approach: None,
+                arm: None,
             });
         }
         Ok((body, limbs))
+    }
+}
+
+/// Each hand's arm, from the joints only it moves (see the module docs).
+fn name_arms(model: &crate::Model, limbs: &mut [LimbConfig]) {
+    let carried: Vec<Vec<usize>> = limbs
+        .iter()
+        .map(|limb| {
+            model.link(&limb.frame).map_or_else(Vec::new, |link| {
+                model.above(link).iter().map(|term| term.joint).collect()
+            })
+        })
+        .collect();
+    for (index, limb) in limbs.iter_mut().enumerate() {
+        let own: Vec<usize> = carried[index]
+            .iter()
+            .copied()
+            .filter(|joint| {
+                carried
+                    .iter()
+                    .enumerate()
+                    .all(|(other, joints)| other == index || !joints.contains(joint))
+            })
+            .collect();
+        let n = own.len();
+        if n >= 5 {
+            let name = |at: usize| model.links()[model.child(own[at])].clone();
+            limb.arm = Some(ArmLinks {
+                shoulder: name(1),
+                elbow: name((n - 1) / 2),
+                wrist: name(n - 2),
+            });
+        }
     }
 }
 
@@ -284,7 +327,19 @@ mod tests {
         for hand in &limbs[..2] {
             assert_eq!(hand.approach, Some([1.0, 0.0, 0.0]));
             assert!(hand.look_forward.is_none());
+            // The arm an operator's is matched to: the links robot-bench's elbow-swivel
+            // measure reads (shoulder roll, elbow pitch, wrist pitch).
+            let side = &hand.name;
+            assert_eq!(
+                hand.arm,
+                Some(ArmLinks {
+                    shoulder: format!("{side}_shoulder_roll_link"),
+                    elbow: format!("{side}_elbow_pitch_link"),
+                    wrist: format!("{side}_wrist_pitch_link"),
+                })
+            );
         }
+        assert!(limbs[2].arm.is_none());
         let body = registered(STATIC).expect("committed").body().expect("body");
         assert_eq!(body.limbs(), ["left", "right", HEAD]);
         assert!(
@@ -343,6 +398,30 @@ mod tests {
                 let mut names: Vec<&str> = hands.iter().map(|h| h.name.as_str()).collect();
                 names.sort_unstable();
                 assert_eq!(names, ["left", "right"], "{name}");
+            }
+            // An arm of five joints or more names its shoulder, elbow and wrist, three distinct
+            // links in order down to the tool, which a solve builds with.
+            for hand in &hands {
+                let link = body.model().link(&hand.frame).expect("frame");
+                let carried = body.model().above(link).len();
+                if let Some(arm) = &hand.arm {
+                    let at = |name: &str| body.model().link(name).expect("arm link");
+                    let (s, e, w) = (at(&arm.shoulder), at(&arm.elbow), at(&arm.wrist));
+                    assert!(
+                        s != e
+                            && e != w
+                            && body.model().descends(e, s)
+                            && body.model().descends(w, e)
+                            && body.model().descends(link, w),
+                        "{name}: {arm:?}"
+                    );
+                    println!(
+                        "{name} {}: {} / {} / {}",
+                        hand.name, arm.shoulder, arm.elbow, arm.wrist
+                    );
+                } else {
+                    println!("{name} {}: no arm ({carried} joints carry it)", hand.name);
+                }
             }
             with_hands += usize::from(!hands.is_empty());
             let looks = limbs.len() - hands.len();

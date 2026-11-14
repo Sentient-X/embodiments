@@ -136,6 +136,24 @@ pub struct Settings {
     /// (on the static body under a millimetre and half a degree; settling is 5 mm and 3
     /// degrees), and twice it pushed far poses past their settle.
     pub preferred_posture_weight: f64,
+    /// How fast a limb whose operator gives their arm ([`Ik::set_home_pull`]) is drawn to the
+    /// preferred posture, per second of its offset: IAIE Bimanual-Teleoperation's null-space
+    /// home pull (`nullspace_gain` 0.5, `dq_null = -k (q - home)`), as the posture weight
+    /// `damping k dt / (1 - k dt)` that moves a free column `k dt` of its offset a tick.
+    pub home_gain: f64,
+    /// How fast a limb's elbow turns toward its aim ([`Ik::set_elbow_aim`]): the reference's
+    /// AEAC, `dq_null = -k grad(w |n_robot - n_target|^2)`, as a gradient on the step that
+    /// moves a free column `k dt` times it a tick, projected onto what the tools leave free.
+    /// The reference's `elbow_gain` 0.5 balances a bent operator arm's weight (0.1-0.3) against
+    /// the home pull at 0.5, so the elbow barely moves: on the static body, hand held, an
+    /// operator's elbow turned 90 degrees out moved the robot's 1 degree in 6 s
+    /// (`tests/arm_retarget.rs` `table_elbow_aim`). At 10 a robot engaged with its upper arm
+    /// turned -1.86 rad (session 8b3e2f2b) hangs its elbow within 60 degrees of down for 94-96 %
+    /// of a table task (27 % today without a served posture) and a raised operator elbow (70
+    /// degrees) is followed to 64-66, with the tool tracking within 6 % of today's (better at the
+    /// table); at 20 the swivel was a little better but the twisted start's tracking 25 mm
+    /// against 13, and at 50 it broke down (70 mm RMS) while the elbow swung.
+    pub elbow_gain: f64,
     /// Kept clear of each joint limit.
     pub limit_margin_rad: f64,
     /// Kept between proxies, and between a proxy and an obstacle.
@@ -183,6 +201,8 @@ impl Default for Settings {
             posture_weight: 1e-6,
             shared_posture_weight: 1e-5,
             preferred_posture_weight: 1e-5,
+            home_gain: 0.5,
+            elbow_gain: 10.0,
             limit_margin_rad: 0.01,
             collision_margin_m: 0.01,
             influence_m: 0.2,
@@ -272,7 +292,7 @@ pub enum Reach {
 }
 
 /// One limb after a step ([`Body::limbs`] order).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct LimbReport {
     /// Tool position error at the new positions, metres (zero for a look-at).
     pub residual_m: f64,
@@ -284,6 +304,29 @@ pub struct LimbReport {
     /// For a driven tool, the link (index into [`crate::Model::links`]) standing between it
     /// and the camera at the new positions; `None` in clear sight, or with no camera.
     pub hidden_by: Option<usize>,
+}
+
+impl Clone for LimbReport {
+    fn clone(&self) -> Self {
+        Self {
+            residual_m: self.residual_m,
+            residual_rad: self.residual_rad,
+            reach: self.reach,
+            active: self.active.clone(),
+            hidden_by: self.hidden_by,
+        }
+    }
+
+    /// Into the report's own buffer: [`crate::teleop::Teleop::step`] copies each tick's
+    /// reports this way, and the derived copy allocated a fresh `active` for every limb with a
+    /// binding row (3 a tick on the static body with its elbows aimed).
+    fn clone_from(&mut self, source: &Self) {
+        self.residual_m = source.residual_m;
+        self.residual_rad = source.residual_rad;
+        self.reach = source.reach;
+        self.active.clone_from(&source.active);
+        self.hidden_by = source.hidden_by;
+    }
 }
 
 /// How the QP ended.
@@ -336,6 +379,37 @@ pub const READING_JITTER: f64 = 0.001;
 /// lifting every cap (the torso 15x; embodiments#206 refute); at a fifth, 1,009, and an
 /// act-sim-like PD keeps 5.1 mm instead of touching. A tenth and a quarter both lost the PD.
 const SOFTENED: f64 = 0.2;
+
+/// Where one limb's elbow should point (adaptive elbow control, IAIE Bimanual-Teleoperation):
+/// the elbow's direction off the line from its shoulder to its wrist, toward `direction`, at
+/// `weight` (0-1, the operator's own elbow's offset from that line over their reach). Links are
+/// indices into [`crate::Model::links`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElbowAim {
+    pub shoulder: usize,
+    pub elbow: usize,
+    pub wrist: usize,
+    /// A unit vector in the root frame, across the shoulder-wrist line.
+    pub direction: Vec3,
+    pub weight: f64,
+}
+
+/// The elbow's unit direction off the line from `shoulder` to `wrist`, and how far off it is,
+/// metres; `None` for a line or an offset under a micrometre (a straight arm points nowhere).
+/// IAIE Bimanual-Teleoperation's `elbow_axis_direction`.
+#[must_use]
+pub fn elbow_direction(shoulder: Vec3, elbow: Vec3, wrist: Vec3) -> Option<(Vec3, f64)> {
+    let axis = sub(wrist, shoulder);
+    let length = norm(axis);
+    if length < 1e-6 {
+        return None;
+    }
+    let d = scale(axis, 1.0 / length);
+    let along = sub(elbow, shoulder);
+    let off = sub(along, scale(d, dot(d, along)));
+    let radius = norm(off);
+    (radius >= 1e-6).then(|| (scale(off, 1.0 / radius), radius))
+}
 
 /// How far a window may pull a step past the acceleration cap, as a multiple of it.
 const WINDOW_PULL: f64 = 2.0;
@@ -420,6 +494,12 @@ struct Workspace {
     jp: Vec<Vec3>,
     /// Per solved column, how far it swings the tools: [`Settings::smoothness`]'s weight.
     lever: Vec<f64>,
+    /// The elbows' points' Jacobians (shoulder, elbow, wrist; per axis) and the elbow cost's
+    /// gradient per solved column ([`Ik::set_elbow_aim`]).
+    j_shoulder: Vec<Vec3>,
+    j_elbow: Vec<Vec3>,
+    j_wrist: Vec<Vec3>,
+    elbow_gradient: Vec<f64>,
     /// This tick's task rows, each times the square root of its weight (`6 x limbs` by `n`),
     /// and how many are in use: the motion that moves a driven tool.
     task_rows: Vec<f64>,
@@ -526,6 +606,12 @@ pub struct Ik {
     jerk_rule: Vec<f64>,
     posture: Vec<sx_embodiment_drivers::jerk::Motion>,
     posture_seeded: bool,
+    /// Per limb, where its elbow should point ([`Ik::set_elbow_aim`]), and whether it is drawn
+    /// home at [`Settings::home_gain`] ([`Ik::set_home_pull`]); per solved column, whether any
+    /// limb it moves is.
+    elbow_aim: Vec<Option<ElbowAim>>,
+    home: Vec<bool>,
+    home_column: Vec<bool>,
     /// Per axis, where it was last measured ([`Ik::set_measured`]); NaN where it was not.
     measured: Vec<f64>,
     /// Per axis, the measurement before this one, and a smoothed measured velocity (units/s).
@@ -535,6 +621,8 @@ pub struct Ik {
     stuck: Vec<bool>,
     work: Workspace,
     qp: Qp,
+    /// The rows the QP is sized for.
+    qp_rows: usize,
     step: Step,
 }
 
@@ -656,6 +744,10 @@ impl Ik {
             jw: vec![[0.0; 3]; axes.len()],
             jp: vec![[0.0; 3]; axes.len()],
             lever: vec![0.0; n],
+            j_shoulder: vec![[0.0; 3]; axes.len()],
+            j_elbow: vec![[0.0; 3]; axes.len()],
+            j_wrist: vec![[0.0; 3]; axes.len()],
+            elbow_gradient: vec![0.0; n],
             task_rows: vec![0.0; 6 * body.limbs.len() * n],
             task_count: 0,
             gram: vec![0.0; 36 * body.limbs.len() * body.limbs.len()],
@@ -735,14 +827,24 @@ impl Ik {
             jerk_rule,
             posture: vec![sx_embodiment_drivers::jerk::Motion::default(); axes_count],
             posture_seeded: false,
+            elbow_aim: vec![None; limbs],
+            home: vec![false; limbs],
+            home_column: vec![false; n],
             measured: vec![f64::NAN; axes_count],
             measured_before: vec![f64::NAN; axes_count],
             measured_speed: vec![0.0; axes_count],
             stuck: vec![false; axes_count],
             work,
             qp,
+            qp_rows: k,
             step,
         })
+    }
+
+    /// The most constraints one limb's report can name (every column, every row and the
+    /// tool's speed): a copy of the reports sized to it never grows.
+    pub(crate) fn report_capacity(&self) -> usize {
+        self.body.solved.len() + self.qp_rows + 1
     }
 
     #[must_use]
@@ -969,6 +1071,47 @@ impl Ik {
             } else {
                 f64::INFINITY
             };
+        }
+    }
+
+    /// Turn `limb`'s elbow toward `aim` in what its tool leaves free, from the next step on, at
+    /// [`Settings::elbow_gain`] times its weight; `None` (the default) stops. An aim whose
+    /// links the description lacks, whose direction is not a unit vector or whose weight is
+    /// not finite and positive is none.
+    pub fn set_elbow_aim(&mut self, limb: usize, aim: Option<ElbowAim>) {
+        let links = self.body.model.links().len();
+        if let Some(slot) = self.elbow_aim.get_mut(limb) {
+            *slot = aim.filter(|aim| {
+                aim.shoulder < links
+                    && aim.elbow < links
+                    && aim.wrist < links
+                    && aim.weight.is_finite()
+                    && aim.weight > 0.0
+                    && (norm(aim.direction) - 1.0).abs() < 1e-6
+            });
+        }
+    }
+
+    /// Whether `limb`'s columns are drawn to the preferred posture ([`Ik::prefer_posture`]) at
+    /// [`Settings::home_gain`] instead of [`Settings::preferred_posture_weight`]: an operator who
+    /// gives their arm places the elbow ([`Ik::set_elbow_aim`]), and the posture is only the
+    /// home it falls back to, as in the reference. A column another limb moves too (a torso)
+    /// keeps its own weight. Without a preferred posture nothing changes.
+    pub fn set_home_pull(&mut self, limb: usize, home: bool) {
+        let Some(slot) = self.home.get_mut(limb) else {
+            return;
+        };
+        if *slot == home {
+            return;
+        }
+        *slot = home;
+        for (column, flag) in self.home_column.iter_mut().enumerate() {
+            *flag = !self.shared[column]
+                && self
+                    .limb_columns
+                    .iter()
+                    .zip(&self.home)
+                    .any(|(columns, &home)| home && columns.contains(&column));
         }
     }
 
@@ -1495,8 +1638,13 @@ impl Ik {
                 _ => {}
             }
         }
+        // The reference's home pull, `k dt` of the offset a tick on a free column.
+        let home_step = (s.home_gain * dt).clamp(0.0, 0.5);
+        let home_weight = s.damping * home_step / (1.0 - home_step);
         for (column, &axis) in body.solved.iter().enumerate() {
-            let weight = if self.preferred.is_some() {
+            let weight = if self.preferred.is_some() && self.home_column[column] {
+                home_weight
+            } else if self.preferred.is_some() {
                 s.preferred_posture_weight
             } else if self.shared[column] {
                 s.shared_posture_weight
@@ -1511,9 +1659,75 @@ impl Ik {
         // carried null-space motion can keep a joint from slowing as the cap's shortening needs:
         // at 500 Hz a tool went 0.26 m/s against 0.2 (`a_tool_speed_never_shortens_a_step_past_a_row`).
         // Such a step is not smoothed; an operator's hands, which set no speed, are.
-        if s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none) {
-            self.smooth_null_space(dt);
+        let smooth = s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none);
+        let aimed = self.elbow_gradient();
+        let projected = smooth && self.smooth_null_space(dt);
+        if aimed {
+            // `dq = -k dt grad` on a free column: the step's cost is `damping |dq|^2`, so its
+            // gradient is `2 damping k dt grad`, in what the tools leave free when the projector
+            // is at hand (the reference projects it through its own null space).
+            let s = &self.settings;
+            let w = &mut self.work;
+            let n = self.body.solved.len();
+            let gain = 2.0 * s.damping * s.elbow_gain * dt;
+            for i in 0..n {
+                let pulled = if projected {
+                    (0..n)
+                        .map(|j| w.null[i * n + j] * w.elbow_gradient[j])
+                        .sum::<f64>()
+                } else {
+                    w.elbow_gradient[i]
+                };
+                w.g[i] += gain * pulled;
+            }
         }
+    }
+
+    /// The gradient over the solved columns of every aimed elbow's cost `w |n - aim|^2`, `n` its
+    /// direction off its shoulder-wrist line ([`elbow_direction`]), into the workspace; whether
+    /// any limb is aimed. Differentiated in closed form from the three points' Jacobians.
+    fn elbow_gradient(&mut self) -> bool {
+        let w = &mut self.work;
+        w.elbow_gradient.fill(0.0);
+        let mut any = false;
+        for aim in self.elbow_aim.iter().flatten() {
+            let frames = &w.frames;
+            let (s, e, r) = (
+                frames.links[aim.shoulder].t,
+                frames.links[aim.elbow].t,
+                frames.links[aim.wrist].t,
+            );
+            let a = sub(r, s);
+            let length = norm(a);
+            let Some((n, radius)) = elbow_direction(s, e, r) else {
+                continue;
+            };
+            let d = scale(a, 1.0 / length);
+            let along = sub(e, s);
+            let t = dot(d, along);
+            let miss = sub(n, aim.direction);
+            for &axis in &self.body.solved {
+                w.j_shoulder[axis] = [0.0; 3];
+                w.j_elbow[axis] = [0.0; 3];
+                w.j_wrist[axis] = [0.0; 3];
+            }
+            let model = &self.body.model;
+            model.point_jacobian(frames, aim.shoulder, s, &mut w.j_shoulder);
+            model.point_jacobian(frames, aim.elbow, e, &mut w.j_elbow);
+            model.point_jacobian(frames, aim.wrist, r, &mut w.j_wrist);
+            for (column, &axis) in self.body.solved.iter().enumerate() {
+                let ds = w.j_shoulder[axis];
+                let da = sub(w.j_wrist[axis], ds);
+                let dd = scale(sub(da, scale(d, dot(d, da))), 1.0 / length);
+                let dalong = sub(w.j_elbow[axis], ds);
+                let dt_along = dot(dd, along) + dot(d, dalong);
+                let dv = sub(dalong, [0, 1, 2].map(|k| dd[k] * t + d[k] * dt_along));
+                let dn = scale(sub(dv, scale(n, dot(n, dv))), 1.0 / radius);
+                w.elbow_gradient[column] += 2.0 * aim.weight * dot(miss, dn);
+            }
+            any = true;
+        }
+        any
     }
 
     /// Add [`Settings::smoothness`]: the step's change from the last step, in the motion that
@@ -1522,7 +1736,7 @@ impl Ik {
     /// the projector onto what the tools leave free, and `D` weighs each column by how far it swings the tools, so a shoulder weighs
     /// more than a wrist. The tools' own motion is never smoothed: their tracking and speed
     /// are the task's.
-    fn smooth_null_space(&mut self, dt: f64) {
+    fn smooth_null_space(&mut self, dt: f64) -> bool {
         let s = &self.settings;
         let w = &mut self.work;
         let n = self.body.solved.len();
@@ -1540,7 +1754,7 @@ impl Ik {
             w.gram[i * m + i] += NULL_DAMPING * s.damping;
         }
         if !(m == 0 || crate::qp::cholesky(&mut w.gram[..m * m], m)) {
-            return; // the rows are not finite: no smoothing this tick
+            return false; // the rows are not finite: no smoothing this tick
         }
         // through = gram^-1 A, a column at a time (through is m x n, row-major).
         for k in 0..n {
@@ -1587,6 +1801,7 @@ impl Ik {
                 }
             }
         }
+        true
     }
 
     /// Per column: joint limits with braking, speed, then acceleration where it fits.
@@ -2804,6 +3019,126 @@ mod tests {
     fn tcp(teleop: &Teleop, q: &[f64], hand: usize) -> Pose {
         let body = teleop.ik().body();
         body.frame(&body.model().poses(q), hand).pose()
+    }
+
+    /// With the operator's arm a limb falls back to the preferred posture at the reference's home
+    /// gain, `k dt` of its offset a tick (0.5/s), not at the preferred posture's weight; a column
+    /// another limb moves (the torso) keeps its own; nothing changes without a preferred posture.
+    #[test]
+    fn a_limb_with_the_operators_arm_falls_home_at_the_references_gain() {
+        let settings = super::Settings {
+            smoothness: 0.0,
+            // Answers, not a loaded host's clock.
+            deadline: std::time::Duration::from_secs(3600),
+            ..super::Settings::default()
+        };
+        let decay = |home: bool, preferred: bool| {
+            let body = static_files().body().expect("body");
+            let width = body.model().axes().len();
+            let caps = super::Caps {
+                speed: vec![1.0; width],
+                accel: vec![10.0; width],
+            };
+            let mut ik = super::Ik::new(body, caps, settings.clone(), Vec::new()).expect("ik");
+            let yaw = ik
+                .body()
+                .model()
+                .axes()
+                .iter()
+                .position(|a| a.name == "left_upper_arm_yaw_joint")
+                .expect("yaw");
+            let mut q = ik.rest().to_vec();
+            if preferred {
+                let mut posture = q.clone();
+                posture[yaw] += 0.3;
+                ik.prefer_posture(&posture).expect("posture");
+            } else {
+                q[yaw] -= 0.3;
+            }
+            ik.set_home_pull(0, home);
+            let available = vec![true; width];
+            let targets = [None, None, None];
+            let anchor = ik.anchor()[yaw];
+            let mut errors = Vec::new();
+            for _ in 0..300 {
+                let step = ik.step(&q, &available, &targets, 0.01).expect("step");
+                q.copy_from_slice(&step.q);
+                errors.push(anchor - q[yaw]);
+            }
+            errors
+        };
+        // Once the shaped reference has reached the posture (about a second at a quarter of
+        // the caps), the home pull closes 0.5 % of the offset a tick.
+        let home = decay(true, true);
+        let rate = (home[249] / home[200]).powf(1.0 / 49.0);
+        assert!((rate - (1.0 - 0.5 * 0.01)).abs() < 2e-3, "{rate}");
+        assert!(home[200] > 0.1, "{}", home[200]);
+        // The preferred posture's own weight has it there by then.
+        let preferred = decay(false, true);
+        assert!(preferred[200].abs() < 1e-3, "{}", preferred[200]);
+        assert_eq!(decay(true, false), decay(false, false));
+    }
+
+    /// The elbow cost's gradient in closed form ([`super::Ik::set_elbow_aim`]) is the cost's own:
+    /// against central differences of `w |n(q) - aim|^2` at scattered postures of both arms.
+    #[test]
+    fn the_elbow_gradient_is_the_elbow_costs() {
+        let body = static_files().body().expect("body");
+        let width = body.model().axes().len();
+        let caps = super::Caps {
+            speed: vec![1.0; width],
+            accel: vec![10.0; width],
+        };
+        let mut ik =
+            super::Ik::new(body, caps, super::Settings::default(), Vec::new()).expect("ik");
+        let model = ik.body().model().clone();
+        let link = |n: &str| model.link(n).expect(n);
+        let mut q: Vec<f64> = ik.rest().to_vec();
+        for (index, slot) in q.iter_mut().enumerate() {
+            *slot += 0.3 * ((index as f64) * 1.7).sin();
+        }
+        for side in ["left", "right"] {
+            let aim = super::ElbowAim {
+                shoulder: link(&format!("{side}_shoulder_roll_link")),
+                elbow: link(&format!("{side}_elbow_pitch_link")),
+                wrist: link(&format!("{side}_wrist_pitch_link")),
+                direction: [0.0, 0.6, -0.8],
+                weight: 0.7,
+            };
+            let limb = usize::from(side == "right");
+            ik.set_elbow_aim(0, None);
+            ik.set_elbow_aim(1, None);
+            ik.set_elbow_aim(limb, Some(aim));
+            let cost = |q: &[f64]| {
+                let frames = model.poses(q);
+                let (n, _) = super::elbow_direction(
+                    frames.links[aim.shoulder].t,
+                    frames.links[aim.elbow].t,
+                    frames.links[aim.wrist].t,
+                )
+                .expect("bent");
+                aim.weight
+                    * (0..3)
+                        .map(|k| (n[k] - aim.direction[k]).powi(2))
+                        .sum::<f64>()
+            };
+            model.poses_into(&q, &mut ik.work.frames);
+            assert!(ik.elbow_gradient());
+            let solved = ik.body().solved().to_vec();
+            for (column, &axis) in solved.iter().enumerate() {
+                let h = 1e-6;
+                let (mut up, mut down) = (q.clone(), q.clone());
+                up[axis] += h;
+                down[axis] -= h;
+                let numeric = (cost(&up) - cost(&down)) / (2.0 * h);
+                let closed = ik.work.elbow_gradient[column];
+                assert!(
+                    (numeric - closed).abs() < 1e-6 * (1.0 + numeric.abs()),
+                    "{side} {}: {closed} against {numeric}",
+                    model.axes()[axis].name
+                );
+            }
+        }
     }
 
     /// A step that misses its deadline brakes every joint together: its joint velocity is the

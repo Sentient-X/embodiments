@@ -119,6 +119,7 @@ fn main() {
         held: Vec::new(),
         obstacles: Vec::new(),
         posture: std::collections::BTreeMap::new(),
+        human_reach_m: sx_embodiment_ik::teleop::HUMAN_REACH_M,
     };
     let mut teleop =
         Teleop::new(static_files().urdf, static_files().collision, &config).expect("solve");

@@ -113,6 +113,11 @@ impl Model {
         &self.above[link]
     }
 
+    /// The link joint `joint` moves.
+    pub(crate) fn child(&self, joint: usize) -> usize {
+        self.joints[joint].child
+    }
+
     /// The link `link` hangs from, and whether through a fixed joint; `None` at the root.
     pub(crate) fn parent(&self, link: usize) -> Option<(usize, bool)> {
         self.joints

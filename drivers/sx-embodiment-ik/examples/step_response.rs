@@ -136,6 +136,7 @@ fn main() {
         held: vec!["torso_joint".into()],
         obstacles: Vec::new(),
         posture: BTreeMap::new(),
+        human_reach_m: sx_embodiment_ik::teleop::HUMAN_REACH_M,
     };
     println!("share {share}, ramp {ramp_s} s; caps (rad/s, rad/s^2):");
     for name in names
