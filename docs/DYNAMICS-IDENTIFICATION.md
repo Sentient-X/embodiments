@@ -160,9 +160,10 @@ python tools/import_reference_dynamics.py --reference-root <handoff>/reference_s
   --supersede static-upper-body.dynamics.json --out left-arm.dynamics.json
 ```
 
-- **Residual.** The worst gravity residual must stay under `--max-residual-nm` (default 1e-3 N·m).
-  - With a drive whose zeros match the handoff's encoder offsets, the fit is exact to 2e-5 N·m.
-  - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range and 0.038 N·m on the handoff's own 24-pose oracle, both with the Spark's trimmed whole-body fit loaded beside it.
+- **Residual.** The worst gravity residual must stay under 1e-3 N·m (`REFERENCE_RESIDUAL_BOUND_NM`). The bound is the calibration's, not a flag: the importer, Fleet (`calibration_from_dict`) and the station (`DynamicsCalibration::parse`) all refuse a reference model fit recording more, or none.
+  - With a drive whose zeros match the handoff's encoder offsets, the fit reproduces the importer's reading of the handoff to 2e-5 N·m. The fixture `left-arm.dynamics.json` is written this way.
+  - Against the handoff's independent 24-pose oracle (`gravity.json`) that settled fit is off by 0.136 N·m, where the nominal drive's fit came to 0.038. The oracle's poses are not in the coordinates a settled drive gives. This is unresolved, and it is part of settling the zeros at the robot (2026-11-15).
+  - With the nominal drive (elbow 5.8°, wrist pitch 8.1° and wrist roll 104° apart from the handoff's zeros), the residual is 0.061 N·m over the range, with the Spark's trimmed whole-body fit loaded beside it. The importer refuses it and prints each joint's residual and offset.
   - A large residual means the drive and the handoff disagree about where zero is. Fix the zero calibration. Never raise the bound for a robot.
   - **The real Spark has the same disagreement.** Fleet revision 2 (digest `f13ee49d`, read 2026-11-14) carries a nominal drive: every left-arm zero is 0. The importer refuses it at 0.061 N·m.
     - Which zero is physically right has to be settled at the robot, before anything is assigned.
@@ -171,6 +172,7 @@ python tools/import_reference_dynamics.py --reference-root <handoff>/reference_s
 - **Receipt.** `<name>.receipt.json` records the per-joint offsets, the residuals, and the masses against the description's.
 - **Not carried.** The handoff's gravity share, feed-forward slew and torque clamps are controller settings, not the arm's physics.
 - **One fit per link and joint.** The station refuses two calibrations that name the same link or joint. `--supersede` therefore writes the robot's existing whole-body fit without what the new file names, as `<name>.trimmed.dynamics.json`; assign both files.
+  - **The pair travels together.** The arm's file names the fit it was certified beside (`certified_beside` evidence: that file's sha256), and the trimmed file names the same digest as its source. Fleet and the station (`certified_together`) refuse the arm's file without exactly that trimmed file, and a fit certified on the description alone beside any other file.
   - **The arm is fitted beside that fit.** The handoff lumps the gripper into its wrist link. The importer takes the gripper back out at the values the station will run: the existing fit's, where it names them (the Spark's gripper base is 0.086 kg; the description's is 0.048 kg). The residual is certified on that whole model: the description, the trimmed file and the new one.
   - Fitted against the description's gripper instead, the arm's file moved the arm's gravity by up to 0.21 N·m at the shoulders once it sat beside the whole-body fit. Its oracle error rose from 0.038 to 0.134 N·m (the refute of 2026-11-14). Always pass `--supersede` when the robot carries a fit.
   - The trimmed file is a subset of a measurement. It keeps the original's method, time and evidence, adds the digest of the document it was cut from, and claims no residual, because the whole fit's residual covered joints it no longer carries.

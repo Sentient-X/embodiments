@@ -75,8 +75,8 @@ pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};
 pub use drive::{DRIVE_SCHEMA, InstanceDrive, JointDrive};
 pub use dynamics::{
-    Dynamics, DynamicsCalibration, DynamicsError, JointFriction, LinkInertia, STANDARD_GRAVITY,
-    Scratch, UPRIGHT,
+    Certification, Dynamics, DynamicsCalibration, DynamicsError, JointFriction, LinkInertia,
+    REFERENCE_RESIDUAL_BOUND_NM, STANDARD_GRAVITY, Scratch, UPRIGHT, certified_together,
 };
 pub use ending::{
     AtEnd, Ending, FeedforwardFn, MAX_RETURN, Pace, Progress, RETURN_MARGIN, RETURN_SETTLE,
