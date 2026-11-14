@@ -905,6 +905,22 @@ def superseded_descriptions(embodiment: Embodiment) -> list[str]:
     )
 
 
+def ready_pose(embodiment: Embodiment) -> dict[str, JsonValue]:
+    """``pack.json``'s ``ready``: every chain joint whose part declares a work-ready
+    configuration (``ChainSpec.ready``), by the description's joint name. It is the body's own
+    home, the posture a solve's redundancy resolves toward where the robot commissioned no Ready
+    pose of its own (``sx_embodiment_ik::BodyFiles::ready``); a chain declaring none is absent."""
+    from .parts import ChainSpec
+
+    parts = {component.component_id: component.part for component in embodiment.components}
+    ready: dict[str, JsonValue] = {}
+    for coordinate, name in zip(embodiment.state.coordinates, embodiment.joint_names, strict=True):
+        part = parts.get(coordinate.instance)
+        if isinstance(part, ChainSpec) and part.ready is not None:
+            ready[name] = part.ready[part.joint_names.index(coordinate.joint_name)]
+    return ready
+
+
 def tool_point_fields(embodiment: Embodiment, tools: tuple[ToolFrame, ...]) -> dict[str, JsonValue]:
     """``pack.json``'s tool points: every derived one as ``tcp_candidates`` (drawn), and as
     ``tcp_frames`` (driven) with its ``tool_points_checked`` record only once a person checked
@@ -1031,6 +1047,7 @@ def build(
         **tool_point_fields(embodiment, tools),
         "tools": tool_documents(embodiment, tools),
         "frames": [frame.to_json() for frame in body_frames(embodiment)],
+        "ready": ready_pose(embodiment),
         "superseded_descriptions": [*superseded_descriptions(embodiment)],
         "generated_by": GENERATOR,
     }

@@ -336,7 +336,9 @@ pub struct ArmLinks {
 }
 
 /// An operator's arm for one hand, in the robot's root frame as the hand's pose is: shoulder,
-/// elbow and wrist, metres (`TeleoperationArmPose`, tracked by the headset or estimated).
+/// elbow and wrist, metres (`TeleoperationArmPose`, tracked by the headset or estimated). The
+/// shoulder anchors SWGR's shoulder-to-hand vector (the hand is the tool point); the three
+/// together give the elbow's direction off the shoulder-wrist line.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OperatorArm {
     pub shoulder_m: [f64; 3],
@@ -1108,10 +1110,15 @@ impl Teleop {
             // its own torso (a reach's tracking 11 -> 23 mm RMS, `tests/arm_retarget.rs`). On a
             // body whose shoulders stand still (the reference's) the two are the same.
             let shoulder = *self.shoulders[hand].get_or_insert(self.frames.links[arm.shoulder].t);
+            // SWGR's one scale on the operator's shoulder-to-hand vector. The hand is the tool
+            // point as given (`tcp`), not the arm's wrist: a page's wrist stands 8 cm behind the
+            // grip, and the tool point is the reading played on the hands' curve while the arm
+            // rides only the newest sample. The reference's wrist is its controller, so the two
+            // agree there.
             let scale = arm.reach_m / human;
             targets.tcp[hand] = Some(Pose {
                 translation_m: [0, 1, 2].map(|k| {
-                    scale.mul_add(operator.wrist_m[k] - operator.shoulder_m[k], shoulder[k])
+                    scale.mul_add(tcp.translation_m[k] - operator.shoulder_m[k], shoulder[k])
                 }),
                 rotation: tcp.rotation,
             });

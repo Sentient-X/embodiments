@@ -91,6 +91,8 @@ struct PackDocument {
     tcp_candidates: BTreeMap<String, String>,
     #[serde(default)]
     frames: Vec<FrameDocument>,
+    #[serde(default)]
+    ready: BTreeMap<String, f64>,
 }
 
 impl BodyFiles<'_> {
@@ -123,6 +125,27 @@ impl BodyFiles<'_> {
     /// As [`BodyFiles::body`].
     pub fn limbs(&self) -> Result<Vec<LimbConfig>, IkError> {
         self.solved().map(|(_, limbs)| limbs)
+    }
+
+    /// The body's own home: each chain joint's declared work-ready value
+    /// (`sx_embodiments.parts.ChainSpec.ready`, elbows down on an arm), by joint name. It is the
+    /// posture a teleop solve resolves the arms' redundancy toward ([`TeleopConfig::posture`])
+    /// where the robot commissioned no Ready pose of its own, so a solve always has a home and
+    /// never anchors to wherever the arm stood at engage. Empty for a body whose chains declare
+    /// none.
+    ///
+    /// [`TeleopConfig::posture`]: crate::teleop::TeleopConfig::posture
+    ///
+    /// # Errors
+    ///
+    /// A `pack.json` that does not parse, or a value that is not finite.
+    pub fn ready(&self) -> Result<BTreeMap<String, f64>, IkError> {
+        let pack: PackDocument =
+            serde_json::from_str(self.pack).map_err(|e| IkError::Tools(e.to_string()))?;
+        if let Some((joint, _)) = pack.ready.iter().find(|(_, value)| !value.is_finite()) {
+            return Err(IkError::Tools(format!("ready {joint:?} is not finite")));
+        }
+        Ok(pack.ready)
     }
 
     /// The description's dynamics in the world's `gravity`, accepting a fit keyed to any of
@@ -305,6 +328,60 @@ mod tests {
     /// The static upper body's limbs, derived from its pack alone, are the ones its solve was
     /// written for by hand until 2026-11-07: both grippers' tool points by side, the ZED looking
     /// out of its lenses from the SO-101 neck, each hand approaching along its tool point's +x.
+    /// The body's own home is its registry chains' declared Ready: on the static upper body
+    /// every arm and torso joint, elbows bent down (0.3 rad off the stop) and the shoulders
+    /// rolled out, so a solve with no commissioned Ready still has one; a body whose chains
+    /// declare none has an empty one.
+    #[test]
+    fn the_static_upper_bodys_home_is_its_registry_ready() {
+        let ready = registered(STATIC)
+            .expect("committed")
+            .ready()
+            .expect("ready");
+        for side in ["left", "right"] {
+            for joint in [
+                "shoulder_pitch",
+                "shoulder_roll",
+                "upper_arm_yaw",
+                "elbow_pitch",
+                "forearm_yaw",
+                "wrist_pitch",
+                "wrist_roll",
+            ] {
+                assert!(
+                    ready.contains_key(&format!("{side}_{joint}_joint")),
+                    "{side} {joint}"
+                );
+            }
+        }
+        for (joint, value) in [
+            ("left_elbow_pitch_joint", -0.3),
+            ("right_elbow_pitch_joint", 0.3),
+            ("torso_joint", 0.0),
+        ] {
+            assert!(
+                (ready[joint] - value).abs() < 1e-12,
+                "{joint}: {}",
+                ready[joint]
+            );
+        }
+        for files in every_registered() {
+            let ready = files.ready().expect("parses");
+            let model = files.body().expect("body");
+            let axes: Vec<&str> = model
+                .model()
+                .axes()
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect();
+            assert!(
+                ready.keys().all(|joint| axes.contains(&joint.as_str())),
+                "{}: a ready joint the description lacks",
+                files.embodiment
+            );
+        }
+    }
+
     #[test]
     fn the_static_upper_bodys_limbs_come_from_its_pack() {
         let limbs = registered(STATIC)

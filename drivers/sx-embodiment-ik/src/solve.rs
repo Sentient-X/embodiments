@@ -152,7 +152,11 @@ pub struct Settings {
     /// of a table task (27 % today without a served posture) and a raised operator elbow (70
     /// degrees) is followed to 64-66, with the tool tracking within 6 % of today's (better at the
     /// table); at 20 the swivel was a little better but the twisted start's tracking 25 mm
-    /// against 13, and at 50 it broke down (70 mm RMS) while the elbow swung.
+    /// against 13, and at 50 it broke down (70 mm RMS) while the elbow swung. With the hand
+    /// held, the elbow's 63 % rise toward a 60 / 90 degree aim takes 1.9 / 1.5 s at 10, 0.85 /
+    /// 0.78 at 20, 0.65 / 0.68 at 30 and 0.63 / 0.69 at 50: no gain reaches a 0.3 s time
+    /// constant on this body (the rise floors near 0.65 s, where the joints' caps bind), and
+    /// the gains that come closest cost a moving hand its tracking.
     pub elbow_gain: f64,
     /// Kept clear of each joint limit.
     pub limit_margin_rad: f64,

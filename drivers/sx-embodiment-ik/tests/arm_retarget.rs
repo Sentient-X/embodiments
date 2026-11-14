@@ -33,16 +33,46 @@ fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
 
 const DT: f64 = 0.01;
 
-/// The station's served solve for the static body (governed caps, its Ready as the posture),
-/// with the limbs the body's files derive today (each hand's arm named).
-fn station_config(posture: bool) -> TeleopConfig {
+/// What the arms' redundancy resolves toward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Posture {
+    /// The robot's commissioned Ready, as the fixture's served config carries it.
+    Commissioned,
+    /// The body's own declared home (`BodyFiles::ready`, the registry chains' Ready): what the
+    /// station serves since 2026-11-14 where the robot commissioned none.
+    Body,
+    /// None served: the posture at engage, the station before 2026-11-14 on a robot with no
+    /// commissioned Ready.
+    Engage,
+}
+
+/// The station's served solve for the static body (governed caps, `posture`), with the limbs
+/// the body's files derive today (each hand's arm named).
+fn station_config_with(posture: Posture) -> TeleopConfig {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     config.limbs = static_files().limbs().expect("its limbs");
-    if !posture {
-        config.posture = BTreeMap::new();
+    match posture {
+        Posture::Commissioned => {}
+        Posture::Body => {
+            config.posture = static_files()
+                .ready()
+                .expect("its home")
+                .into_iter()
+                .filter(|(joint, _)| config.posture.contains_key(joint))
+                .collect();
+        }
+        Posture::Engage => config.posture = BTreeMap::new(),
     }
     config
+}
+
+fn station_config(posture: bool) -> TeleopConfig {
+    station_config_with(if posture {
+        Posture::Commissioned
+    } else {
+        Posture::Engage
+    })
 }
 
 fn solve(config: &TeleopConfig) -> Teleop {
@@ -121,7 +151,7 @@ fn human_arm(shoulder: [f64; 3], wrist: [f64; 3], swivel: f64, outward: [f64; 3]
 
 /// `test_full_extension_lands_on_robot_reach`, `test_bent_arm_scales_proportionally`,
 /// `test_direction_is_preserved` and `test_vr_world_origin_cancels`, through the solve: the hand
-/// the solve takes is the robot's shoulder plus the operator's shoulder-to-wrist vector times
+/// the solve takes is the robot's shoulder plus the operator's shoulder-to-hand vector times
 /// the robot's reach over theirs, wherever the operator stands.
 #[test]
 fn swgr_places_the_hand_by_the_shoulder_wrist_vector_scaled_to_the_robots_reach() {
@@ -147,8 +177,13 @@ fn swgr_places_the_hand_by_the_shoulder_wrist_vector_scaled_to_the_robots_reach(
     for (shoulder, span) in cases {
         let wrist = [0, 1, 2].map(|k| shoulder[k] + span[k]);
         let arm = human_arm(shoulder, wrist, 0.3, [0.0, 1.0, 0.0]);
+        // The operator's hand, in the arm's frame, at the wrist (the reference's controller).
+        let hand = Pose {
+            translation_m: wrist,
+            ..tool
+        };
         let targets = Targets {
-            tcp: hands([Some(tool)]),
+            tcp: hands([Some(hand)]),
             arm: hands([Some(arm)]),
             ..Targets::default()
         };
@@ -309,6 +344,62 @@ enum Variant {
     SwgrAeac,
     /// The same on a robot whose config serves no posture: home is the posture at engage.
     SwgrAeacNoPosture,
+    /// No arm, the body's own home: the station since 2026-11-14 on a robot with no
+    /// commissioned Ready, and the arm-less path everywhere the page sends no arm (the desk).
+    ClutchedHome,
+    /// SWGR, AEAC and the body's home with the arm as the page estimates it when body tracking
+    /// is unavailable (`platform/console/src/workspaces/fleet/xr/arm.ts` `elbowOf`, ported in
+    /// [`estimated_elbow`]): the elbow from where the hand is, not from the operator's own.
+    SwgrEstimated,
+    /// SWGR, AEAC and the body's home with the operator's tracked arm.
+    SwgrHome,
+}
+
+impl Variant {
+    const fn posture(self) -> Posture {
+        match self {
+            Self::Clutched | Self::Swgr | Self::SwgrAeac => Posture::Commissioned,
+            Self::ClutchedNoPosture | Self::SwgrAeacNoPosture => Posture::Engage,
+            Self::ClutchedHome | Self::SwgrEstimated | Self::SwgrHome => Posture::Body,
+        }
+    }
+}
+
+/// The page's estimated elbow (`arm.ts` `elbowOf`, 2026-11-14), in the robot's frame (x
+/// forward, y left, z up) with the operator's body facing +x: a two-bone arm (0.30 / 0.27 m,
+/// never straighter than 0.995 of its length) whose elbow swivels by a direction field over
+/// where the hand points, singular only straight back from the shoulder, with 0.1 of the last
+/// frame's direction kept. `side` is +1 left, -1 right; `memory` the last direction (zeros at
+/// first), updated.
+fn estimated_elbow(
+    side: f64,
+    shoulder: [f64; 3],
+    wrist: [f64; 3],
+    memory: &mut [f64; 3],
+) -> [f64; 3] {
+    let (upper, fore) = (0.30, 0.27);
+    let dot = |a: [f64; 3], b: [f64; 3]| (0..3).map(|k| a[k] * b[k]).sum::<f64>();
+    let unit = |v: [f64; 3]| v.map(|x| x / norm(v).max(1e-12));
+    let axis = sub(wrist, shoulder);
+    let d = norm(axis);
+    if d < 1e-4 {
+        return [shoulder[0], shoulder[1], shoulder[2] - upper];
+    }
+    let n = axis.map(|x| x / d);
+    let k = (d / (0.995 * (upper + fore))).max(1.0);
+    let (l1, l2) = (upper * k, fore * k);
+    let along = ((l1 * l1 - l2 * l2 + d * d) / (2.0 * d)).clamp(-l1, l1);
+    let radius = (l1 * l1 - along * along).max(0.0).sqrt();
+    let (forward, out, up) = ([1.0, 0.0, 0.0], [0.0, side, 0.0], [0.0, 0.0, 1.0]);
+    let q = unit([0, 1, 2].map(|i| -forward[i] * 0.9 - out[i] * 0.4 + up[i] * 0.15));
+    let e = [0, 1, 2].map(|i| out[i] * 0.3 - up[i]);
+    let eq = dot(e, q);
+    let e = unit([0, 1, 2].map(|i| e[i] - q[i] * eq));
+    let (nq, ne, mn) = (dot(n, q), dot(n, e), dot(*memory, n));
+    let v =
+        [0, 1, 2].map(|i| (1.0 - nq) * e[i] + ne * (q[i] - n[i]) + 0.1 * (memory[i] - n[i] * mn));
+    *memory = unit(v);
+    [0, 1, 2].map(|i| shoulder[i] + n[i] * along + memory[i] * radius)
 }
 
 /// The Spark's commanded arms at the first command of session 8b3e2f2b (2026-11-14): the left
@@ -341,8 +432,11 @@ struct Outcome {
     track_p95_mm: f64,
     turn_rms_mrad: f64,
     tick_median_us: f64,
-    /// The arms' joints' jerk, RMS over joints and ticks, rad/s^3.
+    /// The arms' joints' jerk, RMS over joints and ticks, and its magnitude's median and 95th
+    /// percentile, rad/s^3.
     jerk_rms: f64,
+    jerk_p50: f64,
+    jerk_p95: f64,
     /// The robot's mean swivel against the operator's, degrees.
     robot_mean_deg: f64,
     operator_mean_deg: f64,
@@ -384,9 +478,8 @@ fn operator(scenario: Scenario, t: f64, side: f64) -> ([f64; 3], f64) {
 }
 
 fn run(scenario: Scenario, variant: Variant, seconds: f64, twisted: bool) -> Outcome {
-    let config = station_config(
-        variant != Variant::ClutchedNoPosture && variant != Variant::SwgrAeacNoPosture,
-    );
+    let config = station_config_with(variant.posture());
+    let mut memory = [[0.0; 3]; 2];
     let mut teleop = solve(&config);
     let body = teleop.ik().body().clone();
     let mut q = ready(&teleop);
@@ -447,19 +540,30 @@ fn run(scenario: Scenario, variant: Variant, seconds: f64, twisted: bool) -> Out
                 operator_sum += operator_swivel;
             }
             match variant {
-                Variant::Clutched | Variant::ClutchedNoPosture => {
+                Variant::Clutched | Variant::ClutchedNoPosture | Variant::ClutchedHome => {
                     // The same hand as the arm would place, given as the clutch gives a hand:
                     // only the null space differs.
                     let mut pose = tool;
                     pose.translation_m = [0, 1, 2].map(|k| s[k] + wrist[k] * reach / HUMAN_REACH_M);
                     targets.tcp[hand] = Some(pose);
                 }
-                Variant::Swgr | Variant::SwgrAeac | Variant::SwgrAeacNoPosture => {
+                Variant::Swgr
+                | Variant::SwgrAeac
+                | Variant::SwgrAeacNoPosture
+                | Variant::SwgrEstimated
+                | Variant::SwgrHome => {
                     let mut arm = arm;
                     if variant == Variant::Swgr {
                         arm.elbow_m = [0, 1, 2].map(|k| 0.5 * (s[k] + w[k]));
                     }
-                    targets.tcp[hand] = Some(tool);
+                    if variant == Variant::SwgrEstimated {
+                        arm.elbow_m = estimated_elbow(*side, s, w, &mut memory[hand]);
+                    }
+                    // The operator's hand where their wrist is, in the arm's frame.
+                    targets.tcp[hand] = Some(Pose {
+                        translation_m: w,
+                        ..tool
+                    });
                     targets.arm[hand] = Some(arm);
                 }
             }
@@ -506,7 +610,13 @@ fn run(scenario: Scenario, variant: Variant, seconds: f64, twisted: bool) -> Out
             jerks.push(third / DT.powi(3));
         }
     }
+    let mut magnitudes: Vec<f64> = jerks.iter().map(|j| j.abs()).collect();
+    magnitudes.sort_by(f64::total_cmp);
+    let pick =
+        |p: f64| magnitudes[((p * magnitudes.len() as f64) as usize).min(magnitudes.len() - 1)];
     Outcome {
+        jerk_p50: pick(0.5),
+        jerk_p95: pick(0.95),
         bins,
         under_60: (bins[0] + bins[1]) as f64 / total.max(1) as f64,
         track_rms_mm: rms(&errors),
@@ -555,6 +665,20 @@ fn with_the_operators_arm_the_elbows_hang_as_a_persons_and_the_tool_tracks_as_be
         today.under_60,
         arm.under_60
     );
+    // With no arm at all the body's own home unwinds it too, and the page's estimated arm
+    // (no body tracking) hangs the elbow as well as the tracked one at the table.
+    let home = run(Scenario::Table, Variant::ClutchedHome, 5.0, true);
+    let estimated = run(Scenario::Table, Variant::SwgrEstimated, 5.0, false);
+    assert!(
+        home.under_60 > 0.85,
+        "no arm, body home: {:.2}",
+        home.under_60
+    );
+    assert!(
+        estimated.under_60 > 0.6,
+        "estimated arm: {:.2}",
+        estimated.under_60
+    );
 }
 
 /// The table: every scenario and variant, swivel bins, tracking and tick time.
@@ -562,7 +686,7 @@ fn with_the_operators_arm_the_elbows_hang_as_a_persons_and_the_tool_tracks_as_be
 #[ignore = "a table: cargo test --release --test arm_retarget table_elbow_swivel -- --ignored --nocapture"]
 fn table_elbow_swivel() {
     println!(
-        "scenario variant | swivel share 0-30 30-60 60-90 90-120 120-150 150-180 | <60 | robot / operator mean deg | track rms / p95 mm | turn rms mrad | arm jerk rms rad/s3 | tick median us"
+        "scenario variant | swivel share 0-30 30-60 60-90 90-120 120-150 150-180 | <60 | robot / operator mean deg | track rms / p95 mm | turn rms mrad | arm jerk rms p50 p95 rad/s3 | tick median us"
     );
     for (scenario, twisted) in [
         (Scenario::Reach, false),
@@ -572,10 +696,12 @@ fn table_elbow_swivel() {
         (Scenario::Table, true),
     ] {
         for variant in [
-            Variant::Clutched,
             Variant::ClutchedNoPosture,
-            Variant::Swgr,
+            Variant::Clutched,
+            Variant::ClutchedHome,
             Variant::SwgrAeac,
+            Variant::SwgrHome,
+            Variant::SwgrEstimated,
             Variant::SwgrAeacNoPosture,
         ] {
             let o = run(scenario, variant, 8.0, twisted);
@@ -587,7 +713,7 @@ fn table_elbow_swivel() {
                 .map(|b| format!("{:3.0}", 100.0 * *b as f64 / total.max(1) as f64))
                 .collect();
             println!(
-                "{scenario} {variant:?} | {} | {:.0}% | {:.0} / {:.0} | {:.2} / {:.2} | {:.1} | {:.0} | {:.0}",
+                "{scenario} {variant:?} | {} | {:.0}% | {:.0} / {:.0} | {:.2} / {:.2} | {:.1} | {:.0} {:.0} {:.0} | {:.0}",
                 shares.join(" "),
                 100.0 * o.under_60,
                 o.robot_mean_deg,
@@ -596,6 +722,8 @@ fn table_elbow_swivel() {
                 o.track_p95_mm,
                 o.turn_rms_mrad,
                 o.jerk_rms,
+                o.jerk_p50,
+                o.jerk_p95,
                 o.tick_median_us
             );
         }
@@ -615,8 +743,12 @@ fn aimed(aim: f64, seconds: f64) -> Vec<f64> {
     let tool = tools[0].expect("left");
     let w = [0, 1, 2].map(|k| s[k] + (tool.translation_m[k] - s[k]) * HUMAN_REACH_M / reach);
     let arm = human_arm(s, w, aim.to_radians(), [0.0, 1.0, 0.0]);
+    let hand = Pose {
+        translation_m: w,
+        ..tool
+    };
     let targets = Targets {
-        tcp: hands([Some(tool), tools[1]]),
+        tcp: hands([Some(hand), tools[1]]),
         arm: hands([Some(arm)]),
         ..Targets::default()
     };
@@ -662,5 +794,162 @@ fn table_elbow_aim() {
             "operator elbow {aim:5.0} deg: robot swivel at 1..6 s {}",
             row.join(" ")
         );
+    }
+}
+
+/// A real session's hands through the solve with no arm: the tool points the robot was
+/// commanded (forward kinematics of each exported command, robot-bench `control_journal_lag.py
+/// export`) given as the hands, from the session's own first command (8b3e2f2b's twisted left
+/// arm), a gap over 50 ms taken as a release (the solve takes hold afresh where it stands).
+/// Only the null space differs between postures: the posture at engage (the station before
+/// 2026-11-14 on a robot with no commissioned Ready) against the body's own home. Per arm: the
+/// share of ticks per 30 degrees of swivel from down, tracking, and arm jerk p50 / p95.
+///
+/// `SESSIONS=/tmp/shake1114/json/8b3e2f2b.json,/tmp/eve/json/41eb2d39_e40e9290.json`
+#[test]
+#[ignore = "a table over exports: SESSIONS=a.json,b.json cargo test --release --test arm_retarget table_session_replay -- --ignored --nocapture"]
+fn table_session_replay() {
+    let Ok(paths) = std::env::var("SESSIONS") else {
+        println!("SESSIONS names no exports");
+        return;
+    };
+    for path in paths.split(',') {
+        let export: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).expect("export")).expect("json");
+        let names: Vec<&str> = export["names"]
+            .as_array()
+            .expect("names")
+            .iter()
+            .map(|n| n.as_str().expect("name"))
+            .collect();
+        let commands: Vec<(u64, Vec<f64>)> = export["commands"]
+            .as_array()
+            .expect("commands")
+            .iter()
+            .map(|c| {
+                (
+                    c[0].as_u64().expect("t"),
+                    c[1].as_array()
+                        .expect("q")
+                        .iter()
+                        .map(|v| v.as_f64().expect("v"))
+                        .collect(),
+                )
+            })
+            .collect();
+        for posture in [None, Some(Posture::Engage), Some(Posture::Body)] {
+            let config = station_config_with(posture.unwrap_or(Posture::Body));
+            let mut teleop = solve(&config);
+            let body = teleop.ik().body().clone();
+            let axes: Vec<String> = teleop
+                .model()
+                .axes()
+                .iter()
+                .map(|a| a.name.clone())
+                .collect();
+            let map = |q_j: &[f64], into: &mut Vec<f64>| {
+                for (i, a) in axes.iter().enumerate() {
+                    if let Some(j) = names.iter().position(|n| n == a) {
+                        into[i] = q_j[j];
+                    }
+                }
+            };
+            let mut q = ready(&teleop);
+            map(&commands[0].1, &mut q);
+            let mut commanded = q.clone();
+            let arm_axes: Vec<usize> = axes
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| {
+                    (a.starts_with("left_") || a.starts_with("right_")) && !a.contains("gripper")
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let links: Vec<[usize; 3]> = ["left", "right"]
+                .iter()
+                .map(|side| {
+                    [
+                        link(&body, &format!("{side}_shoulder_roll_link")),
+                        link(&body, &format!("{side}_elbow_pitch_link")),
+                        link(&body, &format!("{side}_wrist_pitch_link")),
+                    ]
+                })
+                .collect();
+            let mut bins = [[0usize; 6]; 2];
+            let (mut errors, mut history, mut jerks) = (Vec::new(), Vec::new(), Vec::new());
+            let mut last_t = commands[0].0;
+            teleop.reset();
+            for (t, q_j) in &commands {
+                if t.saturating_sub(last_t) > 50_000_000 {
+                    teleop.reset();
+                    history.clear();
+                }
+                last_t = *t;
+                map(q_j, &mut commanded);
+                if posture.is_some() {
+                    let tools = teleop.tool_poses(&commanded);
+                    let targets = Targets {
+                        tcp: hands([tools[0], tools[1]]),
+                        ..Targets::default()
+                    };
+                    step_once(&mut teleop, &mut q, &targets);
+                    let now = teleop.tool_poses(&q);
+                    for hand in 0..2 {
+                        if let (Some(a), Some(b)) = (now[hand], tools[hand]) {
+                            errors.push(norm(sub(a.translation_m, b.translation_m)) * 1e3);
+                        }
+                    }
+                } else {
+                    q.clone_from(&commanded);
+                }
+                let frames = body.model().poses(&q);
+                for (hand, [s, e, w]) in links.iter().enumerate() {
+                    if let Some(angle) =
+                        swivel(frames.links[*s].t, frames.links[*e].t, frames.links[*w].t)
+                    {
+                        bins[hand][((angle / 30.0) as usize).min(5)] += 1;
+                    }
+                }
+                history.push(arm_axes.iter().map(|&i| q[i]).collect::<Vec<f64>>());
+                if history.len() >= 4 {
+                    let n = history.len();
+                    for j in 0..arm_axes.len() {
+                        let third = history[n - 1][j] - 3.0 * history[n - 2][j]
+                            + 3.0 * history[n - 3][j]
+                            - history[n - 4][j];
+                        jerks.push((third / DT.powi(3)).abs());
+                    }
+                }
+            }
+            jerks.sort_by(f64::total_cmp);
+            errors.sort_by(f64::total_cmp);
+            let pick = |v: &[f64], p: f64| {
+                if v.is_empty() {
+                    f64::NAN
+                } else {
+                    v[((p * v.len() as f64) as usize).min(v.len() - 1)]
+                }
+            };
+            let rms =
+                (errors.iter().map(|x| x * x).sum::<f64>() / errors.len().max(1) as f64).sqrt();
+            let label = posture.map_or("commanded (real)".to_owned(), |p| format!("{p:?}"));
+            for (hand, side) in ["left", "right"].iter().enumerate() {
+                let total: usize = bins[hand].iter().sum();
+                let shares: Vec<String> = bins[hand]
+                    .iter()
+                    .map(|b| format!("{:3.0}", 100.0 * *b as f64 / total.max(1) as f64))
+                    .collect();
+                println!(
+                    "{} {label} {side:5} | {} | <60 {:3.0}% | track rms {:.1} p95 {:.1} mm | jerk p50 {:.0} p95 {:.0}",
+                    path.rsplit('/').next().unwrap_or(path),
+                    shares.join(" "),
+                    100.0 * (bins[hand][0] + bins[hand][1]) as f64 / total.max(1) as f64,
+                    rms,
+                    pick(&errors, 0.95),
+                    pick(&jerks, 0.5),
+                    pick(&jerks, 0.95),
+                );
+            }
+        }
     }
 }
