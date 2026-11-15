@@ -21,7 +21,8 @@ const REGISTRY: &str = include_str!("../bindings/registry.json");
 const UNOPENED: [&str; 2] = ["b601-dm-station", "bimanual-b601-dm"];
 /// Design assemblies no robot is built as: the full humanoid puts the static body's arms on the
 /// earlier humanoid's torso drive (2026-11-08), so its one CAN bus repeats two driven bodies'
-/// ports, which no driver composes as one.
+/// ports, which no driver composes as one. Its provisional leg motors (2026-11-15) repeat the
+/// static arms' ids too, so the torso and arms read as the split bus `torso_can`.
 const DESIGNED_ONLY: [&str; 1] = ["sentient-humanoid"];
 
 /// Every servo mid-range, as the SO-101 open test calibrates them.
@@ -192,7 +193,7 @@ fn every_driven_body_opens_on_simulated_buses() {
             assert!(
                 matches!(
                     result,
-                    Err(OpenError::Bindings(BodyError::Twins { ref port, .. })) if port == "can"
+                    Err(OpenError::Bindings(BodyError::Twins { ref port, .. })) if port == "torso_can"
                 ),
                 "{} is refused as a design assembly: {result:?}",
                 body.embodiment

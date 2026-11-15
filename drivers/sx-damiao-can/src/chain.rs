@@ -121,6 +121,10 @@ pub const DAMIAO_DM8009: ActuatorModel = ActuatorModel::new("damiao_dm8009");
 /// `ActuatorModel.DAMIAO_DM8009P` in the registry: the DM-J8009P-2EC, driven with the DM8009's
 /// limit row (`[12.5, 45, 54]`).
 pub const DAMIAO_DM8009P: ActuatorModel = ActuatorModel::new("damiao_dm8009p");
+/// `ActuatorModel.DAMIAO_DM10010` in the registry: the DM-J10010-2EC, driven with `DM_CAN.py`'s
+/// DM10010 limit row (`[12.5, 20, 200]`). Not yet driven on the bench; every body binding one
+/// marks it provisional.
+pub const DAMIAO_DM10010: ActuatorModel = ActuatorModel::new("damiao_dm10010");
 /// `ActuatorBus.DAMIAO_CAN` in the registry.
 pub const DAMIAO_CAN: ActuatorBus = ActuatorBus::new("damiao_can");
 
@@ -186,6 +190,8 @@ pub fn motor_type(model: ActuatorModel) -> Option<DmMotorType> {
         Some(DmMotorType::DM4340)
     } else if model == DAMIAO_DM8009 || model == DAMIAO_DM8009P {
         Some(DmMotorType::DM8009)
+    } else if model == DAMIAO_DM10010 {
+        Some(DmMotorType::DM10010)
     } else {
         None
     }

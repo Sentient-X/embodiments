@@ -4,7 +4,9 @@ from sx_embodiments import development_embodiments, embodiments
 from sx_embodiments.buses import driven_axes
 
 #: The bodies that repeat a part with its addresses on one bus kind, which alone are split.
-SPLIT = {"bimanual-so101", "bimanual-b601-dm", "b601-dm-station"}
+#: The full humanoid candidate carries the static upper body's arms, whose ids (0x09..0x1E) meet
+#: its own leg motors' (0x01..0x0C, all provisional), so its legs read as buses of their own.
+SPLIT = {"bimanual-so101", "bimanual-b601-dm", "b601-dm-station", "sentient-humanoid"}
 
 
 def _bodies():

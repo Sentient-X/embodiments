@@ -31,7 +31,7 @@ from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_RIGHT_ARM_MODULE,
     STATIC_UPPER_BODY_RIGHT_SHOULDER_MODULE,
 )
-from sx_embodiments.layout import UndocumentedDrive
+from sx_embodiments.layout import DirectDrive, LinkageDrive
 from sx_embodiments.mechanical import Build, Placed
 
 OLD = EmbodimentId("d5f2aad80bcb7bb4ff1eabfdf401b7f4910a89f4d12a731a8c8e24c177090bc5")
@@ -67,7 +67,13 @@ def test_full_body_shares_corrected_modules_and_keeps_unqualified_lower_body() -
         if coordinate.instance in {"left_leg", "right_leg"} or coordinate.joint_name.startswith(
             "waist_"
         ):
-            assert isinstance(coordinate.axis.actuation, UndocumentedDrive)
+            # Every lower-body motor is recorded and none is verified: a linkage's map is
+            # undocumented and a leg motor's direction and zero are unmeasured.
+            actuation = coordinate.axis.actuation
+            if isinstance(actuation, DirectDrive):
+                assert actuation.actuator.provisional
+            else:
+                assert isinstance(actuation, LinkageDrive)
     assert not any(a.asset.format is AssetFormat.MJCF for a in body.assets)
     assert body.urdf.asset.role is AssetRole.DESCRIPTION
     assert "BSD-3-Clause" in body.urdf.provenance.license_id

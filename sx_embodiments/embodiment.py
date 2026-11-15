@@ -73,6 +73,7 @@ from .layout import (
     IntegratedDrive,
     JointAxis,
     JointLayout,
+    LinkageDrive,
     ObservationBinding,
     Passive,
     StateSpace,
@@ -795,6 +796,11 @@ def _actuation_to_dict(value: ActuationBinding) -> dict[str, object]:
         return {"kind": "integrated", "controller": value.controller, "group": value.group}
     if isinstance(value, Passive):
         return {"kind": "passive", "reason": value.reason}
+    if isinstance(value, LinkageDrive):
+        return {
+            "kind": "linkage",
+            "actuators": [_actuator_to_dict(binding) for binding in value.actuators],
+        }
     return {"kind": "undocumented", "reason": value.reason}
 
 
@@ -1076,6 +1082,11 @@ def _parse_actuation(entry: decode.Document) -> ActuationBinding:
     if kind == "undocumented":
         value = decode.exactly(entry, {"kind", "reason"})
         return UndocumentedDrive(decode.text(value, "reason"))
+    if kind == "linkage":
+        value = decode.exactly(entry, {"kind", "actuators"})
+        return LinkageDrive(
+            tuple(_parse_actuator(binding) for binding in decode.documents(value, "actuators"))
+        )
     raise EmbodimentSchemaError(f"{entry.where}.kind is unknown: {kind!r}")
 
 
