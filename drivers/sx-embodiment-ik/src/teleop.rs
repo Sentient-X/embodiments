@@ -70,7 +70,7 @@
 //!   tracked/estimated flicker buzzed the tool. Where this departs from the reference: the elbow
 //!   gain is 10, not 0.5 ([`Settings::elbow_gain`]); no 0.08 s engage blend (the shaper brings
 //!   an engage in within the joints' jerk caps).
-//!   A driven hand whose operator's arm is not known, or is held straight, has its elbow aimed
+//!   A driven hand whose operator's arm is not known has its elbow aimed
 //!   down at [`ELBOW_PRIOR_WEIGHT`] past [`ELBOW_PRIOR_SLACK_RAD`] off hanging (no home pull):
 //!   an elbow hangs unless the operator's says otherwise. Every aim pulls only across the robot's own
 //!   shoulder-wrist line, weighed by how far across it lies (a hanging arm aimed down is asked
@@ -367,7 +367,7 @@ pub const ELBOW_DEADBAND_M: f64 = 0.04;
 pub const ELBOW_WEIGHT_MAX: f64 = 1.0;
 
 /// A driven hand whose operator's arm is not known (the console's local view, a headset with
-/// no body tracking, an older sender) or is held straight has its elbow aimed down at this
+/// no body tracking, an older sender) has its elbow aimed down at this
 /// weight, past [`ELBOW_PRIOR_SLACK_RAD`] off hanging: a person's elbow hangs. Twice an
 /// operator's full weight ([`ELBOW_WEIGHT_MAX`]), because nothing draws this arm home: the
 /// home pull, which an operator's own elbow turns on, weakened Ready 10-20x and roughened the
@@ -1116,8 +1116,7 @@ impl Teleop {
                 continue;
             };
             // The operator's elbow off their shoulder-wrist line, weighted past the deadband, is
-            // followed exactly (no slack). Without one (no arm known, or a straight one inside
-            // the deadband) a driven hand's elbow hangs: [`ELBOW_PRIOR_WEIGHT`] past
+            // followed exactly (no slack). With no operator arm known a driven hand's elbow hangs: [`ELBOW_PRIOR_WEIGHT`] past
             // [`ELBOW_PRIOR_SLACK_RAD`]. Only a known operator arm draws the arm home: the home
             // pull is 10-20x weaker toward Ready than the preferred posture, and with it on for
             // the prior the desk (local view) tracked 65 % worse and an engage at rest jerked 2x
@@ -1126,15 +1125,25 @@ impl Teleop {
                 .and_then(|(o, _)| elbow_direction(o.shoulder_m, o.elbow_m, o.wrist_m))
                 .map(|(direction, radius)| (direction, elbow_weight(radius, human)))
                 .filter(|(_, weight)| *weight > 0.0);
-            let seen = match (targets.tcp[hand], operator) {
-                (_, Some((direction, weight))) => (direction, weight, 0.0),
-                (Some(_), None) => (
+            let seen = match (targets.tcp[hand], *kept, operator) {
+                (_, _, Some((direction, weight))) => (direction, weight, 0.0),
+                // An operator arm held straight, or within the deadband, aims nothing, as before
+                // the prior: falling back to it there flipped the aim between the operator's
+                // elbow at weight 0.01 and the prior at 2.0 on every tick of tracking noise across
+                // the deadband's edge (2880 rad/s^3 of arm jerk; refute of 356541f).
+                (_, Some(_), None) => {
+                    self.elbows[hand] = None;
+                    self.ik.set_elbow_aim(limb, None);
+                    self.ik.set_home_pull(limb, true);
+                    continue;
+                }
+                (Some(_), None, None) => (
                     ELBOW_PRIOR_DIRECTION,
                     ELBOW_PRIOR_WEIGHT,
                     ELBOW_PRIOR_SLACK_RAD,
                 ),
                 // No hand: nothing to aim, and the limb is held as before.
-                (None, None) => {
+                (None, None, None) => {
                     self.elbows[hand] = None;
                     self.ik.set_elbow_aim(limb, None);
                     self.ik.set_home_pull(limb, false);
