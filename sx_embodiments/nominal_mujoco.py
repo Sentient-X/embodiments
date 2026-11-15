@@ -24,7 +24,7 @@ from sx_contracts.identity import canonical_json, content_digest
 from .assets import description_asset_uri
 from .embodiment import Embodiment
 from .kinematics import JointType, Kinematics, Transform, from_xyz_rpy
-from .layout import Bounds, CoordinateUnit
+from .layout import Bounds, CoordinateUnit, StateCoordinate, joint_rating
 from .materialize import materialize
 
 
@@ -78,6 +78,40 @@ class NominalJoint:
             and self.action_scale > 0,
             "Invalid nominal control parameters",
         )
+
+
+def rated_joint(
+    coordinate: StateCoordinate,
+    *,
+    kp: float,
+    kd: float,
+    action_scale: float,
+    default_position: float = 0.0,
+    armature: float | None = None,
+) -> NominalJoint:
+    """A nominal joint whose effort and armature are its drive's, not a profile's choice.
+
+    The effort is the axis's :func:`~sx_embodiments.layout.joint_rating` (its motors' peak
+    torque through their drive) and so is the armature, the motors' reflected rotor inertia.
+    ``armature`` is given only where the rating records none (a DM10010's rotor inertia is
+    unpublished), and is then the profile's stated assumption; giving one the rating has is
+    refused, so one fact has one source. Gains and action scale stay the profile's.
+    """
+    rating = joint_rating(coordinate.axis.actuation)
+    if rating is None:
+        raise NominalExportError(f"{coordinate.joint_name}: the drive has no joint rating")
+    if rating.armature is not None and armature is not None:
+        raise NominalExportError(
+            f"{coordinate.joint_name}: the drive's rating gives the armature; give none"
+        )
+    chosen = rating.armature if rating.armature is not None else armature
+    if chosen is None:
+        raise NominalExportError(
+            f"{coordinate.joint_name}: the drive records no armature; state the assumed one"
+        )
+    return NominalJoint(
+        coordinate.joint_name, kp, kd, rating.effort, chosen, default_position, action_scale
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +298,13 @@ def export_nominal_mujoco(
         if not isinstance(axis.bounds, Bounds):
             raise NominalExportError("Native coordinate bounds missing")
         bounds[nominal.name] = (axis.bounds.lower, axis.bounds.upper)
+        # A simulated motor is never stronger than the one the body is built with.
+        rating = joint_rating(axis.actuation)
+        _require(
+            rating is None or nominal.effort <= rating.effort * (1 + 1e-9),
+            f"{nominal.name}: nominal effort {nominal.effort} exceeds its drive's rated"
+            f" {rating.effort if rating else 0} N·m",
+        )
         _require(
             axis.bounds.lower <= nominal.default_position <= axis.bounds.upper,
             "Default position outside canonical limits",

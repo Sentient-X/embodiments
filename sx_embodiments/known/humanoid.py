@@ -25,10 +25,22 @@ Drives, from Sentient-X sources at pinned commits:
   joint is the motor angle unchanged ("provisional assumption: direct 1:1 mapping"), so each
   binding is identity; a unit's measured zero and direction are its joint calibration.
 
-The waist's roll and pitch are driven together by two motors through a linkage whose mapping
-upstream marks provisional, so they stay undocumented drives, outside any driver's chain;
-``waist_rod_joint`` is feedback-only and the neck and head joints have no motor, so neither
-enters the body state. The legs carry no binding: the robot in service has none.
+* ``sentient_can`` ``examples/capture_readings_27motors.cpp`` (same commit): the legs, each
+  from its hip pitch's send id (right 0x01, left 0x07): hip pitch and hip roll DM10010, hip
+  yaw DM8009, knee DM10010, and two DM4340 driving both ankle joints (``foot1``, ``foot2``).
+
+The waist's roll and pitch, and each ankle's two joints, are driven together by two motors
+through a linkage whose map upstream marks provisional. Each is a :class:`LinkageDrive`: the
+motors are recorded, the map is not, so no driver's chain carries them and no reading of one is
+a joint observation. ``waist_rod_joint`` is feedback-only and the neck and head joints have no
+motor, so neither enters the body state. No leg motor has been driven through the embodiment
+layer: every leg binding is provisional, its direction and zero unmeasured.
+
+The full body's torso, waist and leg limits (``<limit effort velocity>``) are rendered from
+those drives' ratings into :data:`SENTIENT_HUMANOID_RATED_URDF`, which its core and legs are cut
+from (the CAD export declares ``effort="10" velocity="1.0"`` on all of them). The ratings are
+Damiao's published ones at the rated 24 V supply; a linkage's are both motors' at a unit lever
+ratio, an upper bound until its geometry is measured.
 
 The head carries an Intel RealSense D435 (``urdf/humanoid_pkg.csv``, ``camera_link`` on
 ``head_link``), the head module's fitted camera module. Its colour stream is declared at 1280x720
@@ -75,6 +87,7 @@ from ..layout import (
     ActuatorModel,
     CoordinateUnit,
     DirectDrive,
+    LinkageDrive,
     UndocumentedDrive,
     Unobserved,
 )
@@ -131,6 +144,25 @@ SENTIENT_HUMANOID_MJCF: Final = packaged_asset(
 
 SENTIENT_HUMANOID_SOURCE_URDF: Final = replace(SENTIENT_HUMANOID_URDF, role=AssetRole.OTHER)
 
+#: The vendor URDF with every torso, waist and leg joint's ``<limit effort velocity>`` rendered
+#: from the drive the registry binds it to, in place of the CAD export's placeholders
+#: (``tools/compose_humanoid_rated_urdf.py``). The full body's core and legs are cut from it.
+SENTIENT_HUMANOID_RATED_URDF: Final = packaged_asset(
+    relpath="humanoid_pkg/urdf/urdf_robot_acc_rated.urdf",
+    sha256="6b701f9e3f90ba3818c5dd9f3a179175e7fe392144a95c31b99d9538b1133a9f",
+    size_bytes=50508,
+    format=AssetFormat.URDF,
+    role=AssetRole.OTHER,
+    provenance=AssetProvenance(
+        repository="https://github.com/Sentient-X/humanoid_pkg",
+        revision="666bc6b5e00c76b8388a70fcc40a6987e0f1da7a",
+        path="urdf/urdf_robot_acc.urdf",
+        license_id="BSD-3-Clause",
+        generator="sx-embodiments/tools/compose_humanoid_rated_urdf.py",
+    ),
+    media_type="application/xml",
+)
+
 
 def _generated(relpath: str, sha256: str, size_bytes: int) -> PackagedAsset:
     return packaged_asset(
@@ -154,29 +186,49 @@ def _generated(relpath: str, sha256: str, size_bytes: int) -> PackagedAsset:
 SENTIENT_HUMANOID_MASTER_ID_OFFSET: Final = 0x20
 
 
-def _damiao(model: ActuatorModel, bus_id: int) -> DirectDrive:
+def _motor(model: ActuatorModel, bus_id: int, *, provisional: bool = False) -> ActuatorBinding:
     """One motor on the humanoid's one Damiao CAN bus, identity drive map."""
-    return DirectDrive(ActuatorBinding(model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id))
+    return ActuatorBinding(
+        model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id, provisional=provisional
+    )
+
+
+def _damiao(model: ActuatorModel, bus_id: int, *, provisional: bool = False) -> DirectDrive:
+    return DirectDrive(_motor(model, bus_id, provisional=provisional))
+
+
+def _linkage(model: ActuatorModel, *bus_ids: int) -> LinkageDrive:
+    return LinkageDrive(tuple(_motor(model, bus_id, provisional=True) for bus_id in bus_ids))
 
 
 #: The waist's roll and pitch are driven together by two DM4340 motors (CAN 0x0E, 0x0D) through
-#: a linkage whose mapping humanoid_pkg marks provisional: the drive exists but is not documented,
+#: a linkage whose mapping humanoid_pkg marks provisional: the motors are known, the map is not,
 #: so no driver's chain carries it and no unit's reading is a joint observation yet.
-_WAIST = UndocumentedDrive(UNDOCUMENTED_DRIVE_REASON)
+_WAIST = _linkage(ActuatorModel.DAMIAO_DM4340, 0x0E, 0x0D)
 _WAIST_READ = Unobserved(UNDOCUMENTED_OBSERVATION_REASON)
 
-SENTIENT_HUMANOID_TORSO: Final = ChainSpec(
-    part_id=PartId("sentient-humanoid-torso"),
-    layout=bounded_layout(
-        names=("torso_joint", "waist_roll_joint", "waist_pitch_joint"),
-        units=(CoordinateUnit.RADIAN,) * 3,
-        lower=(-1.570796326795, -0.270002435284, -0.767944870878),
-        upper=(1.570796326795, 0.270002435284, 0.767944870878),
-        actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x0F), _WAIST, _WAIST),
-        observations=(ActuatorFeedback(), _WAIST_READ, _WAIST_READ),
-    ),
-    home=(0.0, 0.0, 0.0),
-)
+
+def _torso(waist: LinkageDrive | UndocumentedDrive) -> ChainSpec:
+    return ChainSpec(
+        part_id=PartId("sentient-humanoid-torso"),
+        layout=bounded_layout(
+            names=("torso_joint", "waist_roll_joint", "waist_pitch_joint"),
+            units=(CoordinateUnit.RADIAN,) * 3,
+            lower=(-1.570796326795, -0.270002435284, -0.767944870878),
+            upper=(1.570796326795, 0.270002435284, 0.767944870878),
+            actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x0F), waist, waist),
+            observations=(ActuatorFeedback(), _WAIST_READ, _WAIST_READ),
+        ),
+        home=(0.0, 0.0, 0.0),
+    )
+
+
+#: The full body's torso: the waist's two motors recorded as its linkage.
+SENTIENT_HUMANOID_TORSO: Final = _torso(_WAIST)
+#: The legacy upper body's torso, as published: its identity pins recordings and the paid
+#: vendor CAN transcripts (``sx-damiao-can`` ``tests/fixtures/dm_can``), so its waist keeps the
+#: undocumented drive it was published with. The same two motors are ``_WAIST``'s.
+_LEGACY_TORSO: Final = _torso(UndocumentedDrive(UNDOCUMENTED_DRIVE_REASON))
 
 #: Each arm's first send id; its five motors take consecutive ids from there.
 _ARM_BASE_ID: Final = {"right": 0x10, "left": 0x18}
@@ -231,7 +283,19 @@ def _humanoid_arm(side: Literal["left", "right"]) -> ChainSpec:
     )
 
 
+#: Each leg's first send id (its hip pitch); the leg's six motors take consecutive ids from there.
+_LEG_BASE_ID: Final = {"right": 0x01, "left": 0x07}
+
+
 def _humanoid_leg(side: Literal["left", "right"]) -> ChainSpec:
+    base = _LEG_BASE_ID[side]
+    # humanoid_pkg's assignment table and sentient_can's motor list: hip pitch +0 (DM10010),
+    # hip roll +1 (DM10010), hip yaw +2 (DM8009), knee +3 (DM10010), and the two DM4340 at +4
+    # and +5 that drive both ankle joints through the foot's push rods. No leg motor has been
+    # driven through the embodiment layer, so every binding is provisional: its direction and
+    # zero are unmeasured.
+    ankle = _linkage(ActuatorModel.DAMIAO_DM4340, base + 4, base + 5)
+    unread = Unobserved(UNDOCUMENTED_OBSERVATION_REASON)
     return ChainSpec(
         part_id=PartId(f"sentient-humanoid-{side}-leg"),
         layout=bounded_layout(
@@ -256,6 +320,15 @@ def _humanoid_leg(side: Literal["left", "right"]) -> ChainSpec:
                 0.698131700798,
                 0.436332312999,
             ),
+            actuations=(
+                _damiao(ActuatorModel.DAMIAO_DM10010, base + 1, provisional=True),
+                _damiao(ActuatorModel.DAMIAO_DM10010, base, provisional=True),
+                _damiao(ActuatorModel.DAMIAO_DM8009, base + 2, provisional=True),
+                _damiao(ActuatorModel.DAMIAO_DM10010, base + 3, provisional=True),
+                ankle,
+                ankle,
+            ),
+            observations=(ActuatorFeedback(),) * 4 + (unread, unread),
         ),
         home=(0.0,) * 6,
     )
@@ -305,8 +378,10 @@ UPPER_BODY: Final = Subtree(
 )
 #: The vendor head: neck yaw, head pitch and the camera link, below ``neck_joint``.
 HEAD: Final = Subtree(SENTIENT_HUMANOID_URDF, below="neck_joint")
+#: The legs as the full body carries them, cut from the rated source.
 LEGS: Final = tuple(
-    Subtree(SENTIENT_HUMANOID_URDF, below=f"{side}_hip_pitch_joint") for side in ("right", "left")
+    Subtree(SENTIENT_HUMANOID_RATED_URDF, below=f"{side}_hip_pitch_joint")
+    for side in ("right", "left")
 )
 
 
@@ -315,7 +390,7 @@ HIP: Final = InterfaceId("sentient-humanoid-hip")
 WRIST: Final = InterfaceId("sentient-humanoid-wrist")
 
 UPPER_BODY_COMPONENTS: Final = (
-    body_component("torso", SENTIENT_HUMANOID_TORSO, RootMount("base_link"), limb=Limb.TORSO),
+    body_component("torso", _LEGACY_TORSO, RootMount("base_link"), limb=Limb.TORSO),
     body_component(
         "right_arm", SENTIENT_HUMANOID_RIGHT_ARM, MountedOn("torso", "chest_link"), limb=Limb.ARM
     ),
@@ -458,7 +533,7 @@ FULL_BODY_CORE: Final = Module(
     module_id=ModuleId("sentient-humanoid-core"),
     label="Sentient humanoid retained pelvis, waist and chest",
     description=Subtree(
-        SENTIENT_HUMANOID_URDF,
+        SENTIENT_HUMANOID_RATED_URDF,
         without=(
             "right_hip_pitch_joint",
             "left_hip_pitch_joint",
@@ -470,7 +545,7 @@ FULL_BODY_CORE: Final = Module(
     # The torso and both arms share one CAN bus and each gripper has its own, so both arms
     # come before either gripper (see STATIC_UPPER_BODY_MODULE).
     components=(
-        UPPER_BODY_COMPONENTS[0],
+        body_component("torso", SENTIENT_HUMANOID_TORSO, RootMount("base_link"), limb=Limb.TORSO),
         Slot("left_shoulder"),
         Slot("right_shoulder"),
         Slot("left_shoulder/arm/wrist"),
@@ -678,8 +753,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         replace(STATIC_UPPER_BODY_URDF, role=AssetRole.OTHER),
         packaged_asset(
             relpath="sentient_humanoid/sentient_humanoid.urdf",
-            sha256="e7fd42a06794c5d3fce549e55630ea0a9194eee04411b7f06a9d7ed5ada87e67",
-            size_bytes=184919,
+            sha256="df0261e18f2b6aa2a7cdc7c400747bd7f7d5c7f5f295bc57db5574162c565fa1",
+            size_bytes=185030,
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
             provenance=AssetProvenance(

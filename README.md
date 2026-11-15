@@ -155,8 +155,19 @@ URDF joints remain description-only, with no invented actuator bindings. Earlier
 `sentient_humanoid/` directory, retaining BSD and proprietary source provenance. Inherited
 arm ready references are not an accepted standing pose or full-body Ready. The static
 clamp, table height, mass margin, unit calibration and torso tuning are not transferred.
-Waist and leg drives remain undocumented. Training promotion is held pending human
-engineering review; full-body dynamics, bus compatibility and physical operation remain
+Waist and leg drives are now documented from `humanoid_pkg`'s assignment table and
+`sentient_can`'s motor list: hip pitch, hip roll and knee on the DM-J10010-2EC (`damiao_dm10010`),
+hip yaw and torso yaw on the DM-J8009, and each ankle's and the waist's two joints on two DM4340
+through a linkage (`LinkageDrive`: the motors are recorded, the map is not, so no driver opens
+them). Every leg binding is provisional: its direction and zero are unmeasured. The full body's
+torso, waist and leg `<limit effort velocity>` are rendered from those ratings
+(`tools/compose_humanoid_rated_urdf.py`, `layout.joint_rating`) in place of the CAD's
+`effort="10" velocity="1.0"`. What is datasheet and what is not: peak and rated torque, rated
+speed at 24 V and gear ratio are Damiao's published figures; a linkage's joint effort (both
+motors at a unit lever ratio) is an upper bound, not a measurement; the DM10010's rotor inertia
+is unpublished and unmeasured, so a simulation profile states the armature it assumes
+(`nominal_mujoco.rated_joint`), and the exporter refuses a nominal joint stronger than its drive.
+Training promotion is held pending human engineering review; full-body dynamics, bus compatibility and physical operation remain
 unqualified. The separate table-mounted upper body retains its own SO-101/ZED head.
 
 `sentient-static-upper-body` is a different robot: a yaw torso with two seven-joint
@@ -201,7 +212,8 @@ an arm on one body and a head on another. Every component names its mount frame,
 frame is a link of the description with the chain's joints below it: `tests/test_model_laws.py`
 composes every registered body to prove it. A joint axis may be observed through actuator
 feedback, a vendor interface, or an encoder and may be driven directly, through an integrated
-controller, passively, or remain explicitly undocumented. A qualified direct drive binds an
+controller, passively, through a linkage of several tested motors (`LinkageDrive`, whose map
+no driver has), or remain explicitly undocumented. A qualified direct drive binds an
 `ActuatorModel` on an `ActuatorBus` with its chain address and its design drive map (`sign`,
 `reduction`); a motor's zero is measured per unit and is joint calibration, never a design
 fact. Cameras name their product by id in the open registry `sx_embodiments.cameras`, so a new

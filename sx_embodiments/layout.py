@@ -84,6 +84,11 @@ class ActuatorModel(StrEnum):
     #: nominal, 40 peak) on a crossed-roller output bearing, rated 24 V and run up to 48 V.
     #: A distinct product, so a body names which one it carries.
     DAMIAO_DM8009P = "damiao_dm8009p"
+    #: The DM-J10010-2EC, the humanoid's hip pitch, hip roll and knee motor: 40/150 N·m
+    #: rated/peak through a 10:1 gear, driven with ``DM_CAN``'s DM10010 row ([12.5, 20, 200]).
+    #: Like the Dynamixels, added untested on the bench (2026-11-15) so the humanoid's legs
+    #: carry their real drive facts; every leg binding is provisional until one is driven.
+    DAMIAO_DM10010 = "damiao_dm10010"
     DYNAMIXEL_XL330_M288 = "dynamixel_xl330_m288"
     DYNAMIXEL_XM430_W350 = "dynamixel_xm430_w350"
 
@@ -190,6 +195,15 @@ def rpm(revolutions_per_minute: float) -> float:
     return revolutions_per_minute * 2.0 * math.pi / 60.0
 
 
+#: Damiao's 2025 product selection manual, one specification page per joint motor (rated and
+#: peak torque, rated and unloaded speed at 24 and 48 V, gear ratio, weight), the source of the
+#: DM8009 and DM10010 ratings below.
+DAMIAO_SELECTION_MANUAL_2025: Final = (
+    "https://www.worldrobotconference.com/profile/robot/download/2025/06/30/"
+    "%E8%BE%BE%E5%A6%99%E7%A7%91%E6%8A%80DAMIAO%20-%202025%E5%B9%B4%E4%BA%A7%E5%93%81"
+    "%E9%80%89%E5%9E%8B%E6%89%8B%E5%86%8C_20250630192546A441.pdf"
+)
+
 #: The hottest a Damiao joint motor may run, °C. The DM-J4310-2EC V1.1 user manual
 #: (sharingwin.com/wp-content/uploads/2025/09/DM-J4310-2EC-V1.1-Gear-Motor-User-Manual-V1.0.pdf,
 #: "Protection"): the driver shuts down at 120 °C (fault 0xB) and the motor coil's protection
@@ -233,13 +247,16 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         armature_kg_m2=2.0e-5 * 40**2,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
-    # DM-J8009-2EC manual (manuals.plus/damiao/dm-j8009-2ec-servo-motor-manual): 100 rpm at
-    # 24 V, 160 rpm unloaded. Damiao publishes no rotor inertia for the 8009 family (its 2025
-    # catalogue and the table above stop at the 43 series): the armature is the bench
-    # estimate, 0.02 kg·m² (tools/sim_joint_tracking.py, BAM).
+    # DM-J8009-2EC: Damiao's 2025 product selection manual (DAMIAO_SELECTION_MANUAL_2025, the
+    # DM-J8009-2EC page): rated 24 V, supports 24-48 V, 20/40 N·m rated/peak, 100 rpm rated at
+    # 24 V (200 at 48 V), 168 rpm unloaded at 24 V, gear ratio 9:1. The manual publishes no
+    # rotor inertia for the 8009 or 10010 families: the armature is the bench estimate, 0.02
+    # kg·m² (tools/sim_joint_tracking.py, BAM).
     ActuatorModel.DAMIAO_DM8009: ActuatorRating(
         40.0,
+        SupplyRange(24.0, 48.0),
         rated_speed_rad_s=rpm(100.0),
+        rated_torque_nm=20.0,
         armature_kg_m2=0.02,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
@@ -253,6 +270,19 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         rated_speed_rad_s=rpm(100.0),
         rated_torque_nm=20.0,
         armature_kg_m2=0.02,
+        thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
+    ),
+    # DM-J10010-2EC: the same manual's DM-J10010-2EC page: rated 24 V, supports 24-48 V, 40/150
+    # N·m rated/peak, 50 rpm rated at 24 V (100 at 48 V), 75 rpm unloaded at 24 V (150 at 48 V),
+    # gear ratio 10:1, 1485 g. No rotor inertia is published and none is measured on our motors,
+    # so the armature is left unrecorded, never a guess: Damiao's driver identifies it itself,
+    # which is the bench's to read (robot-bench). The ``DM_CAN`` limit row's 20 rad/s and 200
+    # N·m are the MIT encoding's ranges, not ratings.
+    ActuatorModel.DAMIAO_DM10010: ActuatorRating(
+        150.0,
+        SupplyRange(24.0, 48.0),
+        rated_speed_rad_s=rpm(50.0),
+        rated_torque_nm=40.0,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
     ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
@@ -436,7 +466,78 @@ class UndocumentedDrive:
             raise LayoutError("actuation", "undocumented drive reason must not be empty")
 
 
-ActuationBinding = DirectDrive | IntegratedDrive | Passive | UndocumentedDrive
+@dataclass(frozen=True, slots=True)
+class LinkageDrive:
+    """Several tested motors drive this axis together with others through a parallel linkage
+    (a humanoid's ankle pitch and roll from two motors on push rods) whose map from motor to
+    joint angles is not documented.
+
+    The motors and their addresses are facts; the map is not, so no driver opens these motors
+    and no reading of one is a joint observation. What simulation takes from it is
+    :func:`joint_rating`: the joint can get at most every motor's torque at once, through a lever
+    ratio taken as one until the linkage is measured.
+    """
+
+    actuators: tuple[ActuatorBinding, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.actuators) < 2:
+            raise LayoutError("actuation", "a linkage drive has at least two motors")
+        if not all(binding.provisional for binding in self.actuators):
+            raise LayoutError(
+                "actuation", "a linkage's motors are provisional until its map is documented"
+            )
+
+
+ActuationBinding = DirectDrive | IntegratedDrive | Passive | UndocumentedDrive | LinkageDrive
+
+
+@dataclass(frozen=True, slots=True)
+class JointRating:
+    """What an axis's drive gives it in joint space: the effort a description declares as
+    ``<limit effort>`` (N·m), the speed as ``<limit velocity>`` (rad/s), and the reflected rotor
+    inertia a simulator adds as armature (kg·m², ``None`` where a motor's is unrecorded)."""
+
+    effort: float
+    velocity: float
+    armature: float | None
+
+
+def joint_rating(actuation: ActuationBinding) -> JointRating | None:
+    """The joint-space rating of an axis's drive, from its motors' :data:`ACTUATOR_RATINGS`;
+    ``None`` where the drive is not by tested motors or a motor has no rated speed.
+
+    A direct drive through ``reduction`` (actuator turns per joint turn) multiplies torque and
+    divides speed by it and reflects inertia by its square. A linkage sums its motors' peak
+    torque and armature and takes the slowest one's speed, each at a unit lever ratio: an upper
+    bound to use until the linkage's geometry is measured, not a measured joint limit.
+    """
+    if isinstance(actuation, DirectDrive):
+        binding = actuation.actuator
+        rating = ACTUATOR_RATINGS[binding.model]
+        if rating.rated_speed_rad_s is None:
+            return None
+        return JointRating(
+            effort=rating.peak_torque_nm * binding.reduction,
+            velocity=rating.rated_speed_rad_s / binding.reduction,
+            armature=None
+            if rating.armature_kg_m2 is None
+            else rating.armature_kg_m2 * binding.reduction**2,
+        )
+    if isinstance(actuation, LinkageDrive):
+        ratings = [ACTUATOR_RATINGS[binding.model] for binding in actuation.actuators]
+        speeds = [rating.rated_speed_rad_s for rating in ratings]
+        if any(speed is None for speed in speeds):
+            return None
+        armatures = [rating.armature_kg_m2 for rating in ratings]
+        return JointRating(
+            effort=sum(rating.peak_torque_nm for rating in ratings),
+            velocity=min(speed for speed in speeds if speed is not None),
+            armature=None
+            if any(armature is None for armature in armatures)
+            else sum(armature for armature in armatures if armature is not None),
+        )
+    return None
 
 
 @dataclass(frozen=True, slots=True, init=False)
