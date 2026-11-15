@@ -425,6 +425,11 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// How many reading jitters' worth of carried motion a measured pair must close by before its
+/// follower's lead counts ([`Ik::step`]'s measured collision rows): 1 still let a 1 mrad jitter
+/// shove a held arm 32 mm; 2 held every probed case at its reading's own sag.
+const CLOSING_JITTERS: f64 = 2.0;
+
 /// Weight on a resting column's step from its jerk-bounded stop ([`Target::Rest`]), per
 /// rad^2: far above the damping and the posture, so the stop is what the step takes unless a
 /// row needs otherwise.
@@ -2099,7 +2104,12 @@ impl Ik {
                     .zip(row.iter())
                     .map(|(&axis, r)| r * self.measured_speed[axis])
                     .sum();
-                let lead = if closing > 0.0 {
+                // Closing means faster than reading jitter can fake: twice what a reading off
+                // by READING_JITTER on every joint the row moves carries over MOMENTUM_S. Gated at
+                // zero, a smoothed speed that never quite decays to zero after one 20 urad
+                // flicker brought the whole shove back (105-126 mm; refute of 6ab9ac7).
+                let lever: f64 = row.iter().map(|r| r.abs()).sum();
+                let lead = if closing > CLOSING_JITTERS * READING_JITTER * lever / MOMENTUM_S {
                     body.solved
                         .iter()
                         .zip(row.iter())

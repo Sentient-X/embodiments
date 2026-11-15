@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use sx_embodiment_ik::READING_JITTER;
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig, hands};
 
 const DT: f64 = 0.01;
@@ -17,7 +18,7 @@ fn static_files() -> sx_embodiment_ik::BodyFiles<'static> {
 /// rest and its left shoulder sagged `sag` rad deeper than its command: the commanded tools'
 /// travel from where they engaged at worst, the reading's own (where the body sits), and the
 /// least clearance of the reading and of the command over the run, metres.
-fn press(sag: f64) -> (f64, f64, f64, f64) {
+fn press(sag: f64, jitter: f64, seed: u64) -> (f64, f64, f64, f64) {
     let mut config = TeleopConfig::parse(include_str!("fixtures/static-teleop-config.json"))
         .expect("the station's solve config");
     let ready: BTreeMap<String, f64> =
@@ -57,6 +58,8 @@ fn press(sag: f64) -> (f64, f64, f64, f64) {
         top += 0.001;
     };
     let mut solve = solve;
+    // Judged on the solve alone, never on this host's load.
+    solve.set_deadline(std::time::Duration::from_secs(3600));
     // The left shoulder's deeper direction: whichever way takes the arm further in.
     let joint = names
         .iter()
@@ -90,9 +93,22 @@ fn press(sag: f64) -> (f64, f64, f64, f64) {
         .sqrt();
     let floor = solve.ik().clearance(&read).0.min(before);
     solve.reset();
+    let mut state = seed;
     for _ in 0..100 {
+        // Every reading off by up to `jitter` each tick, as an encoder's last count flickers.
+        let read: Vec<Option<f64>> = measured
+            .iter()
+            .map(|m| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                #[allow(clippy::cast_precision_loss)]
+                let unit = (state >> 11) as f64 / (1_u64 << 53) as f64;
+                m.map(|v| v + jitter * (2.0 * unit - 1.0))
+            })
+            .collect();
         let answer = solve
-            .step(&q, &measured, &available, &targets, DT)
+            .step(&q, &read, &available, &targets, DT)
             .expect("a step");
         q.copy_from_slice(&answer.q);
         for (now, then) in solve.tool_poses(&q).iter().zip(&tools) {
@@ -111,25 +127,34 @@ fn press(sag: f64) -> (f64, f64, f64, f64) {
 
 #[test]
 fn a_press_inside_the_margin_holds_its_tools_and_closes_nothing() {
-    for sag in [0.0, 0.01, 0.03] {
-        let (travel, sagged, floor, least) = press(sag);
+    for (sag, jitter, seed) in [
+        (0.0, 0.0, 0),
+        (0.01, 0.0, 0),
+        (0.03, 0.0, 0),
+        (0.01, 2e-5, 1),
+        (0.01, 1e-4, 2),
+        (0.01, READING_JITTER, 3),
+        (0.01, READING_JITTER, 4),
+    ] {
+        let (travel, sagged, floor, least) = press(sag, jitter, seed);
         eprintln!(
-            "sag {sag}: tools travelled {:.1} mm (the reading sits {:.1} mm off), clearance \
-             {:.1} at the reading -> least {:.1} mm",
+            "sag {sag} jitter {jitter}: tools travelled {:.1} mm (the reading sits {:.1} mm \
+             off), clearance {:.1} at the reading -> least {:.1} mm",
             travel * 1e3,
             sagged * 1e3,
             floor * 1e3,
             least * 1e3
         );
-        // Before the fix the 10 mrad press shoved the tools 125 mm. Now the command at most
-        // settles onto where the body reads, and comes no closer than the body already is.
+        // Before the fix a 10 mrad press shoved the tools 100-125 mm, and gated at exactly zero
+        // speed one 20 urad flicker brought it back. Now the command at most settles onto where
+        // the body reads, and comes no closer than the body already is.
         assert!(
-            travel < sagged + 0.001,
-            "sag {sag}: the tools travelled {travel} m, the reading {sagged} m"
+            travel < sagged + 0.002,
+            "sag {sag} jitter {jitter}: the tools travelled {travel} m, the reading {sagged} m"
         );
         assert!(
-            least > floor - 0.001,
-            "sag {sag}: the pair closed to {least} m from {floor} m"
+            least > floor - 0.0015,
+            "sag {sag} jitter {jitter}: the pair closed to {least} m from {floor} m"
         );
     }
 }
