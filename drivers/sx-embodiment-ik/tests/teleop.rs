@@ -384,7 +384,7 @@ fn a_press_step_eases_in_and_no_motion_is_lost() {
             "a press step moved the gripper"
         );
     }
-    // Then the hand moves on at 0.2 m/s: the gripper eases onto it under 0.7 m/s, never past
+    // Then the hand moves on at 0.2 m/s: the gripper eases onto it no faster than the hand plus 1.5 times the gap over the ramp, never past
     // it, and from then on follows it exactly.
     let mut last = 0.0;
     let mut fastest = 0.0_f64;
@@ -397,7 +397,10 @@ fn a_press_step_eases_in_and_no_motion_is_lost() {
         assert!(now <= x + 1e-12, "the gripper went past the hand");
         last = now;
     }
-    assert!(fastest < 0.7, "eased in at {fastest} m/s");
+    assert!(
+        fastest <= 0.2 + 1.5 * 0.092 / CLUTCH_RAMP_S + 1e-9,
+        "eased in at {fastest} m/s"
+    );
     assert!(
         (last - x).abs() < 1e-12,
         "lost {} m of the hand's motion",
@@ -414,6 +417,139 @@ fn a_press_step_eases_in_and_no_motion_is_lost() {
     clutch.release();
     assert!(apply(&mut clutch, x).abs() < 1e-12);
     assert!(apply(&mut clutch, x + 0.02).abs() < 1e-12);
+}
+
+/// The refute's probes (2026-11-16): a hand already moving at the press, with and without the
+/// press step, and a fast turn through more than half a turn inside the ease. Blending the whole
+/// pose drove the eased target at twice the hand's speed and flipped the slerp's shortest path
+/// past 180 degrees; only the gap left at the end of the still is blended now. Bounds: never
+/// faster than the hand plus 1.5 times the gap over `CLUTCH_RAMP_S`, no tick's turn more than the
+/// hand's own plus the gap's share, never past the hand, and exactly the hand after the ease.
+#[test]
+fn a_moving_or_turning_hand_at_the_press_is_eased_without_outrunning_it() {
+    // (hand speed m/s, press step m, turn rate rad/s)
+    for (speed, step, rate) in [
+        (0.5_f64, 0.0_f64, 0.0_f64),
+        (1.0, 0.0, 0.0),
+        (0.5, 0.088, 0.0),
+        (1.0, 0.088, 0.0),
+        (0.0, 0.0, 6.0),
+        (0.0, 0.0, 8.0),
+        (0.5, 0.088, 8.0),
+    ] {
+        ease_probe(speed, step, rate);
+    }
+}
+
+/// One refute probe: a hand moving at `speed` m/s along x from the press, `step` m more over its
+/// first 130 ms, and turning at `rate` rad/s about z, through an engage's eased hold.
+fn ease_probe(speed: f64, step: f64, rate: f64) {
+    let mut solve = teleop();
+    let q = start(&solve);
+    let tools = solve.tool_poses(&q);
+    let left = tools[0].expect("left gripper");
+    let yaw = |theta: f64| sx_frames::Quaternion {
+        x: 0.0,
+        y: 0.0,
+        z: (theta / 2.0).sin(),
+        w: (theta / 2.0).cos(),
+    };
+    {
+        let hand = |t: f64| {
+            let burst = if t > 0.0 {
+                step.min(step * t / 0.13)
+            } else {
+                0.0
+            };
+            Pose {
+                translation_m: [0.3 + speed * t + burst, -0.2, 0.9],
+                rotation: yaw(rate * t),
+            }
+        };
+        let mut clutch = Clutch::default();
+        let mut out = Vec::new();
+        let mut t = 0.0;
+        while t < 1.2 {
+            let mut asks = Targets {
+                tcp: sx_embodiment_ik::teleop::hands([Some(hand(t)), None]),
+                ..Targets::default()
+            };
+            clutch.apply(&tools, &mut asks, DT);
+            out.push((t, asks.tcp[0].expect("held")));
+            t += DT;
+        }
+        // Where the hand's motion since the press takes the gripper, unsettled.
+        let followed = |t: f64| {
+            let h0 = hand(0.0);
+            let h = hand(t);
+            Pose {
+                translation_m: [0, 1, 2]
+                    .map(|k| left.translation_m[k] + h.translation_m[k] - h0.translation_m[k]),
+                rotation: h.rotation * h0.rotation.conjugate() * left.rotation,
+            }
+        };
+        let freeze = out
+            .iter()
+            .find(|(t, _)| *t >= CLUTCH_SETTLE_S)
+            .expect("the still ends")
+            .0;
+        let gap = followed(freeze).translation_m[0] - left.translation_m[0];
+        let gap_turn = turn_between(followed(freeze).rotation, left.rotation);
+        let label = format!("hand {speed} m/s, step {step} m, turn {rate} rad/s");
+        for pair in out.windows(2) {
+            let ((_, a), (t, b)) = (pair[0], pair[1]);
+            let moved = (0..3)
+                .map(|k| (b.translation_m[k] - a.translation_m[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let hand_moved = speed * DT
+                + if t <= 0.13 + DT {
+                    step * DT / 0.13
+                } else {
+                    0.0
+                };
+            assert!(
+                moved <= hand_moved + 1.5 * gap.abs() / CLUTCH_RAMP_S * DT + 1e-9,
+                "{label}: {} m/s at {t:.2} s",
+                moved / DT
+            );
+            assert!(
+                turn_between(a.rotation, b.rotation)
+                    <= rate * DT + 1.5 * gap_turn / CLUTCH_RAMP_S * DT + 1e-9,
+                "{label}: turned {} rad in a tick at {t:.2} s",
+                turn_between(a.rotation, b.rotation)
+            );
+            assert!(
+                b.translation_m[0] <= followed(t).translation_m[0] + 1e-9,
+                "{label}: past the hand at {t:.2} s"
+            );
+        }
+        for (t, pose) in &out {
+            if *t < CLUTCH_SETTLE_S - 1e-9 {
+                assert!(
+                    (pose.translation_m[0] - left.translation_m[0]).abs() < 1e-12,
+                    "{label}: moved in the still"
+                );
+            }
+            if *t > CLUTCH_SETTLE_S + CLUTCH_RAMP_S + DT {
+                let f = followed(*t);
+                assert!(
+                    (pose.translation_m[0] - f.translation_m[0]).abs() < 1e-9,
+                    "{label}: not following at {t:.2} s"
+                );
+                assert!(
+                    turn_between(pose.rotation, f.rotation) < 1e-9,
+                    "{label}: not turned with the hand at {t:.2} s"
+                );
+            }
+        }
+    }
+}
+
+/// The angle between two rotations, radians.
+fn turn_between(a: sx_frames::Quaternion, b: sx_frames::Quaternion) -> f64 {
+    let dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    2.0 * dot.abs().min(1.0).acos()
 }
 
 /// The angle between two unit quaternions' rotations, radians.

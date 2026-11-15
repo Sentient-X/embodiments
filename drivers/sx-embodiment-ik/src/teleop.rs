@@ -177,6 +177,10 @@ pub const GLITCH_HOLD: std::time::Duration = std::time::Duration::from_millis(20
 /// hand stays there, as a fresh contact under the gap does.
 pub const STALL_RELEASE: f64 = 0.01;
 
+/// An easing hold's gap, frozen at the end of its still: the followed pose's translation minus the
+/// tool's, and the rotation taking the followed pose's onto the tool's.
+type EaseGap = ([f64; 3], Quaternion);
+
 /// The operator's hands as offsets from where they took hold: a clutch. At engage (after
 /// [`Clutch::release`]) each hand's first target is taken as its gripper's tool point where
 /// the robot stands, and from then on the gripper moves as the hand moves from there: the hand's
@@ -189,10 +193,12 @@ pub const STALL_RELEASE: f64 = 0.01;
 /// answer the same targets.
 ///
 /// A hand's first hold after an engage eases in: for [`CLUTCH_SETTLE_S`] the gripper stays where it
-/// was taken, then over
-/// [`CLUTCH_RAMP_S`] it blends (smoothstep, position and turn) from there onto where the hand's
-/// motion since the press takes it, and from then on follows the hand exactly as an unsettled
-/// hold would: no motion is lost, only its first half second is eased. The first readings
+/// was taken, then the gap
+/// left between it and where the hand's motion since the press takes it is frozen and closed over
+/// [`CLUTCH_RAMP_S`] (smoothstep; the turn as a fixed relative rotation), while the hand's motion
+/// from then passes through live. From then on it follows the hand exactly as an unsettled hold
+/// would: no motion is lost, only its first half second is eased, and the eased target is never
+/// faster than the hand plus 1.5 times the gap over [`CLUTCH_RAMP_S`]. The first readings
 /// after a press are not a hand's motion: on the Spark's sessions the second reading came
 /// 58-136 ms after the first and 35-88 mm from it (41eb2d39, b968c187), and then the hand moved
 /// at 0.1-0.2 m/s. Taken at once, that step pushed the tool 69-105 mm past its target at up to
@@ -211,9 +217,10 @@ pub struct Clutch {
     /// is held as any other ([`Targets::arm`] only aims the elbow), so gaining or losing its
     /// arm takes no new hold.
     held: [Option<([f64; 3], Quaternion)>; MAX_HANDS],
-    /// Per hand while its hold eases in: the tool pose it was taken at and the time since
-    /// (seconds).
-    settling: [Option<(Pose, f64)>; MAX_HANDS],
+    /// Per hand while its hold eases in: the tool pose it was taken at, the time since
+    /// (seconds), and from the end of the still the gap frozen then (the followed pose's
+    /// translation minus the tool's, and the rotation taking the followed pose's onto the tool's).
+    settling: [Option<(Pose, f64, Option<EaseGap>)>; MAX_HANDS],
     /// Per hand: whether it has taken hold since the last [`Clutch::release`].
     engaged: [bool; MAX_HANDS],
 }
@@ -221,8 +228,9 @@ pub struct Clutch {
 /// How long a new hold keeps its gripper still, seconds ([`Clutch`]): longer than the slowest
 /// second reading after a press measured (136 ms).
 pub const CLUTCH_SETTLE_S: f64 = 0.15;
-/// Over how long it then blends onto the hand, seconds: an 88 mm press step, the hand moving on
-/// at 0.2 m/s, is caught at 0.64 m/s at most (the 1.34 m/s it was thrown at before).
+/// Over how long the gap left at the end of the still is then closed, seconds: at most 1.5 times
+/// the gap over this faster than the hand, 0.33 m/s for an 88 mm press step (the shaper threw it
+/// at 1.34 m/s before).
 pub const CLUTCH_RAMP_S: f64 = 0.4;
 
 impl Clutch {
@@ -267,11 +275,11 @@ impl Clutch {
                 self.held[hand] = Some(take(tool));
                 if !self.engaged[hand] {
                     self.engaged[hand] = true;
-                    self.settling[hand] = Some((tool, 0.0));
+                    self.settling[hand] = Some((tool, 0.0, None));
                 }
-            } else if let Some((tool, since_s)) = self.settling[hand] {
+            } else if let Some((tool, since_s, gap)) = self.settling[hand] {
                 let step = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
-                self.settling[hand] = Some((tool, since_s + step));
+                self.settling[hand] = Some((tool, since_s + step, gap));
             }
             let Some((offset, local)) = self.held[hand] else {
                 continue;
@@ -281,18 +289,22 @@ impl Clutch {
                 rotation: target.rotation * local,
             };
             targets.tcp[hand] = Some(match self.settling[hand] {
-                Some((tool, since_s)) => {
+                Some((tool, since_s, _)) if since_s < CLUTCH_SETTLE_S => tool,
+                Some((tool, since_s, gap)) => {
+                    // Only the gap left at the end of the still is blended out; the hand's own
+                    // motion from then passes through live, and the turn closed is a fixed one.
+                    let (dx, turn) = gap.unwrap_or_else(|| {
+                        (
+                            [0, 1, 2].map(|k| followed.translation_m[k] - tool.translation_m[k]),
+                            followed.rotation.conjugate() * tool.rotation,
+                        )
+                    });
                     let u = ((since_s - CLUTCH_SETTLE_S) / CLUTCH_RAMP_S).clamp(0.0, 1.0);
-                    if u >= 1.0 {
-                        self.settling[hand] = None;
-                    }
-                    let a = u * u * (3.0 - 2.0 * u);
+                    self.settling[hand] = (u < 1.0).then_some((tool, since_s, Some((dx, turn))));
+                    let left = 1.0 - u * u * (3.0 - 2.0 * u);
                     Pose {
-                        translation_m: [0, 1, 2].map(|k| {
-                            tool.translation_m[k]
-                                + a * (followed.translation_m[k] - tool.translation_m[k])
-                        }),
-                        rotation: tool.rotation.slerp(followed.rotation, a),
+                        translation_m: [0, 1, 2].map(|k| followed.translation_m[k] - left * dx[k]),
+                        rotation: followed.rotation * Quaternion::IDENTITY.slerp(turn, left),
                     }
                 }
                 None => followed,
