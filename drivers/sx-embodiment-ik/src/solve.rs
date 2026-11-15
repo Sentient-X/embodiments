@@ -2087,17 +2087,31 @@ impl Ik {
                 // that whole motion, and a follower carries on past its command: with the whole
                 // room, an act-sim-like PD (zeta 0.2) rang 40-60 mm into the other arm; with
                 // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
-                // the commanded row's to keep.
-                let lead = body
+                // the commanded row's to keep. A pair the body is not closing (its measured speed
+                // along the row is not toward contact) carries nothing in: its lead is none.
+                // Counted anyway, a pair engaged at rest inside its margin read its sag and lag
+                // as closing still to come, every tick, and the row shoved it apart at up to
+                // its whole opening speed: session b968c187's deadman press drove both tools
+                // 117 mm off their held targets in 0.3 s, the capsules from 23 mm in to the margin.
+                let closing: f64 = body
                     .solved
                     .iter()
                     .zip(row.iter())
-                    .filter(|&(&axis, _)| !self.stuck[axis])
-                    .map(|(&axis, r)| {
-                        let carried = MOMENTUM_S * self.measured_speed[axis];
-                        (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
-                    })
-                    .sum::<f64>();
+                    .map(|(&axis, r)| r * self.measured_speed[axis])
+                    .sum();
+                let lead = if closing > 0.0 {
+                    body.solved
+                        .iter()
+                        .zip(row.iter())
+                        .filter(|&(&axis, _)| !self.stuck[axis])
+                        .map(|(&axis, r)| {
+                            let carried = MOMENTUM_S * self.measured_speed[axis];
+                            (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
+                        })
+                        .sum::<f64>()
+                } else {
+                    0.0
+                };
                 rhs = 0.5 * room - lead;
             }
             if candidate.measured
