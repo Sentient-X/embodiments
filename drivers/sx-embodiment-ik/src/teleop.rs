@@ -177,6 +177,10 @@ pub const GLITCH_HOLD: std::time::Duration = std::time::Duration::from_millis(20
 /// hand stays there, as a fresh contact under the gap does.
 pub const STALL_RELEASE: f64 = 0.01;
 
+/// An easing hold's gap, frozen at the end of its still: the followed pose's translation minus the
+/// tool's, and the rotation taking the followed pose's onto the tool's.
+type EaseGap = ([f64; 3], Quaternion);
+
 /// The operator's hands as offsets from where they took hold: a clutch. At engage (after
 /// [`Clutch::release`]) each hand's first target is taken as its gripper's tool point where
 /// the robot stands, and from then on the gripper moves as the hand moves from there: the hand's
@@ -187,6 +191,25 @@ pub const STALL_RELEASE: f64 = 0.01;
 /// hold afresh when it is seen again. Only an operator's hands are clutched; a program's goals
 /// are where they are. The station's follower and the headset's ghost hold one each, so both
 /// answer the same targets.
+///
+/// A hand's first hold after an engage eases in: for [`CLUTCH_SETTLE_S`] the gripper stays where it
+/// was taken, then the gap
+/// left between it and where the hand's motion since the press takes it is frozen and closed over
+/// [`CLUTCH_RAMP_S`] (smoothstep; the turn as a fixed relative rotation), while the hand's motion
+/// from then passes through live. From then on it follows the hand exactly as an unsettled hold
+/// would: no motion is lost, only its first half second is eased, and the eased target is never
+/// faster than the hand plus 1.5 times the gap over [`CLUTCH_RAMP_S`]. The first readings
+/// after a press are not a hand's motion: on the Spark's sessions the second reading came
+/// 58-136 ms after the first and 35-88 mm from it (41eb2d39, b968c187), and then the hand moved
+/// at 0.1-0.2 m/s. Taken at once, that step pushed the tool 69-105 mm past its target at up to
+/// 1.34 m/s on a 90/s stream (`retarget_bench`, 2026-11-16), which the stream's old 200-245 ms
+/// playback lag had hidden. Re-taking the hold while the hand moved fast instead dropped that
+/// motion, so the arm then worked up to 117 mm from where the operator put it (4x the tool's
+/// jerk where that was past reach); holding a fixed 150 ms then letting go moved the shove to
+/// the hold's end (49 mm at 1.07 m/s on a 200 ms stream). A hand seen again within the same engage
+/// (tracking lost, a stalled stream) takes hold at once, as before: easing those in held the
+/// gripper while the hand moved on and then caught up, and on a stream that stalls once a second
+/// raised the tool's jerk (99th percentile) by up to 60 %.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Clutch {
     /// Per hand: the translation added to the hand, and the rotation applied after the hand's
@@ -194,12 +217,28 @@ pub struct Clutch {
     /// is held as any other ([`Targets::arm`] only aims the elbow), so gaining or losing its
     /// arm takes no new hold.
     held: [Option<([f64; 3], Quaternion)>; MAX_HANDS],
+    /// Per hand while its hold eases in: the tool pose it was taken at, the time since
+    /// (seconds), and from the end of the still the gap frozen then (the followed pose's
+    /// translation minus the tool's, and the rotation taking the followed pose's onto the tool's).
+    settling: [Option<(Pose, f64, Option<EaseGap>)>; MAX_HANDS],
+    /// Per hand: whether it has taken hold since the last [`Clutch::release`].
+    engaged: [bool; MAX_HANDS],
 }
+
+/// How long a new hold keeps its gripper still, seconds ([`Clutch`]): longer than the slowest
+/// second reading after a press measured (136 ms).
+pub const CLUTCH_SETTLE_S: f64 = 0.15;
+/// Over how long the gap left at the end of the still is then closed, seconds: at most 1.5 times
+/// the gap over this faster than the hand, 0.33 m/s for an 88 mm press step (the shaper threw it
+/// at 1.34 m/s before).
+pub const CLUTCH_RAMP_S: f64 = 0.4;
 
 impl Clutch {
     /// Let go of both hands: the next targets take hold afresh. Every engage.
     pub fn release(&mut self) {
         self.held = [None; MAX_HANDS];
+        self.settling = [None; MAX_HANDS];
+        self.engaged = [false; MAX_HANDS];
     }
 
     /// Whether `hand` holds on.
@@ -217,25 +256,59 @@ impl Clutch {
 
     /// `targets`' hands moved onto the grippers they hold, taking hold with `tools` (each
     /// gripper's tool point where the robot stands, [`Teleop::tool_poses`]) for a hand seen
-    /// first; a hand whose gripper has no pose is left as given.
-    pub fn apply(&mut self, tools: &[Option<Pose>; MAX_HANDS], targets: &mut Targets) {
+    /// first; a hand whose gripper has no pose is left as given. `dt` is the time since the last
+    /// call, seconds: a new hold eases in over [`CLUTCH_SETTLE_S`] and [`CLUTCH_RAMP_S`] of it.
+    pub fn apply(&mut self, tools: &[Option<Pose>; MAX_HANDS], targets: &mut Targets, dt: f64) {
         for hand in 0..MAX_HANDS {
             let Some(target) = targets.tcp[hand] else {
                 self.held[hand] = None;
+                self.settling[hand] = None;
                 continue;
+            };
+            let take = |tool: Pose| {
+                let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
+                let local = target.rotation.conjugate() * tool.rotation;
+                (offset, local)
             };
             if self.held[hand].is_none() {
                 let Some(tool) = tools[hand] else { continue };
-                let offset = [0, 1, 2].map(|k| tool.translation_m[k] - target.translation_m[k]);
-                let local = target.rotation.conjugate() * tool.rotation;
-                self.held[hand] = Some((offset, local));
+                self.held[hand] = Some(take(tool));
+                if !self.engaged[hand] {
+                    self.engaged[hand] = true;
+                    self.settling[hand] = Some((tool, 0.0, None));
+                }
+            } else if let Some((tool, since_s, gap)) = self.settling[hand] {
+                let step = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
+                self.settling[hand] = Some((tool, since_s + step, gap));
             }
-            if let Some((offset, local)) = self.held[hand] {
-                targets.tcp[hand] = Some(Pose {
-                    translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
-                    rotation: target.rotation * local,
-                });
-            }
+            let Some((offset, local)) = self.held[hand] else {
+                continue;
+            };
+            let followed = Pose {
+                translation_m: [0, 1, 2].map(|k| target.translation_m[k] + offset[k]),
+                rotation: target.rotation * local,
+            };
+            targets.tcp[hand] = Some(match self.settling[hand] {
+                Some((tool, since_s, _)) if since_s < CLUTCH_SETTLE_S => tool,
+                Some((tool, since_s, gap)) => {
+                    // Only the gap left at the end of the still is blended out; the hand's own
+                    // motion from then passes through live, and the turn closed is a fixed one.
+                    let (dx, turn) = gap.unwrap_or_else(|| {
+                        (
+                            [0, 1, 2].map(|k| followed.translation_m[k] - tool.translation_m[k]),
+                            followed.rotation.conjugate() * tool.rotation,
+                        )
+                    });
+                    let u = ((since_s - CLUTCH_SETTLE_S) / CLUTCH_RAMP_S).clamp(0.0, 1.0);
+                    self.settling[hand] = (u < 1.0).then_some((tool, since_s, Some((dx, turn))));
+                    let left = 1.0 - u * u * (3.0 - 2.0 * u);
+                    Pose {
+                        translation_m: [0, 1, 2].map(|k| followed.translation_m[k] - left * dx[k]),
+                        rotation: followed.rotation * Quaternion::IDENTITY.slerp(turn, left),
+                    }
+                }
+                None => followed,
+            });
         }
     }
 }
