@@ -167,6 +167,14 @@ speed at 24 V and gear ratio are Damiao's published figures; a linkage's joint e
 motors at a unit lever ratio) is an upper bound, not a measurement; the DM10010's rotor inertia
 is unpublished and unmeasured, so a simulation profile states the armature it assumes
 (`nominal_mujoco.rated_joint`), and the exporter refuses a nominal joint stronger than its drive.
+Three ranges that look wrong to a human-motion retargeter are the robot's, checked 2026-11-16
+by forward kinematics: both hip rolls abduct at a positive angle (the right roll's R_x(pi) origin
+sits under the right pitch's R_y(pi)), so one range serves both legs; the arm modules' elbow
+zero is its forward stop (forearm level, 90 deg bent, the static upper body's Ready comment),
+and its range swings the forearm through straight to about 80 deg behind; the left upper-arm
+yaw's -293.53..46.24 deg against the right's -138.72..158.12 is the joint-limit donor's, as
+`source/allisa_bot_integration.md` lists, with hardware zeros still unproven. The arm limits
+are the table robot's commandable ranges, so they change only with bench evidence.
 Training promotion is held pending human engineering review; full-body dynamics, bus compatibility and physical operation remain
 unqualified. The separate table-mounted upper body retains its own SO-101/ZED head.
 
