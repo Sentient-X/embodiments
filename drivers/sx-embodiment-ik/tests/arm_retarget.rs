@@ -314,10 +314,12 @@ fn aeac_reads_the_elbow_across_the_shoulder_wrist_line_and_weighs_it_past_the_de
     assert!((blend - 0.35).abs() < 1e-4, "{blend}");
 }
 
-/// Without the operator's arm nothing changes: the same steps, to the bit, whether or not the
-/// config names each hand's arm, whatever the operator's reach.
+/// Without the operator's arm a config that names each hand's arm hangs its elbows
+/// (`ELBOW_PRIOR_WEIGHT`, drawn home): the arm moves in what the tool leaves free, and the
+/// tool tracks as it does with no arms named, within 2 mm (1.04 at worst on this sweep; the aim
+/// is a weight, not a priority), whatever the operator's reach.
 #[test]
-fn a_hand_without_the_operators_arm_steps_exactly_as_before() {
+fn a_hand_without_the_operators_arm_hangs_its_elbow_and_tracks_as_before() {
     let with = station_config(true);
     let mut without = with.clone();
     for limb in &mut without.limbs {
@@ -339,7 +341,17 @@ fn a_hand_without_the_operators_arm_steps_exactly_as_before() {
         };
         step_once(&mut a, &mut qa, &targets);
         step_once(&mut b, &mut qb, &targets);
-        assert_eq!(qa, qb, "tick {tick}");
+        for (hand, (got, want)) in a.tool_poses(&qa).iter().zip(b.tool_poses(&qb)).enumerate() {
+            let (Some(got), Some(want)) = (got, want) else {
+                assert_eq!(got.is_some(), want.is_some(), "hand {hand}");
+                continue;
+            };
+            let apart = (0..3)
+                .map(|k| (got.translation_m[k] - want.translation_m[k]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            assert!(apart < 2e-3, "tick {tick} hand {hand}: {apart} m apart");
+        }
     }
 }
 
@@ -732,8 +744,10 @@ fn with_the_operators_arm_the_elbows_hang_as_a_persons_and_the_tool_tracks_as_be
     );
     let today = run(Scenario::Table, Variant::ClutchedNoPosture, 5.0, true);
     let arm = run(Scenario::Table, Variant::SwgrAeacNoPosture, 5.0, true);
+    // Both unwind: the operator's arm, and without it the hanging prior (`ELBOW_PRIOR_WEIGHT`;
+    // before it, the clutched hand left this arm twisted, under half the time under 60).
     assert!(
-        today.under_60 < 0.5 && arm.under_60 > 0.85,
+        today.under_60 > 0.85 && arm.under_60 > 0.85,
         "{:.2} -> {:.2}",
         today.under_60,
         arm.under_60

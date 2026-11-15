@@ -396,6 +396,10 @@ pub struct ElbowAim {
     /// A unit vector in the root frame, across the shoulder-wrist line.
     pub direction: Vec3,
     pub weight: f64,
+    /// How far off its aim the elbow may sit unpulled, radians: the pull rises smoothly from
+    /// nothing there to its full weight at twice it. An operator's own elbow is followed exactly
+    /// (0); a prior with no operator arm behind it leaves a natural range alone.
+    pub slack_rad: f64,
 }
 
 /// The elbow's unit direction off the line from `shoulder` to `wrist`, and how far off it is,
@@ -413,6 +417,24 @@ pub fn elbow_direction(shoulder: Vec3, elbow: Vec3, wrist: Vec3) -> Option<(Vec3
     let off = sub(along, scale(d, dot(d, along)));
     let radius = norm(off);
     (radius >= 1e-6).then(|| (scale(off, 1.0 / radius), radius))
+}
+
+/// `direction`'s part across the unit line `d`, as a unit vector and its length; `None` when it
+/// lies along the line (under a millionth across).
+fn across_line(direction: Vec3, d: Vec3) -> Option<(Vec3, f64)> {
+    let off = sub(direction, scale(d, dot(d, direction)));
+    let length = norm(off);
+    (length >= 1e-6).then(|| (scale(off, 1.0 / length), length))
+}
+
+/// How much of an aim pulls an elbow `off` radians from it with `slack` radians of slack: none
+/// inside the slack, all past twice it, a smoothstep between.
+fn slack(off: f64, slack: f64) -> f64 {
+    if slack <= 0.0 {
+        return 1.0;
+    }
+    let x = ((off - slack) / slack).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 /// How far a window may pull a step past the acceleration cap, as a multiple of it.
@@ -1091,6 +1113,8 @@ impl Ik {
                     && aim.wrist < links
                     && aim.weight.is_finite()
                     && aim.weight > 0.0
+                    && aim.slack_rad.is_finite()
+                    && aim.slack_rad >= 0.0
                     && (norm(aim.direction) - 1.0).abs() < 1e-6
             });
         }
@@ -1707,9 +1731,20 @@ impl Ik {
                 continue;
             };
             let d = scale(a, 1.0 / length);
+            // The aim's part across this arm's shoulder-wrist line, at its weight times that
+            // part's length: an elbow can point only across its line, so a direction along it
+            // (a hanging arm aimed down) asks nothing. Held fixed over the step, as a target.
+            let Some((toward, across)) = across_line(aim.direction, d) else {
+                continue;
+            };
+            let off = dot(n, toward).clamp(-1.0, 1.0).acos();
+            let weight = aim.weight * across * slack(off, aim.slack_rad);
+            if weight <= 0.0 {
+                continue;
+            }
             let along = sub(e, s);
             let t = dot(d, along);
-            let miss = sub(n, aim.direction);
+            let miss = sub(n, toward);
             for &axis in &self.body.solved {
                 w.j_shoulder[axis] = [0.0; 3];
                 w.j_elbow[axis] = [0.0; 3];
@@ -1727,7 +1762,7 @@ impl Ik {
                 let dt_along = dot(dd, along) + dot(d, dalong);
                 let dv = sub(dalong, [0, 1, 2].map(|k| dd[k] * t + d[k] * dt_along));
                 let dn = scale(sub(dv, scale(n, dot(n, dv))), 1.0 / radius);
-                w.elbow_gradient[column] += 2.0 * aim.weight * dot(miss, dn);
+                w.elbow_gradient[column] += 2.0 * weight * dot(miss, dn);
             }
             any = true;
         }
@@ -3108,11 +3143,17 @@ mod tests {
                 wrist: link(&format!("{side}_wrist_pitch_link")),
                 direction: [0.0, 0.6, -0.8],
                 weight: 0.7,
+                slack_rad: 0.0,
             };
             let limb = usize::from(side == "right");
             ik.set_elbow_aim(0, None);
             ik.set_elbow_aim(1, None);
             ik.set_elbow_aim(limb, Some(aim));
+            // The aim as the gradient holds it: its part across the line at `q`, fixed.
+            let at = model.poses(&q);
+            let span = super::sub(at.links[aim.wrist].t, at.links[aim.shoulder].t);
+            let unit = super::scale(span, 1.0 / super::norm(span));
+            let (toward, across) = super::across_line(aim.direction, unit).expect("across");
             let cost = |q: &[f64]| {
                 let frames = model.poses(q);
                 let (n, _) = super::elbow_direction(
@@ -3121,10 +3162,7 @@ mod tests {
                     frames.links[aim.wrist].t,
                 )
                 .expect("bent");
-                aim.weight
-                    * (0..3)
-                        .map(|k| (n[k] - aim.direction[k]).powi(2))
-                        .sum::<f64>()
+                aim.weight * across * (0..3).map(|k| (n[k] - toward[k]).powi(2)).sum::<f64>()
             };
             model.poses_into(&q, &mut ik.work.frames);
             assert!(ik.elbow_gradient());
