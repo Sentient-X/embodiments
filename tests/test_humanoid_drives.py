@@ -10,6 +10,7 @@ import pytest
 from sx_embodiments import development_embodiments
 from sx_embodiments.buses import driven_axes
 from sx_embodiments.errors import LayoutError
+from sx_embodiments.kinematics import Kinematics
 from sx_embodiments.known.humanoid import (
     SENTIENT_HUMANOID_RATED_URDF,
     SENTIENT_HUMANOID_URDF,
@@ -122,3 +123,21 @@ def test_a_nominal_joint_takes_its_effort_and_armature_from_the_drive() -> None:
         coordinates["left_knee_joint"], kp=1.0, kd=0.0, action_scale=1.0, armature=0.05
     )
     assert (knee.effort, knee.armature) == (150.0, 0.05)
+
+
+def test_both_hip_rolls_abduct_at_a_positive_angle_so_one_range_serves_both() -> None:
+    """The right hip roll's origin (R_x(pi)) sits below the right hip pitch's (R_y(pi)), so its
+    +X axis is the pelvis's -X: a positive angle moves each foot outward, and both legs share
+    the CAD's [-0.279, 1.920] (16 deg adduction, 110 deg abduction). Mirroring the right range
+    from its axis alone (2026-11-16) would have inverted it."""
+    body = _body()
+    kinematics = Kinematics.of(body.urdf_bytes)
+    root = next(iter(kinematics.links - kinematics.parent_joint.keys()))
+    zero = dict.fromkeys(kinematics.independent, 0.0)
+    for side, outward in (("left", 1.0), ("right", -1.0)):
+        foot = kinematics.joints[f"{side}_foot2_joint"].child
+        rest = kinematics.pose(root, foot, zero)[7]
+        rolled = kinematics.pose(root, foot, {**zero, f"{side}_hip_roll_joint": 0.3})[7]
+        assert (rolled - rest) * outward > 0.15, side
+    bounds = {c.axis.name: (c.lower, c.upper) for c in body.state.coordinates}
+    assert bounds["left_hip_roll_joint"] == bounds["right_hip_roll_joint"]
