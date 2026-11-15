@@ -39,7 +39,8 @@ layer: every leg binding is provisional, its direction and zero unmeasured.
 The full body's torso, waist and leg limits (``<limit effort velocity>``) are rendered from
 those drives' ratings into :data:`SENTIENT_HUMANOID_RATED_URDF`, which its core and legs are cut
 from (the CAD export declares ``effort="10" velocity="1.0"`` on all of them). The ratings are
-Damiao's published ones at the rated 24 V supply; a linkage's are both motors' at a unit lever
+Damiao's published ones on each motor's rail (``BIG_MOTOR_VOLTS`` for the legs and torso
+yaw, ``SMALL_MOTOR_VOLTS`` for the waist); a linkage's are both motors' at a unit lever
 ratio, an upper bound until its geometry is measured.
 
 The head carries an Intel RealSense D435 (``urdf/humanoid_pkg.csv``, ``camera_link`` on
@@ -149,8 +150,8 @@ SENTIENT_HUMANOID_SOURCE_URDF: Final = replace(SENTIENT_HUMANOID_URDF, role=Asse
 #: (``tools/compose_humanoid_rated_urdf.py``). The full body's core and legs are cut from it.
 SENTIENT_HUMANOID_RATED_URDF: Final = packaged_asset(
     relpath="humanoid_pkg/urdf/urdf_robot_acc_rated.urdf",
-    sha256="6b701f9e3f90ba3818c5dd9f3a179175e7fe392144a95c31b99d9538b1133a9f",
-    size_bytes=50508,
+    sha256="5c4deefe23730982ed0875ff2af2747a4834de0dcedc33d37cd551a4b0842691",
+    size_bytes=50505,
     format=AssetFormat.URDF,
     role=AssetRole.OTHER,
     provenance=AssetProvenance(
@@ -186,29 +187,52 @@ def _generated(relpath: str, sha256: str, size_bytes: int) -> PackagedAsset:
 SENTIENT_HUMANOID_MASTER_ID_OFFSET: Final = 0x20
 
 
-def _motor(model: ActuatorModel, bus_id: int, *, provisional: bool = False) -> ActuatorBinding:
+#: The full humanoid's rails, from the owner on 2026-11-16: "all the big motors are at 48 V; the
+#: smaller motors are at 24 V; the whole leg is exclusively on 48 V". So every leg motor (the
+#: ankles' DM4340 pair too, which then are the DM4340's 48 V version) and the torso yaw's DM8009
+#: are on 48 V, and the waist's DM4340 pair on 24 V. The legacy upper body declares none: its
+#: published identity predates the statement.
+BIG_MOTOR_VOLTS: Final = 48.0
+SMALL_MOTOR_VOLTS: Final = 24.0
+
+
+def _motor(
+    model: ActuatorModel,
+    bus_id: int,
+    *,
+    provisional: bool = False,
+    volts: float | None = None,
+) -> ActuatorBinding:
     """One motor on the humanoid's one Damiao CAN bus, identity drive map."""
     return ActuatorBinding(
-        model=model, bus=ActuatorBus.DAMIAO_CAN, bus_id=bus_id, provisional=provisional
+        model=model,
+        bus=ActuatorBus.DAMIAO_CAN,
+        bus_id=bus_id,
+        provisional=provisional,
+        supply_volts=volts,
     )
 
 
-def _damiao(model: ActuatorModel, bus_id: int, *, provisional: bool = False) -> DirectDrive:
-    return DirectDrive(_motor(model, bus_id, provisional=provisional))
+def _damiao(
+    model: ActuatorModel, bus_id: int, *, provisional: bool = False, volts: float | None = None
+) -> DirectDrive:
+    return DirectDrive(_motor(model, bus_id, provisional=provisional, volts=volts))
 
 
-def _linkage(model: ActuatorModel, *bus_ids: int) -> LinkageDrive:
-    return LinkageDrive(tuple(_motor(model, bus_id, provisional=True) for bus_id in bus_ids))
+def _linkage(model: ActuatorModel, *bus_ids: int, volts: float) -> LinkageDrive:
+    return LinkageDrive(
+        tuple(_motor(model, bus_id, provisional=True, volts=volts) for bus_id in bus_ids)
+    )
 
 
 #: The waist's roll and pitch are driven together by two DM4340 motors (CAN 0x0E, 0x0D) through
 #: a linkage whose mapping humanoid_pkg marks provisional: the motors are known, the map is not,
 #: so no driver's chain carries it and no unit's reading is a joint observation yet.
-_WAIST = _linkage(ActuatorModel.DAMIAO_DM4340, 0x0E, 0x0D)
+_WAIST = _linkage(ActuatorModel.DAMIAO_DM4340, 0x0E, 0x0D, volts=SMALL_MOTOR_VOLTS)
 _WAIST_READ = Unobserved(UNDOCUMENTED_OBSERVATION_REASON)
 
 
-def _torso(waist: LinkageDrive | UndocumentedDrive) -> ChainSpec:
+def _torso(waist: LinkageDrive | UndocumentedDrive, volts: float | None) -> ChainSpec:
     return ChainSpec(
         part_id=PartId("sentient-humanoid-torso"),
         layout=bounded_layout(
@@ -216,7 +240,7 @@ def _torso(waist: LinkageDrive | UndocumentedDrive) -> ChainSpec:
             units=(CoordinateUnit.RADIAN,) * 3,
             lower=(-1.570796326795, -0.270002435284, -0.767944870878),
             upper=(1.570796326795, 0.270002435284, 0.767944870878),
-            actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x0F), waist, waist),
+            actuations=(_damiao(ActuatorModel.DAMIAO_DM8009, 0x0F, volts=volts), waist, waist),
             observations=(ActuatorFeedback(), _WAIST_READ, _WAIST_READ),
         ),
         home=(0.0, 0.0, 0.0),
@@ -224,11 +248,11 @@ def _torso(waist: LinkageDrive | UndocumentedDrive) -> ChainSpec:
 
 
 #: The full body's torso: the waist's two motors recorded as its linkage.
-SENTIENT_HUMANOID_TORSO: Final = _torso(_WAIST)
+SENTIENT_HUMANOID_TORSO: Final = _torso(_WAIST, BIG_MOTOR_VOLTS)
 #: The legacy upper body's torso, as published: its identity pins recordings and the paid
 #: vendor CAN transcripts (``sx-damiao-can`` ``tests/fixtures/dm_can``), so its waist keeps the
 #: undocumented drive it was published with. The same two motors are ``_WAIST``'s.
-_LEGACY_TORSO: Final = _torso(UndocumentedDrive(UNDOCUMENTED_DRIVE_REASON))
+_LEGACY_TORSO: Final = _torso(UndocumentedDrive(UNDOCUMENTED_DRIVE_REASON), None)
 
 #: Each arm's first send id; its five motors take consecutive ids from there.
 _ARM_BASE_ID: Final = {"right": 0x10, "left": 0x18}
@@ -294,7 +318,7 @@ def _humanoid_leg(side: Literal["left", "right"]) -> ChainSpec:
     # and +5 that drive both ankle joints through the foot's push rods. No leg motor has been
     # driven through the embodiment layer, so every binding is provisional: its direction and
     # zero are unmeasured.
-    ankle = _linkage(ActuatorModel.DAMIAO_DM4340, base + 4, base + 5)
+    ankle = _linkage(ActuatorModel.DAMIAO_DM4340, base + 4, base + 5, volts=BIG_MOTOR_VOLTS)
     unread = Unobserved(UNDOCUMENTED_OBSERVATION_REASON)
     return ChainSpec(
         part_id=PartId(f"sentient-humanoid-{side}-leg"),
@@ -321,10 +345,18 @@ def _humanoid_leg(side: Literal["left", "right"]) -> ChainSpec:
                 0.436332312999,
             ),
             actuations=(
-                _damiao(ActuatorModel.DAMIAO_DM10010, base + 1, provisional=True),
-                _damiao(ActuatorModel.DAMIAO_DM10010, base, provisional=True),
-                _damiao(ActuatorModel.DAMIAO_DM8009, base + 2, provisional=True),
-                _damiao(ActuatorModel.DAMIAO_DM10010, base + 3, provisional=True),
+                _damiao(
+                    ActuatorModel.DAMIAO_DM10010, base + 1, provisional=True, volts=BIG_MOTOR_VOLTS
+                ),
+                _damiao(
+                    ActuatorModel.DAMIAO_DM10010, base, provisional=True, volts=BIG_MOTOR_VOLTS
+                ),
+                _damiao(
+                    ActuatorModel.DAMIAO_DM8009, base + 2, provisional=True, volts=BIG_MOTOR_VOLTS
+                ),
+                _damiao(
+                    ActuatorModel.DAMIAO_DM10010, base + 3, provisional=True, volts=BIG_MOTOR_VOLTS
+                ),
                 ankle,
                 ankle,
             ),
@@ -753,8 +785,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         replace(STATIC_UPPER_BODY_URDF, role=AssetRole.OTHER),
         packaged_asset(
             relpath="sentient_humanoid/sentient_humanoid.urdf",
-            sha256="df0261e18f2b6aa2a7cdc7c400747bd7f7d5c7f5f295bc57db5574162c565fa1",
-            size_bytes=185030,
+            sha256="efd7b79a44ce84d5ae33d6ad28f346ca95d53db422f6af6cef020cb9203a5c80",
+            size_bytes=185027,
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
             provenance=AssetProvenance(

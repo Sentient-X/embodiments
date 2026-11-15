@@ -44,7 +44,7 @@ import numpy as np
 
 from ..buses import driven_axes
 from ..embodiment import Embodiment
-from ..layout import ACTUATOR_RATINGS, BusPort, LayoutError, ServoApproach
+from ..layout import ACTUATOR_RATINGS, BusPort, LayoutError, ServoApproach, rated_speed
 from .dynamics import RigidBodyTree
 
 #: The share of a motor's peak torque a planned acceleration may spend: the bench tools' torque
@@ -148,9 +148,7 @@ def joint_motion(
         speeds = [
             s
             for s in (
-                None
-                if rating.rated_speed_rad_s is None
-                else rating.rated_speed_rad_s / binding.reduction,
+                rated_speed(binding),
                 None if servo is None else servo.speed,
             )
             if s is not None

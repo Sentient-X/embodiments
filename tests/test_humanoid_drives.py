@@ -141,3 +141,46 @@ def test_both_hip_rolls_abduct_at_a_positive_angle_so_one_range_serves_both() ->
         assert (rolled - rest) * outward > 0.15, side
     bounds = {c.axis.name: (c.lower, c.upper) for c in body.state.coordinates}
     assert bounds["left_hip_roll_joint"] == bounds["right_hip_roll_joint"]
+
+
+def test_the_leg_and_big_motors_run_on_48_volts_and_their_speeds_follow() -> None:
+    """The owner, 2026-11-16: "all the big motors are at 48 V; the smaller motors are at 24 V;
+    the whole leg is exclusively on 48 V". A DM10010 is rated 100 rpm there, twice its 24 V."""
+    axes = {c.axis.name: c.axis for c in _body().state.coordinates}
+
+    def volts(name: str) -> set[float | None]:
+        actuation = axes[name].actuation
+        bindings = (
+            (actuation.actuator,)
+            if isinstance(actuation, DirectDrive)
+            else actuation.actuators
+            if isinstance(actuation, LinkageDrive)
+            else ()
+        )
+        return {binding.supply_volts for binding in bindings}
+
+    for name in LEG_MOTORS:
+        side_leg = name.startswith(("left_", "right_"))
+        expected = 48.0 if side_leg or name == "torso_joint" else 24.0
+        assert volts(name) == {expected}, name
+    speeds = {}
+    for name in (
+        "right_knee_joint",
+        "right_hip_yaw_joint",
+        "right_foot1_joint",
+        "waist_roll_joint",
+    ):
+        rating = joint_rating(axes[name].actuation)
+        assert rating is not None and rating.no_load_velocity is not None
+        speeds[name] = (round(rating.velocity, 4), round(rating.no_load_velocity, 4))
+    assert speeds == {
+        "right_knee_joint": (10.472, 15.708),
+        "right_hip_yaw_joint": (20.944, 35.0811),
+        "right_foot1_joint": (3.7699, 10.472),
+        "waist_roll_joint": (3.7699, 5.4978),
+    }
+
+
+def test_a_supply_outside_the_motors_range_is_refused() -> None:
+    with pytest.raises(LayoutError):
+        ActuatorBinding(ActuatorModel.DAMIAO_DM10010, ActuatorBus.DAMIAO_CAN, 1, supply_volts=60.0)

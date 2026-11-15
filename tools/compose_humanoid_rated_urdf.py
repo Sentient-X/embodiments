@@ -8,7 +8,8 @@ each of those joints' ``<limit effort velocity>`` replaced by the joint rating o
 registry binds it to (``sx_embodiments.layout.joint_rating``, from ``ACTUATOR_RATINGS``):
 
 * a directly driven joint (torso yaw, hip pitch, roll and yaw, knee) declares its motor's peak
-  torque and rated speed at its rated 24 V supply;
+  torque and rated speed on the rail its binding declares (``supply_volts``: 48 V for the
+  legs and torso yaw, 24 V for the waist);
 * a joint two motors drive through a linkage (waist roll and pitch, both ankle joints)
   declares both motors' summed peak torque and their rated speed at a unit lever ratio, an
   upper bound until the linkage is measured.

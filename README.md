@@ -163,7 +163,9 @@ them). Every leg binding is provisional: its direction and zero are unmeasured. 
 torso, waist and leg `<limit effort velocity>` are rendered from those ratings
 (`tools/compose_humanoid_rated_urdf.py`, `layout.joint_rating`) in place of the CAD's
 `effort="10" velocity="1.0"`. What is datasheet and what is not: peak and rated torque, rated
-speed at 24 V and gear ratio are Damiao's published figures; a linkage's joint effort (both
+speed at 24 and 48 V and gear ratio are Damiao's published figures, and each motor runs at its
+rail's speeds: the owner's word (2026-11-16) puts the whole leg and the big motors (torso yaw)
+on 48 V and the small ones (waist pair) on 24 V, recorded as `ActuatorBinding.supply_volts`; a linkage's joint effort (both
 motors at a unit lever ratio) is an upper bound, not a measurement; the DM10010's rotor inertia
 is unpublished and unmeasured, so a simulation profile states the armature it assumes
 (`nominal_mujoco.rated_joint`), and the exporter refuses a nominal joint stronger than its drive.

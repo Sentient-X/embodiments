@@ -776,6 +776,8 @@ def _actuator_to_dict(binding: ActuatorBinding) -> dict[str, object]:
         document["port"] = binding.port
     if binding.provisional:
         document["provisional"] = True
+    if binding.supply_volts is not None:
+        document["supply_volts"] = binding.supply_volts
     return document
 
 
@@ -1015,7 +1017,7 @@ def _parse_layout(document: decode.Document) -> JointLayout:
 
 def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
     fields = {"model", "bus", "bus_id", "sign", "reduction"}
-    fields |= {key for key in ("port", "provisional") if key in entry}
+    fields |= {key for key in ("port", "provisional", "supply_volts") if key in entry}
     binding = decode.exactly(entry, fields)
     try:
         model = ActuatorModel(decode.text(binding, "model"))
@@ -1039,6 +1041,7 @@ def _parse_actuator(entry: decode.Document) -> ActuatorBinding:
         reduction=decode.number(binding, "reduction"),
         port=BusPort(decode.text(binding, "port")) if "port" in binding else None,
         provisional=_provisional(binding),
+        supply_volts=decode.number(binding, "supply_volts") if "supply_volts" in binding else None,
     )
 
 
