@@ -210,12 +210,15 @@ fn accepted_vmax(model: DmMotorType) -> Vec<f64> {
 pub const MAX_COAST: f64 = 0.1;
 
 /// The largest coast bound an axis opens with ([`DamiaoAxis::coast`], a robot's Brisk motion),
-/// rad at the joint: twice [`MAX_COAST`]. It doubles the planned velocity a frame carries and
-/// every speed ceiling ([`ActuatorChain::tracking_ceilings`]), so the elbows and arm yaws carry
-/// their whole planned velocity at their Standard top speed and the shoulders' speed ceiling
-/// goes from about 1.2 to 2.4 rad/s; a host that stops commanding mid-move lets a joint settle
-/// up to this far past its last position, not [`MAX_COAST`]. Acceleration, rise time, the
-/// range-end allowance for gravity and the brake are unchanged.
+/// rad at the joint: twice [`MAX_COAST`]. It doubles the planned velocity a frame carries, so the
+/// elbows and arm yaws carry their whole planned velocity up to their top speed instead of the
+/// motor's `kd` dragging them above half of it. The speed ceilings stay [`MAX_COAST`]'s
+/// ([`ActuatorChain::tracking_ceilings`]), so the speeds, the tracking bound and the force a
+/// blocked joint pushes with are Standard's. What it gives up: a host that stops commanding
+/// mid-move lets a joint whose planned velocity was clipped before (the DM4340 joints) settle up
+/// to about this far past its last position (0.15 rad on an elbow, 0.054 at Standard); the
+/// shoulders, whose clip never bound, are unchanged. Acceleration, rise time, the range-end
+/// allowance for gravity and the brake are unchanged.
 pub const BRISK_COAST: f64 = 0.2;
 
 /// The farthest the capped planned velocity may let a joint lag the position sent at its
@@ -241,9 +244,9 @@ pub struct DamiaoAxis {
     /// its `TIMEOUT` register at open; `None` leaves the register as the motor holds it.
     pub can_timeout: Option<Duration>,
     /// How far past its last position the joint may settle when commands stop mid-move, rad at
-    /// the joint: the planned velocity a frame carries is capped at `coast kp / kd`, and the
-    /// axis's speed ceilings scale with it ([`ActuatorChain::tracking_ceilings`]). Above 0 and
-    /// at most [`BRISK_COAST`]; [`MAX_COAST`] unless the robot opens Brisk.
+    /// the joint: the planned velocity a frame carries is capped at `coast kp / kd`. The speed
+    /// ceilings stay [`MAX_COAST`]'s ([`BRISK_COAST`]). Above 0 and at most [`BRISK_COAST`];
+    /// [`MAX_COAST`] unless the robot opens Brisk.
     pub coast: f64,
     /// Whether the motor's feedback state field reports enable and disable. Firmware on the
     /// static upper body's motors answers state 1 whether enabled or not (verified 2026-10-25:
@@ -1880,7 +1883,9 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 let gain = axis.actuator_from_joint(axis.zero + 1.0);
                 let kp = motor.kp * gain * gain;
                 let inertia = axis.motion.inertia;
-                let coast = motor.coast;
+                // The ceilings are Standard's at every coast bound: a wider bound carries more of
+                // the planned velocity, never a faster joint (BRISK_COAST).
+                let coast = MAX_COAST;
                 let lag = (coast + MAX_LAG) * motor.kp / motor.kd;
                 // The held position stops the joint like a spring, until its torque saturates at
                 // the motor's peak: then no faster than the peak decelerates within MAX_COAST.

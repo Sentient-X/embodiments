@@ -1142,19 +1142,21 @@ pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis
     Opener::of(drive)?.damiao(drive, port)
 }
 
-/// How close to its motors' commissioned gains a body moves: each Damiao axis's coast bound
-/// (`sx_damiao_can::chain::DamiaoAxis::coast`), how far a joint may settle past its last command
-/// when the host stops commanding, which caps the planned velocity a frame carries and every
-/// speed ceiling. Serial servos move at their own registers either way. A robot's setting, never
-/// a tool's flag: the station reads it from the robot directory.
+/// How much of its planned velocity a body's Damiao motors are sent: each Damiao axis's coast
+/// bound (`sx_damiao_can::chain::DamiaoAxis::coast`), how far a joint may settle past its last
+/// command when the host stops commanding, which caps the planned velocity its MIT frame
+/// carries. The speed ceilings, the tracking bound and the force a blocked joint pushes with are
+/// the same at either. Serial servos move at their own registers either way. A robot's setting,
+/// never a tool's flag: the station reads it from the robot directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Motion {
     /// The coast bound `MAX_COAST`, 0.1 rad: the driver as it always was.
     #[default]
     Standard,
-    /// The coast bound `BRISK_COAST`, 0.2 rad: about twice the shoulders' speed, the whole
-    /// planned velocity carried on the elbows and arm yaws; a stalled host lets a joint run on
-    /// up to 0.2 rad before it holds (robot-bench `speed_limits.py`, `mit_dynamics` `brisk_*`).
+    /// The coast bound `BRISK_COAST`, 0.2 rad: the elbows and arm yaws carry their whole planned
+    /// velocity up to their top speed, so they keep up on fast moves; a stalled host lets them
+    /// run on up to about 0.15 rad before they hold (robot-bench `speed_limits.py`,
+    /// `mit_dynamics` `brisk_*`).
     Brisk,
 }
 

@@ -219,11 +219,11 @@ fn a_stalled_host_leaves_a_joint_at_top_speed_within_two_coasts_of_its_last_posi
     }
 }
 
-/// Brisk (every axis at [`BRISK_COAST`]): a host that stops commanding at each arm joint's
-/// Brisk top speed leaves it within two Brisk coasts of its last position, the elbow (its
-/// velocity term the coast) within one; printed per joint with how long it takes to hold, and
-/// what that is at the tool on the longest lever the joint carries (the arm straight: shoulder
-/// 0.75 m, upper-arm yaw 0.60 m, elbow and forearm yaw 0.45 m, wrist 0.25 m).
+/// Brisk (every axis at [`BRISK_COAST`]): its frames carry up to twice the planned velocity at
+/// Standard's speeds. A host that stops commanding at each arm joint's top speed leaves it within
+/// two Brisk coasts of its last position, the elbow within one; printed per joint with how long it
+/// takes to hold, and what that is at the tool on the longest lever the joint carries (the arm
+/// straight: shoulder 0.75 m, upper-arm yaw 0.60 m, elbow and forearm yaw 0.45 m, wrist 0.25 m).
 #[test]
 fn brisk_a_stalled_host_leaves_each_arm_joint_within_two_brisk_coasts() {
     let lever = |joint: &str| {
@@ -266,13 +266,13 @@ fn brisk_a_stalled_host_leaves_each_arm_joint_within_two_brisk_coasts() {
     }
 }
 
-/// Brisk: the elbow's top speed is `(BRISK_COAST + MAX_LAG) kp / kd`, 1.97 rad/s, and a move at
-/// it on the MIT law tracks inside the governor's bound and settles, as Standard's does.
+/// Brisk: the elbow's top speed is Standard's, `(MAX_COAST + MAX_LAG) kp / kd`, 1.31 rad/s, now
+/// with its whole planned velocity in the frame; a move at it tracks and settles.
 #[test]
 fn brisk_a_full_speed_move_on_the_mit_law_tracks_and_settles() {
     let mut rig = Rig::with_coast(1.0, BRISK_COAST);
     let elbow = rig.index(ELBOW);
-    let ceiling = (BRISK_COAST + sx_damiao_can::chain::MAX_LAG) * 30.492 / 4.655;
+    let ceiling = (MAX_COAST + sx_damiao_can::chain::MAX_LAG) * 30.492 / 4.655;
     assert!((rig.governor.limits()[elbow].max_speed - ceiling).abs() < 1e-9);
     let mut target = rig.governor.last_observed().expect("rest").to_vec();
     target[elbow] -= 1.2;
@@ -346,8 +346,7 @@ fn a_stop_at_speed_brakes_before_it_disables() {
     brakes_before_it_disables(0.25, MAX_COAST);
 }
 
-/// Brisk at its full speed (the shoulder at about 2.4 rad/s): the brake holds it within one
-/// Brisk coast.
+/// Brisk at full speed: the brake holds the shoulder within one Brisk coast.
 #[test]
 fn brisk_a_stop_at_full_speed_brakes_before_it_disables() {
     brakes_before_it_disables(1.0, BRISK_COAST);

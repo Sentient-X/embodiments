@@ -1,6 +1,6 @@
 //! The coast bound each Damiao axis opens with (`DamiaoAxis::coast`): Standard is the driver as
-//! it was before the bound became a choice, frame for frame; Brisk doubles it, so the planned
-//! velocity a frame carries and every speed ceiling scale with it, and nothing else moves.
+//! it was before the bound became a choice, frame for frame; Brisk doubles it, so a frame carries
+//! up to twice the planned velocity, and every ceiling stays Standard's.
 
 use serde_json::Value;
 use sx_damiao_can::chain::{BRISK_COAST, DamiaoAxis, DamiaoChain, MAX_COAST};
@@ -127,34 +127,66 @@ fn standard_is_the_driver_as_it_was_frame_for_frame() {
 }
 
 #[test]
-fn brisk_doubles_the_planned_velocity_cap_and_lifts_only_the_speed_ceilings() {
-    let standard = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+fn brisk_carries_twice_the_planned_velocity_and_keeps_every_ceiling() {
     let open = |coast: f64| {
         let axes = axes(Some(coast));
         DamiaoChain::open(Sim::for_axes(&axes), axes).expect("opens")
     };
-    let (slow, brisk) = (open(MAX_COAST), open(BRISK_COAST));
-    for ((index, a), (other, b)) in slow
-        .tracking_ceilings()
-        .into_iter()
-        .zip(brisk.tracking_ceilings())
-    {
-        assert_eq!(index, other);
-        let motor = &standard[index];
+    let (mut slow, mut brisk) = (open(MAX_COAST), open(BRISK_COAST));
+    assert_eq!(slow.tracking_ceilings(), brisk.tracking_ceilings());
+    let standard = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    let width = standard.len();
+    let bound = vec![
+        FeedforwardLimit {
+            velocity: Some(10.0),
+            torque: None,
+        };
+        width
+    ];
+    // Every axis asked for 1.2 rad/s: Standard clips the DM4340 joints at 0.1 kp/kd (0.48-0.66
+    // rad/s); Brisk at 0.2 kp/kd (0.96-1.31).
+    let wanted = vec![
+        Feedforward {
+            velocity: 1.2,
+            torque: 0.0,
+            gravity: 0.0,
+        };
+        width
+    ];
+    // Mid-range targets, so the range leaves the planned velocity whole.
+    let targets: Vec<f64> = slow
+        .commandable()
+        .iter()
+        .map(|range| f64::midpoint(range.lower, range.upper))
+        .collect();
+    for chain in [&mut slow, &mut brisk] {
+        chain.set_feedforward_limits(&bound).expect("bounds");
+        chain.command_with(&targets, &wanted).expect("command");
+    }
+    let (a, b) = (slow.applied_feedforward(), brisk.applied_feedforward());
+    for (index, motor) in standard.iter().enumerate() {
         let name = &motor.axis.joint;
-        // Acceleration and rise time are the gains' alone.
-        assert_eq!(a.acceleration, b.acceleration, "{name}");
-        assert_eq!(a.rise_s, b.rise_s, "{name}");
-        // Every speed term grows with the coast bound, at most in proportion.
-        assert!(b.speed > a.speed, "{name}: {} -> {}", a.speed, b.speed);
+        let clip = |coast: f64| (coast * motor.kp / motor.kd).min(1.2);
+        assert!(a[index].velocity.abs() <= clip(MAX_COAST) + 1e-6, "{name}");
         assert!(
-            b.speed <= a.speed * BRISK_COAST / MAX_COAST + 1e-9,
+            b[index].velocity.abs() <= clip(BRISK_COAST) + 1e-6,
             "{name}"
         );
-        // The lag term is (coast + MAX_LAG) kp / kd.
-        let lag = (BRISK_COAST + sx_damiao_can::chain::MAX_LAG) * motor.kp / motor.kd;
-        assert!(b.speed <= lag + 1e-9, "{name}");
+        assert!(
+            b[index].velocity.abs() >= a[index].velocity.abs() - 1e-9,
+            "{name}"
+        );
     }
+    let elbow = standard
+        .iter()
+        .position(|m| m.axis.joint == "left_elbow_pitch_joint")
+        .expect("an elbow");
+    assert!(
+        b[elbow].velocity.abs() > 1.5 * a[elbow].velocity.abs(),
+        "the elbow: {} -> {}",
+        a[elbow].velocity,
+        b[elbow].velocity
+    );
 }
 
 #[test]

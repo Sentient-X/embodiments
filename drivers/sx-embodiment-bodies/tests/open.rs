@@ -2419,10 +2419,9 @@ fn a_drive_naming_a_superseded_id_of_the_body_opens_it() {
 }
 
 /// A robot's motion is how its Damiao buses open: Brisk changes the CAN port (and nothing
-/// else), reopening it gives every Damiao axis Brisk's speed ceilings, and Standard brings
-/// today's back.
+/// else), reopening it keeps every ceiling Standard's, and Standard reopens it back.
 #[test]
-fn a_change_of_motion_reopens_the_damiao_bus_alone_with_its_ceilings() {
+fn a_change_of_motion_reopens_the_damiao_bus_alone() {
     use sx_embodiment_bodies::Motion;
     let drive = drive("sentient-static-upper-body");
     let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
@@ -2450,42 +2449,18 @@ fn a_change_of_motion_reopens_the_damiao_bus_alone_with_its_ceilings() {
         changed_ports(&drive, standard, brisk).expect("in place"),
         ["can"]
     );
-    let body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
+    assert_eq!(
+        changed_ports(&drive, brisk, standard).expect("in place"),
+        ["can"]
+    );
+    let mut body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
     let before = body.tracking_ceilings();
-    let mut body = body;
     assert!(body.stop().is_proven());
-    let body = reopen_ports(body, &drive, brisk, &["can".to_owned()], &mut bridges)
+    let mut body = reopen_ports(body, &drive, brisk, &["can".to_owned()], &mut bridges)
         .expect("reopened Brisk");
-    let after = body.tracking_ceilings();
-    assert_eq!(before.len(), after.len());
-    let shoulder = body
-        .axes()
-        .iter()
-        .position(|axis| axis.joint == "left_shoulder_pitch_joint")
-        .expect("a shoulder");
-    for ((index, a), (other, b)) in before.iter().zip(&after) {
-        assert_eq!(index, other);
-        assert!(
-            b.speed >= a.speed && b.speed <= 2.0 * a.speed + 1e-9,
-            "{index}"
-        );
-        assert_eq!(a.acceleration, b.acceleration);
-    }
-    let speed = |ceilings: &[(usize, sx_embodiment_drivers::TrackingCeiling)]| {
-        ceilings
-            .iter()
-            .find(|(index, _)| *index == shoulder)
-            .expect("the shoulder's ceiling")
-            .1
-            .speed
-    };
-    assert!((speed(&after) / speed(&before) - 2.0).abs() < 1e-9);
-    let mut body = body;
+    assert_eq!(body.tracking_ceilings(), before);
     assert!(body.stop().is_proven());
     let body = reopen_ports(body, &drive, standard, &["can".to_owned()], &mut bridges)
         .expect("reopened Standard");
-    assert_eq!(
-        speed(&body.tracking_ceilings()).to_bits(),
-        speed(&before).to_bits()
-    );
+    assert_eq!(body.tracking_ceilings(), before);
 }
