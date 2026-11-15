@@ -157,6 +157,7 @@ fn open_simulated(
     let provisional: Vec<&str> = provisional.iter().map(String::as_str).collect();
     let options = OpenOptions {
         allow_provisional: &provisional,
+        motion: sx_embodiment_bodies::Motion::Standard,
     };
     let mut opened = open_with(&drive, &commissioning, &calibrations, options, &mut bridges)?;
     let axes = opened.axes();

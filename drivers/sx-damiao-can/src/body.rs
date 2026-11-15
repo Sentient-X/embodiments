@@ -166,6 +166,7 @@ impl DamiaoBody {
             kp: gains.kp,
             kd: gains.kd,
             can_timeout: self.can_timeout,
+            coast: crate::chain::MAX_COAST,
             reports_enable_state: self.reports_enable_state,
         }
     }

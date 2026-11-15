@@ -1142,6 +1142,38 @@ pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis
     Opener::of(drive)?.damiao(drive, port)
 }
 
+/// How much of its planned velocity a body's Damiao motors are sent: each Damiao axis's coast
+/// bound (`sx_damiao_can::chain::DamiaoAxis::coast`), how far a joint may settle past its last
+/// command when the host stops commanding, which caps the planned velocity its MIT frame
+/// carries. The speed ceilings and the tracking bound are the same at either, and a blocked
+/// joint pushes at Brisk at most as hard as at Standard (the bound gives way to its error). A
+/// host that stalls mid-move lets a DM4340 joint run on up to 82 mm at the tool at Brisk, about
+/// 24 mm at Standard (`sx_damiao_can::chain::BRISK_COAST`). Serial servos move at their own
+/// registers either way. A robot's setting,
+/// never a tool's flag: the station reads it from the robot directory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Motion {
+    /// The coast bound `MAX_COAST`, 0.1 rad: the driver as it always was.
+    #[default]
+    Standard,
+    /// The coast bound `BRISK_COAST`, 0.2 rad: the elbows and arm yaws carry their whole planned
+    /// velocity up to their top speed, so they keep up on fast moves, while a blocked one pushes
+    /// no harder than at Standard; a stalled host lets them run on up to about 0.15 rad (82 mm
+    /// at the tool) before they hold (robot-bench `speed_limits.py`, `mit_dynamics` `brisk_*`).
+    Brisk,
+}
+
+impl Motion {
+    /// Each Damiao axis's coast bound at this motion, rad at the joint.
+    #[must_use]
+    pub const fn coast(self) -> f64 {
+        match self {
+            Self::Standard => sx_damiao_can::chain::MAX_COAST,
+            Self::Brisk => sx_damiao_can::chain::BRISK_COAST,
+        }
+    }
+}
+
 /// How a body is opened beyond its drive, commissioning and calibrations.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OpenOptions<'a> {
@@ -1149,6 +1181,8 @@ pub struct OpenOptions<'a> {
     /// bindings the registry has not verified on the robot (its ids, side, sign or zero).
     /// Every provisional port not named here is left closed, its axes outside the body.
     pub allow_provisional: &'a [&'a str],
+    /// How close to its gains the body moves; Standard unless the robot says otherwise.
+    pub motion: Motion,
 }
 
 /// The provisional ports opening `drive`'s body with `options` leaves closed, in state order.
@@ -1202,12 +1236,19 @@ fn plan(
         return Err(OpenError::RailPort(selector.clone()));
     }
     let mut closed = opener.closed(drive, options)?;
-    let parts = opener.parts(
+    let mut parts = opener.parts(
         drive,
         calibrations,
         &mut closed,
         &commissioning.out_of_service,
     )?;
+    for (_, part, _) in &mut parts {
+        if let Part::Damiao(motors) = part {
+            for motor in motors {
+                motor.coast = options.motion.coast();
+            }
+        }
+    }
     Ok(Plan { closed, parts })
 }
 
@@ -1742,8 +1783,14 @@ pub struct Setup<'a> {
 }
 
 /// What one open bus is, beyond its port: the joints it drives in service, each serial
-/// servo's calibration, and where its out-of-service axes sit in its whole vector.
-type BusShape = (Vec<String>, Vec<Option<MotorCalibration>>, Vec<usize>);
+/// servo's calibration, where its out-of-service axes sit in its whole vector, and each Damiao
+/// axis's coast bound (its bits; [`Motion`]).
+type BusShape = (
+    Vec<String>,
+    Vec<Option<MotorCalibration>>,
+    Vec<usize>,
+    Vec<u64>,
+);
 
 impl Part {
     fn calibrations(&self) -> Vec<Option<MotorCalibration>> {
@@ -1764,12 +1811,17 @@ fn shape(part: &Part, mask: &Mask) -> BusShape {
             .collect(),
         part.calibrations(),
         mask.out.clone(),
+        match part {
+            Part::Damiao(motors) => motors.iter().map(|motor| motor.coast.to_bits()).collect(),
+            Part::Feetech { .. } | Part::Dynamixel { .. } => Vec::new(),
+        },
     )
 }
 
 /// The ports of `drive`'s opened body whose bus opens differently with `after` than it did
 /// with `before`, in the body's order: a servo's calibration changed, an axis taken out of or
-/// put back into service, or the rails changed (which may derate any bus, so every port).
+/// put back into service, the body's [`Motion`] changed (its Damiao buses), or the rails
+/// changed (which may derate any bus, so every port).
 /// Ports that share a CAN bridge change together, since their bridge is opened once.
 ///
 /// Everything [`open_with`] refuses before a bridge is opened is refused here for `after`, so

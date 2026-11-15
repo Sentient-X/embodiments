@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use sx_damiao_can::chain::{DamiaoChain, MAX_COAST};
+use sx_damiao_can::chain::{BRISK_COAST, DamiaoChain, MAX_COAST};
 use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::{
@@ -56,7 +56,15 @@ impl Rig {
 
     /// The same at `share` of the rated limits.
     fn new_at(share: f64) -> Self {
-        let axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+        Self::with_coast(share, MAX_COAST)
+    }
+
+    /// The same, every axis opened with the coast bound `coast` (Brisk: [`BRISK_COAST`]).
+    fn with_coast(share: f64, coast: f64) -> Self {
+        let mut axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+        for axis in &mut axes {
+            axis.coast = coast;
+        }
         let bus = Sim::for_axes(&axes).with_mit_dynamics().with_manual_time();
         let chain = DamiaoChain::open(bus.clone(), axes).expect("opens");
         let limits = AxisLimits::rated_all(chain.axes(), share).expect("rated");
@@ -120,7 +128,14 @@ fn a_full_speed_move_on_the_mit_law_tracks_and_settles() {
 /// Drive `joint` toward the far end of its range until it moves at its governed top speed,
 /// then stall the host past the watchdog: how far it went past the last position sent.
 fn coast_at_top_speed(joint: &str) -> (f64, f64) {
-    let mut rig = Rig::new();
+    let (top, farthest, _) = coast_at_top_speed_with(joint, MAX_COAST);
+    (top, farthest)
+}
+
+/// [`coast_at_top_speed`] with every axis at the coast bound `coast`; also how long after the
+/// last frame the joint came within 5 mrad of where it ends (seconds).
+fn coast_at_top_speed_with(joint: &str, coast: f64) -> (f64, f64, f64) {
+    let mut rig = Rig::with_coast(1.0, coast);
     let index = rig.index(joint);
     let top = rig.governor.limits()[index].max_speed;
     let mut target = rig.governor.last_observed().expect("rest").to_vec();
@@ -154,11 +169,22 @@ fn coast_at_top_speed(joint: &str) -> (f64, f64) {
     // The host stalls: nothing more is sent until the watchdog has disabled the motors.
     let last = rig.governor.sent().expect("sent")[index];
     let mut farthest = f64::NEG_INFINITY;
+    let mut path = Vec::new();
     for _ in 0..(STALL.as_millis() / 5) {
         rig.pass(Duration::from_millis(5));
-        farthest = farthest.max(sign * (rig.q(index) - last));
+        let q = rig.q(index);
+        path.push(q);
+        farthest = farthest.max(sign * (q - last));
     }
-    (top, farthest)
+    // The hold: the first moment after which the joint stays within 5 mrad of where it is
+    // when the watchdog has long fired.
+    let end = *path.last().expect("a path");
+    let settled = path
+        .iter()
+        .rposition(|q| (q - end).abs() > 0.005)
+        .map_or(0, |i| i + 1);
+    let settled = f64::from(u32::try_from(settled).expect("a short path"));
+    (top, farthest, 0.005 * settled)
 }
 
 /// A host that stops commanding at a joint's top governed speed: each motor holds its last
@@ -191,6 +217,78 @@ fn a_stalled_host_leaves_a_joint_at_top_speed_within_two_coasts_of_its_last_posi
             "{joint} at {top} rad/s coasted {coast} rad past its last position"
         );
     }
+}
+
+/// Brisk (every axis at [`BRISK_COAST`]): its frames carry up to twice the planned velocity at
+/// Standard's speeds. A host that stops commanding at each arm joint's top speed leaves it within
+/// two Brisk coasts of its last position, the elbow within one; printed per joint with how long it
+/// takes to hold, and what that is at the tool on the longest lever the joint carries (the arm
+/// straight: shoulder 0.75 m, upper-arm yaw 0.60 m, elbow and forearm yaw 0.45 m, wrist 0.25 m).
+#[test]
+fn brisk_a_stalled_host_leaves_each_arm_joint_within_two_brisk_coasts() {
+    let lever = |joint: &str| {
+        if joint.contains("shoulder") {
+            0.75
+        } else if joint.contains("upper_arm") {
+            0.60
+        } else if joint.contains("elbow") || joint.contains("forearm") {
+            0.45
+        } else {
+            0.25
+        }
+    };
+    for joint in [
+        SHOULDER,
+        "left_shoulder_roll_joint",
+        "right_shoulder_roll_joint",
+        "left_upper_arm_yaw_joint",
+        ELBOW,
+        "left_forearm_yaw_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_roll_joint",
+    ] {
+        let (top0, coast0, hold0) = coast_at_top_speed_with(joint, MAX_COAST);
+        let (top, coast, hold) = coast_at_top_speed_with(joint, BRISK_COAST);
+        println!(
+            "{joint}: standard {top0:.2} rad/s coasts {coast0:.3} rad ({:.0} mm), holds after \
+             {hold0:.2} s; brisk {top:.2} rad/s coasts {coast:.3} rad ({:.0} mm), holds after \
+             {hold:.2} s",
+            1000.0 * coast0.max(0.0) * lever(joint),
+            1000.0 * coast.max(0.0) * lever(joint),
+        );
+        assert!(
+            coast <= 2.0 * BRISK_COAST + 0.02,
+            "{joint} at {top} rad/s coasted {coast} rad past its last position"
+        );
+        if joint == ELBOW {
+            assert!(coast <= BRISK_COAST + 0.03, "the elbow coasted {coast} rad");
+        }
+    }
+}
+
+/// Brisk: the elbow's top speed is Standard's, `(MAX_COAST + MAX_LAG) kp / kd`, 1.31 rad/s, now
+/// with its whole planned velocity in the frame; a move at it tracks and settles.
+#[test]
+fn brisk_a_full_speed_move_on_the_mit_law_tracks_and_settles() {
+    let mut rig = Rig::with_coast(1.0, BRISK_COAST);
+    let elbow = rig.index(ELBOW);
+    let ceiling = (MAX_COAST + sx_damiao_can::chain::MAX_LAG) * 30.492 / 4.655;
+    assert!((rig.governor.limits()[elbow].max_speed - ceiling).abs() < 1e-9);
+    let mut target = rig.governor.last_observed().expect("rest").to_vec();
+    target[elbow] -= 1.2;
+    for _ in 0..150 {
+        rig.governor
+            .command(&target)
+            .expect("no tracking stop at Brisk's full speed on the MIT law");
+        rig.pass(MAX_STEP_INTERVAL);
+    }
+    let q = rig.q(elbow);
+    assert!(
+        (q - target[elbow]).abs() < 0.06,
+        "settled at {q}, not {}",
+        target[elbow]
+    );
+    assert!(rig.governor.stop().is_proven());
 }
 
 /// A joint blocked while moving slowly (a hand, the coffee machine) is caught by about the
@@ -245,7 +343,17 @@ fn a_slow_joint_that_is_blocked_stops_at_the_at_rest_bound() {
 /// (without the brake, from 1.24 rad/s on 1.2 N m of friction, 0.2 rad).
 #[test]
 fn a_stop_at_speed_brakes_before_it_disables() {
-    let mut rig = Rig::new_at(0.25);
+    brakes_before_it_disables(0.25, MAX_COAST);
+}
+
+/// Brisk at full speed: the brake holds the shoulder within one Brisk coast.
+#[test]
+fn brisk_a_stop_at_full_speed_brakes_before_it_disables() {
+    brakes_before_it_disables(1.0, BRISK_COAST);
+}
+
+fn brakes_before_it_disables(share: f64, coast: f64) {
+    let mut rig = Rig::with_coast(share, coast);
     let shoulder = rig.index(SHOULDER);
     let mut target = rig.governor.last_observed().expect("rest").to_vec();
     let rest = target[shoulder];
@@ -275,8 +383,9 @@ fn a_stop_at_speed_brakes_before_it_disables() {
         rig.pass(Duration::from_millis(5));
         farthest = farthest.max(rig.q(shoulder) - at_stop);
     }
+    println!("stopped at {top:.2} rad/s, the shoulder went {farthest:.3} rad on");
     assert!(
-        farthest <= MAX_COAST + 0.02,
+        farthest <= coast + 0.02,
         "stopped at {top} rad/s, the shoulder went {farthest} rad on"
     );
 }

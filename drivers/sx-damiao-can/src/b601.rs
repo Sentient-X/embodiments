@@ -90,6 +90,7 @@ fn joint(axis: BoundAxis, &(_, (soft_lower, soft_upper), kp, kd): &Joint) -> Dam
         motor_upper,
         // Seeed's controller leaves the motors' TIMEOUT register as it finds it.
         can_timeout: None,
+        coast: crate::chain::MAX_COAST,
         reports_enable_state: true,
     }
 }
@@ -139,6 +140,7 @@ pub fn b601_gripper(drive: &InstanceDrive) -> Result<DamiaoAxis, BodyError> {
         motor_lower: GRIPPER_MOTOR_OPEN_RAD,
         motor_upper: 0.0,
         can_timeout: None,
+        coast: crate::chain::MAX_COAST,
         reports_enable_state: true,
     })
 }

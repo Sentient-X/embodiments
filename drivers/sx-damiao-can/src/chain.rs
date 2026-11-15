@@ -210,7 +210,28 @@ fn accepted_vmax(model: DmMotorType) -> Vec<f64> {
 /// static upper body): with planned velocity `v` it settles `kd v / kp` past the position, so
 /// the planned velocity sent is capped at `MAX_COAST kp / kd` (refute of 2026-10-30: uncapped,
 /// the elbow coasted 0.58 rad and the left upper-arm yaw 0.79 rad at full speed).
+///
+/// It is each axis's coast bound by default ([`DamiaoAxis::coast`], Standard); a robot may open
+/// with up to [`BRISK_COAST`].
 pub const MAX_COAST: f64 = 0.1;
+
+/// The largest coast bound an axis opens with ([`DamiaoAxis::coast`], a robot's Brisk motion),
+/// rad at the joint: twice [`MAX_COAST`]. It doubles the planned velocity a frame carries, so the
+/// elbows and arm yaws carry their whole planned velocity up to their top speed instead of the
+/// motor's `kd` dragging them above half of it. The speed ceilings stay [`MAX_COAST`]'s
+/// ([`ActuatorChain::tracking_ceilings`]), so the speeds and the tracking bound are Standard's.
+/// The bound gives way as a joint falls behind its target, from the whole of it at `2 MAX_LAG -
+/// MAX_COAST` of error to [`MAX_COAST`]'s at `2 MAX_LAG`, the governor's at-rest tracking bound,
+/// so a blocked joint pushes `kp e + kd v_des` at most as hard as at Standard (refute of
+/// 2026-11-16: without it the elbow's push before the trip rose from 11.6 to 14.6 N m; the
+/// shoulder's is 17.9 N m with its `kd v_des`). In free motion the error stays under that (0.092
+/// rad at most in five real sessions), so the whole bound is sent. What it gives up: a host
+/// that stops commanding mid-move lets a DM4340 joint, whose clip bound before, run on up to 82
+/// mm at the tool (upper-arm yaw; elbow 69 mm, forearm yaw 68 mm) against about 24 mm at
+/// Standard, holding after 0.47-0.58 s: past the solve's 10 mm collision margin, so people stay
+/// out of forearm reach. The shoulders, whose clip never bound, are unchanged. Acceleration,
+/// rise time, the range-end allowance for gravity and the brake are unchanged.
+pub const BRISK_COAST: f64 = 0.2;
 
 /// The farthest the capped planned velocity may let a joint lag the position sent at its
 /// speed ceiling, rad: half the governor's at-rest tracking bound, so the stop still has room
@@ -234,6 +255,12 @@ pub struct DamiaoAxis {
     /// How long the enabled motor may hear no command before it disables itself, written to
     /// its `TIMEOUT` register at open; `None` leaves the register as the motor holds it.
     pub can_timeout: Option<Duration>,
+    /// How far past its last position the joint may settle when commands stop mid-move, rad at
+    /// the joint: the planned velocity a frame carries is capped at `coast kp / kd`, and above
+    /// [`MAX_COAST`] that cap gives way to the joint's error ([`BRISK_COAST`]). The speed
+    /// ceilings stay [`MAX_COAST`]'s. Above 0 and at most [`BRISK_COAST`];
+    /// [`MAX_COAST`] unless the robot opens Brisk.
+    pub coast: f64,
     /// Whether the motor's feedback state field reports enable and disable. Firmware on the
     /// static upper body's motors answers state 1 whether enabled or not (verified 2026-10-25:
     /// a wrist motor held at kp 5 and released on disable, LED green then red, while the field
@@ -388,6 +415,8 @@ pub enum DamiaoChainError {
     Ids(u16),
     #[error("bus_id {0} has MIT gains outside kp 0..=500, kd 0..=5")]
     Gains(u16),
+    #[error("bus_id {0} has a coast bound outside 0 < coast <= BRISK_COAST (0.2 rad)")]
+    Coast(u16),
     #[error("bus_id {0} has a motor range that is not finite lower < upper inside its Q_MAX")]
     MotorRange(u16),
     #[error("bus_id {0} did not confirm MIT control mode")]
@@ -1224,9 +1253,10 @@ impl<P: CanPort> DamiaoChain<P> {
         &self,
         index: usize,
         target: f64,
+        observed: Option<f64>,
         wanted: Feedforward,
     ) -> ((f64, f64), Feedforward) {
-        let DamiaoAxis { kp, kd, .. } = self.motors[index];
+        let DamiaoAxis { kp, kd, coast, .. } = self.motors[index];
         let axis = &self.motors[index].axis;
         let gain = axis.actuator_from_joint(axis.zero + 1.0);
         let FeedforwardLimit { velocity, torque } = self.feedforward_limits[index];
@@ -1240,13 +1270,30 @@ impl<P: CanPort> DamiaoChain<P> {
         } else {
             wanted.gravity.clamp(-effort.abs(), effort.abs())
         };
-        // The coast past the last position if commands stop: `kd dq / kp`, at most MAX_COAST.
+        // The coast past the last position if commands stop: `kd dq / kp`, at most the axis's
+        // coast bound. Above MAX_COAST (Brisk) the bound gives way to the joint's error toward
+        // where it is going, so a blocked joint pushes `kp e + kd dq` no harder than at
+        // Standard: the whole bound while it lags at most `2 MAX_LAG - MAX_COAST`, MAX_COAST's
+        // from `2 MAX_LAG`, the governor's at-rest tracking bound, where its push would trip.
+        let wanted_dq = (gain * speed).clamp(-v_max, v_max);
+        let coast = if coast > MAX_COAST {
+            let lag = observed.map_or(f64::INFINITY, |at| {
+                (target - at) * wanted_dq.signum() / gain.abs()
+            });
+            if lag.is_finite() {
+                (MAX_COAST + 2.0 * MAX_LAG - lag).clamp(MAX_COAST, coast)
+            } else {
+                MAX_COAST
+            }
+        } else {
+            coast
+        };
         let coast = if kd > 0.0 {
-            MAX_COAST * gain.abs() * kp / kd
+            coast * gain.abs() * kp / kd
         } else {
             v_max
         };
-        let mut dq = (gain * speed).clamp(-v_max, v_max).clamp(-coast, coast);
+        let mut dq = wanted_dq.clamp(-coast, coast);
         let tau_all = (effort / gain).clamp(-t_max, t_max);
         let mut held = (gravity / gain).clamp(-t_max, t_max);
         let mut rest = tau_all - held;
@@ -1324,12 +1371,16 @@ impl<P: CanPort> DamiaoChain<P> {
             .map(|(motor, joint)| motor.axis.actuator_from_joint(*joint))
             .collect();
         // Each axis' feed-forward in the motor's coordinates, and what that is at the joint.
+        let stands = self.feedback().ok();
         let mut sent: Axes<(f64, f64)> = Axes::new();
         let mut applied: Axes<Feedforward> = Axes::new();
         for index in 0..self.motors.len() {
             let (frame, at_joint) = self.actuator_feedforward(
                 index,
                 targets[index],
+                stands
+                    .as_ref()
+                    .map(|feedback| f64::from(feedback[index].position)),
                 feedforward.map_or(Feedforward::default(), |all| all[index]),
             );
             sent.push(frame);
@@ -1513,6 +1564,7 @@ impl<P: CanPort> DamiaoChain<P> {
             let ((_, tau), applied) = self.actuator_feedforward(
                 index,
                 at,
+                None,
                 Feedforward {
                     velocity: 0.0,
                     torque: gravity,
@@ -1809,6 +1861,9 @@ pub(crate) fn validate(motor: &DamiaoAxis, ids: &mut Vec<u16>) -> Result<(), Dam
     if !((0.0..=KP_MAX).contains(&motor.kp) && (0.0..=KD_MAX).contains(&motor.kd)) {
         return Err(DamiaoChainError::Gains(bus_id));
     }
+    if !(motor.coast > 0.0 && motor.coast <= BRISK_COAST) {
+        return Err(DamiaoChainError::Coast(bus_id));
+    }
     if motor
         .can_timeout
         .is_some_and(|timeout| timeout_counts(timeout).is_none())
@@ -1863,13 +1918,15 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 let gain = axis.actuator_from_joint(axis.zero + 1.0);
                 let kp = motor.kp * gain * gain;
                 let inertia = axis.motion.inertia;
-                let lag = (MAX_COAST + MAX_LAG) * motor.kp / motor.kd;
+                // The ceilings are Standard's at every coast bound: a wider bound carries more of
+                // the planned velocity, never a faster joint (BRISK_COAST).
+                let coast = MAX_COAST;
+                let lag = (coast + MAX_LAG) * motor.kp / motor.kd;
                 // The held position stops the joint like a spring, until its torque saturates at
                 // the motor's peak: then no faster than the peak decelerates within MAX_COAST.
                 let peak = axis.binding.model.rating().peak_torque_nm * gain.abs();
                 let momentum = if inertia > 0.0 {
-                    (MAX_COAST * (kp / inertia).sqrt())
-                        .min((2.0 * MAX_COAST * peak / inertia).sqrt())
+                    (coast * (kp / inertia).sqrt()).min((2.0 * coast * peak / inertia).sqrt())
                 } else {
                     f64::INFINITY
                 };
