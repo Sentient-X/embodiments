@@ -1145,8 +1145,11 @@ pub fn damiao_motors(drive: &InstanceDrive, port: &str) -> Result<Vec<DamiaoAxis
 /// How much of its planned velocity a body's Damiao motors are sent: each Damiao axis's coast
 /// bound (`sx_damiao_can::chain::DamiaoAxis::coast`), how far a joint may settle past its last
 /// command when the host stops commanding, which caps the planned velocity its MIT frame
-/// carries. The speed ceilings, the tracking bound and the force a blocked joint pushes with are
-/// the same at either. Serial servos move at their own registers either way. A robot's setting,
+/// carries. The speed ceilings and the tracking bound are the same at either, and a blocked
+/// joint pushes at Brisk at most as hard as at Standard (the bound gives way to its error). A
+/// host that stalls mid-move lets a DM4340 joint run on up to 82 mm at the tool at Brisk, about
+/// 24 mm at Standard (`sx_damiao_can::chain::BRISK_COAST`). Serial servos move at their own
+/// registers either way. A robot's setting,
 /// never a tool's flag: the station reads it from the robot directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Motion {
@@ -1154,9 +1157,9 @@ pub enum Motion {
     #[default]
     Standard,
     /// The coast bound `BRISK_COAST`, 0.2 rad: the elbows and arm yaws carry their whole planned
-    /// velocity up to their top speed, so they keep up on fast moves; a stalled host lets them
-    /// run on up to about 0.15 rad before they hold (robot-bench `speed_limits.py`,
-    /// `mit_dynamics` `brisk_*`).
+    /// velocity up to their top speed, so they keep up on fast moves, while a blocked one pushes
+    /// no harder than at Standard; a stalled host lets them run on up to about 0.15 rad (82 mm
+    /// at the tool) before they hold (robot-bench `speed_limits.py`, `mit_dynamics` `brisk_*`).
     Brisk,
 }
 

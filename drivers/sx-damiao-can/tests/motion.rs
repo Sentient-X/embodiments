@@ -3,7 +3,7 @@
 //! up to twice the planned velocity, and every ceiling stays Standard's.
 
 use serde_json::Value;
-use sx_damiao_can::chain::{BRISK_COAST, DamiaoAxis, DamiaoChain, MAX_COAST};
+use sx_damiao_can::chain::{BRISK_COAST, DamiaoAxis, DamiaoChain, MAX_COAST, MAX_LAG};
 use sx_damiao_can::sim::Sim;
 use sx_damiao_can::static_upper_body::STATIC_UPPER_BODY;
 use sx_embodiment_drivers::{ActuatorChain, Feedforward, FeedforwardLimit, InstanceDrive};
@@ -159,8 +159,14 @@ fn brisk_carries_twice_the_planned_velocity_and_keeps_every_ceiling() {
         .iter()
         .map(|range| f64::midpoint(range.lower, range.upper))
         .collect();
+    // The joints are first brought to the targets at rest: Brisk's bound is for a joint
+    // tracking its target, and gives way to one far behind it.
+    let still = vec![Feedforward::default(); width];
     for chain in [&mut slow, &mut brisk] {
         chain.set_feedforward_limits(&bound).expect("bounds");
+        chain
+            .command_with(&targets, &still)
+            .expect("to the targets");
         chain.command_with(&targets, &wanted).expect("command");
     }
     let (a, b) = (slow.applied_feedforward(), brisk.applied_feedforward());
@@ -196,6 +202,82 @@ fn a_coast_bound_outside_its_range_is_refused_at_open() {
         assert!(
             DamiaoChain::open(Sim::for_axes(&axes), axes).is_err(),
             "coast {coast} opened"
+        );
+    }
+}
+
+/// A joint blocked by what it met (a person, a table) pushes `kp e + kd v_des` into it, `e` its
+/// error toward its target: at joint scale, `e + (kd / kp) v_des` times `kp`. Brisk's doubled
+/// planned velocity gives way as `e` grows, so the push never exceeds the most Standard pushes
+/// before the governor's at-rest tracking bound (`2 MAX_LAG`) trips it, and from that bound on
+/// it is Standard's, error for error.
+#[test]
+fn a_blocked_joint_pushes_no_harder_at_brisk_than_at_standard() {
+    let standard = axes(None);
+    let width = standard.len();
+    let push = |coast: f64, index: usize, error: f64| {
+        let axes = axes(Some(coast));
+        let bus = Sim::for_axes(&axes);
+        let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+        chain
+            .set_feedforward_limits(&vec![
+                FeedforwardLimit {
+                    velocity: Some(10.0),
+                    torque: None,
+                };
+                width
+            ])
+            .expect("bounds");
+        let middle: Vec<f64> = chain
+            .commandable()
+            .iter()
+            .map(|range| f64::midpoint(range.lower, range.upper))
+            .collect();
+        chain
+            .command_with(&middle, &vec![Feedforward::default(); width])
+            .expect("to the middle");
+        // Blocked where it stands; the target and the planned velocity run on past it.
+        let motor = &axes[index];
+        let blocked = motor.axis.actuator_from_joint(middle[index]);
+        bus.state()
+            .motors
+            .get_mut(&motor.axis.binding.bus_id)
+            .expect("the motor")
+            .q = blocked;
+        let _ = chain.read_positions();
+        let mut targets = middle.clone();
+        targets[index] += error;
+        let mut wanted = vec![Feedforward::default(); width];
+        wanted[index].velocity = 10.0;
+        chain.command_with(&targets, &wanted).expect("command");
+        let v = chain.applied_feedforward()[index].velocity;
+        error + motor.kd / motor.kp * v
+    };
+    for (index, motor) in standard.iter().enumerate() {
+        let name = &motor.axis.joint;
+        let most = push(MAX_COAST, index, 2.0 * MAX_LAG);
+        for step in 0..=30_u32 {
+            let error = f64::from(step) * 0.01;
+            let (slow, brisk) = (
+                push(MAX_COAST, index, error),
+                push(BRISK_COAST, index, error),
+            );
+            // Within one 12-bit velocity code of the frame (0.2 mrad of push at the upper-arm yaw).
+            assert!(
+                brisk <= slow.max(most) + 5e-4,
+                "{name} at {error}: {brisk} > {slow}, {most}"
+            );
+            if error >= 2.0 * MAX_LAG {
+                assert!(
+                    (brisk - slow).abs() < 5e-4,
+                    "{name} at {error}: {brisk} != {slow}"
+                );
+            }
+        }
+        // Tracking (no error), Brisk carries more of the planned velocity wherever the clip bound.
+        assert!(
+            push(BRISK_COAST, index, 0.0) >= push(MAX_COAST, index, 0.0) - 1e-9,
+            "{name}"
         );
     }
 }
