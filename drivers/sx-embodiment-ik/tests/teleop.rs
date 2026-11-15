@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use sx_embodiment_ik::teleop::{
-    Clutch, GLITCH_HOLD, MAX_HANDS, REFERENCE_GAP, STALL, STEADY_S, TELEOP_SCHEMA, Targets, Teleop,
-    TeleopConfig, TeleopStep,
+    CLUTCH_RAMP_S, CLUTCH_SETTLE_S, Clutch, GLITCH_HOLD, MAX_HANDS, REFERENCE_GAP, STALL, STEADY_S,
+    TELEOP_SCHEMA, Targets, Teleop, TeleopConfig, TeleopStep,
 };
 use sx_embodiment_ik::{READING_JITTER, Solve, ToolSpeed};
 use sx_frames::{Pose, QuaternionLayout};
@@ -292,7 +292,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
         tcp: sx_embodiment_ik::teleop::hands([Some(hand), None]),
         ..Targets::default()
     };
-    clutch.apply(&tools, &mut targets);
+    clutch.apply(&tools, &mut targets, DT);
     let held = targets.tcp[0].expect("left");
     assert!((0..3).all(|k| (held.translation_m[k] - left.translation_m[k]).abs() < 1e-12));
     assert!(
@@ -302,6 +302,16 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
         ) < 1e-9
     );
     assert!(clutch.holds(0) && !clutch.holds(1));
+    // The hold eases in while the hand stands still.
+    let mut eased_s = 0.0;
+    while eased_s <= CLUTCH_SETTLE_S + CLUTCH_RAMP_S + DT {
+        eased_s += DT;
+        let mut still = Targets {
+            tcp: sx_embodiment_ik::teleop::hands([Some(hand), None]),
+            ..Targets::default()
+        };
+        clutch.apply(&tools, &mut still, DT);
+    }
     // The hand moves 5 cm up and turns 0.2 rad about the robot's z: the gripper does the same.
     let turn = [0.0, 0.0, 0.1_f64.sin(), 0.1_f64.cos()];
     let moved = Pose {
@@ -312,7 +322,7 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
         tcp: sx_embodiment_ik::teleop::hands([Some(moved), None]),
         ..Targets::default()
     };
-    clutch.apply(&tools, &mut targets);
+    clutch.apply(&tools, &mut targets, DT);
     let followed = targets.tcp[0].expect("left");
     assert!((followed.translation_m[2] - (left.translation_m[2] + 0.05)).abs() < 1e-12);
     assert!(
@@ -323,18 +333,87 @@ fn the_clutch_takes_hold_where_the_robot_stands_and_moves_the_gripper_as_the_han
     );
     // The hand drops out of tracking: it lets go, and takes hold afresh where it is seen next.
     let mut gone = Targets::default();
-    clutch.apply(&tools, &mut gone);
+    clutch.apply(&tools, &mut gone, DT);
     assert!(!clutch.holds(0));
     let mut back = Targets {
         tcp: sx_embodiment_ik::teleop::hands([Some(moved), None]),
         ..Targets::default()
     };
-    clutch.apply(&tools, &mut back);
+    clutch.apply(&tools, &mut back, DT);
     let again = back.tcp[0].expect("left");
     assert!((0..3).all(|k| (again.translation_m[k] - left.translation_m[k]).abs() < 1e-12));
     // Released (a regrip): the next target takes hold afresh too.
     clutch.release();
     assert!(!clutch.holds(0));
+}
+
+/// A press's first readings are not a hand's motion (Spark sessions 41eb2d39 and b968c187: the
+/// second reading 58-136 ms after the first and 35-88 mm from it). Taken at once on a 90/s stream
+/// the step threw the tool 76 mm past its target at 1.34 m/s. A new hold eases in instead: a step
+/// inside its first `CLUTCH_SETTLE_S` moves nothing, then the gripper blends onto the hand over
+/// `CLUTCH_RAMP_S` at a bounded speed, and ends exactly where the hand's whole motion since the
+/// press takes it, so none of the operator's motion is lost.
+#[test]
+fn a_press_step_eases_in_and_no_motion_is_lost() {
+    let mut solve = teleop();
+    let q = start(&solve);
+    let tools = solve.tool_poses(&q);
+    let left = tools[0].expect("left gripper");
+    let at = |x: f64| Pose {
+        translation_m: [0.3 + x, -0.2, 0.9],
+        rotation: sx_frames::Quaternion::IDENTITY,
+    };
+    let mut clutch = Clutch::default();
+    let apply = |clutch: &mut Clutch, x: f64| {
+        let mut t = Targets {
+            tcp: sx_embodiment_ik::teleop::hands([Some(at(x)), None]),
+            ..Targets::default()
+        };
+        clutch.apply(&tools, &mut t, DT);
+        t.tcp[0].expect("held").translation_m[0] - left.translation_m[0]
+    };
+    // The press: held at 0, then 88 mm away within 130 ms, the 41eb2d39 right hand's step.
+    assert!(apply(&mut clutch, 0.0).abs() < 1e-12);
+    let burst = 13_u32; // ticks of DT
+    assert!(f64::from(burst) * DT < CLUTCH_SETTLE_S);
+    let mut x = 0.0;
+    for _ in 0..burst {
+        x += 0.088 / f64::from(burst);
+        assert!(
+            apply(&mut clutch, x).abs() < 1e-12,
+            "a press step moved the gripper"
+        );
+    }
+    // Then the hand moves on at 0.2 m/s: the gripper eases onto it under 0.7 m/s, never past
+    // it, and from then on follows it exactly.
+    let mut last = 0.0;
+    let mut fastest = 0.0_f64;
+    let mut eased_s = 0.0;
+    while eased_s <= CLUTCH_SETTLE_S + CLUTCH_RAMP_S + DT {
+        eased_s += DT;
+        x += 0.2 * DT;
+        let now = apply(&mut clutch, x);
+        fastest = fastest.max((now - last) / DT);
+        assert!(now <= x + 1e-12, "the gripper went past the hand");
+        last = now;
+    }
+    assert!(fastest < 0.7, "eased in at {fastest} m/s");
+    assert!(
+        (last - x).abs() < 1e-12,
+        "lost {} m of the hand's motion",
+        x - last
+    );
+    x += 0.01;
+    assert!((apply(&mut clutch, x) - x).abs() < 1e-12);
+    // A hand lost and seen again in the same engage takes hold at once and is followed at once;
+    // the next engage eases in again.
+    let mut gone = Targets::default();
+    clutch.apply(&tools, &mut gone, DT);
+    assert!(apply(&mut clutch, x).abs() < 1e-12);
+    assert!((apply(&mut clutch, x + 0.02) - 0.02).abs() < 1e-12);
+    clutch.release();
+    assert!(apply(&mut clutch, x).abs() < 1e-12);
+    assert!(apply(&mut clutch, x + 0.02).abs() < 1e-12);
 }
 
 /// The angle between two unit quaternions' rotations, radians.

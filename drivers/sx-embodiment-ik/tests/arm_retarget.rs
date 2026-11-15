@@ -189,7 +189,7 @@ fn clutched_run(
         } else {
             [None; MAX_HANDS]
         };
-        clutch.apply(&tools, &mut targets);
+        clutch.apply(&tools, &mut targets, DT);
         step_once(&mut teleop, &mut q, &targets);
         let now = teleop.tool_poses(&q)[0].expect("left tool").translation_m;
         farthest = farthest.max(norm(sub(now, tool.translation_m)) * 1e3);
@@ -379,7 +379,7 @@ fn the_clutch_holds_a_hand_with_an_arm_as_any_hand() {
         ..Targets::default()
     };
     assert!(clutch.takes_hold(&targets));
-    clutch.apply(&tools, &mut targets);
+    clutch.apply(&tools, &mut targets, DT);
     let held = targets.tcp[0].expect("held");
     for k in 0..3 {
         assert!((held.translation_m[k] - gripper.translation_m[k]).abs() < 1e-12);
@@ -389,7 +389,7 @@ fn the_clutch_holds_a_hand_with_an_arm_as_any_hand() {
         ..Targets::default()
     };
     assert!(!clutch.takes_hold(&targets));
-    clutch.apply(&[None; MAX_HANDS], &mut targets);
+    clutch.apply(&[None; MAX_HANDS], &mut targets, DT);
     assert_eq!(targets.tcp[0], Some(held));
 }
 

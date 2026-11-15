@@ -549,7 +549,7 @@ fn main() {
         let mut asked = [None; MAX_HANDS];
         if driven {
             let tools = solve.tool_poses(&read);
-            clutch.apply(&tools, &mut targets);
+            clutch.apply(&tools, &mut targets, dt);
             // The head as a pose: its translation from where the camera stood at the hold,
             // moved as the operator's head has moved since; its rotation the operator's own
             // (the camera looks where they look, level as they hold their head).
