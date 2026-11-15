@@ -279,6 +279,65 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-35": QuestApkBuildId(
             "sha256:20c3c9ccd6c630b28fea440d6dda320c488ae624020101407ccc7994f5f8cc74"
         ),
+        # Builds 36-67 went to pods as HIL trials, unregistered (sx#4210). The entries below
+        # are the builds pod5's staged episodes carry as episode.json `quest_apk_build_id`
+        # (read on the headset 2026-11-15: 228 seals pending "not on the accepted build
+        # list"), plus 1.5.0-72, the build now installed on pod5.
+        #
+        # 2026-10-22, OpenQuestCapture 1.5.0 build 58 (OQC cfb4546, QuestCameraLib 51a4868,
+        # libsx_rig.so c6678356), the archived release: pod4 and pod5 recorded on it; on pod5
+        # 196 episodes, 20261102_180514 to 20261105_195648.
+        "1.5.0-58": QuestApkBuildId(
+            "sha256:799ad8f2baa39e4d07335f6dc4499f404aa809931e5cc1d1841d95809de25783"
+        ),
+        # 2026-11-05, build 58 with only libsx_rig.so rebuilt (sx 9c60a11b6a, packaged
+        # 1ffc1159): pod5's storage/backlog HIL trial, bounded per-camera and per-encoder
+        # writer queues. Recorded pod5 20261105_212529 to 20261105_215449 (4).
+        "1.5.0-58-storage-2a761d61": QuestApkBuildId(
+            "sha256:2a761d6117c310aaffd24adbf02a969d3cd7492137657ad80141329b850a9178"
+        ),
+        # 2026-11-05, build 58 with only libsx_rig.so rebuilt (sx 9c60a11b6a): pod5's
+        # temporary fixed-exposure diagnostic probe. Recorded pod5 20261105_221448 (1).
+        "1.5.0-58-exposure-probe-c07ce691": QuestApkBuildId(
+            "sha256:c07ce69120c8664ce703ad1087bf831ac9cceee589ce0d1d69fce00c7a47ab45"
+        ),
+        # 2026-11-05, build 58 with only libsx_rig.so rebuilt (sx 9c60a11b6a): pod5's
+        # automatic brightness and backlog correction HIL trial. Recorded pod5
+        # 20261105_223222 to 20261106_005423 (6).
+        "1.5.0-58-auto-brightness-85af646c": QuestApkBuildId(
+            "sha256:85af646c5c2810a379dd5e6ff4a0da24f6cbe15f0a6e589ead35ef364fcd7c02"
+        ),
+        # 2026-10-29, OpenQuestCapture 1.5.0 build 67 (OQC 5b31ccf, QuestCameraLib f66ab1e,
+        # libsx_rig.so 967144db), the archived release. Recorded pod5 20261106_012936 to
+        # 20261106_125125 (4).
+        "1.5.0-67": QuestApkBuildId(
+            "sha256:0b0694f11a5949bd0f1e5f887800741c673ed698736871055fa35890e626f4b4"
+        ),
+        # 2026-11-06, build 67 with only libsx_rig.so rebuilt (sx 9c0b8959dd, embodiments
+        # b15c4b5, packaged bd88fc8d): pod5's local exposure patch, metering frames older than
+        # the last control readback are rejected. Recorded pod5 20261106_182352 to
+        # 20261109_132228 (83).
+        "1.5.0-67-exposure-313d65ab": QuestApkBuildId(
+            "sha256:313d65abf450320b6ed1ca23634d8d3e7126713796ad66f07c889f58fc681305"
+        ),
+        # 2026-11-10, build 67 with libsx_rig.so d84cf8fe (the 11-09 quality candidate's) and
+        # the C# chain rebuilt from OQC 5b31ccf plus a patch: pod5's USB-repair HIL trial.
+        # Recorded pod5 20261110_171816 to 20261112_174440 (88).
+        "1.5.0-67-usb-repair-ea6de61f": QuestApkBuildId(
+            "sha256:ea6de61f6b8e099e4c565e79955670d1db562528c93c9aac8d28ac9f9bfc3fcf"
+        ),
+        # 2026-11-12, the USB-repair build with libsx_rig.so 58293113 and the C# chain rebuilt:
+        # pod5's seal/status fix (status parsed off Unity's thread, fresh tracking at start,
+        # pending-episode review UI). Recorded pod5 20261112_181140 to 20261113_145058 (5).
+        "1.5.0-67-sealing-0e57c237": QuestApkBuildId(
+            "sha256:0e57c2379711f3bad5b75f5f4fc2c40dde92c654a3aabf4a2e762bf196c922b3"
+        ),
+        # 2026-11-15, OpenQuestCapture 1.5.0 build 72 (OQC 59e8fd6, QuestCameraLib 93d2e74,
+        # libsx_rig.so f238959a, embodiment assets from sx 310d653e70): the sx#4210 integrity
+        # release (shared tracking gate, controller tracked, seal I/O yield), installed on pod5.
+        "1.5.0-72": QuestApkBuildId(
+            "sha256:7c0ae2c96bc1dc68bd20effd96316b5da59f1e376505304ea22ff44470eea095"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
