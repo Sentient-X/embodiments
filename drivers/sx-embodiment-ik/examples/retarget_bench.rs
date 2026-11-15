@@ -31,13 +31,17 @@
 //!   head translation and rotation from the hold, the whole SO-101 chain solving it;
 //! - `deadband=MM`: a hand target moving less than MM from its last kept value is not moved
 //!   (dwell: a still hand stays still).
-//! - `invert=S[,G[,C[,A]]]`: the fitted follower inverted on the command, scaled by S: the
-//!   offset its viscous drag (`b v / w^2`), C times its Coulomb drag and A times its sag hold the
-//!   joint behind a moving command (default C = A = 1), at most 0.05 rad; G picks the joints
+//! - `invert=S[,G[,C[,A[,V]]]]`: the fitted follower inverted on the command, scaled by S: the
+//!   offset V times its viscous drag (`b v / w^2`), C times its Coulomb drag and A times its sag
+//!   hold the joint behind a moving command (default C = A = V = 1; `invert=1,1,0,1,0` is the
+//!   arms' sag alone), at most 0.05 rad; G picks the joints
 //!   (0 all, 1 the arms, 2 the neck; never a finger). On five sessions (2026-11-15) the arms'
 //!   `invert=1,1,0` cut arm jerk 281 -> 235 and tool track p50 19.1 -> 12.4 mm, nearly all of it
 //!   the sag term (`invert=1,1,0,0`, viscous alone, did nothing): it is a gravity-model error,
 //!   so its fix belongs in the gravity feed-forward, not a push;
+//! - `hpolicy=NAME[,NAME]`: a robot-bench `residual_rl.py` policy over a window of the joint's
+//!   history and the stream's staleness and lag (`$POLICY_DIR/hpolicy-NAME.json`); on 2026-11-16
+//!   its 250 ms window bought 3 % tracking and passed 11 of 30 follower and stream cases;
 //! - `policy=NAME[,NAME]`: a robot-bench `residual_policy.py` policy's bounded offset added
 //!   (`$POLICY_DIR/policy-NAME.json`); on 2026-11-15 the arm policy over-pushed a 30 % stiffer
 //!   follower to tool jerk p95 152 -> 496.
@@ -62,6 +66,12 @@ use sx_frames::{Pose, Quaternion};
 struct Tick {
     hands: Vec<Option<[f64; 7]>>,
     head: Option<[f64; 7]>,
+    /// The newest reading's wait since it arrived, and the playback lag, seconds (robot-bench
+    /// `teleop_replay.play`, 11-16); absent in older ticks.
+    #[serde(default)]
+    stale_s: Option<f64>,
+    #[serde(default)]
+    lag_s: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -187,15 +197,52 @@ impl Policy {
     }
 }
 
+/// A per-joint residual policy over a window of the joint's history (robot-bench
+/// `residual_rl.py`): `history` ticks, newest first, of [e / 0.02, measured velocity, planned
+/// velocity, last residual / max_push], then the stream's [stale / 0.1 s, lag / 0.3 s]; tanh
+/// layers, the last scaled to `max_push`.
+#[derive(Deserialize)]
+struct HPolicy {
+    group: String,
+    history: usize,
+    max_push: f64,
+    /// Per layer, weights (out x in) and biases.
+    layers: Vec<(Vec<Vec<f64>>, Vec<f64>)>,
+}
+
+impl HPolicy {
+    fn applies(&self, joint: &str) -> bool {
+        match self.group.as_str() {
+            "neck" => joint.starts_with("so101_"),
+            _ => joint.starts_with("left_") || joint.starts_with("right_"),
+        }
+    }
+
+    fn push(&self, x: &[f64]) -> f64 {
+        let mut a: Vec<f64> = x.to_vec();
+        for (w, b) in &self.layers {
+            a = w
+                .iter()
+                .zip(b)
+                .map(|(row, bias)| {
+                    (bias + row.iter().zip(&a).map(|(wi, ai)| wi * ai).sum::<f64>()).tanh()
+                })
+                .collect();
+        }
+        self.max_push * a[0]
+    }
+}
+
 struct Variant {
     lead: bool,
     boost: Option<(f64, f64)>,
     /// Which joints the boost pushes: 0 every modelled joint, 1 the arms, 2 the neck.
     boost_group: u8,
-    /// scale, group (0 every joint, 1 the arms, 2 the neck), Coulomb share, sag share
-    invert: Option<(f64, u8, f64, f64)>,
+    /// scale, group (0 every joint, 1 the arms, 2 the neck), Coulomb, sag and viscous shares
+    invert: Option<(f64, u8, f64, f64, f64)>,
     perturb: Option<(f64, f64, f64)>,
     policies: Vec<Policy>,
+    hpolicies: Vec<HPolicy>,
     neckpush: Option<(f64, f64, f64)>,
     elbowprior: Option<f64>,
     filter: Option<Option<OneEuro>>,
@@ -214,6 +261,7 @@ fn parse_variant(text: &str) -> Variant {
         invert: None,
         perturb: None,
         policies: Vec::new(),
+        hpolicies: Vec::new(),
         neckpush: None,
         elbowprior: None,
         filter: None,
@@ -225,7 +273,7 @@ fn parse_variant(text: &str) -> Variant {
     };
     for part in text.split('+') {
         let (name, args) = part.split_once('=').unwrap_or((part, ""));
-        let nums: Vec<f64> = if name == "policy" {
+        let nums: Vec<f64> = if name == "policy" || name == "hpolicy" {
             Vec::new()
         } else {
             args.split(',')
@@ -251,6 +299,7 @@ fn parse_variant(text: &str) -> Variant {
                     nums.get(1).map_or(0, |g| *g as u8),
                     nums.get(2).copied().unwrap_or(1.0),
                     nums.get(3).copied().unwrap_or(1.0),
+                    nums.get(4).copied().unwrap_or(1.0),
                 ));
             }
             "neckpush" => v.neckpush = Some((nums[0], nums[1], nums[2])),
@@ -269,6 +318,16 @@ fn parse_variant(text: &str) -> Variant {
                     v.policies.push(
                         serde_json::from_slice(&std::fs::read(path).expect("a policy"))
                             .expect("a policy json"),
+                    );
+                }
+            }
+            "hpolicy" => {
+                for name in args.split(',') {
+                    let dir = std::env::var("POLICY_DIR").unwrap_or_else(|_| ".".into());
+                    let path = format!("{dir}/hpolicy-{name}.json");
+                    v.hpolicies.push(
+                        serde_json::from_slice(&std::fs::read(path).expect("an hpolicy"))
+                            .expect("an hpolicy json"),
                     );
                 }
             }
@@ -483,6 +542,10 @@ fn main() {
     let mut push_state = vec![0.0; width];
     let (mut e_prev, mut u_prev, mut v_prev) =
         (vec![0.0; width], vec![0.0; width], vec![0.0; width]);
+    // per axis, the history policy's window (newest first) and the last reading
+    let mut window: Vec<std::collections::VecDeque<[f64; 4]>> =
+        vec![std::collections::VecDeque::new(); width];
+    let mut read_prev: Option<Vec<f64>> = None;
     let mut result = Out {
         axes: names.clone(),
         limits: axes.iter().map(|a| a.limits).collect(),
@@ -620,7 +683,7 @@ fn main() {
         result.solve_us.push(start.elapsed().as_secs_f64() * 1e6);
         // What reaches the motors: the solve's answer, or pushed past it by the error.
         let mut sent = cmd.clone();
-        if let (Some((scale, group, coulomb, sag)), true) = (variant.invert, driven) {
+        if let (Some((scale, group, coulomb, sag, viscous)), true) = (variant.invert, driven) {
             // The fitted follower inverted: the offset its viscous and Coulomb drag and its sag
             // hold the joint behind a moving command, added so it lands on the command.
             for axis in 0..width {
@@ -631,7 +694,8 @@ fn main() {
                 }
                 let w2 = f.omega * f.omega;
                 let push = scale
-                    * ((f.b * qdot[axis] + coulomb * f.c * (qdot[axis] / 0.02).tanh()) / w2
+                    * ((viscous * f.b * qdot[axis] + coulomb * f.c * (qdot[axis] / 0.02).tanh())
+                        / w2
                         - sag * f.sag);
                 sent[axis] += push.clamp(-0.05, 0.05);
                 if let Some([lo, hi]) = axes[axis].limits {
@@ -668,6 +732,50 @@ fn main() {
             u_prev.fill(0.0);
         }
         v_prev.copy_from_slice(&qdot);
+        if !variant.hpolicies.is_empty() {
+            let vmeas: Vec<f64> = match &read_prev {
+                Some(prev) => read.iter().zip(prev).map(|(r, p)| (r - p) / dt).collect(),
+                None => vec![0.0; width],
+            };
+            read_prev = Some(read.clone());
+            for axis in 0..width {
+                let Some(policy) = variant.hpolicies.iter().find(|p| p.applies(&names[axis]))
+                else {
+                    continue;
+                };
+                if !driven || followers[axis].is_none() || names[axis].contains("finger") {
+                    window[axis].clear();
+                    u_prev[axis] = 0.0;
+                    continue;
+                }
+                let e = cmd[axis] - read[axis];
+                window[axis].push_front([
+                    e / 0.02,
+                    vmeas[axis],
+                    qdot[axis],
+                    u_prev[axis] / policy.max_push,
+                ]);
+                window[axis].truncate(policy.history);
+                let mut x = Vec::with_capacity(4 * policy.history + 2);
+                for k in 0..policy.history {
+                    // a window not yet full repeats its oldest row
+                    let row = window[axis]
+                        .get(k)
+                        .or_else(|| window[axis].back())
+                        .copied()
+                        .unwrap_or([0.0; 4]);
+                    x.extend_from_slice(&row);
+                }
+                x.push(tick.stale_s.unwrap_or(0.0) / 0.1);
+                x.push(tick.lag_s.unwrap_or(0.0) / 0.3);
+                let u = policy.push(&x);
+                sent[axis] += u;
+                if let Some([lo, hi]) = axes[axis].limits {
+                    sent[axis] = sent[axis].clamp(lo, hi);
+                }
+                u_prev[axis] = u;
+            }
+        }
         // The station's neck push as it lands (fleet/station intent.rs `NeckPush`): slewed, on
         // the neck while the operator drives, decaying otherwise, folded into the held command.
         if let Some((gain, e0, slew)) = variant.neckpush {
@@ -737,7 +845,10 @@ fn main() {
                         let (u, vff) = &history[history.len() - 1 - f.delay];
                         let (q, v) = (q_meas[axis], v_meas[axis]);
                         let a = f.omega * f.omega * (u[axis] - q + f.sag)
-                            + 2.0 * f.zeta * f.omega * (vff[axis] - v)
+                            + 2.0
+                                * f.zeta
+                                * f.omega
+                                * (vff[axis].clamp(-clip[axis], clip[axis]) - v)
                             - f.b * v
                             - f.c * (v / 0.02).tanh();
                         v_meas[axis] = v + a * h;
