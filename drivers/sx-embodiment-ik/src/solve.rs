@@ -447,6 +447,11 @@ const MEASURED_SPEED_S: f64 = 0.03;
 /// (main: 60 mm in); 30 and 100 ms kept less (embodiments#208).
 const MOMENTUM_S: f64 = 0.06;
 
+/// How many reading jitters' worth of carried motion a measured pair must close by before its
+/// follower's lead counts ([`Ik::step`]'s measured collision rows): 1 still let a 1 mrad jitter
+/// shove a held arm 32 mm; 2 held every probed case at its reading's own sag.
+const CLOSING_JITTERS: f64 = 2.0;
+
 /// Weight on a resting column's step from its jerk-bounded stop ([`Target::Rest`]), per
 /// rad^2: far above the damping and the posture, so the stop is what the step takes unless a
 /// row needs otherwise.
@@ -2122,17 +2127,36 @@ impl Ik {
                 // that whole motion, and a follower carries on past its command: with the whole
                 // room, an act-sim-like PD (zeta 0.2) rang 40-60 mm into the other arm; with
                 // half, it touches at worst (1.5 mm in; embodiments#206). The pace of closing is
-                // the commanded row's to keep.
-                let lead = body
+                // the commanded row's to keep. A pair the body is not closing (its measured speed
+                // along the row is not toward contact) carries nothing in: its lead is none.
+                // Counted anyway, a pair engaged at rest inside its margin read its sag and lag
+                // as closing still to come, every tick, and the row shoved it apart at up to
+                // its whole opening speed: session b968c187's deadman press drove both tools
+                // 117 mm off their held targets in 0.3 s, the capsules from 23 mm in to the margin.
+                let closing: f64 = body
                     .solved
                     .iter()
                     .zip(row.iter())
-                    .filter(|&(&axis, _)| !self.stuck[axis])
-                    .map(|(&axis, r)| {
-                        let carried = MOMENTUM_S * self.measured_speed[axis];
-                        (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
-                    })
-                    .sum::<f64>();
+                    .map(|(&axis, r)| r * self.measured_speed[axis])
+                    .sum();
+                // Closing means faster than reading jitter can fake: twice what a reading off
+                // by READING_JITTER on every joint the row moves carries over MOMENTUM_S. Gated at
+                // zero, a smoothed speed that never quite decays to zero after one 20 urad
+                // flicker brought the whole shove back (105-126 mm; refute of 6ab9ac7).
+                let lever: f64 = row.iter().map(|r| r.abs()).sum();
+                let lead = if closing > CLOSING_JITTERS * READING_JITTER * lever / MOMENTUM_S {
+                    body.solved
+                        .iter()
+                        .zip(row.iter())
+                        .filter(|&(&axis, _)| !self.stuck[axis])
+                        .map(|(&axis, r)| {
+                            let carried = MOMENTUM_S * self.measured_speed[axis];
+                            (r * (q[axis] - w.seen_q[axis] + carried)).max(0.0)
+                        })
+                        .sum::<f64>()
+                } else {
+                    0.0
+                };
                 rhs = 0.5 * room - lead;
             }
             if candidate.measured
