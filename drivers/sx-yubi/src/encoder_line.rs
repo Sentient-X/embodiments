@@ -1,15 +1,20 @@
 //! The ESP32-C6 gripper encoder's line protocol: `<angle>\n` or `<device id>,<angle>\n`, the
 //! angle in radians from an AS5601. Shared by the laptop pod (tty) and the headset rig
-//! (CDC-ACM over usbfs), so both refuse exactly the same lines.
+//! (CDC-ACM over usbfs), so both refuse exactly the same lines. The switch firmware's `# {json}`
+//! status lines share the stream; they are never samples here (`switch` reads them).
 
 /// The YUBI gripper's mechanical limit, radians.
 pub const MAX_ANGLE_RAD: f64 = 0.959_931_1;
-/// Bytes kept of one line; the remainder of a longer line is dropped.
-pub const MAX_LINE: usize = 256;
+/// Bytes kept of one line; the remainder of a longer line is dropped. Above the switch
+/// firmware's status line (539 bytes measured 2026-11-15), which 256 cut and so lost.
+pub const MAX_LINE: usize = 1024;
 
 /// Parse one line (without its newline). `Ok(None)` is a line that carries no sample (a
 /// boot banner, a log line); `Err` is a sample the rig must refuse.
 pub fn parse(line: &[u8]) -> Result<Option<(Option<String>, f64)>, String> {
+    if crate::switch::is_status(line) {
+        return Ok(None);
+    }
     let text = String::from_utf8_lossy(line);
     let (reported_id, value) = match text.split_once(',') {
         Some((reported_id, value)) => {
@@ -94,6 +99,11 @@ mod tests {
         assert_eq!(id.as_deref(), Some("enc-7"));
         assert!((angle - (std::f64::consts::TAU - 6.0)).abs() < 1e-12);
         assert_eq!(parse(b"ESP-ROM:esp32c6-20220919").unwrap(), None);
+        assert_eq!(
+            parse(b"# 0.25").unwrap(),
+            None,
+            "a status line is never a sample"
+        );
     }
 
     #[test]
@@ -124,7 +134,7 @@ mod tests {
     fn the_first_cut_line_is_discarded_and_long_lines_are_capped() {
         let mut lines = Lines::default();
         let mut seen = Vec::new();
-        let long = vec![b'9'; 300];
+        let long = vec![b'9'; MAX_LINE + 300];
         lines
             .feed::<()>(b"25\n0.10\n0.2", |l| {
                 seen.push(l.to_vec());
