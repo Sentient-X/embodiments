@@ -126,7 +126,7 @@
       lower="-1.570796326795"
       upper="1.570796326795"
       effort="40"
-      velocity="10.4719755" />
+      velocity="20.943951" />
   </joint>
   <link
     name="waist_roll_link">
@@ -1263,7 +1263,7 @@
       lower="-2.094395102393"
       upper="2.094395102393"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="right_hip_roll_link">
@@ -1321,7 +1321,7 @@
       lower="-0.279252680319"
       upper="1.919862177194"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="right_hip_yaw_link">
@@ -1379,7 +1379,7 @@
       lower="-1.570796326795"
       upper="1.570796326795"
       effort="40"
-      velocity="10.4719755" />
+      velocity="20.943951" />
   </joint>
   <link
     name="right_knee_link">
@@ -1437,7 +1437,7 @@
       lower="-1.535889741755"
       upper="1.535889741755"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="right_foot1_link">
@@ -1727,7 +1727,7 @@
       lower="-2.094395102393"
       upper="2.094395102393"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="left_hip_roll_link">
@@ -1785,7 +1785,7 @@
       lower="-0.279252680319" 
       upper="1.919862177194"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="left_hip_yaw_link">
@@ -1843,7 +1843,7 @@
       lower="-1.570796326795"
       upper="1.570796326795"
       effort="40"
-      velocity="10.4719755" />
+      velocity="20.943951" />
   </joint>
   <link
     name="left_knee_link">
@@ -1901,7 +1901,7 @@
       lower="-1.535889741755"
       upper="1.535889741755"
       effort="150"
-      velocity="5.23598776" />
+      velocity="10.4719755" />
   </joint>
   <link
     name="left_foot1_link">

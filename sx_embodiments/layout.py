@@ -142,6 +142,27 @@ class ServoApproach:
 
 
 @dataclass(frozen=True, slots=True)
+class SupplySpeed:
+    """The vendor's output speeds on one supply, rad/s: rated (continuous, under rated torque)
+    and unloaded. A Damiao joint motor's speed scales with its bus voltage, so its datasheet
+    states both at 24 and at 48 V."""
+
+    volts: float
+    rated_rad_s: float
+    no_load_rad_s: float
+
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.volts) and self.volts > 0.0):
+            raise LayoutError("actuator", "a supply speed's volts must be positive and finite")
+        if not (math.isfinite(self.rated_rad_s) and 0.0 < self.rated_rad_s <= self.no_load_rad_s):
+            raise LayoutError(
+                "actuator", "a supply's rated speed must be positive and at most its unloaded one"
+            )
+        if not math.isfinite(self.no_load_rad_s):
+            raise LayoutError("actuator", "a supply's unloaded speed must be finite")
+
+
+@dataclass(frozen=True, slots=True)
 class ActuatorRating:
     """A tested product's ratings, as its vendor publishes them.
 
@@ -163,6 +184,9 @@ class ActuatorRating:
     ``thermal_limit_celsius`` is the hottest the vendor lets the motor run (the lower of its
     driver and coil limits), what a joint held under torque is watched against; ``None``
     where none is recorded, never a guess.
+    ``supply_speeds`` are the vendor's rated and unloaded speeds at each supply it publishes
+    them for; a binding that declares the rail its motor is wired to
+    (``ActuatorBinding.supply_volts``) runs at that supply's (:meth:`speed_at`).
     """
 
     peak_torque_nm: float
@@ -172,8 +196,21 @@ class ActuatorRating:
     armature_kg_m2: float | None = None
     holding_brake: bool = False
     thermal_limit_celsius: float | None = None
+    supply_speeds: tuple[SupplySpeed, ...] = ()
+
+    def speed_at(self, volts: float | None) -> SupplySpeed | None:
+        """The published speeds on a ``volts`` supply; ``None`` where the vendor publishes none
+        for it (the caller then keeps ``rated_speed_rad_s``, the rated supply's)."""
+        if volts is None:
+            return None
+        return next((speed for speed in self.supply_speeds if speed.volts == volts), None)
 
     def __post_init__(self) -> None:
+        volts = [speed.volts for speed in self.supply_speeds]
+        if len(set(volts)) != len(volts):
+            raise LayoutError("actuator", "a supply's speeds are published once")
+        if self.supply is not None and not all(self.supply.admits(v) for v in volts):
+            raise LayoutError("actuator", "a published supply speed lies outside its supply range")
         if not math.isfinite(self.peak_torque_nm) or self.peak_torque_nm <= 0.0:
             raise LayoutError("actuator", "peak torque must be a positive finite N·m")
         speed = self.rated_speed_rad_s
@@ -240,12 +277,19 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
     # DM-J4340-2EC user manual: 24 V, 9/27 N·m rated/peak, rated speed 36 rpm, 52 rpm unloaded,
     # gear ratio 40:1. Armature: the same table's 2.00E-05 kg·m² rotor times 40², 0.032 at the
     # output (the bench estimate assumed 0.01; neither is measured on our motors yet).
+    # Speeds per supply, the 2025 selection manual: 36 rpm rated on both versions, 52.5 rpm
+    # unloaded on the 24 V version and 100 rpm on the 48 V version. One registry model covers
+    # both; which one a 48 V rail carries is the unit's (the driver accepts either VMAX row).
     ActuatorModel.DAMIAO_DM4340: ActuatorRating(
         27.0,
         rated_speed_rad_s=rpm(36.0),
         rated_torque_nm=9.0,
         armature_kg_m2=2.0e-5 * 40**2,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
+        supply_speeds=(
+            SupplySpeed(24.0, rpm(36.0), rpm(52.5)),
+            SupplySpeed(48.0, rpm(36.0), rpm(100.0)),
+        ),
     ),
     # DM-J8009-2EC: Damiao's 2025 product selection manual (DAMIAO_SELECTION_MANUAL_2025, the
     # DM-J8009-2EC page): rated 24 V, supports 24-48 V, 20/40 N·m rated/peak, 100 rpm rated at
@@ -259,6 +303,10 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         rated_torque_nm=20.0,
         armature_kg_m2=0.02,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
+        supply_speeds=(
+            SupplySpeed(24.0, rpm(100.0), rpm(168.0)),
+            SupplySpeed(48.0, rpm(200.0), rpm(335.0)),
+        ),
     ),
     # openelab.io/products/damiao-brushless-servo-dm-j8009p and
     # sharingwin.com/product/dmbots-dm-j8009p-2ec-robotic-actuator: rated 24 V (100 rpm
@@ -271,6 +319,11 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         rated_torque_nm=20.0,
         armature_kg_m2=0.02,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
+        # The selection manual's DM-J8009P-2EC page: the DM8009's speeds.
+        supply_speeds=(
+            SupplySpeed(24.0, rpm(100.0), rpm(168.0)),
+            SupplySpeed(48.0, rpm(200.0), rpm(335.0)),
+        ),
     ),
     # DM-J10010-2EC: the same manual's DM-J10010-2EC page: rated 24 V, supports 24-48 V, 40/150
     # N·m rated/peak, 50 rpm rated at 24 V (100 at 48 V), 75 rpm unloaded at 24 V (150 at 48 V),
@@ -284,6 +337,10 @@ ACTUATOR_RATINGS: Final[dict[ActuatorModel, ActuatorRating]] = {
         rated_speed_rad_s=rpm(50.0),
         rated_torque_nm=40.0,
         thermal_limit_celsius=DAMIAO_THERMAL_LIMIT_CELSIUS,
+        supply_speeds=(
+            SupplySpeed(24.0, rpm(50.0), rpm(75.0)),
+            SupplySpeed(48.0, rpm(100.0), rpm(150.0)),
+        ),
     ),
     # ROBOTIS e-manual: 0.52 N·m stall at 5 V, 3.7-6 V; 4.1 N·m stall at 12 V, 10-14.8 V.
     ActuatorModel.DYNAMIXEL_XL330_M288: ActuatorRating(0.52, SupplyRange(3.7, 6.0)),
@@ -353,7 +410,16 @@ class ActuatorBinding:
     ``provisional`` marks a binding not yet verified on the robot it describes (its address,
     side, drive map or zero), so no driver moves it unless a person bringing the robot up opts
     in for its port. It is serialized only when set.
+
+    ``supply_volts`` is the rail the design wires this motor to, where the design states one
+    (the humanoid's legs on 48 V): the motor's speeds are its rating's at that supply
+    (:func:`rated_speed`). A robot's measured rail is still the commissioning's (``--rail``),
+    which derates a motor over its range. Serialized only when set.
     """
+
+    def speeds(self) -> SupplySpeed | None:
+        """The motor's published speeds on its declared supply, at the motor shaft."""
+        return ACTUATOR_RATINGS[self.model].speed_at(self.supply_volts)
 
     model: ActuatorModel
     bus: ActuatorBus
@@ -362,8 +428,18 @@ class ActuatorBinding:
     reduction: float = 1.0
     port: BusPort | None = None
     provisional: bool = False
+    supply_volts: float | None = None
 
     def __post_init__(self) -> None:
+        volts = self.supply_volts
+        if volts is not None:
+            if not (math.isfinite(volts) and volts > 0.0):
+                raise LayoutError("actuator", "supply volts must be positive and finite")
+            supply = ACTUATOR_RATINGS[self.model].supply
+            if supply is not None and not supply.admits(volts):
+                raise LayoutError(
+                    "actuator", f"{self.model.value} is not specified for a {volts:g} V supply"
+                )
         if type(self.bus_id) is not int or self.bus_id < 1:
             raise LayoutError("actuator", "bus_id must be a positive integer")
         if self.sign not in (-1, 1):
@@ -492,6 +568,18 @@ class LinkageDrive:
 ActuationBinding = DirectDrive | IntegratedDrive | Passive | UndocumentedDrive | LinkageDrive
 
 
+def rated_speed(binding: ActuatorBinding) -> float | None:
+    """The joint speed a binding's motor is rated at on its declared supply (its rating's rated
+    supply where it declares none), through its reduction; ``None`` where none is recorded."""
+    on_supply = binding.speeds()
+    speed = (
+        on_supply.rated_rad_s
+        if on_supply is not None
+        else ACTUATOR_RATINGS[binding.model].rated_speed_rad_s
+    )
+    return None if speed is None else speed / binding.reduction
+
+
 @dataclass(frozen=True, slots=True)
 class JointRating:
     """What an axis's drive gives it in joint space: the effort a description declares as
@@ -501,6 +589,9 @@ class JointRating:
     effort: float
     velocity: float
     armature: float | None
+    #: The unloaded speed on the declared supply (rad/s), where the vendor publishes one: what a
+    #: torque-speed curve falls to zero at.
+    no_load_velocity: float | None = None
 
 
 def joint_rating(actuation: ActuationBinding) -> JointRating | None:
@@ -515,27 +606,37 @@ def joint_rating(actuation: ActuationBinding) -> JointRating | None:
     if isinstance(actuation, DirectDrive):
         binding = actuation.actuator
         rating = ACTUATOR_RATINGS[binding.model]
-        if rating.rated_speed_rad_s is None:
+        speed = rated_speed(binding)
+        if speed is None:
             return None
+        on_supply = binding.speeds()
         return JointRating(
             effort=rating.peak_torque_nm * binding.reduction,
-            velocity=rating.rated_speed_rad_s / binding.reduction,
+            velocity=speed,
             armature=None
             if rating.armature_kg_m2 is None
             else rating.armature_kg_m2 * binding.reduction**2,
+            no_load_velocity=None
+            if on_supply is None
+            else on_supply.no_load_rad_s / binding.reduction,
         )
     if isinstance(actuation, LinkageDrive):
-        ratings = [ACTUATOR_RATINGS[binding.model] for binding in actuation.actuators]
-        speeds = [rating.rated_speed_rad_s for rating in ratings]
+        bindings = actuation.actuators
+        ratings = [ACTUATOR_RATINGS[binding.model] for binding in bindings]
+        speeds = [rated_speed(binding) for binding in bindings]
         if any(speed is None for speed in speeds):
             return None
         armatures = [rating.armature_kg_m2 for rating in ratings]
+        unloaded = [binding.speeds() for binding in bindings]
         return JointRating(
             effort=sum(rating.peak_torque_nm for rating in ratings),
             velocity=min(speed for speed in speeds if speed is not None),
             armature=None
             if any(armature is None for armature in armatures)
             else sum(armature for armature in armatures if armature is not None),
+            no_load_velocity=None
+            if any(speed is None for speed in unloaded)
+            else min(speed.no_load_rad_s for speed in unloaded if speed is not None),
         )
     return None
 
