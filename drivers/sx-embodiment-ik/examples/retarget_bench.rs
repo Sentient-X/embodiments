@@ -24,6 +24,16 @@
 //!   head translation and rotation from the hold, the whole SO-101 chain solving it;
 //! - `deadband=MM`: a hand target moving less than MM from its last kept value is not moved
 //!   (dwell: a still hand stays still).
+//! - `invert=S[,G[,C[,A]]]`: the fitted follower inverted on the command, scaled by S: the
+//!   offset its viscous drag (`b v / w^2`), C times its Coulomb drag and A times its sag hold the
+//!   joint behind a moving command (default C = A = 1), at most 0.05 rad; G picks the joints
+//!   (0 all, 1 the arms, 2 the neck; never a finger). On five sessions (2026-11-15) the arms'
+//!   `invert=1,1,0` cut arm jerk 281 -> 235 and tool track p50 19.1 -> 12.4 mm, nearly all of it
+//!   the sag term (`invert=1,1,0,0`, viscous alone, did nothing): it is a gravity-model error,
+//!   so its fix belongs in the gravity feed-forward, not a push;
+//! - `policy=NAME[,NAME]`: a robot-bench `residual_policy.py` policy's bounded offset added
+//!   (`$POLICY_DIR/policy-NAME.json`); on 2026-11-15 the arm policy over-pushed a 30 % stiffer
+//!   follower to tool jerk p95 152 -> 496.
 
 // A measurement tool run by hand (robot-bench `retarget_bench`), never shipped: its numeric
 // casts and terse names are a script's, so clippy is off here.
@@ -175,7 +185,8 @@ struct Variant {
     boost: Option<(f64, f64)>,
     /// Which joints the boost pushes: 0 every modelled joint, 1 the arms, 2 the neck.
     boost_group: u8,
-    invert: Option<f64>,
+    /// scale, group (0 every joint, 1 the arms, 2 the neck), Coulomb share, sag share
+    invert: Option<(f64, u8, f64, f64)>,
     perturb: Option<(f64, f64, f64)>,
     policies: Vec<Policy>,
     neckpush: Option<(f64, f64, f64)>,
@@ -227,7 +238,14 @@ fn parse_variant(text: &str) -> Variant {
                 v.boost = Some((nums[0], nums[1]));
                 v.boost_group = 2;
             }
-            "invert" => v.invert = Some(nums[0]),
+            "invert" => {
+                v.invert = Some((
+                    nums[0],
+                    nums.get(1).map_or(0, |g| *g as u8),
+                    nums.get(2).copied().unwrap_or(1.0),
+                    nums.get(3).copied().unwrap_or(1.0),
+                ));
+            }
             "neckpush" => v.neckpush = Some((nums[0], nums[1], nums[2])),
             "elbowprior" => v.elbowprior = Some(nums[0]),
             "perturb" => v.perturb = Some((nums[0], nums[1], nums[2])),
@@ -575,14 +593,19 @@ fn main() {
         result.solve_us.push(start.elapsed().as_secs_f64() * 1e6);
         // What reaches the motors: the solve's answer, or pushed past it by the error.
         let mut sent = cmd.clone();
-        if let (Some(scale), true) = (variant.invert, driven) {
+        if let (Some((scale, group, coulomb, sag)), true) = (variant.invert, driven) {
             // The fitted follower inverted: the offset its viscous and Coulomb drag and its sag
             // hold the joint behind a moving command, added so it lands on the command.
             for axis in 0..width {
                 let Some(f) = &nominal[axis] else { continue };
+                let neck = names[axis].starts_with("so101_");
+                if (group == 1 && neck) || (group == 2 && !neck) || names[axis].contains("finger") {
+                    continue;
+                }
                 let w2 = f.omega * f.omega;
-                let push =
-                    scale * ((f.b * qdot[axis] + f.c * (qdot[axis] / 0.02).tanh()) / w2 - f.sag);
+                let push = scale
+                    * ((f.b * qdot[axis] + coulomb * f.c * (qdot[axis] / 0.02).tanh()) / w2
+                        - sag * f.sag);
                 sent[axis] += push.clamp(-0.05, 0.05);
                 if let Some([lo, hi]) = axes[axis].limits {
                     sent[axis] = sent[axis].clamp(lo, hi);
