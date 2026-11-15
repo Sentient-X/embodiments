@@ -70,6 +70,11 @@
 //!   tracked/estimated flicker buzzed the tool. Where this departs from the reference: the elbow
 //!   gain is 10, not 0.5 ([`Settings::elbow_gain`]); no 0.08 s engage blend (the shaper brings
 //!   an engage in within the joints' jerk caps).
+//!   A driven hand whose operator's arm is not known has its elbow aimed
+//!   down at [`ELBOW_PRIOR_WEIGHT`] past [`ELBOW_PRIOR_SLACK_RAD`] off hanging (no home pull):
+//!   an elbow hangs unless the operator's says otherwise. Every aim pulls only across the robot's own
+//!   shoulder-wrist line, weighed by how far across it lies (a hanging arm aimed down is asked
+//!   nothing).
 //!
 //! Nothing here allocates per step after [`Teleop::new`], and nothing reads a clock.
 
@@ -360,6 +365,28 @@ pub const ELBOW_DEADBAND_M: f64 = 0.04;
 
 /// The most an aimed elbow weighs: the reference's `elbow_weight_max`.
 pub const ELBOW_WEIGHT_MAX: f64 = 1.0;
+
+/// A driven hand whose operator's arm is not known (the console's local view, a headset with
+/// no body tracking, an older sender) has its elbow aimed down at this
+/// weight, past [`ELBOW_PRIOR_SLACK_RAD`] off hanging: a person's elbow hangs. Twice an
+/// operator's full weight ([`ELBOW_WEIGHT_MAX`]), because nothing draws this arm home: the
+/// home pull, which an operator's own elbow turns on, weakened Ready 10-20x and roughened the
+/// desk's tracking and engage (refute of embodiments b0aff0e). Without the prior the hand's
+/// 6-D pose and a weak posture left the redundancy wherever the solve wandered: the Spark's
+/// right elbow sat 60-180 degrees off hanging for 77 % of session 9a273e41 (11-15, local
+/// view, no arm), and 70-100 % of one arm in three of four earlier sessions. Replayed through
+/// the fitted followers (robot-bench `retarget_bench`, five sessions pooled), the swivel's
+/// median went 69 -> 39 degrees and the share past 60 57 % -> 11 %, for 1.6 mm more median
+/// tracking (18.8 -> 20.4) and arm jerk RMS 402 -> 423.
+/// At 0.6 and 1.0 four of ten arms stayed 29-89 % past 60; at 3.0 an engage at rest jerked
+/// 10x its cap (`tests/rest.rs`).
+pub const ELBOW_PRIOR_WEIGHT: f64 = 2.0;
+
+/// The prior's direction in the root frame: down.
+pub const ELBOW_PRIOR_DIRECTION: [f64; 3] = [0.0, 0.0, -1.0];
+
+/// How far off hanging the prior leaves an elbow alone, radians (30 degrees; in full from 60).
+pub const ELBOW_PRIOR_SLACK_RAD: f64 = 0.52;
 
 /// The time constant the operator's elbow direction and weight are low-passed over, seconds:
 /// the reference's `elbow_filter_alpha` 0.35 a tick at its 60 Hz, `-dt / ln(1 - 0.35)`, so
@@ -798,7 +825,7 @@ pub struct Teleop {
     /// Per limb, its arm ([`LimbConfig::arm`]); per hand, its operator's elbow direction and
     /// weight as low-passed ([`ELBOW_FILTER_S`]).
     arms: Vec<Option<Arm>>,
-    elbows: [Option<([f64; 3], f64)>; MAX_HANDS],
+    elbows: [Option<([f64; 3], f64, f64)>; MAX_HANDS],
     /// Per hand, the operator's arm last given and the seconds since ([`ARM_HOLD_S`]).
     operator_arms: [Option<(OperatorArm, f64)>; MAX_HANDS],
 }
@@ -1082,39 +1109,76 @@ impl Teleop {
                 // No hand, or an arm gone longer than the hold.
                 _ => None,
             };
-            let (Some(arm), Some((operator, _))) = (self.arms[limb], *kept) else {
+            let Some(arm) = self.arms[limb] else {
                 self.elbows[hand] = None;
                 self.ik.set_elbow_aim(limb, None);
                 self.ik.set_home_pull(limb, false);
                 continue;
             };
-            // The operator's elbow off their shoulder-wrist line, weighted past the deadband;
-            // a straight arm, or one within the deadband, aims nothing and forgets its filter.
-            let seen = elbow_direction(operator.shoulder_m, operator.elbow_m, operator.wrist_m)
+            // The operator's elbow off their shoulder-wrist line, weighted past the deadband, is
+            // followed exactly (no slack). With no operator arm known a driven hand's elbow hangs: [`ELBOW_PRIOR_WEIGHT`] past
+            // [`ELBOW_PRIOR_SLACK_RAD`]. Only a known operator arm draws the arm home: the home
+            // pull is 10-20x weaker toward Ready than the preferred posture, and with it on for
+            // the prior the desk (local view) tracked 65 % worse and an engage at rest jerked 2x
+            // its cap (refute of embodiments b0aff0e).
+            let operator = (*kept)
+                .and_then(|(o, _)| elbow_direction(o.shoulder_m, o.elbow_m, o.wrist_m))
                 .map(|(direction, radius)| (direction, elbow_weight(radius, human)))
                 .filter(|(_, weight)| *weight > 0.0);
-            self.elbows[hand] = seen.map(|(direction, weight)| match self.elbows[hand] {
-                Some((before, weighed)) => {
+            let seen = match (targets.tcp[hand], *kept, operator) {
+                (_, _, Some((direction, weight))) => (direction, weight, 0.0),
+                // An operator arm held straight, or within the deadband, aims nothing, as before
+                // the prior: falling back to it there flipped the aim between the operator's
+                // elbow at weight 0.01 and the prior at 2.0 on every tick of tracking noise across
+                // the deadband's edge (2880 rad/s^3 of arm jerk; refute of 356541f).
+                (_, Some(_), None) => {
+                    self.elbows[hand] = None;
+                    self.ik.set_elbow_aim(limb, None);
+                    self.ik.set_home_pull(limb, true);
+                    continue;
+                }
+                (Some(_), None, None) => (
+                    ELBOW_PRIOR_DIRECTION,
+                    ELBOW_PRIOR_WEIGHT,
+                    ELBOW_PRIOR_SLACK_RAD,
+                ),
+                // No hand: nothing to aim, and the limb is held as before.
+                (None, None, None) => {
+                    self.elbows[hand] = None;
+                    self.ik.set_elbow_aim(limb, None);
+                    self.ik.set_home_pull(limb, false);
+                    continue;
+                }
+            };
+            // Direction, weight and slack are low-passed together, so a hand changing between
+            // the prior and the operator's elbow eases across rather than switching in a tick.
+            let (direction, weight, slack) = seen;
+            let filtered = match self.elbows[hand] {
+                Some((before, weighed, slacked)) => {
                     let mixed = [0, 1, 2].map(|k| before[k] + blend * (direction[k] - before[k]));
                     let length = mixed.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-9);
                     (
                         mixed.map(|x| x / length),
                         weighed + blend * (weight - weighed),
+                        slacked + blend * (slack - slacked),
                     )
                 }
-                None => (direction, weight),
-            });
+                None => seen,
+            };
+            self.elbows[hand] = Some(filtered);
+            let (direction, weight, slack_rad) = filtered;
             self.ik.set_elbow_aim(
                 limb,
-                self.elbows[hand].map(|(direction, weight)| ElbowAim {
+                Some(ElbowAim {
                     shoulder: arm.shoulder,
                     elbow: arm.elbow,
                     wrist: arm.wrist,
                     direction,
                     weight,
+                    slack_rad,
                 }),
             );
-            self.ik.set_home_pull(limb, true);
+            self.ik.set_home_pull(limb, kept.is_some());
         }
     }
 

@@ -34,6 +34,11 @@
     0.0,
     0.0
    ],
+   "arm": {
+    "elbow": "left_elbow_pitch_link",
+    "shoulder": "left_shoulder_roll_link",
+    "wrist": "left_wrist_pitch_link"
+   },
    "frame": "left_gripper_tcp",
    "name": "left"
   },
@@ -43,6 +48,11 @@
     0.0,
     0.0
    ],
+   "arm": {
+    "elbow": "right_elbow_pitch_link",
+    "shoulder": "right_shoulder_roll_link",
+    "wrist": "right_wrist_pitch_link"
+   },
    "frame": "right_gripper_tcp",
    "name": "right"
   },
