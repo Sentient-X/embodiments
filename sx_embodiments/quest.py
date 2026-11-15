@@ -344,6 +344,11 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-73": QuestApkBuildId(
             "sha256:3e704e58bfb4a554302ad364e9de2b70b212003ae15c1de819ae8fe54c94b1ad"
         ),
+        # 2026-11-15, OpenQuestCapture 1.5.0 build 74 (OQC 0f7c5d0, QuestCameraLib 3e0566c,
+        # libsx_rig.so e2f431d8, embodiment assets from sx eaa315c810): replaces 73 on pod5.
+        "1.5.0-74": QuestApkBuildId(
+            "sha256:854a8aaf5134d83aab4f1dde384274f68d0d3d20683603d60f50041de9500059"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
