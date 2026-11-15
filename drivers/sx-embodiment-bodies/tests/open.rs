@@ -179,6 +179,7 @@ fn the_humanoid_upper_body_opens_on_its_one_bridge() {
 /// The static upper body's provisional ports, opened for a supervised bring-up.
 const BRING_UP: OpenOptions = OpenOptions {
     allow_provisional: &["left_gripper", "right_gripper", "neck"],
+    motion: sx_embodiment_bodies::Motion::Standard,
 };
 
 /// Open with every provisional port opted in, as a supervised bring-up does.
@@ -598,6 +599,7 @@ fn a_port_on_another_bridge_or_another_set_of_open_ports_is_another_body() {
     let fewer = Setup {
         options: OpenOptions {
             allow_provisional: &["left_gripper", "right_gripper"],
+            motion: sx_embodiment_bodies::Motion::Standard,
         },
         ..before
     };
@@ -1643,6 +1645,7 @@ fn by_default_the_provisional_neck_and_grippers_stay_off_and_the_damiao_bus_driv
     for wrong in ["can", "elbow"] {
         let options = OpenOptions {
             allow_provisional: &[wrong],
+            motion: sx_embodiment_bodies::Motion::Standard,
         };
         assert!(matches!(
             open_with(
@@ -1658,6 +1661,7 @@ fn by_default_the_provisional_neck_and_grippers_stay_off_and_the_damiao_bus_driv
     // One port opted in opens that one alone beside the verified bus.
     let neck_only = OpenOptions {
         allow_provisional: &["neck"],
+        motion: sx_embodiment_bodies::Motion::Standard,
     };
     let mut bridges = Bridges {
         buses: BTreeMap::from([("CAN".to_owned(), Sim::for_axes(&axes))]),
@@ -2412,4 +2416,76 @@ fn a_drive_naming_a_superseded_id_of_the_body_opens_it() {
     assert_eq!(body.axes().len(), 25);
     drive.embodiment = "not-a-body".to_owned();
     assert!(STATIC_UPPER_BODY.axes(&drive).is_err());
+}
+
+/// A robot's motion is how its Damiao buses open: Brisk changes the CAN port (and nothing
+/// else), reopening it gives every Damiao axis Brisk's speed ceilings, and Standard brings
+/// today's back.
+#[test]
+fn a_change_of_motion_reopens_the_damiao_bus_alone_with_its_ceilings() {
+    use sx_embodiment_bodies::Motion;
+    let drive = drive("sentient-static-upper-body");
+    let axes = STATIC_UPPER_BODY.axes(&drive).expect("axes");
+    let (_, _, mut bridges) = static_bridges(&axes);
+    let commissioning = static_commissioning(&drive);
+    let calibrations = probed_calibrations();
+    let standard = Setup {
+        commissioning: &commissioning,
+        calibrations: &calibrations,
+        options: BRING_UP,
+    };
+    let brisk = Setup {
+        options: OpenOptions {
+            motion: Motion::Brisk,
+            ..BRING_UP
+        },
+        ..standard
+    };
+    assert!(
+        changed_ports(&drive, standard, standard)
+            .expect("in place")
+            .is_empty()
+    );
+    assert_eq!(
+        changed_ports(&drive, standard, brisk).expect("in place"),
+        ["can"]
+    );
+    let body = bring_up(&drive, &commissioning, &calibrations, &mut bridges).expect("body");
+    let before = body.tracking_ceilings();
+    let mut body = body;
+    assert!(body.stop().is_proven());
+    let body = reopen_ports(body, &drive, brisk, &["can".to_owned()], &mut bridges)
+        .expect("reopened Brisk");
+    let after = body.tracking_ceilings();
+    assert_eq!(before.len(), after.len());
+    let shoulder = body
+        .axes()
+        .iter()
+        .position(|axis| axis.joint == "left_shoulder_pitch_joint")
+        .expect("a shoulder");
+    for ((index, a), (other, b)) in before.iter().zip(&after) {
+        assert_eq!(index, other);
+        assert!(
+            b.speed >= a.speed && b.speed <= 2.0 * a.speed + 1e-9,
+            "{index}"
+        );
+        assert_eq!(a.acceleration, b.acceleration);
+    }
+    let speed = |ceilings: &[(usize, sx_embodiment_drivers::TrackingCeiling)]| {
+        ceilings
+            .iter()
+            .find(|(index, _)| *index == shoulder)
+            .expect("the shoulder's ceiling")
+            .1
+            .speed
+    };
+    assert!((speed(&after) / speed(&before) - 2.0).abs() < 1e-9);
+    let mut body = body;
+    assert!(body.stop().is_proven());
+    let body = reopen_ports(body, &drive, standard, &["can".to_owned()], &mut bridges)
+        .expect("reopened Standard");
+    assert_eq!(
+        speed(&body.tracking_ceilings()).to_bits(),
+        speed(&before).to_bits()
+    );
 }

@@ -115,6 +115,7 @@ impl BodyFlags {
             &calibrations,
             OpenOptions {
                 allow_provisional: &provisional,
+                motion: sx_embodiment_bodies::Motion::Standard,
             },
             &mut SystemPorts::system(),
         )
@@ -135,6 +136,7 @@ impl BodyFlags {
             &calibrations,
             OpenOptions {
                 allow_provisional: &provisional,
+                motion: sx_embodiment_bodies::Motion::Standard,
             },
             &mut SystemPorts::system(),
         )

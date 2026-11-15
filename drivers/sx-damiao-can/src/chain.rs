@@ -204,7 +204,19 @@ fn accepted_vmax(model: DmMotorType) -> Vec<f64> {
 /// static upper body): with planned velocity `v` it settles `kd v / kp` past the position, so
 /// the planned velocity sent is capped at `MAX_COAST kp / kd` (refute of 2026-10-30: uncapped,
 /// the elbow coasted 0.58 rad and the left upper-arm yaw 0.79 rad at full speed).
+///
+/// It is each axis's coast bound by default ([`DamiaoAxis::coast`], Standard); a robot may open
+/// with up to [`BRISK_COAST`].
 pub const MAX_COAST: f64 = 0.1;
+
+/// The largest coast bound an axis opens with ([`DamiaoAxis::coast`], a robot's Brisk motion),
+/// rad at the joint: twice [`MAX_COAST`]. It doubles the planned velocity a frame carries and
+/// every speed ceiling ([`ActuatorChain::tracking_ceilings`]), so the elbows and arm yaws carry
+/// their whole planned velocity at their Standard top speed and the shoulders' speed ceiling
+/// goes from about 1.2 to 2.4 rad/s; a host that stops commanding mid-move lets a joint settle
+/// up to this far past its last position, not [`MAX_COAST`]. Acceleration, rise time, the
+/// range-end allowance for gravity and the brake are unchanged.
+pub const BRISK_COAST: f64 = 0.2;
 
 /// The farthest the capped planned velocity may let a joint lag the position sent at its
 /// speed ceiling, rad: half the governor's at-rest tracking bound, so the stop still has room
@@ -228,6 +240,11 @@ pub struct DamiaoAxis {
     /// How long the enabled motor may hear no command before it disables itself, written to
     /// its `TIMEOUT` register at open; `None` leaves the register as the motor holds it.
     pub can_timeout: Option<Duration>,
+    /// How far past its last position the joint may settle when commands stop mid-move, rad at
+    /// the joint: the planned velocity a frame carries is capped at `coast kp / kd`, and the
+    /// axis's speed ceilings scale with it ([`ActuatorChain::tracking_ceilings`]). Above 0 and
+    /// at most [`BRISK_COAST`]; [`MAX_COAST`] unless the robot opens Brisk.
+    pub coast: f64,
     /// Whether the motor's feedback state field reports enable and disable. Firmware on the
     /// static upper body's motors answers state 1 whether enabled or not (verified 2026-10-25:
     /// a wrist motor held at kp 5 and released on disable, LED green then red, while the field
@@ -382,6 +399,8 @@ pub enum DamiaoChainError {
     Ids(u16),
     #[error("bus_id {0} has MIT gains outside kp 0..=500, kd 0..=5")]
     Gains(u16),
+    #[error("bus_id {0} has a coast bound outside 0 < coast <= BRISK_COAST (0.2 rad)")]
+    Coast(u16),
     #[error("bus_id {0} has a motor range that is not finite lower < upper inside its Q_MAX")]
     MotorRange(u16),
     #[error("bus_id {0} did not confirm MIT control mode")]
@@ -1220,7 +1239,7 @@ impl<P: CanPort> DamiaoChain<P> {
         target: f64,
         wanted: Feedforward,
     ) -> ((f64, f64), Feedforward) {
-        let DamiaoAxis { kp, kd, .. } = self.motors[index];
+        let DamiaoAxis { kp, kd, coast, .. } = self.motors[index];
         let axis = &self.motors[index].axis;
         let gain = axis.actuator_from_joint(axis.zero + 1.0);
         let FeedforwardLimit { velocity, torque } = self.feedforward_limits[index];
@@ -1234,9 +1253,10 @@ impl<P: CanPort> DamiaoChain<P> {
         } else {
             wanted.gravity.clamp(-effort.abs(), effort.abs())
         };
-        // The coast past the last position if commands stop: `kd dq / kp`, at most MAX_COAST.
+        // The coast past the last position if commands stop: `kd dq / kp`, at most the axis's
+        // coast bound.
         let coast = if kd > 0.0 {
-            MAX_COAST * gain.abs() * kp / kd
+            coast * gain.abs() * kp / kd
         } else {
             v_max
         };
@@ -1803,6 +1823,9 @@ pub(crate) fn validate(motor: &DamiaoAxis, ids: &mut Vec<u16>) -> Result<(), Dam
     if !((0.0..=KP_MAX).contains(&motor.kp) && (0.0..=KD_MAX).contains(&motor.kd)) {
         return Err(DamiaoChainError::Gains(bus_id));
     }
+    if !(motor.coast > 0.0 && motor.coast <= BRISK_COAST) {
+        return Err(DamiaoChainError::Coast(bus_id));
+    }
     if motor
         .can_timeout
         .is_some_and(|timeout| timeout_counts(timeout).is_none())
@@ -1857,13 +1880,13 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
                 let gain = axis.actuator_from_joint(axis.zero + 1.0);
                 let kp = motor.kp * gain * gain;
                 let inertia = axis.motion.inertia;
-                let lag = (MAX_COAST + MAX_LAG) * motor.kp / motor.kd;
+                let coast = motor.coast;
+                let lag = (coast + MAX_LAG) * motor.kp / motor.kd;
                 // The held position stops the joint like a spring, until its torque saturates at
                 // the motor's peak: then no faster than the peak decelerates within MAX_COAST.
                 let peak = axis.binding.model.rating().peak_torque_nm * gain.abs();
                 let momentum = if inertia > 0.0 {
-                    (MAX_COAST * (kp / inertia).sqrt())
-                        .min((2.0 * MAX_COAST * peak / inertia).sqrt())
+                    (coast * (kp / inertia).sqrt()).min((2.0 * coast * peak / inertia).sqrt())
                 } else {
                     f64::INFINITY
                 };

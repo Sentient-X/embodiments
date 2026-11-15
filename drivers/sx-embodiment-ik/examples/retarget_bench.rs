@@ -8,6 +8,11 @@
 //!     <config.json> <follower.json> <ticks.json> <variant> <out.json>
 //! ```
 //!
+//! `config.json` may carry `vclip` (robot-bench `speed_limits.py config`): per Damiao joint, the
+//! most planned velocity its MIT frame carries (`coast kp / kd`), where the follower's velocity
+//! feed is clipped as the driver clips it. Without it the replay under-reads the DM4340 joints'
+//! fast-motion error (41 against the journals' 58-72 mrad p50; with it, 55).
+//!
 //! `ticks.json` is robot-bench `teleop_replay.py ticks ... played` (the station's Trail
 //! playback of the session's intents). `follower.json` is robot-bench
 //! `references/spark-follower-model-2026-11-14.json`. `variant` is `+`-joined:
@@ -292,8 +297,17 @@ fn main() {
         std::process::exit(2);
     };
     let variant = parse_variant(variant);
-    let mut config: TeleopConfig =
-        serde_json::from_slice(&std::fs::read(config).expect("config")).expect("a teleop config");
+    // The config may carry `vclip`: per joint, the most planned velocity the motor's frame
+    // carries (sx-damiao-can `MAX_COAST kp / kd`, robot-bench `speed_limits.py config`). The
+    // follower's velocity feed is clipped there, as `DamiaoChain::actuator_feedforward` sends it.
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(config).expect("config")).expect("config json");
+    let vclip: std::collections::BTreeMap<String, f64> = raw
+        .as_object_mut()
+        .and_then(|o| o.remove("vclip"))
+        .map(|v| serde_json::from_value(v).expect("vclip: joint to rad/s"))
+        .unwrap_or_default();
+    let mut config: TeleopConfig = serde_json::from_value(raw).expect("a teleop config");
     let model: FollowerModel =
         serde_json::from_slice(&std::fs::read(follower).expect("follower")).expect("model");
     let ticks: Ticks =
@@ -417,6 +431,10 @@ fn main() {
     };
     let mut q_meas = to_ours(&ticks.q0);
     let mut v_meas = vec![0.0; width];
+    let clip: Vec<f64> = names
+        .iter()
+        .map(|n| vclip.get(n).copied().unwrap_or(f64::INFINITY))
+        .collect();
     let mut cmd = q_meas.clone();
     let mut qdot = vec![0.0; width];
     let longest = followers
@@ -675,7 +693,10 @@ fn main() {
                         let (u, vff) = &history[history.len() - 1 - f.delay];
                         let (q, v) = (q_meas[axis], v_meas[axis]);
                         let a = f.omega * f.omega * (u[axis] - q + f.sag)
-                            + 2.0 * f.zeta * f.omega * (vff[axis] - v)
+                            + 2.0
+                                * f.zeta
+                                * f.omega
+                                * (vff[axis].clamp(-clip[axis], clip[axis]) - v)
                             - f.b * v
                             - f.c * (v / 0.02).tanh();
                         v_meas[axis] = v + a * h;
