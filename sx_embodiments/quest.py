@@ -349,6 +349,12 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-74": QuestApkBuildId(
             "sha256:854a8aaf5134d83aab4f1dde384274f68d0d3d20683603d60f50041de9500059"
         ),
+        # 2026-11-16, OpenQuestCapture 1.5.0 build 75 (OQC 36ca07c, QuestCameraLib a6e6bd3,
+        # libsx_rig.so 90b3d29b from sx def516aa36, embodiment assets from sx 07fed1dc87): the
+        # right gripper's start/stop hold, mid-episode camera failure stop; replaces 74 on pod5.
+        "1.5.0-75": QuestApkBuildId(
+            "sha256:adf3575470a2056d695a33c9e2f871b8aa8dd2fdf170e087dc51b60fb32a6366"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
