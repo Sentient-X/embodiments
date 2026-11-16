@@ -355,6 +355,14 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-75": QuestApkBuildId(
             "sha256:adf3575470a2056d695a33c9e2f871b8aa8dd2fdf170e087dc51b60fb32a6366"
         ),
+        # 2026-11-16, OpenQuestCapture 1.5.0 build 76 (OQC f560511, QuestCameraLib 0964035,
+        # libsx_rig.so 90b3d29b from sx def516aa36, embodiment assets from sx 07fed1dc87): the stop
+        # finds stopRecording again (75's AAR compiled it to ()Lkotlin/Unit; and both eyes failed
+        # at the first stop), JNI bound on the main thread; passed the on-device gate on pod5
+        # (both eyes 436 frames, finished MP4s); replaces 75 on pod5.
+        "1.5.0-76": QuestApkBuildId(
+            "sha256:47038bdf0efd2039a1411c89c264bbee5119ee8455a39215d187d52e41e3cc26"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
