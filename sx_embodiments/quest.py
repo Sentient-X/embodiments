@@ -363,6 +363,13 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-76": QuestApkBuildId(
             "sha256:47038bdf0efd2039a1411c89c264bbee5119ee8455a39215d187d52e41e3cc26"
         ),
+        # 2026-11-21, OpenQuestCapture 1.5.0 build 77 (OQC c548eb1, QuestCameraLib 0964035,
+        # libsx_rig.so e02c61b9 from sx bbe8641a30, embodiment assets from sx bbe8641a30): every
+        # seal stage streams (a 139 s take 660 MB -> 22 MB peak) and a seal that dies three times
+        # the same way under one build is held (seal_held) instead of rerun at every launch.
+        "1.5.0-77": QuestApkBuildId(
+            "sha256:a107cacc10f4174a6d2792a77a0fccf1323b43ca984127787e768aef97a63eb5"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
