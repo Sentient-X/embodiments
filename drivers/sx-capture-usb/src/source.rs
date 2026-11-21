@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use sx_yubi::camera::{ExposureConfig, Setting};
 
+use crate::uvc::controls::ColourPreset;
+
 /// The host monotonic clock used to timestamp completed device transfers.
 pub type MonotonicClock = fn() -> std::io::Result<i64>;
 
@@ -71,6 +73,19 @@ pub trait Port: Send + Sync {
         Err("this device reports no port path".to_owned())
     }
     fn open_camera(&self, config: ExposureConfig) -> Result<Box<dyn CameraSource>, String>;
+    /// [`Port::open_camera`], also writing `colour` once before streaming starts when one is
+    /// given (opt-in; `None` is exactly `open_camera`). A port that cannot write the camera's
+    /// processing unit refuses a preset rather than silently record without it.
+    fn open_camera_with_colour(
+        &self,
+        config: ExposureConfig,
+        colour: Option<&'static ColourPreset>,
+    ) -> Result<Box<dyn CameraSource>, String> {
+        match colour {
+            None => self.open_camera(config),
+            Some(preset) => Err(format!("this port cannot apply colour preset {}", preset.name)),
+        }
+    }
     fn open_encoder(&self) -> Result<Box<dyn EncoderSource>, String>;
     /// Called while the device's fd is still the rig's (detach, rig close): an encoder's
     /// link lowers its control lines, as `cdc_acm`'s close does.
