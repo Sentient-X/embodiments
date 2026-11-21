@@ -83,7 +83,10 @@ pub trait Port: Send + Sync {
     ) -> Result<Box<dyn CameraSource>, String> {
         match colour {
             None => self.open_camera(config),
-            Some(preset) => Err(format!("this port cannot apply colour preset {}", preset.name)),
+            Some(preset) => Err(format!(
+                "this port cannot apply colour preset {}",
+                preset.name
+            )),
         }
     }
     fn open_encoder(&self) -> Result<Box<dyn EncoderSource>, String>;

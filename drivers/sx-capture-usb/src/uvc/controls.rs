@@ -76,15 +76,33 @@ pub const GRIPPER_3100K_V1: ColourPreset = ColourPreset {
             false,
             0,
         ),
-        pu("white_balance_temperature", PU_WHITE_BALANCE_TEMPERATURE_CONTROL, 2, false, 3100),
+        pu(
+            "white_balance_temperature",
+            PU_WHITE_BALANCE_TEMPERATURE_CONTROL,
+            2,
+            false,
+            3100,
+        ),
         pu("saturation", PU_SATURATION_CONTROL, 2, false, 60),
         pu("contrast", PU_CONTRAST_CONTROL, 2, false, 32),
         pu("brightness", PU_BRIGHTNESS_CONTROL, 2, true, 0),
         pu("hue", PU_HUE_CONTROL, 2, true, 0),
         pu("gamma", PU_GAMMA_CONTROL, 2, false, 100),
         pu("sharpness", PU_SHARPNESS_CONTROL, 2, false, 2),
-        pu("power_line_frequency", PU_POWER_LINE_FREQUENCY_CONTROL, 1, false, 1),
-        pu("backlight_compensation", PU_BACKLIGHT_COMPENSATION_CONTROL, 2, false, 1),
+        pu(
+            "power_line_frequency",
+            PU_POWER_LINE_FREQUENCY_CONTROL,
+            1,
+            false,
+            1,
+        ),
+        pu(
+            "backlight_compensation",
+            PU_BACKLIGHT_COMPENSATION_CONTROL,
+            2,
+            false,
+            1,
+        ),
     ],
 };
 
@@ -93,7 +111,9 @@ pub const COLOUR_PRESETS: [&ColourPreset; 1] = [&GRIPPER_3100K_V1];
 
 /// The preset a rig config names, or `None` for an unknown name (the caller refuses it).
 pub fn colour_preset(name: &str) -> Option<&'static ColourPreset> {
-    COLOUR_PRESETS.into_iter().find(|preset| preset.name == name)
+    COLOUR_PRESETS
+        .into_iter()
+        .find(|preset| preset.name == name)
 }
 
 /// What a camera's receipt says about colour when no preset was asked for: nothing was
@@ -516,7 +536,10 @@ pub(crate) mod tests {
             "only the processing unit is addressed"
         );
         // Exposure and gain are not the preset's to touch.
-        assert!(log.iter().all(|entry| entry.2 != u16::from(PU_GAIN_CONTROL) << 8));
+        assert!(
+            log.iter()
+                .all(|entry| entry.2 != u16::from(PU_GAIN_CONTROL) << 8)
+        );
     }
 
     #[test]
@@ -547,7 +570,8 @@ pub(crate) mod tests {
             index: u16,
             data: &mut [u8],
         ) -> io::Result<usize> {
-            self.inner.control_in(request_type, request, value, index, data)
+            self.inner
+                .control_in(request_type, request, value, index, data)
         }
 
         fn control_out(
@@ -561,7 +585,8 @@ pub(crate) mod tests {
             if value == u16::from(self.selector) << 8 {
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
             }
-            self.inner.control_out(request_type, request, value, index, data)
+            self.inner
+                .control_out(request_type, request, value, index, data)
         }
     }
 
