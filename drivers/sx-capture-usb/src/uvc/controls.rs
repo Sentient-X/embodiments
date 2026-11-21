@@ -6,9 +6,10 @@
 //! `exposure_time_absolute` is `CT_EXPOSURE_TIME_ABSOLUTE_CONTROL` (100 µs units), and
 //! `gain` is `PU_GAIN_CONTROL` — so the laptop pod's settings and these are the same numbers.
 //!
-//! A colour preset (white balance, saturation, contrast, …: the processing unit's other
-//! controls) is opt-in: written once when the camera opens, before streaming starts, and
-//! never per frame. Without one the camera keeps whatever it holds, as before.
+//! A colour preset ([`ColourPreset`]: manual exposure, exposure time and gain, white balance,
+//! saturation, contrast, …) is opt-in: written once when the camera opens, before streaming
+//! starts, read back, and never touched per frame. Without one the camera keeps whatever it
+//! holds and no colour control is sent, as before.
 
 use std::io;
 
@@ -35,28 +36,88 @@ pub const PU_GAMMA_CONTROL: u8 = 0x09;
 pub const PU_WHITE_BALANCE_TEMPERATURE_CONTROL: u8 = 0x0a;
 pub const PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL: u8 = 0x0b;
 
-/// One processing-unit control a colour preset sets: its V4L2-style name, UVC selector,
-/// wire size (1 or 2 bytes, little-endian) and whether the camera reads it as signed.
+pub const CT_AE_PRIORITY_CONTROL: u8 = 0x03;
+
+/// The UVC entity a control is addressed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    CameraTerminal,
+    ProcessingUnit,
+}
+
+/// One control a colour preset sets: its name as the colour bundle (and V4L2) names it, the
+/// UVC entity and selector, its wire size (1, 2 or 4 bytes, little-endian), whether the
+/// camera reads it as signed, and the value in the bundle's terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColourControl {
     pub name: &'static str,
+    pub unit: Unit,
     pub selector: u8,
     pub size: u8,
     pub signed: bool,
-    pub value: i16,
+    pub value: i32,
 }
 
-/// A named set of processing-unit controls, written in order (white balance auto off before
-/// its temperature) once at camera open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A per-camera locked colour preset (`sx.gripper-colour-profile/v1`'s `preset` and
+/// `preset_conditions`): every value is written once when the camera opens, before streaming,
+/// and read back. Exposure is manual and held at `exposure_100us`/`gain`: a camera opened with
+/// a preset is never steered by an exposure controller.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColourPreset {
-    pub name: &'static str,
-    pub controls: &'static [ColourControl],
+    /// The bundle's `profile_name`, named in every receipt.
+    pub name: String,
+    /// V4L2 `auto_exposure`: only 1 (manual) is accepted.
+    pub auto_exposure: i32,
+    /// `exposure_time_absolute`, 100 µs units.
+    pub exposure_100us: i32,
+    pub gain: i32,
+    /// V4L2 `white_balance_temperature_auto`: 0 fixes `wb_temperature`, 1 leaves it unwritten.
+    pub auto_wb: i32,
+    pub wb_temperature: i32,
+    pub brightness: i32,
+    pub contrast: i32,
+    pub saturation: i32,
+    pub hue: i32,
+    pub gamma: i32,
+    pub sharpness: i32,
+    pub power_line_frequency: Option<i32>,
+    pub backlight_compensation: Option<i32>,
+    /// V4L2 `exposure_dynamic_framerate`, UVC `CT_AE_PRIORITY_CONTROL`.
+    pub exposure_dynamic_framerate: Option<i32>,
+    /// A control the camera refuses or reads back otherwise fails the open (true) or is only
+    /// recorded (false).
+    pub refuse_on_mismatch: bool,
 }
 
-const fn pu(name: &'static str, selector: u8, size: u8, signed: bool, value: i16) -> ColourControl {
+/// The accepted range of each preset value on the YUBI wrist camera (32e4:9230).
+pub const PRESET_RANGES: [(&str, i32, i32); 14] = [
+    ("auto_exposure", 1, 1),
+    ("exposure", 1, 5000),
+    ("gain", 0, 100),
+    ("auto_wb", 0, 1),
+    ("wb_temperature", 2800, 6500),
+    ("brightness", -64, 64),
+    ("contrast", 0, 64),
+    ("saturation", 0, 128),
+    ("hue", -40, 40),
+    ("gamma", 72, 500),
+    ("sharpness", 0, 6),
+    ("power_line_frequency", 0, 2),
+    ("backlight_compensation", 0, 2),
+    ("exposure_dynamic_framerate", 0, 1),
+];
+
+const fn control(
+    name: &'static str,
+    unit: Unit,
+    selector: u8,
+    size: u8,
+    signed: bool,
+    value: i32,
+) -> ColourControl {
     ColourControl {
         name,
+        unit,
         selector,
         size,
         signed,
@@ -64,62 +125,234 @@ const fn pu(name: &'static str, selector: u8, size: u8, signed: bool, value: i16
     }
 }
 
-/// The gripper colour calibration point: 3100 K fixed white balance, saturation 60,
-/// 50 Hz anti-flicker, everything else at the camera's documented defaults.
-pub const GRIPPER_3100K_V1: ColourPreset = ColourPreset {
-    name: "gripper_3100k_v1",
-    controls: &[
-        pu(
-            "white_balance_temperature_auto",
-            PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL,
-            1,
-            false,
-            0,
-        ),
-        pu(
-            "white_balance_temperature",
-            PU_WHITE_BALANCE_TEMPERATURE_CONTROL,
-            2,
-            false,
-            3100,
-        ),
-        pu("saturation", PU_SATURATION_CONTROL, 2, false, 60),
-        pu("contrast", PU_CONTRAST_CONTROL, 2, false, 32),
-        pu("brightness", PU_BRIGHTNESS_CONTROL, 2, true, 0),
-        pu("hue", PU_HUE_CONTROL, 2, true, 0),
-        pu("gamma", PU_GAMMA_CONTROL, 2, false, 100),
-        pu("sharpness", PU_SHARPNESS_CONTROL, 2, false, 2),
-        pu(
-            "power_line_frequency",
-            PU_POWER_LINE_FREQUENCY_CONTROL,
-            1,
-            false,
-            1,
-        ),
-        pu(
-            "backlight_compensation",
-            PU_BACKLIGHT_COMPENSATION_CONTROL,
-            2,
-            false,
-            1,
-        ),
-    ],
-};
+impl ColourPreset {
+    /// Every value by its bundle name, `None` for a condition the preset leaves alone.
+    fn values(&self) -> [(&'static str, Option<i32>); 14] {
+        [
+            ("auto_exposure", Some(self.auto_exposure)),
+            ("exposure", Some(self.exposure_100us)),
+            ("gain", Some(self.gain)),
+            ("auto_wb", Some(self.auto_wb)),
+            ("wb_temperature", Some(self.wb_temperature)),
+            ("brightness", Some(self.brightness)),
+            ("contrast", Some(self.contrast)),
+            ("saturation", Some(self.saturation)),
+            ("hue", Some(self.hue)),
+            ("gamma", Some(self.gamma)),
+            ("sharpness", Some(self.sharpness)),
+            ("power_line_frequency", self.power_line_frequency),
+            ("backlight_compensation", self.backlight_compensation),
+            (
+                "exposure_dynamic_framerate",
+                self.exposure_dynamic_framerate,
+            ),
+        ]
+    }
 
-/// Every preset a rig config may name.
-pub const COLOUR_PRESETS: [&ColourPreset; 1] = [&GRIPPER_3100K_V1];
+    /// Refuse a preset the camera cannot hold: no name, auto exposure, or any value outside
+    /// [`PRESET_RANGES`] (every out-of-range value is named).
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("colour preset has no name".to_owned());
+        }
+        let outside: Vec<String> = self
+            .values()
+            .into_iter()
+            .zip(PRESET_RANGES)
+            .filter_map(|((name, value), (_, min, max))| {
+                let value = value?;
+                (!(min..=max).contains(&value))
+                    .then(|| format!("{name} {value} not in {min}..={max}"))
+            })
+            .collect();
+        if outside.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "colour preset {}: {}",
+                self.name,
+                outside.join(", ")
+            ))
+        }
+    }
 
-/// The preset a rig config names, or `None` for an unknown name (the caller refuses it).
-pub fn colour_preset(name: &str) -> Option<&'static ColourPreset> {
-    COLOUR_PRESETS
-        .into_iter()
-        .find(|preset| preset.name == name)
+    /// The exposure the camera is held at: start = min = max, so nothing may move it.
+    pub fn exposure_config(&self) -> ExposureConfig {
+        let held = Setting {
+            exposure_100us: self.exposure_100us,
+            gain: self.gain,
+        };
+        ExposureConfig {
+            start: held,
+            min: held,
+            max: held,
+        }
+    }
+
+    /// The controls in the order they are written: manual exposure before its time and gain,
+    /// white balance auto off before its temperature (which is not written under auto).
+    pub fn controls(&self) -> Vec<ColourControl> {
+        use Unit::{CameraTerminal as Ct, ProcessingUnit as Pu};
+        let mut out = vec![control(
+            "auto_exposure",
+            Ct,
+            CT_AE_MODE_CONTROL,
+            1,
+            false,
+            self.auto_exposure,
+        )];
+        if let Some(value) = self.exposure_dynamic_framerate {
+            out.push(control(
+                "exposure_dynamic_framerate",
+                Ct,
+                CT_AE_PRIORITY_CONTROL,
+                1,
+                false,
+                value,
+            ));
+        }
+        out.extend([
+            control(
+                "exposure",
+                Ct,
+                CT_EXPOSURE_TIME_ABSOLUTE_CONTROL,
+                4,
+                false,
+                self.exposure_100us,
+            ),
+            control("gain", Pu, PU_GAIN_CONTROL, 2, false, self.gain),
+            control(
+                "auto_wb",
+                Pu,
+                PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL,
+                1,
+                false,
+                self.auto_wb,
+            ),
+        ]);
+        if self.auto_wb == 0 {
+            out.push(control(
+                "wb_temperature",
+                Pu,
+                PU_WHITE_BALANCE_TEMPERATURE_CONTROL,
+                2,
+                false,
+                self.wb_temperature,
+            ));
+        }
+        out.extend([
+            control(
+                "brightness",
+                Pu,
+                PU_BRIGHTNESS_CONTROL,
+                2,
+                true,
+                self.brightness,
+            ),
+            control("contrast", Pu, PU_CONTRAST_CONTROL, 2, false, self.contrast),
+            control(
+                "saturation",
+                Pu,
+                PU_SATURATION_CONTROL,
+                2,
+                false,
+                self.saturation,
+            ),
+            control("hue", Pu, PU_HUE_CONTROL, 2, true, self.hue),
+            control("gamma", Pu, PU_GAMMA_CONTROL, 2, false, self.gamma),
+            control(
+                "sharpness",
+                Pu,
+                PU_SHARPNESS_CONTROL,
+                2,
+                false,
+                self.sharpness,
+            ),
+        ]);
+        if let Some(value) = self.power_line_frequency {
+            out.push(control(
+                "power_line_frequency",
+                Pu,
+                PU_POWER_LINE_FREQUENCY_CONTROL,
+                1,
+                false,
+                value,
+            ));
+        }
+        if let Some(value) = self.backlight_compensation {
+            out.push(control(
+                "backlight_compensation",
+                Pu,
+                PU_BACKLIGHT_COMPENSATION_CONTROL,
+                2,
+                false,
+                value,
+            ));
+        }
+        out
+    }
+
+    /// The receipt of one application: what was asked, what each control read back (in the
+    /// bundle's terms), what the camera refused, which read back otherwise, and whether all
+    /// held. `results` pairs each of [`ColourPreset::controls`] with its read-back.
+    pub fn report(
+        &self,
+        results: impl IntoIterator<Item = (ColourControl, Result<i32, String>)>,
+    ) -> Value {
+        let mut requested = Map::new();
+        let mut read_back = Map::new();
+        let mut refused = Map::new();
+        let mut mismatched = Vec::new();
+        for (c, result) in results {
+            requested.insert(c.name.to_owned(), json!(c.value));
+            match result {
+                Ok(value) => {
+                    if value != c.value {
+                        mismatched.push(json!(c.name));
+                    }
+                    read_back.insert(c.name.to_owned(), json!(value));
+                }
+                Err(error) => {
+                    refused.insert(c.name.to_owned(), json!(error));
+                }
+            }
+        }
+        let matched = refused.is_empty() && mismatched.is_empty();
+        json!({
+            "preset": self.name,
+            "requested": requested,
+            "read_back": read_back,
+            "refused": refused,
+            "mismatched": mismatched,
+            "matched": matched,
+            "refuse_on_mismatch": self.refuse_on_mismatch,
+        })
+    }
+
+    /// Why the camera may not stream under this preset: some control did not hold and the
+    /// preset refuses a mismatch. `None` when every control held, or mismatches are only
+    /// recorded.
+    pub fn refusal(&self, report: &Value) -> Option<String> {
+        if !self.refuse_on_mismatch || report["matched"] == json!(true) {
+            return None;
+        }
+        Some(format!(
+            "camera did not hold colour preset {}: mismatched {}, refused {}, read back {}",
+            self.name, report["mismatched"], report["refused"], report["read_back"]
+        ))
+    }
 }
 
-/// What a camera's receipt says about colour when no preset was asked for: nothing was
-/// written, the camera holds whatever it held.
-pub fn colour_untouched() -> Value {
-    json!({"preset": Value::Null})
+/// V4L2's `auto_exposure` for a UVC `CT_AE_MODE_CONTROL` bitmap (manual 1, auto 0, shutter
+/// priority 2, aperture priority 3); an unknown mode reads back as its negated bitmap.
+fn ae_mode_v4l2(mode: u8) -> i32 {
+    match mode {
+        0x01 => 1,
+        0x02 => 0,
+        0x04 => 2,
+        0x08 => 3,
+        other => -i32::from(other),
+    }
 }
 
 /// Where the rig's controls live on one camera.
@@ -240,26 +473,40 @@ pub fn apply_exposure(
     })
 }
 
-/// Write each of a preset's controls and read it back, once, at camera open. A control the
-/// camera refuses (or answers short) is named in `refused` and the rest still go out, so the
-/// stream opens and the receipt states exactly what the camera holds; `matched` is true only
-/// when every control reads back as asked.
+/// Write each of a preset's controls and read it back, once, at camera open: SET_CUR then
+/// GET_CUR, camera terminal and processing unit. A control the camera refuses (or answers
+/// short) is named in the report's `refused` and the rest still go out, so the receipt states
+/// exactly what the camera holds; whether a mismatch stops the open is
+/// [`ColourPreset::refusal`]'s call.
 pub fn apply_colour_preset(
     control: &impl Control,
     entities: &Entities,
     preset: &ColourPreset,
 ) -> Value {
-    let mut held = Map::new();
-    let mut refused = Map::new();
-    let mut requested = Map::new();
-    for c in preset.controls {
-        requested.insert(c.name.to_owned(), json!(c.value));
-        let unit = entities.processing_unit;
-        let answer = match c.size {
-            1 => set(control, entities, unit, c.selector, &[c.value as u8])
-                .and_then(|()| get::<1>(control, entities, unit, c.selector))
-                .map(|[byte]| i32::from(byte)),
-            2 => set(control, entities, unit, c.selector, &c.value.to_le_bytes())
+    let results: Vec<(ColourControl, Result<i32, String>)> = preset
+        .controls()
+        .into_iter()
+        .map(|c| {
+            let unit = match c.unit {
+                Unit::CameraTerminal => entities.camera_terminal,
+                Unit::ProcessingUnit => entities.processing_unit,
+            };
+            let answer = match (c.size, c.selector, c.unit) {
+                (1, CT_AE_MODE_CONTROL, Unit::CameraTerminal) => {
+                    set(control, entities, unit, c.selector, &[AE_MODE_MANUAL])
+                        .and_then(|()| get::<1>(control, entities, unit, c.selector))
+                        .map(|[mode]| ae_mode_v4l2(mode))
+                }
+                (1, ..) => set(control, entities, unit, c.selector, &[c.value as u8])
+                    .and_then(|()| get::<1>(control, entities, unit, c.selector))
+                    .map(|[byte]| i32::from(byte)),
+                (2, ..) => set(
+                    control,
+                    entities,
+                    unit,
+                    c.selector,
+                    &(c.value as i16).to_le_bytes(),
+                )
                 .and_then(|()| get::<2>(control, entities, unit, c.selector))
                 .map(|bytes| {
                     if c.signed {
@@ -268,32 +515,24 @@ pub fn apply_colour_preset(
                         i32::from(u16::from_le_bytes(bytes))
                     }
                 }),
-            size => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("unsupported control size {size}"),
-            )),
-        };
-        match answer {
-            Ok(value) => {
-                held.insert(c.name.to_owned(), json!(value));
-            }
-            Err(error) => {
-                refused.insert(c.name.to_owned(), json!(error.to_string()));
-            }
-        }
-    }
-    let matched = refused.is_empty()
-        && preset
-            .controls
-            .iter()
-            .all(|c| held.get(c.name) == Some(&json!(c.value)));
-    json!({
-        "preset": preset.name,
-        "requested": requested,
-        "held": held,
-        "refused": refused,
-        "matched": matched,
-    })
+                (4, ..) => set(
+                    control,
+                    entities,
+                    unit,
+                    c.selector,
+                    &(c.value as u32).to_le_bytes(),
+                )
+                .and_then(|()| get::<4>(control, entities, unit, c.selector))
+                .map(|bytes| u32::from_le_bytes(bytes) as i32),
+                (size, ..) => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("unsupported control size {size}"),
+                )),
+            };
+            (c, answer.map_err(|error| error.to_string()))
+        })
+        .collect();
+    preset.report(results)
 }
 
 /// The Sonix register-access extension control over a usbfs control pipe, so the pod's one
@@ -514,54 +753,126 @@ pub(crate) mod tests {
         );
     }
 
+    /// The fleet bundle's preset (`fleet_lightC_2p3ms_wb3100_v1`).
+    pub(crate) fn fleet_preset() -> ColourPreset {
+        ColourPreset {
+            name: "fleet_lightC_2p3ms_wb3100_v1".to_owned(),
+            auto_exposure: 1,
+            exposure_100us: 23,
+            gain: 0,
+            auto_wb: 0,
+            wb_temperature: 3100,
+            brightness: 0,
+            contrast: 32,
+            saturation: 60,
+            hue: 0,
+            gamma: 100,
+            sharpness: 2,
+            power_line_frequency: Some(1),
+            backlight_compensation: Some(1),
+            exposure_dynamic_framerate: Some(1),
+            refuse_on_mismatch: true,
+        }
+    }
+
     #[test]
-    fn colour_preset_writes_each_control_once_to_the_processing_unit_and_reads_it_back() {
+    fn a_preset_writes_each_control_once_to_its_unit_and_reads_it_back() {
         let controls = Controls::default();
-        let status = apply_colour_preset(&controls, &ENTITIES, &GRIPPER_3100K_V1);
-        assert_eq!(status["preset"], "gripper_3100k_v1");
+        let preset = fleet_preset();
+        let status = apply_colour_preset(&controls, &ENTITIES, &preset);
+        assert_eq!(status["preset"], "fleet_lightC_2p3ms_wb3100_v1");
         assert_eq!(status["matched"], true, "{status}");
-        assert_eq!(status["held"]["white_balance_temperature"], 3100);
-        assert_eq!(status["held"]["saturation"], 60);
-        assert_eq!(status["held"]["power_line_frequency"], 1);
+        assert_eq!(preset.refusal(&status), None);
+        assert_eq!(status["read_back"]["auto_exposure"], 1);
+        assert_eq!(status["read_back"]["exposure"], 23);
+        assert_eq!(status["read_back"]["gain"], 0);
+        assert_eq!(status["read_back"]["wb_temperature"], 3100);
+        assert_eq!(status["read_back"]["saturation"], 60);
+        assert_eq!(status["read_back"]["exposure_dynamic_framerate"], 1);
+        assert_eq!(status["requested"], status["read_back"]);
         assert!(status["refused"].as_object().unwrap().is_empty());
+        assert_eq!(status["mismatched"], json!([]));
         let log = controls.log.borrow();
         let writes: Vec<&Request> = log.iter().filter(|entry| entry.1 == SET_CUR).collect();
-        assert_eq!(writes.len(), GRIPPER_3100K_V1.controls.len());
-        // White balance auto goes off (1 byte) before the temperature (2 bytes LE) is set.
-        assert_eq!(*writes[0], (0x21, 0x01, 0x0b00, 0x0200, vec![0]));
-        assert_eq!(*writes[1], (0x21, 0x01, 0x0a00, 0x0200, vec![0x1c, 0x0c]));
-        assert_eq!(*writes[8], (0x21, 0x01, 0x0500, 0x0200, vec![1]));
-        assert!(
-            log.iter().all(|entry| entry.3 == 0x0200),
-            "only the processing unit is addressed"
+        assert_eq!(writes.len(), preset.controls().len());
+        assert_eq!(writes.len(), 14);
+        assert_eq!(
+            log.iter().filter(|entry| entry.1 == GET_CUR).count(),
+            writes.len(),
+            "each control is read back once"
         );
-        // Exposure and gain are not the preset's to touch.
+        // Manual exposure, its priority, time (4 bytes) on the camera terminal; gain and the
+        // colour controls on the processing unit; white balance auto off before its temperature.
+        assert_eq!(*writes[0], (0x21, 0x01, 0x0200, 0x0100, vec![0x01]));
+        assert_eq!(*writes[1], (0x21, 0x01, 0x0300, 0x0100, vec![0x01]));
+        assert_eq!(*writes[2], (0x21, 0x01, 0x0400, 0x0100, vec![23, 0, 0, 0]));
+        assert_eq!(*writes[3], (0x21, 0x01, 0x0400, 0x0200, vec![0, 0]));
+        assert_eq!(*writes[4], (0x21, 0x01, 0x0b00, 0x0200, vec![0]));
+        assert_eq!(*writes[5], (0x21, 0x01, 0x0a00, 0x0200, vec![0x1c, 0x0c]));
+        assert_eq!(*writes[12], (0x21, 0x01, 0x0500, 0x0200, vec![1]));
+        assert_eq!(*writes[13], (0x21, 0x01, 0x0100, 0x0200, vec![1, 0]));
         assert!(
             log.iter()
-                .all(|entry| entry.2 != u16::from(PU_GAIN_CONTROL) << 8)
+                .all(|entry| entry.3 == 0x0100 || entry.3 == 0x0200),
+            "never the extension unit"
+        );
+    }
+
+    #[test]
+    fn auto_white_balance_leaves_the_temperature_unwritten_and_conditions_are_optional() {
+        let controls = Controls::default();
+        let preset = ColourPreset {
+            auto_wb: 1,
+            power_line_frequency: None,
+            backlight_compensation: None,
+            exposure_dynamic_framerate: None,
+            ..fleet_preset()
+        };
+        let status = apply_colour_preset(&controls, &ENTITIES, &preset);
+        assert_eq!(status["matched"], true, "{status}");
+        assert!(status["requested"].get("wb_temperature").is_none());
+        assert!(status["requested"].get("power_line_frequency").is_none());
+        assert_eq!(preset.controls().len(), 10);
+        assert!(
+            controls
+                .log
+                .borrow()
+                .iter()
+                .all(|entry| entry.2 != u16::from(PU_WHITE_BALANCE_TEMPERATURE_CONTROL) << 8)
         );
     }
 
     #[test]
     fn signed_controls_round_trip_negative_values() {
-        static NEGATIVE: ColourPreset = ColourPreset {
-            name: "test_negative",
-            controls: &[pu("brightness", PU_BRIGHTNESS_CONTROL, 2, true, -5)],
-        };
         let controls = Controls::default();
-        let status = apply_colour_preset(&controls, &ENTITIES, &NEGATIVE);
-        assert_eq!(status["held"]["brightness"], -5);
+        let preset = ColourPreset {
+            brightness: -5,
+            hue: -40,
+            ..fleet_preset()
+        };
+        let status = apply_colour_preset(&controls, &ENTITIES, &preset);
+        assert_eq!(status["read_back"]["brightness"], -5);
+        assert_eq!(status["read_back"]["hue"], -40);
         assert_eq!(status["matched"], true);
-        assert_eq!(controls.log.borrow()[0].4, vec![0xfb, 0xff]);
+        assert!(
+            controls
+                .log
+                .borrow()
+                .iter()
+                .any(|entry| entry.2 == u16::from(PU_BRIGHTNESS_CONTROL) << 8
+                    && entry.4 == vec![0xfb, 0xff])
+        );
     }
 
-    /// A camera that stalls one selector: the rest still go out and the receipt names it.
-    struct Refusing {
+    /// A camera that stalls one selector's write, or answers another with its own value.
+    struct Quirky {
         inner: Controls,
-        selector: u8,
+        refuses: Option<u8>,
+        /// (selector, the value GET_CUR answers).
+        clamps: Option<(u8, u16)>,
     }
 
-    impl Control for Refusing {
+    impl Control for Quirky {
         fn control_in(
             &self,
             request_type: u8,
@@ -570,8 +881,16 @@ pub(crate) mod tests {
             index: u16,
             data: &mut [u8],
         ) -> io::Result<usize> {
-            self.inner
-                .control_in(request_type, request, value, index, data)
+            let read = self
+                .inner
+                .control_in(request_type, request, value, index, data)?;
+            if let Some((selector, answer)) = self.clamps
+                && value == u16::from(selector) << 8
+                && index == 0x0200
+            {
+                data[..2].copy_from_slice(&answer.to_le_bytes());
+            }
+            Ok(read)
         }
 
         fn control_out(
@@ -582,7 +901,10 @@ pub(crate) mod tests {
             index: u16,
             data: &[u8],
         ) -> io::Result<()> {
-            if value == u16::from(self.selector) << 8 {
+            if self
+                .refuses
+                .is_some_and(|s| value == u16::from(s) << 8 && index == 0x0200)
+            {
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
             }
             self.inner
@@ -591,24 +913,193 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_refused_colour_control_is_reported_not_fatal() {
-        let camera = Refusing {
+    fn a_refused_or_mismatched_control_is_recorded_and_refuses_only_when_asked() {
+        let camera = Quirky {
             inner: Controls::default(),
-            selector: PU_HUE_CONTROL,
+            refuses: Some(PU_HUE_CONTROL),
+            clamps: Some((PU_SATURATION_CONTROL, 64)),
         };
-        let status = apply_colour_preset(&camera, &ENTITIES, &GRIPPER_3100K_V1);
+        let preset = fleet_preset();
+        let status = apply_colour_preset(&camera, &ENTITIES, &preset);
         assert_eq!(status["matched"], false);
         assert!(status["refused"]["hue"].is_string(), "{status}");
-        assert_eq!(status["held"]["saturation"], 60);
-        assert!(status["held"].get("hue").is_none());
+        assert!(status["read_back"].get("hue").is_none());
+        assert_eq!(status["read_back"]["saturation"], 64);
+        assert_eq!(status["requested"]["saturation"], 60);
+        assert_eq!(status["mismatched"], json!(["saturation"]));
+        // The rest still went out.
+        assert_eq!(status["read_back"]["gamma"], 100);
+        let refusal = preset.refusal(&status).expect("refused");
+        assert!(
+            refusal.contains("saturation") && refusal.contains("hue"),
+            "{refusal}"
+        );
+        let recorded = ColourPreset {
+            refuse_on_mismatch: false,
+            ..preset
+        };
+        let status = apply_colour_preset(
+            &Quirky {
+                inner: Controls::default(),
+                refuses: Some(PU_HUE_CONTROL),
+                clamps: None,
+            },
+            &ENTITIES,
+            &recorded,
+        );
+        assert_eq!(status["matched"], false);
+        assert_eq!(status["refuse_on_mismatch"], false);
+        assert_eq!(recorded.refusal(&status), None);
     }
 
     #[test]
-    fn presets_are_found_by_name_only() {
-        assert_eq!(colour_preset("gripper_3100k_v1"), Some(&GRIPPER_3100K_V1));
-        assert_eq!(colour_preset("GRIPPER_3100K_V1"), None);
-        assert_eq!(colour_preset(""), None);
-        assert_eq!(colour_untouched(), json!({"preset": null}));
+    fn a_camera_left_in_auto_exposure_reads_back_as_a_mismatch() {
+        let stubborn = Controls {
+            hold_auto: true,
+            ..Controls::default()
+        };
+        let preset = fleet_preset();
+        let status = apply_colour_preset(&stubborn, &ENTITIES, &preset);
+        assert_eq!(status["read_back"]["auto_exposure"], 3, "aperture priority");
+        assert_eq!(status["mismatched"], json!(["auto_exposure"]));
+        assert!(preset.refusal(&status).is_some());
+    }
+
+    #[test]
+    fn presets_are_validated_against_the_cameras_ranges() {
+        let preset = fleet_preset();
+        assert_eq!(preset.validate(), Ok(()));
+        assert_eq!(
+            preset.exposure_config(),
+            ExposureConfig {
+                start: Setting {
+                    exposure_100us: 23,
+                    gain: 0
+                },
+                min: Setting {
+                    exposure_100us: 23,
+                    gain: 0
+                },
+                max: Setting {
+                    exposure_100us: 23,
+                    gain: 0
+                },
+            }
+        );
+        let edges = ColourPreset {
+            exposure_100us: 5000,
+            gain: 100,
+            wb_temperature: 6500,
+            saturation: 128,
+            contrast: 64,
+            gamma: 72,
+            brightness: -64,
+            hue: 40,
+            sharpness: 6,
+            ..fleet_preset()
+        };
+        assert_eq!(edges.validate(), Ok(()));
+        for (bad, field) in [
+            (
+                ColourPreset {
+                    auto_exposure: 3,
+                    ..fleet_preset()
+                },
+                "auto_exposure 3",
+            ),
+            (
+                ColourPreset {
+                    exposure_100us: 0,
+                    ..fleet_preset()
+                },
+                "exposure 0",
+            ),
+            (
+                ColourPreset {
+                    exposure_100us: 5001,
+                    ..fleet_preset()
+                },
+                "exposure 5001",
+            ),
+            (
+                ColourPreset {
+                    gain: 101,
+                    ..fleet_preset()
+                },
+                "gain 101",
+            ),
+            (
+                ColourPreset {
+                    wb_temperature: 2799,
+                    ..fleet_preset()
+                },
+                "wb_temperature 2799",
+            ),
+            (
+                ColourPreset {
+                    saturation: 129,
+                    ..fleet_preset()
+                },
+                "saturation 129",
+            ),
+            (
+                ColourPreset {
+                    contrast: 65,
+                    ..fleet_preset()
+                },
+                "contrast 65",
+            ),
+            (
+                ColourPreset {
+                    gamma: 71,
+                    ..fleet_preset()
+                },
+                "gamma 71",
+            ),
+            (
+                ColourPreset {
+                    brightness: 65,
+                    ..fleet_preset()
+                },
+                "brightness 65",
+            ),
+            (
+                ColourPreset {
+                    hue: -41,
+                    ..fleet_preset()
+                },
+                "hue -41",
+            ),
+            (
+                ColourPreset {
+                    sharpness: 7,
+                    ..fleet_preset()
+                },
+                "sharpness 7",
+            ),
+            (
+                ColourPreset {
+                    auto_wb: 2,
+                    ..fleet_preset()
+                },
+                "auto_wb 2",
+            ),
+            (
+                ColourPreset {
+                    power_line_frequency: Some(3),
+                    ..fleet_preset()
+                },
+                "power_line_frequency 3",
+            ),
+        ] {
+            let error = bad.validate().unwrap_err();
+            assert!(error.contains(field), "{field}: {error}");
+        }
+        let unnamed = ColourPreset {
+            name: " ".to_owned(),
+            ..fleet_preset()
+        };
+        assert!(unnamed.validate().is_err());
     }
 
     #[test]

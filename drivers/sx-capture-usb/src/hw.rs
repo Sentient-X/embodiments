@@ -246,8 +246,18 @@ impl Port for UsbfsPort {
     fn open_camera_with_colour(
         &self,
         config: ExposureConfig,
-        colour: Option<&'static ColourPreset>,
+        colour: Option<&ColourPreset>,
     ) -> Result<Box<dyn CameraSource>, String> {
+        if let Some(preset) = colour {
+            preset.validate()?;
+            if config != preset.exposure_config() {
+                return Err(format!(
+                    "colour preset {} holds the camera at its own exposure and gain; \
+                     it opens only with that locked range",
+                    preset.name
+                ));
+            }
+        }
         let (camera, entities) = self.camera.as_ref().ok_or("not a camera")?;
         self.claim(camera.control_interface)?;
         self.claim(camera.streaming_interface)?;
@@ -263,17 +273,29 @@ impl Port for UsbfsPort {
             interval,
         )
         .map_err(|e| format!("probe/commit: {}", io_detail(e)))?;
-        let held = controls::apply_exposure(&self.device, entities, config, config.start, true)?;
-        if held != config.start {
-            return Err(format!(
-                "camera holds exposure/gain {}/{} after requesting the start setting",
-                held.exposure_100us, held.gain
-            ));
-        }
-        // Once, before streaming: no control traffic per frame, and none at all without a preset.
-        let colour = colour.map_or_else(controls::colour_untouched, |preset| {
-            controls::apply_colour_preset(&self.device, entities, preset)
-        });
+        // Once, before streaming: no control traffic per frame. Without a preset, exactly the
+        // exposure controls as always; with one, the preset writes manual exposure, its time
+        // and gain with the colour controls and reads every one back.
+        let colour = match colour {
+            None => {
+                let held =
+                    controls::apply_exposure(&self.device, entities, config, config.start, true)?;
+                if held != config.start {
+                    return Err(format!(
+                        "camera holds exposure/gain {}/{} after requesting the start setting",
+                        held.exposure_100us, held.gain
+                    ));
+                }
+                None
+            }
+            Some(preset) => {
+                let report = controls::apply_colour_preset(&self.device, entities, preset);
+                if let Some(refusal) = preset.refusal(&report) {
+                    return Err(refusal);
+                }
+                Some(report)
+            }
+        };
         let high_speed = self.device.speed().map_err(io_detail)? >= 3;
         let engine = Engine::start(self.device, camera, &committed, high_speed, self.clock)
             .map_err(|e| format!("streaming: {}", io_detail(e)))?;
@@ -324,8 +346,8 @@ struct UsbfsCamera {
     engine: Option<Engine>,
     exposure: ExposureControl,
     negotiated: Value,
-    /// The colour preset written at open and what the camera read back.
-    colour: Value,
+    /// The colour preset written at open and what the camera read back; `None` without one.
+    colour: Option<Value>,
 }
 
 impl CameraSource for UsbfsCamera {
@@ -348,10 +370,13 @@ impl CameraSource for UsbfsCamera {
                 "transfers": engine.decoder.stats,
                 "bandwidth": engine.bandwidth,
                 "clock": engine.decoder.clock_quality(),
-                "colour": self.colour,
             }),
-            None => json!({"negotiated": self.negotiated, "colour": self.colour}),
+            None => json!({"negotiated": self.negotiated}),
         }
+    }
+
+    fn colour_controls(&self) -> Option<Value> {
+        self.colour.clone()
     }
 
     fn close(mut self: Box<Self>) {
