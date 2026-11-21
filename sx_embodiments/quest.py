@@ -370,6 +370,13 @@ HEADSET_QUEST_APK_BUILDS: Mapping[str, QuestApkBuildId] = MappingProxyType(
         "1.5.0-77": QuestApkBuildId(
             "sha256:a107cacc10f4174a6d2792a77a0fccf1323b43ca984127787e768aef97a63eb5"
         ),
+        # 2026-11-21, OpenQuestCapture 1.5.0 build 79 (OQC a41c78d, QuestCameraLib 0964035,
+        # libsx_rig.so e35cfbab from sx 25f36d350e, embodiment assets from the same tree): a take
+        # stops itself at the pod's ceiling, which the Factory sets and the pod pulls with each
+        # heartbeat (30 minutes by default, warned a minute before), and is sealed as usual.
+        "1.5.0-79": QuestApkBuildId(
+            "sha256:3f97dbb969ef2c1482f95d6c153523c58dfa39ee76de0613c8c8384d96f7678e"
+        ),
     }
 )
 #: Every real build that has recorded, laptop pod and headset alike (append-only).
