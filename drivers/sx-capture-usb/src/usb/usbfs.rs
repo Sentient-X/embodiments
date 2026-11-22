@@ -495,6 +495,7 @@ impl Pool {
         }
     }
 
+    /// Submit transfer `index`; one the kernel refuses stays idle (see [`Pool::idle`]).
     pub fn submit(&mut self, index: usize) -> io::Result<()> {
         let transfer = &mut self.transfers[index];
         transfer.reset();
@@ -503,6 +504,26 @@ impl Pool {
         unsafe { ioctl(self.device.fd, SUBMIT_URB, transfer.urb.as_ptr().cast()) }?;
         self.in_flight[index] = true;
         Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.transfers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.transfers.is_empty()
+    }
+
+    /// Transfers the kernel holds now.
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight.iter().filter(|held| **held).count()
+    }
+
+    /// Transfers reaped or refused and not submitted since, by index.
+    pub fn idle(&self) -> Vec<usize> {
+        (0..self.transfers.len())
+            .filter(|index| !self.in_flight[*index])
+            .collect()
     }
 
     pub fn submit_all(&mut self) -> io::Result<()> {

@@ -39,6 +39,8 @@ pub struct StreamStats {
     /// Frames before the clock locked, or without PTS: never delivered.
     pub untimed: u64,
     pub payloads_without_scr: u64,
+    /// Submits the kernel refused for memory (`ENOMEM`) and the ring offered again later.
+    pub submits_refused: u64,
 }
 
 pub struct Decoder {
@@ -137,6 +139,86 @@ impl Decoder {
     }
 }
 
+/// In-flight URBs on one camera's isochronous endpoint and packets per URB.
+///
+/// usbfs copies every submitted URB's buffer into a kernel allocation of its own
+/// (`proc_do_submiturb`: `kmalloc(buffer_length, GFP_KERNEL | __GFP_NOWARN)`), so a URB of
+/// 32 packets × 3072 bytes (98 304 bytes) was an order-5 (128 KiB) page allocation on every
+/// submit, 120 times a second per camera. Past `PAGE_ALLOC_COSTLY_ORDER` (3) the allocator
+/// does not reclaim or compact for a request: with the heap fragmented after a long take's
+/// seal it refused at once, and the stream died `Out of memory (os error 12)` (13 takes;
+/// one archived stream after exactly 60 URBs, 240 ms in). Eight packets (24 576 bytes at
+/// 3072) is an order-3 (32 KiB) request, inside the costly order, which the allocator
+/// reclaims for rather than refuses.
+///
+/// Eight such URBs held 32 ms of the bus (what Linux uvcvideo keeps, UVC_URBS ×
+/// UVC_MAX_PACKETS): a pump thread that stalled longer than that while the previous take's
+/// seal loaded the headset lost the camera's frames, four in a row for every 40 ms past the
+/// ring, and the 30 Hz selection's gap grew past its law (24 takes terminated "exposure
+/// gap", 15 within 30 s of Start). The ring now holds `URBS` × `PACKETS` × 125 µs =
+/// 200 × 1 ms = 200 ms: one URB completes every millisecond and the pump may be away for
+/// 200 of them before a packet is lost ([`in_flight`]).
+///
+/// Memory, two cameras attached: the usbfs budget is one `usbfs_memory_mb` (16 MiB)
+/// counter for the whole system, charged per in-flight URB with its buffer, `struct urb`,
+/// `struct async` and packet descriptors (`URB_OVERHEAD` covers them with room). Per camera
+/// 200 × (24 576 + 512) = 5 017 600 bytes (4.8 MiB); two cameras 9.6 MiB; the encoders'
+/// synchronous 64 KiB bulk reads and anything else holding usbfs memory have the 6.4 MiB
+/// left. [`in_flight_fits_two_cameras`] holds the arithmetic.
+pub const URBS: usize = 200;
+pub const PACKETS: usize = 8;
+/// What usbfs charges one in-flight URB beyond its buffer (`struct async` + `struct urb`
+/// + `PACKETS` iso descriptors, about 400 bytes on 5.10 arm64), rounded up.
+pub const URB_OVERHEAD: usize = 512;
+/// The high-speed microframe: the service interval of a wrist camera's endpoint.
+pub const MICROFRAME_NS: i64 = 125_000;
+/// The system-wide usbfs budget (`usbfs_memory_mb`, 16 MiB).
+pub const USBFS_BUDGET: usize = 16 << 20;
+/// The largest buffer a submit may ask the kernel to copy: order-3, `PAGE_ALLOC_COSTLY_ORDER`
+/// (32 KiB on 4 KiB pages), the largest request the allocator reclaims for.
+pub const SUBMIT_COPY_LIMIT: usize = 32 << 10;
+/// The pump thread's nice: Android's `THREAD_PRIORITY_AUDIO` (-16), the priority of a
+/// thread that must drain a device ring on time. An app may lower its own threads' nice to
+/// -20 on Android (init sets `RLIMIT_NICE` to 40); a desktop without `CAP_SYS_NICE` refuses
+/// and the pump runs as before, the refusal reported.
+pub const PUMP_NICE: i32 = -16;
+
+/// The in-flight window one camera's ring gives for a packet size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct InFlight {
+    pub urbs: usize,
+    pub packets: usize,
+    /// The bus time the ring covers: how long the pump may be away before a packet is lost.
+    pub window_ns: i64,
+    /// What one submit asks the kernel to copy.
+    pub submit_bytes: usize,
+    /// What usbfs charges this camera while every URB is in flight.
+    pub charged_bytes: usize,
+}
+
+/// The ring's window for `packet_size` bytes per `service_interval_ns`.
+pub const fn in_flight(packet_size: usize, service_interval_ns: i64) -> InFlight {
+    InFlight {
+        urbs: URBS,
+        packets: PACKETS,
+        window_ns: (URBS * PACKETS) as i64 * service_interval_ns,
+        submit_bytes: PACKETS * packet_size,
+        charged_bytes: URBS * (PACKETS * packet_size + URB_OVERHEAD),
+    }
+}
+
+/// Where the pump thread's priority stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PumpPriority {
+    /// The thread that pumps (its kernel tid), once one has.
+    pub thread: Option<i32>,
+    /// The nice the thread had before the engine raised it.
+    pub previous_nice: Option<i32>,
+    /// The nice the thread runs at: [`PUMP_NICE`], or its previous one when refused.
+    pub nice: Option<i32>,
+    pub refused: Option<String>,
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use engine::Engine;
 
@@ -148,11 +230,6 @@ mod engine {
     use crate::uvc::probe::Probe;
     use std::io;
 
-    /// In-flight URBs and packets per URB: ~32 ms of high-speed microframes in flight, as
-    /// Linux uvcvideo keeps (UVC_URBS × UVC_MAX_PACKETS).
-    pub const URBS: usize = 8;
-    pub const PACKETS: usize = 32;
-
     pub struct Engine {
         device: Device,
         clock: crate::source::MonotonicClock,
@@ -160,6 +237,76 @@ mod engine {
         pool: Pool,
         pub decoder: Decoder,
         pub bandwidth: Bandwidth,
+        pub in_flight: InFlight,
+        pub priority: PumpPriority,
+    }
+
+    fn errno_location() -> *mut libc::c_int {
+        #[cfg(target_os = "android")]
+        // SAFETY: bionic returns this thread's errno slot.
+        unsafe {
+            libc::__errno()
+        }
+        #[cfg(not(target_os = "android"))]
+        // SAFETY: glibc returns this thread's errno slot.
+        unsafe {
+            libc::__errno_location()
+        }
+    }
+
+    fn thread_id() -> i32 {
+        // SAFETY: gettid has no preconditions.
+        unsafe { libc::gettid() }
+    }
+
+    /// This thread's nice (`getpriority`), errno-checked: -1 is a nice too.
+    fn nice_of(tid: i32) -> io::Result<i32> {
+        // SAFETY: the errno slot is this thread's; getpriority reads it on failure only.
+        unsafe { *errno_location() = 0 };
+        // SAFETY: PRIO_PROCESS with a tid is one thread.
+        let nice = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid as libc::id_t) };
+        let error = io::Error::last_os_error();
+        if nice == -1 && error.raw_os_error().is_some_and(|code| code != 0) {
+            return Err(error);
+        }
+        Ok(nice)
+    }
+
+    fn set_nice(tid: i32, nice: i32) -> io::Result<()> {
+        // SAFETY: PRIO_PROCESS with a tid is one thread.
+        if unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, nice) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Raise the calling thread to [`PUMP_NICE`], recording what it had.
+    fn raise_pump_priority(tid: i32) -> PumpPriority {
+        let previous = match nice_of(tid) {
+            Ok(previous) => previous,
+            Err(error) => {
+                return PumpPriority {
+                    thread: Some(tid),
+                    previous_nice: None,
+                    nice: None,
+                    refused: Some(format!("getpriority: {error}")),
+                };
+            }
+        };
+        match set_nice(tid, PUMP_NICE) {
+            Ok(()) => PumpPriority {
+                thread: Some(tid),
+                previous_nice: Some(previous),
+                nice: Some(PUMP_NICE),
+                refused: None,
+            },
+            Err(error) => PumpPriority {
+                thread: Some(tid),
+                previous_nice: Some(previous),
+                nice: Some(previous),
+                refused: Some(format!("setpriority({PUMP_NICE}): {error}")),
+            },
+        }
     }
 
     impl Engine {
@@ -195,7 +342,7 @@ mod engine {
             device.set_interface(camera.streaming_interface, alt.alternate)?;
             let size = alt.endpoint.bytes_per_interval() as usize;
             // bInterval is 2^(n-1) frames (full speed: 1 ms) or microframes (high speed).
-            let unit = if high_speed { 125_000 } else { 1_000_000 };
+            let unit = if high_speed { MICROFRAME_NS } else { 1_000_000 };
             let service_interval_ns = unit << alt.endpoint.interval.saturating_sub(1).min(15);
             let bandwidth = Bandwidth {
                 alternate: alt.alternate,
@@ -213,14 +360,26 @@ mod engine {
                 pool,
                 decoder: Decoder::new(frequency, max_frame, service_interval_ns),
                 bandwidth,
+                in_flight: in_flight(size, service_interval_ns),
+                priority: PumpPriority::default(),
             };
             engine.pool.submit_all()?;
             Ok(engine)
         }
 
         /// Wait up to `timeout_ms` and decode whatever completed; frames go to `out`.
+        ///
+        /// The first call from a thread raises that thread to [`PUMP_NICE`]; `stop` puts
+        /// it back. A URB the kernel refuses to take back (`ENOMEM`, its copy buffer) is
+        /// counted and left idle: it is offered again on the next pump, after a completion
+        /// has freed a buffer of the kernel's own. The stream fails only once no URB is in
+        /// flight, as then nothing can complete.
         pub fn pump(&mut self, timeout_ms: i32, out: &mut Vec<SourceFrame>) -> io::Result<()> {
-            if !self.device.wait(timeout_ms)? {
+            let tid = thread_id();
+            if self.priority.thread != Some(tid) {
+                self.priority = raise_pump_priority(tid);
+            }
+            if !self.device.wait(timeout_ms)? && self.pool.in_flight_count() == self.pool.len() {
                 return Ok(());
             }
             let reap_ns = (self.clock)()?;
@@ -237,28 +396,52 @@ mod engine {
                     // A whole URB failed: count it as lost packets and keep streaming.
                     _ => self.decoder.stats.packet_errors += 1,
                 }
-                let packets: Vec<(i32, Vec<u8>)> = (0..transfer.packets())
-                    .map(|k| {
-                        let (status, bytes) = transfer.packet(k);
-                        (status, bytes.to_vec())
-                    })
-                    .collect();
                 self.decoder.on_iso(
-                    packets.iter().map(|(s, b)| (*s, b.as_slice())),
+                    (0..transfer.packets()).map(|k| transfer.packet(k)),
                     reap_ns,
                     out,
                 );
-                self.pool.submit(index)?;
+            }
+            let mut refused = None;
+            for index in self.pool.idle() {
+                match self.pool.submit(index) {
+                    Ok(()) => {}
+                    Err(error) if error.raw_os_error() == Some(libc::ENOMEM) => {
+                        self.decoder.stats.submits_refused += 1;
+                        refused = Some(error);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            if let Some(error) = refused
+                && self.pool.in_flight_count() == 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    format!(
+                        "the kernel took back none of the {} URBs ({} refused so far): {error}",
+                        self.pool.len(),
+                        self.decoder.stats.submits_refused
+                    ),
+                ));
             }
             Ok(())
         }
 
-        /// Stop streaming: every URB back from the kernel, bandwidth released.
+        /// Stop streaming: every URB back from the kernel, bandwidth released, the pump
+        /// thread's nice as it was.
         pub fn stop(mut self) {
             self.pool.cancel();
             let _ = self
                 .device
                 .set_interface(self.camera.streaming_interface, 0);
+            if let (Some(tid), Some(previous), None) = (
+                self.priority.thread,
+                self.priority.previous_nice,
+                &self.priority.refused,
+            ) {
+                let _ = set_nice(tid, previous);
+            }
         }
     }
 }
@@ -401,6 +584,39 @@ mod tests {
             }
             previous = Some(n);
         }
+    }
+
+    /// The ring's arithmetic, at the wrist camera's 3072-byte high-bandwidth microframes
+    /// and at the smaller payloads a camera may negotiate: at least 200 ms in flight (a
+    /// seal-stalled pump), each submit's kernel copy within the costly order, and two
+    /// cameras inside the system's 16 MiB usbfs budget with room for the encoders.
+    #[test]
+    fn in_flight_fits_two_cameras() {
+        let wrist = in_flight(3072, 125_000);
+        assert_eq!(wrist.urbs, 200);
+        assert_eq!(wrist.packets, 8);
+        assert_eq!(wrist.window_ns, 200_000_000);
+        assert_eq!(wrist.submit_bytes, 24_576);
+        assert_eq!(wrist.charged_bytes, 5_017_600);
+        for packet_size in [1024, 2048, 3072] {
+            let ring = in_flight(packet_size, 125_000);
+            assert!(ring.window_ns >= 200_000_000, "{packet_size}: {ring:?}");
+            assert!(
+                ring.submit_bytes <= SUBMIT_COPY_LIMIT,
+                "{packet_size}: {ring:?}"
+            );
+            // Two cameras, and the two encoders' bulk reads beside them, under the budget
+            // with a quarter of it spare.
+            assert!(
+                2 * ring.charged_bytes + 2 * crate::cdc::LINK_BUFFER <= USBFS_BUDGET * 3 / 4,
+                "{packet_size}: {ring:?}"
+            );
+        }
+        // The ring the failures were measured under: 8 URBs × 32 packets held 32 ms, and
+        // each submit copied 98 304 bytes, past twice the costly order (an order-5 request).
+        let (old_urbs, old_packets) = (8_usize, 32_usize);
+        assert_eq!((old_urbs * old_packets) as i64 * 125_000, 32_000_000);
+        assert!(old_packets * 3072 > 2 * SUBMIT_COPY_LIMIT);
     }
 
     fn truth_slot(frame: usize, period: f64) -> f64 {
