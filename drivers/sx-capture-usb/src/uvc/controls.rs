@@ -292,29 +292,32 @@ impl ColourPreset {
         out
     }
 
-    /// The receipt of one application: what was asked, what each control read back (in the
-    /// bundle's terms), what the camera refused, which read back otherwise, and whether all
-    /// held. `results` pairs each of [`ColourPreset::controls`] with its read-back.
-    pub fn report(
+    /// The receipt of one application, with separate write and read results for every control.
+    fn report(
         &self,
-        results: impl IntoIterator<Item = (ColourControl, Result<i32, String>)>,
+        results: impl IntoIterator<Item = (ColourControl, io::Result<()>, io::Result<i32>)>,
     ) -> Value {
         let mut requested = Map::new();
         let mut read_back = Map::new();
         let mut refused = Map::new();
         let mut mismatched = Vec::new();
-        for (c, result) in results {
+        for (c, write, read) in results {
             requested.insert(c.name.to_owned(), json!(c.value));
-            match result {
+            let mut errors = Vec::new();
+            if let Err(error) = write {
+                errors.push(format!("SET_CUR: {error}"));
+            }
+            match read {
                 Ok(value) => {
                     if value != c.value {
                         mismatched.push(json!(c.name));
                     }
                     read_back.insert(c.name.to_owned(), json!(value));
                 }
-                Err(error) => {
-                    refused.insert(c.name.to_owned(), json!(error));
-                }
+                Err(error) => errors.push(format!("GET_CUR: {error}")),
+            }
+            if !errors.is_empty() {
+                refused.insert(c.name.to_owned(), json!(errors.join("; ")));
             }
         }
         let matched = refused.is_empty() && mismatched.is_empty();
@@ -473,66 +476,57 @@ pub fn apply_exposure(
     })
 }
 
-/// Write each of a preset's controls and read it back, once, at camera open: SET_CUR then
-/// GET_CUR, camera terminal and processing unit. A control the camera refuses (or answers
-/// short) is named in the report's `refused` and the rest still go out, so the receipt states
-/// exactly what the camera holds; whether a mismatch stops the open is
-/// [`ColourPreset::refusal`]'s call.
+/// Write a preset once at camera open, then read every control back before starting the stream.
+/// A later write may affect an earlier control, so the receipt is based on the complete set
+/// of writes. A failed write still gets a readback and is named in the report's `refused`.
 pub fn apply_colour_preset(
     control: &impl Control,
     entities: &Entities,
     preset: &ColourPreset,
 ) -> Value {
-    let results: Vec<(ColourControl, Result<i32, String>)> = preset
-        .controls()
-        .into_iter()
-        .map(|c| {
-            let unit = match c.unit {
-                Unit::CameraTerminal => entities.camera_terminal,
-                Unit::ProcessingUnit => entities.processing_unit,
-            };
-            let answer = match (c.size, c.selector, c.unit) {
-                (1, CT_AE_MODE_CONTROL, Unit::CameraTerminal) => {
-                    set(control, entities, unit, c.selector, &[AE_MODE_MANUAL])
-                        .and_then(|()| get::<1>(control, entities, unit, c.selector))
-                        .map(|[mode]| ae_mode_v4l2(mode))
-                }
-                (1, ..) => set(control, entities, unit, c.selector, &[c.value as u8])
-                    .and_then(|()| get::<1>(control, entities, unit, c.selector))
-                    .map(|[byte]| i32::from(byte)),
-                (2, ..) => set(
-                    control,
-                    entities,
-                    unit,
-                    c.selector,
-                    &(c.value as i16).to_le_bytes(),
-                )
-                .and_then(|()| get::<2>(control, entities, unit, c.selector))
-                .map(|bytes| {
-                    if c.signed {
-                        i32::from(i16::from_le_bytes(bytes))
-                    } else {
-                        i32::from(u16::from_le_bytes(bytes))
-                    }
-                }),
-                (4, ..) => set(
-                    control,
-                    entities,
-                    unit,
-                    c.selector,
-                    &(c.value as u32).to_le_bytes(),
-                )
-                .and_then(|()| get::<4>(control, entities, unit, c.selector))
+    let controls = preset.controls();
+    let mut writes = Vec::with_capacity(controls.len());
+    for c in controls {
+        let unit = match c.unit {
+            Unit::CameraTerminal => entities.camera_terminal,
+            Unit::ProcessingUnit => entities.processing_unit,
+        };
+        let manual_exposure = c.unit == Unit::CameraTerminal && c.selector == CT_AE_MODE_CONTROL;
+        let value = if manual_exposure {
+            i32::from(AE_MODE_MANUAL)
+        } else {
+            c.value
+        };
+        let bytes = value.to_le_bytes();
+        let write = set(
+            control,
+            entities,
+            unit,
+            c.selector,
+            &bytes[..usize::from(c.size)],
+        );
+        writes.push((c, unit, manual_exposure, write));
+    }
+
+    preset.report(writes.into_iter().map(|(c, unit, manual_exposure, write)| {
+        let read = match c.size {
+            1 if manual_exposure => {
+                get::<1>(control, entities, unit, c.selector).map(|[mode]| ae_mode_v4l2(mode))
+            }
+            1 => get::<1>(control, entities, unit, c.selector).map(|[byte]| i32::from(byte)),
+            2 if c.signed => get::<2>(control, entities, unit, c.selector)
+                .map(|bytes| i32::from(i16::from_le_bytes(bytes))),
+            2 => get::<2>(control, entities, unit, c.selector)
+                .map(|bytes| i32::from(u16::from_le_bytes(bytes))),
+            4 => get::<4>(control, entities, unit, c.selector)
                 .map(|bytes| u32::from_le_bytes(bytes) as i32),
-                (size, ..) => Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("unsupported control size {size}"),
-                )),
-            };
-            (c, answer.map_err(|error| error.to_string()))
-        })
-        .collect();
-    preset.report(results)
+            size => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unsupported control size {size}"),
+            )),
+        };
+        (c, write, read)
+    }))
 }
 
 /// The Sonix register-access extension control over a usbfs control pipe, so the pod's one
@@ -870,6 +864,7 @@ pub(crate) mod tests {
         refuses: Option<u8>,
         /// (selector, the value GET_CUR answers).
         clamps: Option<(u8, u16)>,
+        changes_gain_on_backlight: Option<u16>,
     }
 
     impl Control for Quirky {
@@ -908,8 +903,33 @@ pub(crate) mod tests {
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
             }
             self.inner
-                .control_out(request_type, request, value, index, data)
+                .control_out(request_type, request, value, index, data)?;
+            if let Some(gain) = self.changes_gain_on_backlight
+                && value == u16::from(PU_BACKLIGHT_COMPENSATION_CONTROL) << 8
+                && index == 0x0200
+            {
+                self.inner.state.borrow_mut().insert(
+                    (u16::from(PU_GAIN_CONTROL) << 8, index),
+                    gain.to_le_bytes().to_vec(),
+                );
+            }
+            Ok(())
         }
+    }
+
+    #[test]
+    fn a_later_control_write_is_reflected_in_the_final_readback() {
+        let camera = Quirky {
+            inner: Controls::default(),
+            refuses: None,
+            clamps: None,
+            changes_gain_on_backlight: Some(40),
+        };
+        let preset = fleet_preset();
+        let status = apply_colour_preset(&camera, &ENTITIES, &preset);
+        assert_eq!(status["read_back"]["gain"], 40);
+        assert_eq!(status["mismatched"], json!(["gain"]));
+        assert!(preset.refusal(&status).is_some());
     }
 
     #[test]
@@ -918,15 +938,20 @@ pub(crate) mod tests {
             inner: Controls::default(),
             refuses: Some(PU_HUE_CONTROL),
             clamps: Some((PU_SATURATION_CONTROL, 64)),
+            changes_gain_on_backlight: None,
         };
+        camera.inner.state.borrow_mut().insert(
+            (u16::from(PU_HUE_CONTROL) << 8, 0x0200),
+            (-12_i16).to_le_bytes().to_vec(),
+        );
         let preset = fleet_preset();
         let status = apply_colour_preset(&camera, &ENTITIES, &preset);
         assert_eq!(status["matched"], false);
         assert!(status["refused"]["hue"].is_string(), "{status}");
-        assert!(status["read_back"].get("hue").is_none());
+        assert_eq!(status["read_back"]["hue"], -12);
         assert_eq!(status["read_back"]["saturation"], 64);
         assert_eq!(status["requested"]["saturation"], 60);
-        assert_eq!(status["mismatched"], json!(["saturation"]));
+        assert_eq!(status["mismatched"], json!(["saturation", "hue"]));
         // The rest still went out.
         assert_eq!(status["read_back"]["gamma"], 100);
         let refusal = preset.refusal(&status).expect("refused");
@@ -938,14 +963,25 @@ pub(crate) mod tests {
             refuse_on_mismatch: false,
             ..preset
         };
-        let status = apply_colour_preset(
-            &Quirky {
-                inner: Controls::default(),
-                refuses: Some(PU_HUE_CONTROL),
-                clamps: None,
-            },
-            &ENTITIES,
-            &recorded,
+        let camera = Quirky {
+            inner: Controls::default(),
+            refuses: Some(PU_HUE_CONTROL),
+            clamps: None,
+            changes_gain_on_backlight: None,
+        };
+        camera.inner.state.borrow_mut().insert(
+            (u16::from(PU_HUE_CONTROL) << 8, 0x0200),
+            0_i16.to_le_bytes().to_vec(),
+        );
+        let status = apply_colour_preset(&camera, &ENTITIES, &recorded);
+        assert_eq!(status["read_back"]["hue"], 0);
+        assert_eq!(status["mismatched"], json!([]));
+        assert!(
+            status["refused"]["hue"]
+                .as_str()
+                .unwrap()
+                .starts_with("SET_CUR:"),
+            "{status}"
         );
         assert_eq!(status["matched"], false);
         assert_eq!(status["refuse_on_mismatch"], false);
