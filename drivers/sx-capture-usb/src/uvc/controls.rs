@@ -8,8 +8,8 @@
 //!
 //! A colour preset ([`ColourPreset`]: manual exposure, exposure time and gain, white balance,
 //! saturation, contrast, …) is opt-in: written once when the camera opens, before streaming
-//! starts, read back, and never touched per frame. Without one the camera keeps whatever it
-//! holds and no colour control is sent, as before.
+//! starts, read back, and never touched per frame. On a normal open the driver enables
+//! firmware auto white balance once. Exposure and gain still use the caller's bounds.
 
 use std::io;
 
@@ -419,11 +419,25 @@ pub fn apply_exposure(
     setting: Setting,
     enter_manual: bool,
 ) -> Result<Setting, String> {
+    check_exposure(config, setting)?;
+    write_exposure(control, entities, setting, enter_manual)
+}
+
+fn check_exposure(config: ExposureConfig, setting: Setting) -> Result<(), String> {
     if !(config.min.exposure_100us..=config.max.exposure_100us).contains(&setting.exposure_100us)
         || !(config.min.gain..=config.max.gain).contains(&setting.gain)
     {
         return Err("camera exposure request is outside the accepted range".to_owned());
     }
+    Ok(())
+}
+
+fn write_exposure(
+    control: &impl Control,
+    entities: &Entities,
+    setting: Setting,
+    enter_manual: bool,
+) -> Result<Setting, String> {
     let failed = |error: io::Error| format!("camera exposure control: {error}");
     if enter_manual {
         set(
@@ -474,6 +488,34 @@ pub fn apply_exposure(
         exposure_100us: u32::from_le_bytes(exposure) as i32,
         gain: i32::from(u16::from_le_bytes(gain)),
     })
+}
+
+/// Enable firmware white balance, establish bounded manual exposure, then verify white
+/// balance after the last write. A white balance refusal is reported without stopping capture.
+pub fn apply_capture_controls(
+    control: &impl Control,
+    entities: &Entities,
+    config: ExposureConfig,
+) -> Result<(Setting, Result<(), String>), String> {
+    check_exposure(config, config.start)?;
+    let unit = entities.processing_unit;
+    let selector = PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL;
+    let requested = set(control, entities, unit, selector, &[1]);
+    let exposure = write_exposure(control, entities, config.start, true)?;
+    let auto_white_balance = requested
+        .map_err(|error| format!("SET_CUR: {error}"))
+        .and_then(|()| {
+            let [enabled] = get::<1>(control, entities, unit, selector)
+                .map_err(|error| format!("GET_CUR: {error}"))?;
+            if enabled == 1 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "expected auto white balance 1, read back {enabled}"
+                ))
+            }
+        });
+    Ok((exposure, auto_white_balance))
 }
 
 /// Write a preset once at camera open, then read every control back before starting the stream.
@@ -593,6 +635,7 @@ pub(crate) mod tests {
         pub(crate) state: RefCell<BTreeMap<(u16, u16), Vec<u8>>>,
         pub(crate) log: RefCell<Vec<Request>>,
         pub(crate) hold_auto: bool,
+        hold_white_balance_off: bool,
     }
 
     impl Control for Controls {
@@ -614,6 +657,11 @@ pub(crate) mod tests {
             let mut stored = stored.clone();
             if self.hold_auto && value == u16::from(CT_AE_MODE_CONTROL) << 8 {
                 stored = vec![0x08];
+            }
+            if self.hold_white_balance_off
+                && value == u16::from(PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL) << 8
+            {
+                stored = vec![0];
             }
             data[..stored.len()].copy_from_slice(&stored);
             Ok(stored.len())
@@ -676,6 +724,35 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn firmware_white_balance_readback_follows_the_manual_exposure_setup() {
+        let controls = Controls::default();
+        let (exposure, white_balance) =
+            apply_capture_controls(&controls, &ENTITIES, CONTROLS).unwrap();
+        assert_eq!(exposure, CONTROLS.start);
+        assert_eq!(white_balance, Ok(()));
+        let log = controls.log.borrow();
+        assert_eq!(log.len(), 8);
+        assert_eq!(log[0], (0x21, SET_CUR, 0x0b00, 0x0200, vec![1]));
+        assert_eq!(log[1], (0x21, SET_CUR, 0x0200, 0x0100, vec![1]));
+        assert_eq!(log[7], (0xa1, GET_CUR, 0x0b00, 0x0200, vec![]));
+    }
+
+    #[test]
+    fn firmware_white_balance_requires_enabled_readback() {
+        let controls = Controls {
+            hold_white_balance_off: true,
+            ..Controls::default()
+        };
+        let (exposure, white_balance) =
+            apply_capture_controls(&controls, &ENTITIES, CONTROLS).unwrap();
+        assert_eq!(exposure, CONTROLS.start);
+        assert_eq!(
+            white_balance,
+            Err("expected auto white balance 1, read back 0".to_owned())
+        );
+    }
+
+    #[test]
     fn out_of_contract_settings_and_a_camera_left_in_auto_are_refused() {
         let controls = Controls::default();
         for setting in [
@@ -689,6 +766,11 @@ pub(crate) mod tests {
             },
         ] {
             assert!(apply_exposure(&controls, &ENTITIES, CONTROLS, setting, true).is_err());
+            let invalid_start = ExposureConfig {
+                start: setting,
+                ..CONTROLS
+            };
+            assert!(apply_capture_controls(&controls, &ENTITIES, invalid_start).is_err());
         }
         assert!(
             controls.log.borrow().is_empty(),

@@ -79,7 +79,7 @@ pub trait Port: Send + Sync {
     }
     fn open_camera(&self, config: ExposureConfig) -> Result<Box<dyn CameraSource>, String>;
     /// [`Port::open_camera`], also writing `colour` once before streaming starts when one is
-    /// given (opt-in; `None` is exactly `open_camera`, with no extra control traffic). With a
+    /// given (opt-in; `None` is exactly `open_camera`). With a
     /// preset, `config` must be [`ColourPreset::exposure_config`] (the camera is held there),
     /// every control is read back into [`CameraSource::colour_controls`], and a mismatch the
     /// preset refuses fails the open before streaming. A port that cannot write the camera's
