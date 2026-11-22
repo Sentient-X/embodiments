@@ -369,6 +369,10 @@ impl CameraSource for UsbfsCamera {
                 "negotiated": self.negotiated,
                 "transfers": engine.decoder.stats,
                 "bandwidth": engine.bandwidth,
+                // The ring this stream ran under and the pump thread's priority, so a
+                // status after a stall says what held the bus and who was draining it.
+                "in_flight": engine.in_flight,
+                "pump": engine.priority,
                 "clock": engine.decoder.clock_quality(),
             }),
             None => json!({"negotiated": self.negotiated}),
