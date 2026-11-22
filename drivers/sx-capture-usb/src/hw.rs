@@ -273,27 +273,26 @@ impl Port for UsbfsPort {
             interval,
         )
         .map_err(|e| format!("probe/commit: {}", io_detail(e)))?;
-        // Once, before streaming: no control traffic per frame. Without a preset, exactly the
-        // exposure controls as always; with one, the preset writes manual exposure, its time
-        // and gain with the colour controls and reads every one back.
-        let colour = match colour {
+        // Set the firmware's white balance mode once before streaming. A locked preset
+        // supplies its own white balance, exposure and gain.
+        let (colour, auto_white_balance) = match colour {
             None => {
-                let held =
-                    controls::apply_exposure(&self.device, entities, config, config.start, true)?;
+                let (held, white_balance) =
+                    controls::apply_capture_controls(&self.device, entities, config)?;
                 if held != config.start {
                     return Err(format!(
                         "camera holds exposure/gain {}/{} after requesting the start setting",
                         held.exposure_100us, held.gain
                     ));
                 }
-                None
+                (None, Some(white_balance))
             }
             Some(preset) => {
                 let report = controls::apply_colour_preset(&self.device, entities, preset);
                 if let Some(refusal) = preset.refusal(&report) {
                     return Err(refusal);
                 }
-                Some(report)
+                (Some(report), None)
             }
         };
         let high_speed = self.device.speed().map_err(io_detail)? >= 3;
@@ -315,6 +314,7 @@ impl Port for UsbfsPort {
                 "high_speed": high_speed,
             }),
             colour,
+            auto_white_balance,
         }))
     }
 
@@ -348,6 +348,7 @@ struct UsbfsCamera {
     negotiated: Value,
     /// The colour preset written at open and what the camera read back; `None` without one.
     colour: Option<Value>,
+    auto_white_balance: Option<Result<(), String>>,
 }
 
 impl CameraSource for UsbfsCamera {
@@ -364,7 +365,7 @@ impl CameraSource for UsbfsCamera {
     }
 
     fn report(&self) -> Value {
-        match &self.engine {
+        let mut report = match &self.engine {
             Some(engine) => json!({
                 "negotiated": self.negotiated,
                 "transfers": engine.decoder.stats,
@@ -372,7 +373,14 @@ impl CameraSource for UsbfsCamera {
                 "clock": engine.decoder.clock_quality(),
             }),
             None => json!({"negotiated": self.negotiated}),
+        };
+        if let Some(result) = &self.auto_white_balance {
+            report["auto_white_balance_at_open"] = match result {
+                Ok(()) => json!({"state": "enabled"}),
+                Err(detail) => json!({"state": "unverified", "detail": detail}),
+            };
         }
+        report
     }
 
     fn colour_controls(&self) -> Option<Value> {
