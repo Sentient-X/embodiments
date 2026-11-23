@@ -254,19 +254,35 @@ def _guarded_path(
     fractions = np.linspace(0, 1, 3 if polish else 9)
     candidates = seed[:, None] + fractions[None, :, None] * (desired - seed)[:, None]
     permitted = np.ones(candidates.shape[:2], dtype=np.bool_)
-    for row, states in enumerate(candidates):
-        # These equal lower and upper bounds freeze wrists, head and unrelated links
-        # during contact relief, including for a robot with affine mimic coordinates.
-        lower = seed[row].copy()
-        upper = lower.copy()
-        lower[digits.controls] = robot.lower[digits.controls]
-        upper[digits.controls] = robot.upper[digits.controls]
-        for k in range(1, len(states)):
-            pose, contact = _relieve_penetration(
-                collision, states[k], lower, upper, robot.velocity, model.full_q, robot.coupling
-            )
-            states[k] = pose
-            permitted[row, k] = contact.unallowed <= 1e-6
+    # Fixed rows cannot select a non-seed candidate. For the remaining rows,
+    # evaluate equal poses once and run independent CAD relief in parallel.
+    lower, upper = seed.copy(), seed.copy()
+    lower[:, digits.controls] = robot.lower[digits.controls]
+    upper[:, digits.controls] = robot.upper[digits.controls]
+    tasks: list[tuple[int, list[int]]] = []
+    for row in np.flatnonzero(~fixed):
+        unique: dict[bytes, list[int]] = {}
+        for k in range(1, len(fractions)):
+            unique.setdefault(candidates[row, k].tobytes(), []).append(k)
+        tasks.extend((int(row), slots) for slots in unique.values())
+
+    def relieve(worker: CollisionModel, index: int) -> tuple[Floats, bool]:
+        row, slots = tasks[index]
+        pose, contact = _relieve_penetration(
+            worker,
+            candidates[row, slots[0]],
+            lower[row],
+            upper[row],
+            robot.velocity,
+            model.full_q,
+            robot.coupling,
+        )
+        return pose, contact.unallowed <= 1e-6
+
+    solved = collision.map_queries(len(tasks), relieve)
+    for (row, slots), (pose, clear) in zip(tasks, solved, strict=True):
+        candidates[row, slots] = pose
+        permitted[row, slots] = clear
     angles, tips = _candidate_geometry(model, digits, reference, target_angles, candidates)
     originally_within = np.all(~np.isfinite(original_tips) | (original_tips <= limit_m), axis=-1)
     within = np.all(~np.isfinite(tips) | (tips <= limit_m), axis=-1)

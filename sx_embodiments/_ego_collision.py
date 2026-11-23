@@ -6,7 +6,7 @@ import csv
 import hashlib
 import os
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from dataclasses import dataclass
@@ -130,6 +130,11 @@ class _Model(Protocol):
     nv: int
     nbody: int
     ngeom: int
+    npair: int
+    geom_contype: NDArray[np.int32]
+    geom_conaffinity: NDArray[np.int32]
+    body_contype: NDArray[np.int32]
+    body_conaffinity: NDArray[np.int32]
     geom_bodyid: NDArray[np.int32]
     geom_margin: Floats
     jnt_type: NDArray[np.int32]
@@ -184,6 +189,8 @@ class CollisionModel:
     ) -> None:
         self.model = model
         self.data = cast("_Data", _mj.MjData(model))
+        self._query_key: bytes | None = None
+        self._previous_query: tuple[bytes, _Data] | None = None
         self.permutation = np.asarray(
             [model.joint(name).id for name in ordered_joints], dtype=np.int64
         )
@@ -320,11 +327,77 @@ class CollisionModel:
             model, ordered_joints, neutral, pairs, tuple(sorted(all_groups - bearing)), caps, arcs
         )
 
+    def moving_pairs(self, physical: NDArray[np.int64]) -> CollisionModel:
+        """Filter only the candidate screening model. The original checks every accepted pose."""
+        model = self.model
+        if (
+            not self.checked
+            or not len(physical)
+            or model.npair
+            or not model.ngeom
+            or np.any(model.geom_contype != 1)
+            or np.any(model.geom_conaffinity != 1)
+        ):
+            return self
+        active = self.permutation[physical]
+        # Identical moving ancestors imply a constant inter-geom transform at
+        # each exposure while all other physical coordinates remain frozen.
+        _, group = np.unique(self.ancestor[:, active], axis=0, return_inverse=True)
+        labels = group[model.geom_bodyid] + 1
+        if len(np.unique(labels)) == len(labels):
+            return self
+        if int(labels.max()).bit_length() > 30:
+            return self
+        for (left, right), (axes, _) in self.arc_joints.items():
+            if left not in self.names or right not in self.names:
+                return self
+            if group[self.names.index(left)] == group[self.names.index(right)] and any(
+                joint in active for joint, _, _ in axes
+            ):
+                return self
+        subset = copy(self)
+        subset.model = copy(model)
+        subset.data = cast("_Data", _mj.MjData(subset.model))
+        subset._query_key, subset._previous_query = None, None
+        mutable = subset.model
+        bits = (1 << int(labels.max()).bit_length()) - 1
+        # MuJoCo accepts (A.type & B.affinity) | (B.type & A.affinity).
+        # Label and its bitwise complement therefore admit exactly unequal labels.
+        mutable.geom_contype[:] = labels
+        mutable.geom_conaffinity[:] = bits ^ labels
+        for i in range(model.nbody):
+            geoms = model.geom_bodyid == i
+            mutable.body_contype[i] = np.bitwise_or.reduce(mutable.geom_contype[geoms], initial=0)
+            mutable.body_conaffinity[i] = np.bitwise_or.reduce(
+                mutable.geom_conaffinity[geoms], initial=0
+            )
+        return subset
+
     def _contacts(self, q_full: Floats) -> dict[tuple[int, int], _Contact]:
-        self.data.qpos[self.permutation] = q_full
-        _mj.mj_kinematics(self.model, self.data)
-        _mj.mj_comPos(self.model, self.data)
-        _mj.mj_collision(self.model, self.data)
+        # A trial and its Jacobian query the identical pose. Rejected LM steps
+        # also return to the preceding pose. Keep both native narrow-phase
+        # workspaces, including contact frames and derivative data, verbatim.
+        if q_full.shape != self.permutation.shape:
+            raise ValueError("CAD pose must provide one scalar per physical joint")
+        pose = np.asarray(q_full, dtype=np.float64)
+        key = pose.tobytes()
+        if key != self._query_key:
+            previous = self._previous_query
+            current = None if self._query_key is None else (self._query_key, self.data)
+            data = self.data
+            if previous is not None:
+                data = previous[1]
+            elif current is not None:
+                data = cast("_Data", _mj.MjData(self.model))
+            if previous is None or previous[0] != key:
+                # A failed query may overwrite the recycled buffer. Publish
+                # its key only after the native computation succeeds.
+                self._previous_query = None
+                data.qpos[self.permutation] = pose
+                _mj.mj_kinematics(self.model, data)
+                _mj.mj_comPos(self.model, data)
+                _mj.mj_collision(self.model, data)
+            self.data, self._query_key, self._previous_query = data, key, current
         result: dict[tuple[int, int], _Contact] = {}
         for contact in self.data.contact:
             pair = (min(contact.geom1, contact.geom2), max(contact.geom1, contact.geom2))
@@ -333,27 +406,27 @@ class CollisionModel:
                 result[pair] = contact
         return result
 
-    def batch_at(self, rows: Sequence[Floats]) -> list[Contacts]:
-        """Check independent poses in input order with the same narrow-phase CAD query as at()."""
-        # MjModel and the allowances are read-only. Each chunk owns its own
-        # native MjData so the GIL-releasing collision recursion can run in parallel.
-        count = len(rows)
+    def map_queries[T](self, count: int, operation: Callable[[CollisionModel, int], T]) -> list[T]:
+        """Keep independent CAD queries ordered, with private MuJoCo data per worker."""
         workers = min(8, os.cpu_count() or 1, (count + 3) // 4)
         if count < 16 or workers < 2:
-            return [self.at(row) for row in rows]
+            return [operation(self, i) for i in range(count)]
+        width = (count + workers - 1) // workers
 
-        def check_chunk(start: int) -> list[Contacts]:
+        def check_chunk(start: int) -> list[T]:
             worker = copy(self)
             worker.data = cast("_Data", _mj.MjData(self.model))
-            return [worker.at(row) for row in rows[start : start + width]]
+            worker._query_key, worker._previous_query = None, None
+            return [operation(worker, i) for i in range(start, min(count, start + width))]
 
-        width = (count + workers - 1) // workers
         with ThreadPoolExecutor(max_workers=workers) as pool:
             return [
-                contact
-                for chunk in pool.map(check_chunk, range(0, count, width))
-                for contact in chunk
+                value for chunk in pool.map(check_chunk, range(0, count, width)) for value in chunk
             ]
+
+    def batch_at(self, rows: Sequence[Floats]) -> list[Contacts]:
+        """Use the full contact query for each row, including all neutral and bearing allowances."""
+        return self.map_queries(len(rows), lambda model, i: model.at(rows[i]))
 
     def at(
         self, q_full: Floats, *, gradient: bool = False, penetration_only: bool = False
