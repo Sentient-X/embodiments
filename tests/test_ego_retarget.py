@@ -217,3 +217,45 @@ def test_builtin_bearing_profile_round_trip(tmp_path):
     path = tmp_path / "wuji.json"
     path.write_text(json.dumps(profile.document()))
     assert MappingProfile.read(path) == profile
+
+
+def test_verified_bearings_bind_to_visual_cad_and_hold_only_within_the_arc(tmp_path):
+    from sx_embodiments._ego_collision import (
+        BearingArc,
+        CollisionModel,
+        JointInterval,
+        cad_sweep_identity,
+        certified_arcs,
+        collision_assets,
+        nominal_bearings,
+    )
+    from sx_embodiments.ego_retarget import _model
+
+    path = tmp_path / "rotor.urdf"
+    path.write_text("""<robot name="rotor"><link name="case">
+      <visual><geometry><mesh filename="cad.stl"/></geometry></visual>
+      <collision><geometry><sphere radius=".1"/></geometry></collision></link>
+      <link name="rotor"><collision><origin xyz=".05 0 0"/>
+        <geometry><sphere radius=".1"/></geometry></collision></link>
+      <joint name="axle" type="revolute"><parent link="case"/><child link="rotor"/>
+        <axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="3"/>
+      </joint></robot>""")
+    cad = tmp_path / "cad.stl"
+    cad.write_bytes(b"first visual CAD")
+    before = collision_assets(path)[2]
+    cad.write_bytes(b"changed visual CAD")
+    geometry = collision_assets(path)
+    assert geometry[2] != before
+    assert not certified_arcs(cad_sweep_identity(), geometry[2])
+
+    robot = _model(path)
+    # A serialized v1 profile can still carry the nominal depth rows without
+    # any new certificate field. It cannot grant clearances on a different arm.
+    with pytest.raises(ValueError, match="exact certified CAD"):
+        CollisionModel.read(geometry, robot.names, robot.neutral, (), nominal_bearings())
+    arc = BearingArc(("case", "rotor"), (JointInterval("axle", -0.2, 0.2),), 0.151)
+    collision = CollisionModel.read(geometry, robot.names, robot.neutral, (), (), (arc,))
+    assert collision is not None
+    assert np.isclose(collision.at(np.array([0.1])).maximum, 0.15)
+    assert collision.at(np.array([0.1])).unallowed == 0
+    assert np.isclose(collision.at(np.array([0.25])).unallowed, 0.15)

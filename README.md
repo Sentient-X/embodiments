@@ -731,9 +731,18 @@ These tolerances accommodate convex-hull faceting in this nominal model. Only ge
 already nested at neutral can use a cap, and each gets at most the audited increase
 over its own neutral depth. A new mesh contact or deeper penetration remains unallowed, retaining its
 full absolute depth. These are geometric accommodations, not hardware qualifications.
+The nominal model also binds its `sentient_wuji_cad_sweeps.csv` certificate to the exact URDF,
+collision meshes and materialized visual CAD. Eleven single-axis intervals use triangle-surface
+separation outside measured rotor interfaces. Eight two-axis Wuji knuckles use the complete palm
+and finger CAD, including a neutral solid-containment check. A continuous distance bound covers
+the angles between samples. The shoulder intervals retain the CAD's mechanical stop. Reproduce
+the checks with `python tools/verify_ego_bearing_cad.py assembled.urdf` after installing
+`trimesh`, `shapely` and `python-fcl`. The archive lists the applied certificate and angular
+bounds. A changed assembly needs its own geometric evidence.
+
 Custom profiles may specify `bearing_depth_limits_m` rows with two links and a depth. The archive lists neutral collisions, the worst unallowed
-pair per sample, missing rigid-body geometry, and a digest of URDF and collision mesh
-bytes. The IK penalizes unallowed contacts near the boundary. A blocked target can retain
+pair per sample, missing rigid-body geometry, and a digest of the URDF, collision meshes and
+materialized visual meshes. The IK penalizes unallowed contacts near the boundary. A blocked target can retain
 a larger tracking residual. Empty or incomplete collision geometry leaves the check
 unqualified. These endpoint checks do not measure swept volume, contact with the scene,
 force, balance or physical safety.
