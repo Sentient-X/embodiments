@@ -7,6 +7,7 @@ observation and a kinematically feasible robot fit are distinct pieces of eviden
 
 from __future__ import annotations
 
+import csv
 import json
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
@@ -21,7 +22,7 @@ import numpy as np
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue
 
-from ._ego_collision import CollisionModel, Pair, collision_assets
+from ._ego_collision import Bearing, CollisionModel, Pair, collision_assets
 from .kinematics import JointType, Kinematics, from_xyz_rpy
 
 type Floats = NDArray[np.float64]
@@ -69,6 +70,7 @@ class MappingProfile:
     hands: Mapping[str, tuple[str | None, ...]]
     camera_optical_link: str | None = None
     allowed_collision_pairs: tuple[Pair, ...] = ()
+    bearing_depth_limits_m: tuple[Bearing, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.hands or set(self.hands) - {"left", "right"}:
@@ -101,14 +103,20 @@ class MappingProfile:
                 for part in (base, "link3", "link4", "tip_link"):
                     links.append(f"{side}_finger{finger}_{part}")
             hands[side] = tuple(links)
-        # The torso rotates inside the base bearing and each non-thumb MCP uses
-        # two co-located axes in its palm. Thumb/wrist adapters are not exempt.
-        allowed = [("base_link", "torso_link")]
-        for side in hands:
-            allowed.extend(
-                (f"{side}_palm_link", f"{side}_finger{finger}_link2") for finger in range(2, 6)
+        with Path(__file__).with_name("sentient_wuji_bearings.csv").open(newline="") as stream:
+            bearings = tuple(
+                (row["link_a"], row["link_b"], float(row["cap_m"]))
+                for row in csv.DictReader(stream)
             )
-        return cls(hands, "zed_left_optical", tuple(allowed))
+        return cls(hands, "zed_left_optical", bearing_depth_limits_m=bearings)
+
+    def document(self) -> dict[str, JsonValue]:
+        return {
+            "hands": {s: list(links) for s, links in self.hands.items()},
+            "camera_optical_link": self.camera_optical_link,
+            "allowed_collision_pairs": [list(pair) for pair in self.allowed_collision_pairs],
+            "bearing_depth_limits_m": [[a, b, d] for a, b, d in self.bearing_depth_limits_m],
+        }
 
     @classmethod
     def read(cls, path: Path) -> MappingProfile:
@@ -117,6 +125,7 @@ class MappingProfile:
             "hands",
             "camera_optical_link",
             "allowed_collision_pairs",
+            "bearing_depth_limits_m",
         }:
             raise ValueError("profile expects hands and optional camera_optical_link")
         hands = document.get("hands")
@@ -148,7 +157,22 @@ class MappingProfile:
             ):
                 raise ValueError("each allowed collision pair needs two link names")
             pairs.append((pair[0], pair[1]))
-        return cls(mapped, camera, tuple(pairs))
+        bearings = document.get("bearing_depth_limits_m", [])
+        if not isinstance(bearings, list):
+            raise ValueError("bearing_depth_limits_m must be an array of (link,link,metres)")
+        limited: list[Bearing] = []
+        for row in bearings:
+            if (
+                not isinstance(row, list)
+                or len(row) != 3
+                or not isinstance(row[0], str)
+                or not isinstance(row[1], str)
+                or not isinstance(row[2], (float, int))
+                or isinstance(row[2], bool)
+            ):
+                raise ValueError("each bounded bearing needs two link names and a depth in metres")
+            limited.append((row[0], row[1], float(row[2])))
+        return cls(mapped, camera, tuple(pairs), tuple(limited))
 
 
 @dataclass(frozen=True)
@@ -174,6 +198,8 @@ class Fit:
     collision_link_pairs: NDArray[np.str_]
     neutral_penetration_m: Floats
     allowed_collision_pairs: NDArray[np.str_]
+    bearing_link_pairs: NDArray[np.str_]
+    bearing_depth_limits_m: Floats
     collision_missing_geometry: tuple[str, ...]
     collision_description_sha256: str
 
@@ -442,7 +468,9 @@ def solve(
     neutral = robot.neutral
     if robot.coupling is not None:
         neutral = robot.coupling @ neutral + robot.offset
-    collision = CollisionModel.read(geometry, native, neutral, profile.allowed_collision_pairs)
+    collision = CollisionModel.read(
+        geometry, native, neutral, profile.allowed_collision_pairs, profile.bearing_depth_limits_m
+    )
     return _solve(
         robot,
         collision,
@@ -549,7 +577,7 @@ def _solve(
         q = _fit_frame(
             sites, terms, flat, camera_targets[i], previous, temporal, lo, hi, 65 if first else 12
         )
-        if collision is not None and collision.at(sites.full_q(q)).violation.size:
+        if collision is not None and collision.at(sites.full_q(q)).unallowed > 1e-6:
             q = _fit_frame(
                 sites,
                 terms,
@@ -562,18 +590,37 @@ def _solve(
                 35 if first else 16,
                 collision,
             )
-            # Preserve a clear preceding endpoint when the local step runs into
-            # a blocked IK branch. Its larger tracking error is kept in the archive.
-            if (
-                not first
-                and collision.at(sites.full_q(q)).unallowed > 1e-6
-                and collision.at(sites.full_q(previous)).unallowed <= 1e-6
-            ):
-                for alpha in (0.75, 0.5, 0.25, 0.0):
-                    shortened = previous + alpha * (q - previous)
-                    if collision.at(sites.full_q(shortened)).unallowed <= 1e-6:
-                        q = shortened
+            # If the local IK step enters a blocked branch, recover only the
+            # joints changing the relative pose of colliding surfaces. Common ancestors,
+            # the other arm, and unaffected digits can keep tracking.
+            contact = collision.at(sites.full_q(q))
+            if contact.unallowed > 1e-6 and collision.at(sites.full_q(previous)).unallowed <= 1e-6:
+                candidate = q.copy()
+                locked = np.zeros(len(q), dtype=np.bool_)
+                for _ in range(6):
+                    blockers = contact.blocked_joints
+                    if robot.coupling is not None:
+                        blockers = np.asarray(np.any(robot.coupling[blockers] != 0.0, axis=0))
+                    if not np.any(blockers & ~locked):
+                        q = previous
                         break
+                    locked |= blockers
+                    q = np.where(locked, previous, candidate)
+                    contact = collision.at(sites.full_q(q))
+                    if contact.unallowed <= 1e-6:
+                        # Recover the feasible fraction of the restricted joint motion.
+                        delta = candidate - q
+                        low, high = 0.0, 1.0
+                        for _ in range(5):
+                            fraction = (low + high) / 2
+                            if collision.at(sites.full_q(q + fraction * delta)).unallowed <= 1e-6:
+                                low = fraction
+                            else:
+                                high = fraction
+                        q = q + low * delta
+                        break
+                else:
+                    q = previous
         seq[i] = q
     # A symmetric pass damps alternating IK branches without adding a frame of lag.
     # At most half of each sample comes from its neighbours' time-weighted line.
@@ -644,6 +691,10 @@ def _solve(
             tuple(collision.neutral.values()) if collision is not None else (), dtype=np.float64
         ),
         np.asarray(profile.allowed_collision_pairs, dtype=str).reshape(-1, 2),
+        np.asarray([(a, b) for a, b, _ in profile.bearing_depth_limits_m], dtype=str).reshape(
+            -1, 2
+        ),
+        np.asarray([depth for _, _, depth in profile.bearing_depth_limits_m], dtype=np.float64),
         collision.missing_geometry if collision is not None else ("no collision geometry",),
         geometry_id,
     )

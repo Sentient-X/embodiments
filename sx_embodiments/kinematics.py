@@ -233,6 +233,16 @@ class Kinematics:
             if joint.type is not JointType.FIXED and joint.mimic is None
         )
 
+    def coordinates(self, positions: Mapping[str, float]) -> dict[str, float]:
+        """Expand the independent scalar positions to every movable joint, including mimics."""
+        if set(positions) != set(self.independent):
+            raise KinematicsError("positions must name exactly the independent joints")
+        return {
+            joint.name: self._position(joint, positions)
+            for joint in self.joints.values()
+            if joint.type in _ONE_DOF
+        }
+
     def _parent_joint(self, link: str) -> Joint | None:
         name = self.parent_joint.get(link)
         return self.joints[name] if name is not None else None

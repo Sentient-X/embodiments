@@ -716,11 +716,22 @@ timestamps, observed-hand masks, achieved FK landmarks, per-landmark/wrist/finge
 optical-axis/full-orientation errors, and camera translation relative to its neutral location.
 Error is against the supplied reconstruction.
 Missing evidence and unsupported landmarks have NaN residuals. Each fitted pose also records contact checks against the URDF collision shapes using
-MuJoCo's convex meshes and normal parent/welded-body filtering. Raw, neutral-relative,
+MuJoCo's convex meshes. Links separated by a moving joint are checked, including direct
+parent/child links. Shapes in a single welded rigid group cannot move relative to each other. Raw, neutral-relative,
 and unallowed penetrating depths are reported separately. Exactly named
 `allowed_collision_pairs` in the profile identify exempt mechanical pairs. The generic
-default is empty. The supplied Wuji profile records the torso bearing and the four compound
-MCP bearings in each palm. The archive lists neutral collisions, the worst unallowed
+default is empty. The built-in Sentient–Wuji profile has no unlimited pair exemptions.
+Its packaged `sentient_wuji_bearings.csv` names 61 individual rotary bearing pairs
+and eight compound MCP pairs that overlap across the entire sampled joint sweep.
+The table records neutral, minimum and maximum measured convex penetration at 65
+positions per single joint and on a 13×13 grid per compound joint. For depths varying by
+at most 1 mm on that sweep the cap is the sampled maximum, rounded up to 0.1 mm.
+For more angle-dependent bearings it is the neutral depth, rounded up to 0.1 mm.
+These tolerances accommodate convex-hull faceting in this nominal model. Only geometry pairs
+already nested at neutral can use a cap, and each gets at most the audited increase
+over its own neutral depth. A new mesh contact or deeper penetration remains unallowed, retaining its
+full absolute depth. These are geometric accommodations, not hardware qualifications.
+Custom profiles may specify `bearing_depth_limits_m` rows with two links and a depth. The archive lists neutral collisions, the worst unallowed
 pair per sample, missing rigid-body geometry, and a digest of URDF and collision mesh
 bytes. The IK penalizes unallowed contacts near the boundary. A blocked target can retain
 a larger tracking residual. Empty or incomplete collision geometry leaves the check
