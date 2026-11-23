@@ -18,6 +18,9 @@ type Floats = NDArray[np.float64]
 type Booleans = NDArray[np.bool_]
 
 
+TRACKING_TIME_S = 0.075
+
+
 def smooth_acceleration(positions: Floats, intervals: Floats) -> Floats:
     """Fit the seed while minimizing integrated squared angular/linear acceleration.
 
@@ -52,7 +55,7 @@ def smooth_acceleration(positions: Floats, intervals: Floats) -> Floats:
         )
         fraction = (t - knots[left]) / (knots[left + 1] - knots[left])
         return smoothed[left] + fraction[:, None] * (smoothed[left + 1] - smoothed[left])
-    weight = 0.075**4 * mass[1:-1]
+    weight = TRACKING_TIME_S**4 * mass[1:-1]
     a = 2.0 / (before * (before + after))
     c = 2.0 / (after * (before + after))
     b = -a - c

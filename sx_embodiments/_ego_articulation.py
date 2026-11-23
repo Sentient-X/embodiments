@@ -77,6 +77,25 @@ class ArticulationTargets:
         controls = independent(finger_ancestry) & ~independent(wrist_and_camera)
         return cls(landmarks, sites, angles, controls)
 
+    def tracking_cost(self, row: int, points: Floats, poses: Floats) -> float:
+        """Mean squared tip displacement in phalanx lengths and distal angle in radians."""
+        valid = np.isfinite(self.angles[row])
+        sites = self.sites[valid]
+        bones = np.diff(poses[sites], axis=1)
+        lengths = np.linalg.norm(bones, axis=2)
+        keep = (lengths > 1e-6).all(axis=1)
+        if not keep.any():
+            return 0.0
+        first, second = bones[keep].transpose(1, 0, 2)
+        angle = np.arctan2(np.linalg.norm(np.cross(first, second), axis=1), (first * second).sum(1))
+        tip = poses[sites[keep, 2]] - points[self.landmarks[valid][keep, 2]]
+        tip_scale = lengths[keep].mean(axis=1)
+        squared_errors: Floats = np.asarray(
+            np.sum(tip**2, axis=1) / tip_scale**2 + (angle - self.angles[row, valid][keep]) ** 2,
+            dtype=np.float64,
+        )
+        return float(squared_errors.mean())
+
     def residuals(
         self,
         row: int,

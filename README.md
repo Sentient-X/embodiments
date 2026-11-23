@@ -727,6 +727,17 @@ against the same collision geometry. To inspect a contact reversal, compare the 
 fingertip location against the source images across successive native frames.
 A smoother angle alone can move the fingertip away from the observed contact.
 
+The solver compares this articulated candidate against the whole-body temporal fit.
+It selects complete postures with an eight-state dynamic program on four successive
+native exposures. Each selected transition obeys the source-clock velocity bound.
+Within each uninterrupted span, the largest jerk across all coordinates divided by
+their respective URDF velocities must be at most that of the original fit on the
+same four exposures. The selection minimizes squared normalized jerk and measured
+finger tracking error, using physical phalanx lengths to scale fingertip displacement.
+Missing exposures and changes in hand evidence start separate spans, with the
+original endpoints anchoring the break. The bound covers the largest normalized
+value. Individual joint derivatives and source flexion errors still require inspection.
+
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
 smoothing window. Without a declared cadence, intervals longer than 1.5 times the
 fastest observed period or 150 ms split the window. The same refinement can reuse
