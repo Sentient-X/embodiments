@@ -760,6 +760,35 @@ and a 15-degree error in the bend change. The opt-in fit met those angle checks 
 window. Median absolute fingertip error rose from 6.4 to 13.7 mm and 5.6 to 10.9 mm,
 respectively. The original source and all upper-body coordinates were fixed.
 
+For whole-body motion, call `optimize_trajectory` with the verified fit's named `q`,
+registration and source timestamps, landmarks and camera transforms. The optional
+`arm_posture_world_m` maps each side to an N × 3 × 3 array of human shoulder, elbow
+and wrist positions in world metres. A body profile may declare the corresponding
+three URDF link names per side under `arm_links`. This fits the directions of the human
+upper arm and forearm across different limb lengths. Each wrist, observed fingertip
+and the camera also contribute tracking terms. The optimizer preserves the fitted
+digit coordinates, source exposure clock, URDF position and velocity limits, and
+sampled collision-depth budgets.
+
+All wrist and head ancestors in a continuous span participate in the same nonlinear
+least-squares problem. The objective integrates tracking, normalized speed,
+acceleration, jerk and unloaded rigid-body effort. The solver assembles coupled,
+banded Gauss-Newton systems, evaluates candidate steps through FK and collision
+geometry, and accepts objective decreases. The report records each segment's
+objective history, linear solve residual and termination reason. This establishes
+a local numerical solution. A global optimality certificate would require a
+different proof.
+
+The returned `MotionReport.torque_before` and `torque` arrays use the fit's joint
+order. Revolute efforts are in Nm and prismatic efforts in N. Exact source time and
+interior three-pose stencils determine the derivatives. Endpoints and breaks remain
+NaN. `effort_limits` and `training_effort_ok` permit a caller to exclude exposures
+with missing or exceeded bounds. Pass a hash-bound `effort_limits` companion file to
+use more specific actuator limits and reflected inertias. Robot-root gravity follows
+the supplied world-to-robot rotation. Contact forces, payload, friction and actuator
+thermal duty are outside this unloaded estimate. Source-body agreement measures
+agreement with the reconstruction.
+
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
 smoothing window. Without a declared cadence, intervals longer than 1.5 times the
 fastest observed period or 150 ms split the window. The same refinement can reuse

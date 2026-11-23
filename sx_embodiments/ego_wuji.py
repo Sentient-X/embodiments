@@ -8,15 +8,26 @@ import math
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+from dataclasses import asdict
 from itertools import product
 from pathlib import Path
 
+from sx_contracts.identity import canonical_json
+
 from . import development_embodiments
+from ._ego_effort_limits import EffortLimit, EffortLimits
 from .assembly import Assembly, Member, Pose, Subtree
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
 from .checks import stl_bounds
 from .kinematics import from_xyz_rpy
-from .known.static_upper_body import STATIC_UPPER_BODY_URDF
+from .known.static_upper_body import (
+    STATIC_UPPER_BODY_LEFT_ARM,
+    STATIC_UPPER_BODY_NECK,
+    STATIC_UPPER_BODY_RIGHT_ARM,
+    STATIC_UPPER_BODY_TORSO,
+    STATIC_UPPER_BODY_URDF,
+)
+from .layout import ACTUATOR_RATINGS, DirectDrive, joint_rating
 from .materialize import materialize
 
 
@@ -92,6 +103,31 @@ def _extent(root: ET.Element, link: str, axis: int, directory: Path) -> tuple[fl
     if not extrema or max(extrema) <= min(extrema):
         raise ValueError(f"{link} has no housing extent along the mount axis")
     return min(extrema), max(extrema)
+
+
+def _body_effort_limits(urdf: bytes) -> EffortLimits:
+    """Body drive budgets for an assembly built with the registered Sentient upper body."""
+    rows: list[EffortLimit] = []
+    for part in (
+        STATIC_UPPER_BODY_TORSO,
+        STATIC_UPPER_BODY_LEFT_ARM,
+        STATIC_UPPER_BODY_RIGHT_ARM,
+        STATIC_UPPER_BODY_NECK,
+    ):
+        for axis in part.layout.axes:
+            drive = axis.actuation
+            if not isinstance(drive, DirectDrive):
+                raise ValueError(f"expected Sentient direct-drive binding for {axis.name}")
+            rating = joint_rating(drive)
+            if rating is None:
+                raise ValueError(f"missing Sentient drive rating for {axis.name}")
+            motor = ACTUATOR_RATINGS[drive.actuator.model]
+            continuous = motor.rated_torque_nm
+            maximum = rating.effort if continuous is None else continuous * drive.actuator.reduction
+            basis = "stall at 12 V" if continuous is None else "continuous rated torque"
+            source = f"sx_embodiments.layout.ACTUATOR_RATINGS {drive.actuator.model.value}, {basis}"
+            rows.append(EffortLimit(axis.name, "Nm", maximum, source, rating.armature))
+    return EffortLimits(hashlib.sha256(urdf).hexdigest(), tuple(rows))
 
 
 def assemble(wuji_urdf_dir: Path, output: Path) -> Path:
@@ -174,5 +210,8 @@ def assemble(wuji_urdf_dir: Path, output: Path) -> Path:
             for i, geom in enumerate(link.findall(category)):
                 geom.set("name", f"{link.attrib['name']}_{category}_{i}")
     ET.indent(root)
-    _publish(output, ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    description = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    _publish(output, description)
+    limits = _body_effort_limits(description)
+    _publish(output.with_suffix(".effort.json"), canonical_json(asdict(limits)).encode())
     return output

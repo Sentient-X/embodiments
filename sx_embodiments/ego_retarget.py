@@ -32,6 +32,7 @@ from ._ego_collision import (
     nominal_bearings,
 )
 from ._ego_digit_shape import refine_digits
+from ._ego_motion import MotionReport
 from ._ego_selection import choose_postures
 from ._ego_temporal import native_gaps, regularize
 from .kinematics import JointType, Kinematics, from_xyz_rpy
@@ -83,10 +84,17 @@ class MappingProfile:
     allowed_collision_pairs: tuple[Pair, ...] = ()
     bearing_depth_limits_m: tuple[Bearing, ...] = ()
     cad_sweep_sha256: str | None = None
+    arm_links: Mapping[str, tuple[str, str, str]] | None = None
 
     def __post_init__(self) -> None:
         if not self.hands or set(self.hands) - {"left", "right"}:
             raise ValueError("hands must map one or both anatomical sides")
+        if self.arm_links is not None:
+            if set(self.arm_links) - set(self.hands):
+                raise ValueError("arm_links must name a side in the hand mapping")
+            for chain in self.arm_links.values():
+                if len(chain) != 3 or len(set(chain)) != 3 or not all(x.strip() for x in chain):
+                    raise ValueError("arm_links requires distinct shoulder, elbow and wrist links")
         links: list[str] = []
         for side, sites in self.hands.items():
             if len(sites) != 21 or sites[0] is None:
@@ -121,16 +129,28 @@ class MappingProfile:
             "zed_left_optical",
             bearing_depth_limits_m=bearings,
             cad_sweep_sha256=cad_sweep_identity(),
+            arm_links={
+                side: (
+                    f"{side}_shoulder_pitch_link",
+                    f"{side}_elbow_pitch_link",
+                    f"{side}_wrist_roll_link",
+                )
+                for side in hands
+            },
         )
 
     def document(self) -> dict[str, JsonValue]:
-        return {
+        document: dict[str, JsonValue] = {
             "cad_sweep_sha256": self.cad_sweep_sha256,
             "hands": {s: list(links) for s, links in self.hands.items()},
             "camera_optical_link": self.camera_optical_link,
             "allowed_collision_pairs": [list(pair) for pair in self.allowed_collision_pairs],
             "bearing_depth_limits_m": [[a, b, d] for a, b, d in self.bearing_depth_limits_m],
         }
+
+        if self.arm_links is not None:
+            document["arm_links"] = {side: list(chain) for side, chain in self.arm_links.items()}
+        return document
 
     @classmethod
     def read(cls, path: Path) -> MappingProfile:
@@ -139,6 +159,7 @@ class MappingProfile:
             "hands",
             "camera_optical_link",
             "allowed_collision_pairs",
+            "arm_links",
             "cad_sweep_sha256",
             "bearing_depth_limits_m",
         }:
@@ -190,7 +211,24 @@ class MappingProfile:
         certificate = document.get("cad_sweep_sha256")
         if certificate is not None and not isinstance(certificate, str):
             raise ValueError("cad_sweep_sha256 must be a certificate digest or null")
-        return cls(mapped, camera, tuple(pairs), tuple(limited), certificate)
+        arm_links: dict[str, tuple[str, str, str]] | None = None
+        arms = document.get("arm_links")
+        if arms is not None:
+            if not isinstance(arms, dict):
+                raise ValueError("arm_links must be a mapping by side")
+            arm_links = {}
+            for side, chain in arms.items():
+                if not isinstance(chain, list) or len(chain) != 3:
+                    raise ValueError("arm_links requires shoulder, elbow and wrist link names")
+                shoulder, elbow, wrist = chain
+                if (
+                    not isinstance(shoulder, str)
+                    or not isinstance(elbow, str)
+                    or not isinstance(wrist, str)
+                ):
+                    raise ValueError("arm_links requires string link names")
+                arm_links[side] = (shoulder, elbow, wrist)
+        return cls(mapped, camera, tuple(pairs), tuple(limited), certificate, arm_links)
 
 
 @dataclass(frozen=True)
@@ -608,6 +646,127 @@ def refine_trajectory(
     )
 
 
+def optimize_trajectory(
+    urdf: Path,
+    profile: MappingProfile,
+    *,
+    time_ns: Indices,
+    hands_world_m: Mapping[str, Floats],
+    world_from_camera: Floats,
+    robot_from_world: Floats,
+    joint_names: tuple[str, ...],
+    q: Floats,
+    fps: float | None = None,
+    arm_posture_world_m: Mapping[str, Floats] | None = None,
+    arm_links: Mapping[str, tuple[str, str, str]] | None = None,
+    effort_limits: Path | None = None,
+) -> tuple[Fit, MotionReport]:
+    """Refine an offline fixed-base trajectory using the actual clock, FK, CAD and dynamics.
+
+    Arm references, when available, are world-space shoulder, elbow and wrist sites
+    in that order. Only their segment directions enter the objective. Each digit's
+    fitted internal coordinates are retained. The result is a local numerical
+    optimum candidate of the coupled nonlinear problem.
+    """
+    from ._ego_dynamics import UPRIGHT, EffortModel
+    from ._ego_effort_limits import load_effort_limits
+    from ._ego_motion import optimize
+
+    robot, collision, geometry_id = _configured(urdf, profile)
+    if tuple(joint_names) != robot.names:
+        raise ValueError("seed joint names must match independent URDF coordinates in order")
+    seed = np.asarray(q, dtype=np.float64)
+
+    # Reuse the native frame/hand validation and final reporting for the seed
+    # and the optimized poses, including physical CAD on every source sample.
+    def evaluate(values: Floats) -> Fit:
+        return _solve(
+            robot,
+            collision,
+            geometry_id,
+            profile,
+            time_ns=time_ns,
+            hands_world_m=hands_world_m,
+            world_from_camera=world_from_camera,
+            robot_from_world=robot_from_world,
+            fps=fps,
+            seed=values,
+            evaluate_only=True,
+        )
+
+    if seed.shape != (len(time_ns), len(robot.names)) or not np.isfinite(seed).all():
+        raise ValueError("one finite named joint position per source sample is required")
+    baseline = evaluate(seed)
+    placement = baseline.robot_from_world
+    points = (
+        np.stack([hands_world_m[s] for s in profile.hands], axis=1) @ placement[:3, :3].T
+        + placement[:3, 3]
+    )
+    refs = arm_posture_world_m or {}
+    body: dict[str, Floats] = {}
+    for side, source in refs.items():
+        values = np.asarray(source, dtype=np.float64)
+        if (
+            side not in ("left", "right")
+            or values.shape != (len(time_ns), 3, 3)
+            or np.isinf(values).any()
+        ):
+            raise ValueError(
+                "body reference needs shoulder, elbow, wrist per native exposure and side"
+            )
+        body[side] = values @ placement[:3, :3].T
+    arms = (profile.arm_links or {}) if arm_links is None else arm_links
+    tree = Kinematics.of(urdf.read_bytes())
+    links = [name for mapped in profile.hands.values() for name in mapped if name is not None]
+    camera = profile.camera_optical_link
+    if camera is not None:
+        links.append(camera)
+    for side, triple in arms.items():
+        if side not in profile.hands or len(triple) != 3 or len(set(triple)) != 3:
+            raise ValueError("each mapped arm needs three distinct links for its mapped hand")
+        wrist = profile.hands[side][0]
+        assert wrist is not None
+        for parent, child in zip(triple, (*triple[1:], wrist), strict=True):
+            if tree.path(parent, child)[0]:
+                raise ValueError(
+                    "posture links must descend shoulder to elbow to wrist to mapped hand"
+                )
+        if side in body:
+            links.extend(triple)
+    links = list(dict.fromkeys(links))
+    sites = _Sites(robot, tuple(links))
+    head = (world_from_camera[:, :3, 3] - world_from_camera[0, :3, 3]) @ placement[:3, :3].T
+    if camera is not None:
+        head += sites.positions(robot.neutral)[links.index(camera)]
+    rated = load_effort_limits(effort_limits, urdf) if effort_limits is not None else None
+    try:
+        effort = EffortModel.of(
+            urdf, robot.names, gravity=placement[:3, :3] @ np.asarray(UPRIGHT), effort_limits=rated
+        )
+        unavailable = None
+    except ValueError as exc:
+        if effort_limits is not None:
+            raise
+        effort, unavailable = None, str(exc)
+    result, report = optimize(
+        sites,
+        collision,
+        profile,
+        links,
+        seed,
+        time_ns,
+        fps,
+        points,
+        placement[:3, :3] @ world_from_camera[:, :3, :3],
+        head,
+        arms,
+        body,
+        effort,
+        unavailable,
+    )
+    return (baseline if np.array_equal(seed, result) else evaluate(result)), report
+
+
 def _solve(
     robot: _Robot,
     collision: CollisionModel | None,
@@ -621,6 +780,7 @@ def _solve(
     seed: Floats | None = None,
     fps: float | None = None,
     digit_shape_limit_m: float | None = None,
+    evaluate_only: bool = False,
 ) -> Fit:
     if fps is not None and (not np.isfinite(fps) or fps <= 0):
         raise ValueError("fps must be finite and positive")
@@ -800,6 +960,8 @@ def _solve(
                 np.abs(np.diff(proposed, axis=0)) <= intervals[:, None] * robot.velocity + 1e-10
             ):
                 seq = proposed
+    elif evaluate_only:
+        seq = seed
     elif digit_shape_limit_m is not None:
         seq = refine_digits(
             sites, collision, map_indices, points, times, seed, fps, digit_shape_limit_m
