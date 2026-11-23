@@ -161,3 +161,59 @@ def test_collision_identity_changes_with_mesh_contents(tmp_path):
     before = collision_description_sha256(path)
     mesh.write_bytes(b"second mesh")
     assert before != collision_description_sha256(path)
+
+
+def test_moving_parent_and_child_contact_is_visible_and_bearing_depth_is_bounded(tmp_path):
+    from sx_embodiments._ego_collision import CollisionModel, collision_assets
+    from sx_embodiments.ego_retarget import _model
+
+    path = tmp_path / "parent-collision.urdf"
+    description = """<robot name="probe">
+      <link name="root"><collision><origin xyz="-3 0 0"/>
+        <geometry><sphere radius=".10"/></geometry></collision></link>
+      <link name="arm"><collision><origin xyz="0 0 0"/>
+        <geometry><sphere radius=".10"/></geometry></collision></link>
+      <link name="hand"><collision><origin xyz=".05 0 0"/>
+        <geometry><sphere radius=".10"/></geometry></collision></link>
+      <joint name="j1" type="prismatic"><parent link="root"/><child link="arm"/>
+        <axis xyz="1 0 0"/><limit lower="-1" upper="1" velocity="1" effort="1"/></joint>
+      <joint name="j2" type="prismatic"><parent link="arm"/><child link="hand"/>
+        <axis xyz="1 0 0"/><limit lower="-1" upper="1" velocity="1" effort="1"/></joint>
+    </robot>"""
+    path.write_text(description)
+    robot = _model(path)
+    default = CollisionModel.read(collision_assets(path), robot.names, robot.neutral, ())
+    assert default is not None
+    contacts = default.at(robot.neutral)
+    assert contacts.unallowed == pytest.approx(0.150)
+    assert contacts.maximum == pytest.approx(0.150)
+    assert contacts.worst_pair == ("arm", "hand")
+    with pytest.raises(ValueError, match="rotary bearing"):
+        CollisionModel.read(
+            collision_assets(path), robot.names, robot.neutral, (), (("arm", "hand", 0.16),)
+        )
+
+    # A bounded bearing allowance can admit the nested neutral housings, but a
+    # rotation which drives them deeper must still report the actual absolute depth.
+    description = description.replace('name="j2" type="prismatic"', 'name="j2" type="revolute"')
+    description = description.replace('<axis xyz="1 0 0"/>', '<axis xyz="0 0 1"/>')
+    description = description.replace(
+        'name="arm"><collision><origin xyz="0 0 0"', 'name="arm"><collision><origin xyz=".1 0 0"'
+    )
+    description = description.replace('xyz=".05 0 0"', 'xyz=".08 .06 0"')
+    path.write_text(description)
+    model = CollisionModel.read(
+        collision_assets(path), robot.names, robot.neutral, (), (("arm", "hand", 0.14),)
+    )
+    assert model is not None
+    assert model.at(robot.neutral).unallowed == 0.0
+    assert model.at(np.array([0.0, -0.64])).unallowed > 0.19
+
+
+def test_builtin_bearing_profile_round_trip(tmp_path):
+    profile = MappingProfile.sentient_wuji()
+    assert not profile.allowed_collision_pairs
+    assert len(profile.bearing_depth_limits_m) == 69
+    path = tmp_path / "wuji.json"
+    path.write_text(json.dumps(profile.document()))
+    assert MappingProfile.read(path) == profile

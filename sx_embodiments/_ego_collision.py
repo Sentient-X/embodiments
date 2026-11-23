@@ -18,6 +18,7 @@ from .kinematics import JointType, Kinematics
 
 type Floats = NDArray[np.float64]
 type Pair = tuple[str, str]
+type Bearing = tuple[str, str, float]
 _mj = cast("ModuleType", mujoco)
 
 
@@ -47,7 +48,12 @@ class _Named(Protocol):
     name: str
 
 
+class _Options(Protocol):
+    disableflags: int
+
+
 class _Model(Protocol):
+    opt: _Options
     nv: int
     nbody: int
     ngeom: int
@@ -85,10 +91,11 @@ class Contacts:
     worst_pair: Pair
     violation: Floats
     jacobian: Floats
+    blocked_joints: NDArray[np.bool_]
 
 
 class CollisionModel:
-    """Convex URDF collision geometry with the engine's normal welded/parent filtering."""
+    """Convex URDF collision geometry with every independently moving link pair checked."""
 
     margin_m = 0.003
 
@@ -99,6 +106,7 @@ class CollisionModel:
         neutral: Floats,
         allowed: frozenset[Pair],
         missing_geometry: tuple[str, ...],
+        bearings: dict[Pair, float],
     ) -> None:
         self.model = model
         self.data = cast("_Data", _mj.MjData(model))
@@ -118,10 +126,28 @@ class CollisionModel:
         self.missing_geometry = missing_geometry
         self.checked = not missing_geometry and len(np.unique(model.geom_bodyid)) >= 2
         self.neutral: dict[Pair, float] = {}
-        initial = self._contacts(neutral)
-        self.neutral = {
-            pair: -contact.dist for pair, contact in initial.items() if contact.dist < 0
-        }
+        self.geom_neutral: dict[tuple[int, int], float] = {}
+        self.geom_bearing_cap: dict[tuple[int, int], float] = {}
+        self.geom_links = tuple(self.names[int(i)] for i in model.geom_bodyid)
+        for geoms, contact in self._contacts(neutral).items():
+            depth = -contact.dist
+            if depth <= 0:
+                continue
+            pair = self._pair(geoms)
+            self.geom_neutral[geoms] = depth
+            self.neutral[pair] = max(self.neutral.get(pair, 0.0), depth)
+        for geoms, depth in self.geom_neutral.items():
+            pair = self._pair(geoms)
+            if pair in bearings:
+                # A cap grants at most the audited increase over the link pair's
+                # neutral depth to each already-nested geometry pair.
+                self.geom_bearing_cap[geoms] = min(
+                    bearings[pair], depth + max(0.0, bearings[pair] - self.neutral[pair])
+                )
+
+    def _pair(self, geoms: tuple[int, int]) -> Pair:
+        a, b = self.geom_links[geoms[0]], self.geom_links[geoms[1]]
+        return (min(a, b), max(a, b))
 
     @classmethod
     def read(
@@ -130,10 +156,26 @@ class CollisionModel:
         ordered_joints: tuple[str, ...],
         neutral: Floats,
         allowed: tuple[Pair, ...],
+        bearings: tuple[Bearing, ...] = (),
     ) -> CollisionModel | None:
         root, assets, _ = geometry
         tree = Kinematics.of(ET.tostring(root))
-        for a, b in allowed:
+        caps: dict[Pair, float] = {}
+        for a, b, depth in bearings:
+            if not np.isfinite(depth) or depth <= 0:
+                raise ValueError("bearing penetration cap must be finite and positive")
+            pair = (min(a, b), max(a, b))
+            if pair in caps or pair in allowed or (pair[1], pair[0]) in allowed:
+                raise ValueError(f"duplicate or unrestricted bearing allowance {pair}")
+            caps[pair] = depth
+            # A named allowance is solely for a nested rotary bearing or paired
+            # rotary bearings. A slider can drive a link through its parent.
+            joints = [j for j in sum(tree.path(a, b), ()) if j.type != JointType.FIXED]
+            if not 1 <= len(joints) <= 2 or any(
+                j.type not in {JointType.REVOLUTE, JointType.CONTINUOUS} for j in joints
+            ):
+                raise ValueError(f"depth cap requires one or two rotary bearing axes: {pair}")
+        for a, b in (*allowed, *caps):
             if a not in tree.links or b not in tree.links or a == b:
                 raise ValueError(f"invalid allowed collision pair {(a, b)}")
         bearing: set[str] = set()
@@ -173,20 +215,21 @@ class CollisionModel:
         for mesh_spec in spec.meshes:
             mesh_spec.inertia = _mj.mjtMeshInertia.mjMESH_INERTIA_SHELL
         model = cast("_Model", spec.compile())
+        # The engine otherwise suppresses collisions between bodies separated by
+        # a movable joint, including a slider driven straight into its parent.
+        model.opt.disableflags |= int(_mj.mjtDisableBit.mjDSBL_FILTERPARENT)
         model.geom_margin[:] = cls.margin_m
         pairs = frozenset((min(a, b), max(a, b)) for a, b in allowed)
-        return cls(model, ordered_joints, neutral, pairs, tuple(sorted(all_groups - bearing)))
+        return cls(model, ordered_joints, neutral, pairs, tuple(sorted(all_groups - bearing)), caps)
 
-    def _contacts(self, q_full: Floats) -> dict[Pair, _Contact]:
+    def _contacts(self, q_full: Floats) -> dict[tuple[int, int], _Contact]:
         self.data.qpos[self.permutation] = q_full
         _mj.mj_kinematics(self.model, self.data)
         _mj.mj_comPos(self.model, self.data)
         _mj.mj_collision(self.model, self.data)
-        result: dict[Pair, _Contact] = {}
+        result: dict[tuple[int, int], _Contact] = {}
         for contact in self.data.contact:
-            a = self.names[int(self.model.geom_bodyid[contact.geom1])]
-            b = self.names[int(self.model.geom_bodyid[contact.geom2])]
-            pair = (min(a, b), max(a, b))
+            pair = (min(contact.geom1, contact.geom2), max(contact.geom1, contact.geom2))
             old = result.get(pair)
             if old is None or contact.dist < old.dist:
                 result[pair] = contact
@@ -194,19 +237,32 @@ class CollisionModel:
 
     def at(self, q_full: Floats, *, gradient: bool = False) -> Contacts:
         contacts = self._contacts(q_full)
-        depth = {pair: max(0.0, -contact.dist) for pair, contact in contacts.items()}
-        maximum = max(depth.values(), default=0.0)
-        excess = max(
-            (max(0.0, p - self.neutral.get(pair, 0.0)) for pair, p in depth.items()), default=0.0
-        )
-        unallowed = {pair: p for pair, p in depth.items() if pair not in self.allowed}
-        worst = max(unallowed, key=lambda pair: unallowed[pair], default=("", ""))
+        maximum, excess, unallowed = 0.0, 0.0, 0.0
+        worst: Pair = ("", "")
+        blocked = np.zeros(self.model.nv, dtype=np.bool_)
         residuals: list[float] = []
         gradients: list[Floats] = []
-        for pair, contact in contacts.items():
-            if pair in self.allowed or contact.dist >= self.margin_m:
+        for geoms, contact in contacts.items():
+            pair = self._pair(geoms)
+            depth = max(0.0, -contact.dist)
+            maximum = max(maximum, depth)
+            excess = max(excess, depth - self.geom_neutral.get(geoms, 0.0))
+            if pair in self.allowed:
                 continue
-            residuals.append(self.margin_m - contact.dist)
+            cap = self.geom_bearing_cap.get(geoms, 0.0)
+            if depth > cap:
+                if depth > unallowed:
+                    unallowed, worst = depth, pair
+                if depth > 1e-6:
+                    first, second = (
+                        self.model.geom_bodyid[contact.geom1],
+                        self.model.geom_bodyid[contact.geom2],
+                    )
+                    blocked |= self.ancestor[first] != self.ancestor[second]
+            residual = (-cap if cap > 0 else self.margin_m) - contact.dist
+            if residual <= 0:
+                continue
+            residuals.append(residual)
             if gradient:
                 a, b = (
                     int(self.model.geom_bodyid[contact.geom1]),
@@ -219,8 +275,9 @@ class CollisionModel:
         return Contacts(
             maximum,
             excess,
-            unallowed.get(worst, 0.0),
+            unallowed,
             worst,
             np.asarray(residuals, dtype=np.float64),
             np.asarray(gradients, dtype=np.float64).reshape(-1, len(self.permutation)),
+            blocked[self.permutation],
         )

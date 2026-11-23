@@ -48,6 +48,21 @@ def test_a_mimic_follows_its_leader_and_cannot_be_given() -> None:
         kinematics.pose("base", "c", {"j1": 0.3, "j3": 0.1})
 
 
+def test_coordinates_expand_a_sibling_and_a_constant_mimic_chain() -> None:
+    extra = b"""<link name="e"/><joint name="j4" type="revolute">
+        <parent link="c"/><child link="e"/><axis xyz="0 0 1"/>
+        <mimic joint="j3" multiplier="0" offset="0.25"/></joint></robot>"""
+    tree = Kinematics.of(URDF.replace(b"</robot>", extra))
+    assert tree.coordinates({"j2": 0.4, "j1": 0.3}) == {
+        "j1": 0.3,
+        "j2": 0.4,
+        "j3": -0.3,
+        "j4": 0.25,
+    }
+    with pytest.raises(KinematicsError, match="independent joints"):
+        tree.coordinates({"j1": 0.3, "j2": 0.4, "j3": -0.3})
+
+
 def test_a_rigid_path_needs_no_positions_and_a_moving_one_does() -> None:
     kinematics = Kinematics.of(URDF)
     assert kinematics.is_rigid("c", "d") and not kinematics.is_rigid("base", "b")
