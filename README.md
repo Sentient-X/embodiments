@@ -744,7 +744,7 @@ fingertip budget in metres to `solve` or `refine_trajectory`, for example
 the temporal pass, use `refine_trajectory(..., digit_shape_limit_m=0.04, temporal_seed=True)`.
 The calling pipeline verifies the original reconstruction, robot, clock and seed data.
 
-The shape fit changes only controls exclusive to each complete digit. It computes two
+The shape fit changes only controls exclusive to each complete digit. A driver with a mimic follower outside that digit’s kinematic chain stays fixed. Missing finger observations retain the exact seed coordinates. Contiguous observations of another finger can still improve its fit during that gap. It computes two
 unsigned angles from the link origins and fits them together with the absolute tip.
 Both joints of each angle contribute through their actual kinematic Jacobians. It checks
 sampled URDF contacts, native position and velocity limits, and preserves the fingertip
@@ -756,8 +756,8 @@ objects can retain substantial error.
 On two disjoint 525-frame windows of take 0005, the previous fit had zero accepted
 transitions meeting a 35-degree absolute angle error for all ten fingers at both ends
 and a 15-degree error in the bend change. The opt-in fit met those angle checks on
-235 of the same 268 pairs in the standing excerpt and 362 of 380 pairs in the later
-window. Median absolute fingertip error rose from 6.4 to 13.4 mm and 5.6 to 10.8 mm,
+238 of the same 268 pairs in the standing excerpt and 358 of 380 pairs in the later
+window. Median absolute fingertip error rose from 6.4 to 13.7 mm and 5.6 to 10.9 mm,
 respectively. The original source and all upper-body coordinates were fixed.
 
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the

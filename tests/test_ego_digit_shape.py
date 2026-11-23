@@ -28,19 +28,18 @@ def test_complete_digit_traces_measured_bends_with_a_fixed_wrist_and_real_contac
         )
     urdf = tmp_path / "one_digit.urdf"
     urdf.write_text('<robot name="one_digit">' + "".join(parts) + "</robot>")
-    clock = np.r_[np.arange(6) * 70_000_000, 1_700_000_000 + np.arange(6) * 70_000_000]
+    clock = np.arange(12, dtype=np.int64) * 70_000_000
     seed = np.tile([0.03, 0.5, 1.1, -0.6], (len(clock), 1))
     seed[:, 0] += np.linspace(0, 0.005, len(clock))
     targets = seed.copy()
     targets[:6, 1:] = [0.7, 0.25, 0.45]
-    targets[6:, 1:] = [0.5, 0.65, 0.35]
+    targets[6:, 1:] = [0.7, 0.25, 0.45]
     kinematics = Kinematics.of(urdf.read_bytes())
     points = np.zeros((len(clock), 21, 3))
     for i, q in enumerate(targets):
         for k, link in enumerate(links[1:]):
             transform = kinematics.pose("base", link, dict(zip(joints[:-1], q, strict=True)))
             points[i, k] = np.asarray(transform).reshape(4, 4)[:3, 3]
-    points[4] = np.nan
     profile = MappingProfile({"left": tuple(links[1:] + [None] * 16)})
     options = {
         "time_ns": clock,
@@ -65,6 +64,53 @@ def test_complete_digit_traces_measured_bends_with_a_fixed_wrist_and_real_contac
     assert np.all(np.abs(np.diff(result.q, axis=0)) <= 4 * np.diff(clock)[:, None] * 1e-9 + 1e-6)
     with pytest.raises(ValueError, match="temporal_seed requires"):
         refine_trajectory(urdf, profile, **options, temporal_seed=True)
+
+    # Reappearing fingertips must not revise earlier observed or missing targets.
+    missing = points.copy()
+    missing[4:8] = np.nan
+
+    def occluded(source):
+        opts = {
+            **options,
+            "time_ns": np.arange(len(clock), dtype=np.int64) * 70_000_000,
+            "hands_world_m": {"left": source},
+        }
+        return refine_trajectory(
+            urdf, profile, **opts, digit_shape_limit_m=0.04, temporal_seed=True
+        )
+
+    first = occluded(missing)
+    missing[8:] = points[:4]
+    second = occluded(missing)
+    np.testing.assert_array_equal(first.q[:8], second.q[:8])
+    np.testing.assert_array_equal(first.q[4:8], seed[4:8])
+    assert not first.observed[4:8].any()
+
+    cut_clock = clock.copy()
+    cut_clock[6:] += 200_000_000
+    changed = points.copy()
+    changed[:6] = points[-6:] + np.array([0.015, 0.010, 0])
+
+    def separated(source):
+        return refine_trajectory(
+            urdf,
+            profile,
+            **{**options, "time_ns": cut_clock, "hands_world_m": {"left": source}},
+            digit_shape_limit_m=0.04,
+            temporal_seed=True,
+        )
+
+    cut, changed_cut = separated(points), separated(changed)
+    np.testing.assert_array_equal(cut.q[5:7], seed[5:7])
+    np.testing.assert_array_equal(cut.q[6:], changed_cut.q[6:])
+
+    sparse = MappingProfile({"left": tuple(["wrist", None, None, None, "tip"] + [None] * 16)})
+    bad = seed.copy()
+    bad[1, 0] += 0.5
+    with pytest.raises(ValueError, match="velocity limits"):
+        refine_trajectory(
+            urdf, sparse, **{**options, "q": bad}, digit_shape_limit_m=0.04, temporal_seed=True
+        )
 
 
 @pytest.mark.parametrize("n", [2, 3, 5])
@@ -95,3 +141,80 @@ def test_jerk_path_retains_its_velocity_history(n):
     actual = _path(score, velocities, bounds, dt, polish=True)
     optimal = min(cost(path) for path in product(range(options), repeat=n))
     assert cost(actual) == pytest.approx(optimal)
+
+
+def test_occluded_left_digit_does_not_disable_a_visible_right_digit_or_drive_auxiliary_mimic(
+    tmp_path,
+):
+    # Disjoint side chains, plus an unobserved auxiliary joint driven by the
+    # first left finger hinge. Its leader must stay fixed even with a fingertip target.
+    def link(name):
+        return (
+            f'<link name="{name}"><collision><geometry><sphere radius=".002"/>'
+            "</geometry></collision></link>"
+        )
+
+    def joint(name, kind, parent, child, origin, mimic=""):
+        return (
+            f'<joint name="{name}" type="{kind}"><parent link="{parent}"/><child link="{child}"/>'
+            f'<origin xyz="{origin}"/><axis xyz="0 0 1"/><limit lower="-1.4" upper="1.4" '
+            f'effort="1" velocity="8"/>{mimic}</joint>'
+        )
+
+    xml = [link("root")]
+    hands = {}
+    for sign, side in [(-1, "left"), (1, "right")]:
+        names = [f"{side}_{k}" for k in range(5)]
+        hands[side] = tuple(names + [None] * 16)
+        for k, name in enumerate(names):
+            xml.append(link(name))
+            xml.append(
+                joint(
+                    name + "_j",
+                    "revolute" if 0 < k < 4 else "fixed",
+                    names[k - 1] if k else "root",
+                    name,
+                    ".06 0 0" if k else f"0 {sign * 0.4} 0",
+                )
+            )
+    xml += [
+        link("aux"),
+        joint(
+            "coupled",
+            "revolute",
+            "root",
+            "aux",
+            "0 1 0",
+            '<mimic joint="left_1_j" multiplier="-.5"/>',
+        ),
+    ]
+    path = tmp_path / "bimanual.urdf"
+    path.write_text('<robot name="bimanual">' + "".join(xml) + "</robot>")
+    kin = Kinematics.of(path.read_bytes())
+    names = tuple(side + f"_{j}_j" for side in hands for j in (1, 2, 3))
+    q = np.tile([0.3, 0.9, 0.1, 0.3, 0.9, 0.1], (13, 1))
+    t = np.arange(len(q), dtype=np.int64) * 100_000_000
+    target = dict(zip(names, [0.45, 0.25, 0.4, 0.45, 0.25, 0.4], strict=True))
+    pts = {}
+    for side, links in hands.items():
+        a = np.zeros((len(t), 21, 3))
+        for j, name in enumerate(links[:5]):
+            a[:, j] = np.asarray(kin.pose("root", name, target)).reshape(4, 4)[:3, 3]
+        pts[side] = a
+    pts["left"][3:9] = np.nan
+    fit = refine_trajectory(
+        path,
+        MappingProfile(hands),
+        time_ns=t,
+        hands_world_m=pts,
+        world_from_camera=np.tile(np.eye(4), (len(t), 1, 1)),
+        robot_from_world=np.eye(4),
+        joint_names=names,
+        q=q,
+        fps=10.0,
+        digit_shape_limit_m=0.04,
+        temporal_seed=True,
+    )
+    np.testing.assert_array_equal(fit.q[3:9, :3], q[3:9, :3])
+    np.testing.assert_array_equal(fit.q[:, 0], q[:, 0])
+    assert np.all(np.max(abs(fit.q[3:9, 3:] - q[3:9, 3:]), axis=1) > 0.1)

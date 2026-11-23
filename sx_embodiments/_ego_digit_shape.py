@@ -65,7 +65,13 @@ class Digits:
             # Any control moving another mapped site, wrist or optical frame stays fixed.
             remaining = np.ones(len(ancestry), dtype=np.bool_)
             remaining[chain] = False
-            columns = np.flatnonzero(ancestry[chain].any(0) & ~ancestry[remaining].any(0))
+            private = ancestry[chain].any(0) & ~ancestry[remaining].any(0)
+            if model.robot.coupling is not None:
+                # A control can also drive an unscored sibling through URDF mimic.
+                # Exclude it even if none of that sibling's bodies is a mapped site.
+                outside = ~np.asarray(model.ancestor[chain].any(0))
+                private &= ~(model.robot.coupling[outside] != 0).any(0)
+            columns = np.flatnonzero(private)
             if len(columns):
                 landmarks.append(digit)
                 sites.append(chain)
@@ -87,6 +93,18 @@ class Digits:
                     native_units[axis] = scale[digit]
         return cls(
             np.asarray(landmarks), np.asarray(sites), cols, active, cols[active], native_units
+        )
+
+    def subset(self, indices: list[int]) -> Digits:
+        columns = self.columns[indices]
+        active = self.active[indices]
+        return Digits(
+            self.landmarks[indices],
+            self.sites[indices],
+            columns,
+            active,
+            columns[active],
+            self.native_units,
         )
 
     def converge(
@@ -228,6 +246,7 @@ def _guarded_path(
     desired: Floats,
     dt: Floats,
     limit_m: float,
+    fixed: Bools,
     *,
     polish: bool,
 ) -> Floats:
@@ -262,6 +281,7 @@ def _guarded_path(
             + 0.12 * np.nansum((tips / limit_m) ** 2, axis=-1) / np.isfinite(tips).sum(-1).clip(1)
         )
     )
+    permitted[fixed, 1:] = False
     score[~permitted] = np.inf
     if len(seed) == 1:
         return candidates[:, np.argmin(score[0])]
@@ -301,79 +321,90 @@ def refine_digits(
         )
     if (seed < robot.lower - 1e-9).any() or (seed > robot.upper + 1e-9).any():
         raise ValueError("digit shape seed exceeds independent joint position limits")
+    intervals = np.diff(times).astype(np.float64) * 1e-9
+    if np.any(np.abs(np.diff(seed, axis=0)) > intervals[:, None] * robot.velocity + 1e-8):
+        raise ValueError("digit shape seed exceeds the native URDF velocity limits")
     digits = Digits.mapped(model, mapped)
     result = seed.copy()
     if digits is None:
         return result
-    intervals = np.diff(times).astype(np.float64) * 1e-9
-    boundaries = np.r_[0, np.flatnonzero(native_gaps(intervals, fps)) + 1, len(times)]
-    anatomical_points = points.reshape(len(times), -1, 3)[:, digits.landmarks]
-    for a, b in pairwise(boundaries):
-        saved = seed[a:b]
-        clock = times[a:b]
-        dt = intervals[a : b - 1]
-        if (np.abs(np.diff(saved, axis=0)) > dt[:, None] * robot.velocity + 1e-8).any():
-            raise ValueError("digit shape seed exceeds the native URDF velocity limits")
-        reference = anatomical_points[a:b]
-        target_angles = bends(reference)
-        valid = np.asarray(np.isfinite(target_angles).all(-1), dtype=np.bool_)
-        if not valid.any():
-            continue
-        desired = np.stack(
-            [
-                digits.converge(model, q, reference[row], target_angles[row])
-                for row, q in enumerate(saved)
-            ]
-        )
-        for digit, active in enumerate(digits.active):
-            cols = digits.columns[digit, active]
-            available = valid[:, digit]
-            edges = np.r_[0, np.flatnonzero(available[1:] != available[:-1]) + 1, len(saved)]
-            for start, end in pairwise(edges):
-                if available[start] and end - start >= 3:
-                    desired[start:end, cols] = smooth_acceleration(
-                        desired[start:end, cols], dt[start : end - 1]
-                    )
-            if available.any() and not available.all():
-                # Interpolate the fitted coordinate correction over missing observations,
-                # keeping the original source visibility metadata and clock unchanged.
-                for j in cols:
-                    correction = (desired[:, j] - saved[:, j])[available]
-                    desired[:, j] = saved[:, j] + np.interp(clock, clock[available], correction)
-        desired = np.clip(desired, robot.lower, robot.upper)
-        original = np.stack([model.positions(q)[digits.sites[:, -1]] for q in saved])
-        original_tips = np.linalg.norm(original - reference[:, :, -1], axis=-1)
-        path = _guarded_path(
-            model,
-            collision,
-            digits,
-            reference,
-            target_angles,
-            original_tips,
-            saved,
-            desired,
-            dt,
-            limit_m,
-            polish=False,
-        )
-        # Three passes reduce high-frequency contact relief changes while retaining
-        # the checked path at each time. Only the movable digit coordinates are smoothed.
-        for _ in range(3):
-            desired = path.copy()
-            desired[:, digits.controls] = smooth_acceleration(path[:, digits.controls], dt)
+    gaps = native_gaps(intervals, fps)
+    points = points.reshape(len(times), -1, 3)
+    availability = np.asarray(
+        np.isfinite(bends(points[:, digits.landmarks])).all(-1), dtype=np.bool_
+    )
+    by_visibility: dict[bytes, list[int]] = {}
+    for digit in range(len(digits.sites)):
+        by_visibility.setdefault(availability[:, digit].tobytes(), []).append(digit)
+    for indices in by_visibility.values():
+        group = digits.subset(indices)
+        present = availability[:, indices[0]]
+        breaks = gaps | (present[1:] != present[:-1])
+        boundaries = np.r_[0, np.flatnonzero(breaks) + 1, len(times)]
+        for begin, end in pairwise(boundaries):
+            if not present[begin]:
+                continue
+            # Include only the neighbouring *seed* pose on each side for the
+            # velocity transition. Its target is absent and its q stays exact.
+            # Only a digit's own coverage boundaries limit its observations.
+            cut_before = bool(begin > 0 and gaps[begin - 1])
+            cut_after = bool(end < len(times) and gaps[end - 1])
+            left = int(begin) if cut_before else max(0, int(begin) - 1)
+            right = int(end) if cut_after else min(len(times), int(end) + 1)
+            saved = result[left:right].copy()
+            core = slice(int(begin) - left, int(end) - left)
+            reference = np.full((len(saved), len(group.sites), 4, 3), np.nan)
+            reference[core] = points[begin:end, group.landmarks]
+            target_angles = bends(reference)
+            desired = saved.copy()
+            for row in range(core.start, core.stop):
+                desired[row] = group.converge(model, saved[row], reference[row], target_angles[row])
+            controls = group.controls
+            observed_dt = intervals[begin : end - 1]
+            desired[core, controls] = smooth_acceleration(desired[core, controls], observed_dt)
             desired = np.clip(desired, robot.lower, robot.upper)
+            original = np.stack([model.positions(q)[group.sites[:, -1]] for q in saved])
+            original_tips = np.linalg.norm(original - reference[:, :, -1], axis=-1)
+            fixed = np.ones(len(saved), dtype=np.bool_)
+            fixed[core] = False
+            # Both measured endpoints of a discontinuous camera clock retain the
+            # original robot pose. Neither independent island sees its neighbour.
+            if cut_before:
+                fixed[core.start] = True
+            if cut_after:
+                fixed[core.stop - 1] = True
+            dt = intervals[left : right - 1]
             path = _guarded_path(
                 model,
                 collision,
-                digits,
+                group,
                 reference,
                 target_angles,
                 original_tips,
-                path,
+                saved,
                 desired,
                 dt,
                 limit_m,
-                polish=True,
+                fixed,
+                polish=False,
             )
-        result[a:b] = path
+            for _ in range(3):
+                desired = path.copy()
+                desired[core, controls] = smooth_acceleration(path[core, controls], observed_dt)
+                desired = np.clip(desired, robot.lower, robot.upper)
+                path = _guarded_path(
+                    model,
+                    collision,
+                    group,
+                    reference,
+                    target_angles,
+                    original_tips,
+                    path,
+                    desired,
+                    dt,
+                    limit_m,
+                    fixed,
+                    polish=True,
+                )
+            result[begin:end, controls] = path[core, controls]
     return result
