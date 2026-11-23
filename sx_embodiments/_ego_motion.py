@@ -340,10 +340,15 @@ class _Tracking:
                     pj = np.einsum("nrk,nrj->nkj", rotation, pj - jac[:, self.camera] - angular)
                 term(error, pj, 155.0, 0.04)
                 if metrics is not None:
-                    u, _ = _unit(achieved)
-                    v, _ = _unit(source)
+                    u, achieved_size = _unit(achieved)
+                    v, source_size = _unit(source)
                     angle = np.rad2deg(np.arccos(np.clip(np.sum(u * v, axis=1), -1, 1)))
-                    metrics["achieved_optical_palm_ray_error_deg"].append(angle[np.isfinite(angle)])
+                    defined = (
+                        np.isfinite(angle)
+                        & (achieved_size[:, 0] > 1e-8)
+                        & (source_size[:, 0] > 1e-8)
+                    )
+                    metrics["achieved_optical_palm_ray_error_deg"].append(angle[defined])
             palm_errors.append(error)
             palm_jacs.append(pj)
         if len(palm_errors) == 2:

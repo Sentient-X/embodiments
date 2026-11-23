@@ -436,6 +436,8 @@ def test_coupled_achieved_optical_and_hand_relative_jacobians(tmp_path):
     points[0, 1, 0] = [0.15, -0.03, 0.61]
     targets = np.tile(np.eye(3), (2, 1, 1))
     head = np.array([[0.05, 0.02, 0.15], [0.06, 0.02, 0.14]])
+    # A geometrically undefined ray receives no angular score.
+    points[1, 0, 0] = head[1]
     tracking = _Tracking(sites, profile, names, points, targets, head, {}, {})
     q = np.array([[0.12, 0.08, 0.3], [0.14, 0.075, 0.28]])
     dt = np.array([0.1])
@@ -454,3 +456,4 @@ def test_coupled_achieved_optical_and_hand_relative_jacobians(tmp_path):
     metrics = {"achieved_optical_palm_ray_error_deg": [], "inter_palm_vector_error_m": []}
     tracking.cost(q, slice(0, 2), mass, dt, None, metrics)
     assert len(metrics["inter_palm_vector_error_m"][0]) == 1
+    assert sum(len(values) for values in metrics["achieved_optical_palm_ray_error_deg"]) == 2
