@@ -31,6 +31,7 @@ from ._ego_collision import (
     collision_assets,
     nominal_bearings,
 )
+from ._ego_digit_shape import refine_digits
 from ._ego_selection import choose_postures
 from ._ego_temporal import native_gaps, regularize
 from .kinematics import JointType, Kinematics, from_xyz_rpy
@@ -509,6 +510,7 @@ def solve(
     world_from_camera: Floats,
     robot_from_world: Floats | None,
     fps: float | None = None,
+    digit_shape_limit_m: float | None = None,
 ) -> Fit:
     """Fit on the native clock. Registration explicitly maps the input world to the URDF root."""
 
@@ -524,6 +526,20 @@ def solve(
         robot_from_world=robot_from_world,
         fps=fps,
     )
+    fit = _solve(
+        robot,
+        collision,
+        geometry_id,
+        profile,
+        time_ns=time_ns,
+        hands_world_m=hands_world_m,
+        world_from_camera=world_from_camera,
+        robot_from_world=fit.robot_from_world,
+        seed=fit.q,
+        fps=fps,
+    )
+    if digit_shape_limit_m is None:
+        return fit
     return _solve(
         robot,
         collision,
@@ -535,6 +551,7 @@ def solve(
         robot_from_world=fit.robot_from_world,
         seed=fit.q,
         fps=fps,
+        digit_shape_limit_m=digit_shape_limit_m,
     )
 
 
@@ -549,6 +566,8 @@ def refine_trajectory(
     joint_names: tuple[str, ...],
     q: Floats,
     fps: float | None = None,
+    digit_shape_limit_m: float | None = None,
+    temporal_seed: bool = False,
 ) -> Fit:
     """Refine a source-matched, previously solved native trajectory, rechecking final geometry.
 
@@ -558,6 +577,22 @@ def refine_trajectory(
     robot, collision, geometry_id = _configured(urdf, profile)
     if tuple(joint_names) != robot.names:
         raise ValueError("seed joint names must match independent URDF coordinates in order")
+    if temporal_seed and digit_shape_limit_m is None:
+        raise ValueError("temporal_seed requires a digit shape fingertip budget")
+    values = np.asarray(q, dtype=np.float64)
+    if digit_shape_limit_m is not None and not temporal_seed:
+        values = _solve(
+            robot,
+            collision,
+            geometry_id,
+            profile,
+            time_ns=time_ns,
+            hands_world_m=hands_world_m,
+            world_from_camera=world_from_camera,
+            robot_from_world=robot_from_world,
+            seed=values,
+            fps=fps,
+        ).q
     return _solve(
         robot,
         collision,
@@ -567,8 +602,9 @@ def refine_trajectory(
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
         robot_from_world=robot_from_world,
-        seed=np.asarray(q, dtype=np.float64),
+        seed=values,
         fps=fps,
+        digit_shape_limit_m=digit_shape_limit_m,
     )
 
 
@@ -584,7 +620,10 @@ def _solve(
     robot_from_world: Floats | None,
     seed: Floats | None = None,
     fps: float | None = None,
+    digit_shape_limit_m: float | None = None,
 ) -> Fit:
+    if fps is not None and (not np.isfinite(fps) or fps <= 0):
+        raise ValueError("fps must be finite and positive")
     times = np.asarray(time_ns)
     if (
         times.dtype != np.int64
@@ -761,6 +800,10 @@ def _solve(
                 np.abs(np.diff(proposed, axis=0)) <= intervals[:, None] * robot.velocity + 1e-10
             ):
                 seq = proposed
+    elif digit_shape_limit_m is not None:
+        seq = refine_digits(
+            sites, collision, map_indices, points, times, seed, fps, digit_shape_limit_m
+        )
     else:
         influence = [
             np.any(sites.ancestor[np.flatnonzero(map_indices // 21 == side)], axis=0)
