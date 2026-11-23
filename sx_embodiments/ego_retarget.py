@@ -31,6 +31,7 @@ from ._ego_collision import (
     collision_assets,
     nominal_bearings,
 )
+from ._ego_selection import choose_postures
 from ._ego_temporal import native_gaps, regularize
 from .kinematics import JointType, Kinematics, from_xyz_rpy
 
@@ -827,7 +828,7 @@ def _solve(
             collision,
         )
         if digits.any():
-            seq = regularize(
+            articulated = regularize(
                 seq,
                 times,
                 availability,
@@ -843,6 +844,25 @@ def _solve(
                 collision,
                 digits,
             )
+
+            tracking = np.zeros((len(times), 2))
+            eligible = np.any(present, axis=1)
+            for row in np.flatnonzero(np.any(seq != articulated, axis=1)):
+                flat = points[row].reshape(-1, 3)
+                reference_positions = sites.positions(seq[row])
+                tracking[row, 0] = articulation_targets.tracking_cost(
+                    row, flat, reference_positions
+                )
+                adjusted_positions = sites.positions(articulated[row])
+                tracking[row, 1] = articulation_targets.tracking_cost(row, flat, adjusted_positions)
+                if collision is not None:
+                    depth = collision.at(sites.full_q(articulated[row])).unallowed
+                    if depth > 1e-6:
+                        eligible[row] &= depth <= collision.at(sites.full_q(seq[row])).unallowed
+            chosen = choose_postures(
+                times, fps, present, seq, articulated, robot.velocity, tracking, eligible
+            )
+            seq[chosen] = articulated[chosen]
 
     for i, final_q in enumerate(seq):
         positions = sites.positions(final_q)
