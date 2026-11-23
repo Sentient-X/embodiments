@@ -547,6 +547,8 @@ def solve(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
     robot_from_world: Floats | None,
     fps: float | None = None,
     digit_shape_limit_m: float | None = None,
@@ -562,6 +564,8 @@ def solve(
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
+        joint_inliers=joint_inliers,
+        sparse_hand_sites_world_m=sparse_hand_sites_world_m,
         robot_from_world=robot_from_world,
         fps=fps,
     )
@@ -573,6 +577,8 @@ def solve(
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
+        joint_inliers=joint_inliers,
+        sparse_hand_sites_world_m=sparse_hand_sites_world_m,
         robot_from_world=fit.robot_from_world,
         seed=fit.q,
         fps=fps,
@@ -587,6 +593,8 @@ def solve(
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
+        joint_inliers=joint_inliers,
+        sparse_hand_sites_world_m=sparse_hand_sites_world_m,
         robot_from_world=fit.robot_from_world,
         seed=fit.q,
         fps=fps,
@@ -601,6 +609,8 @@ def refine_trajectory(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
     robot_from_world: Floats,
     joint_names: tuple[str, ...],
     q: Floats,
@@ -628,6 +638,8 @@ def refine_trajectory(
             time_ns=time_ns,
             hands_world_m=hands_world_m,
             world_from_camera=world_from_camera,
+            joint_inliers=joint_inliers,
+            sparse_hand_sites_world_m=sparse_hand_sites_world_m,
             robot_from_world=robot_from_world,
             seed=values,
             fps=fps,
@@ -640,6 +652,8 @@ def refine_trajectory(
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
+        joint_inliers=joint_inliers,
+        sparse_hand_sites_world_m=sparse_hand_sites_world_m,
         robot_from_world=robot_from_world,
         seed=values,
         fps=fps,
@@ -654,6 +668,8 @@ def optimize_trajectory(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
     robot_from_world: Floats,
     joint_names: tuple[str, ...],
     q: Floats,
@@ -691,6 +707,8 @@ def optimize_trajectory(
             time_ns=time_ns,
             hands_world_m=hands_world_m,
             world_from_camera=world_from_camera,
+            joint_inliers=joint_inliers,
+            sparse_hand_sites_world_m=sparse_hand_sites_world_m,
             robot_from_world=robot_from_world,
             fps=fps,
             seed=values,
@@ -701,10 +719,10 @@ def optimize_trajectory(
         raise ValueError("one finite named joint position per source sample is required")
     baseline = evaluate(seed)
     placement = baseline.robot_from_world
-    points = (
-        np.stack([hands_world_m[s] for s in profile.hands], axis=1) @ placement[:3, :3].T
-        + placement[:3, 3]
+    _, geometry, _ = _hand_observations(
+        tuple(profile.hands), len(time_ns), hands_world_m, joint_inliers, sparse_hand_sites_world_m
     )
+    points = geometry @ placement[:3, :3].T + placement[:3, 3]
     refs = arm_posture_world_m or {}
     body: dict[str, Floats] = {}
     for side, source in refs.items():
@@ -738,9 +756,7 @@ def optimize_trajectory(
             links.extend(triple)
     links = list(dict.fromkeys(links))
     sites = _Sites(robot, tuple(links))
-    head = (world_from_camera[:, :3, 3] - world_from_camera[0, :3, 3]) @ placement[:3, :3].T
-    if camera is not None:
-        head += sites.positions(robot.neutral)[links.index(camera)]
+    registered_camera = placement @ world_from_camera
     rated = load_effort_limits(effort_limits, urdf) if effort_limits is not None else None
     try:
         effort = EffortModel.of(
@@ -760,8 +776,8 @@ def optimize_trajectory(
         time_ns,
         fps,
         points,
-        placement[:3, :3] @ world_from_camera[:, :3, :3],
-        head,
+        registered_camera[:, :3, :3],
+        registered_camera[:, :3, 3],
         arms,
         body,
         effort,
@@ -770,6 +786,62 @@ def optimize_trajectory(
         on_checkpoint,
     )
     return (baseline if np.array_equal(seed, result) else evaluate(result)), report
+
+
+def _hand_observations(
+    sides: tuple[str, ...],
+    count: int,
+    hands_world_m: Mapping[str, Floats],
+    joint_inliers: Mapping[str, Indices] | None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None,
+) -> tuple[Floats, Floats, NDArray[np.bool_]]:
+    """Keep the complete hand shape prior separate from individually observed 3D sites."""
+    source = np.stack([np.asarray(hands_world_m[side], dtype=np.float64) for side in sides], axis=1)
+    if source.shape != (count, len(sides), 21, 3) or np.isinf(source).any():
+        raise ValueError("source landmarks must be N x 21 x 3 metres for each side")
+    present = np.asarray(np.isfinite(source).all(axis=(2, 3)))
+    absent = np.isnan(source).all(axis=(2, 3))
+    if not np.all(present | absent):
+        raise ValueError("a hand observation must have 21 finite landmarks or be entirely missing")
+    if np.any(np.ptp(source[present], axis=1).max(axis=1) <= 1e-8):
+        raise ValueError("degenerate hand observation")
+    geometry = source.copy()
+    if joint_inliers is not None or sparse_hand_sites_world_m is not None:
+        for observations in (joint_inliers, sparse_hand_sites_world_m):
+            if observations is not None and set(observations) != set(sides):
+                raise ValueError("landmark evidence must name each mapped hand")
+        for i, side in enumerate(sides):
+            if joint_inliers is not None:
+                bits = np.asarray(joint_inliers[side])
+                if (
+                    bits.shape != (count,)
+                    or bits.dtype.kind not in "iu"
+                    or np.any((bits < 0) | (bits >= 1 << 21))
+                ):
+                    raise ValueError(
+                        "one nonnegative 21-bit stereo mask per hand and exposure required"
+                    )
+                supported = (bits.astype(np.int64)[:, None] & (1 << np.arange(21))) != 0
+                geometry[:, i] = np.where(supported[..., None], geometry[:, i], np.nan)
+            if sparse_hand_sites_world_m is not None:
+                sparse = np.asarray(sparse_hand_sites_world_m[side], dtype=np.float64)
+                finite = np.asarray(np.isfinite(sparse).all(axis=-1), dtype=np.bool_)
+                if sparse.shape != (count, 21, 3) or not np.all(
+                    finite | np.isnan(sparse).all(axis=-1)
+                ):
+                    raise ValueError("sparse 3D sites must each be one finite XYZ or three NaNs")
+                geometry[:, i] = np.where(finite[..., None], sparse, geometry[:, i])
+                # Shape requires four connected sites. Never build a bend by mixing
+                # a sparse observed phalanx with an inferred one from another fit.
+                for start in range(1, 21, 4):
+                    chain = slice(start, start + 4)
+                    complete = np.asarray(
+                        finite[:, chain].all(axis=1, keepdims=True), dtype=np.bool_
+                    )
+                    source[:, i, chain] = np.where(
+                        complete[..., None], sparse[:, chain], source[:, i, chain]
+                    )
+    return source, geometry, present
 
 
 def _solve(
@@ -781,6 +853,8 @@ def _solve(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
     robot_from_world: Floats | None,
     seed: Floats | None = None,
     fps: float | None = None,
@@ -806,6 +880,8 @@ def _solve(
             time_ns=times,
             hands_world_m=hands_world_m,
             world_from_camera=world_from_camera,
+            joint_inliers=joint_inliers,
+            sparse_hand_sites_world_m=sparse_hand_sites_world_m,
             fps=fps,
         )
     placement = np.asarray(robot_from_world, dtype=np.float64)
@@ -815,17 +891,15 @@ def _solve(
     _rigid(placement)
     _rigid(cameras)
     sides = tuple(profile.hands)
-    source = np.stack([np.asarray(hands_world_m[side], dtype=np.float64) for side in sides], axis=1)
-    if source.shape != (len(times), len(sides), 21, 3) or np.isinf(source).any():
-        raise ValueError("source landmarks must be N x 21 x 3 metres for each side")
-    present = np.asarray(np.isfinite(source).all(axis=(2, 3)))
-    absent = np.isnan(source).all(axis=(2, 3))
-    if not np.all(present | absent):
-        raise ValueError("a hand observation must have 21 finite landmarks or be entirely missing")
-    if np.any(np.ptp(source[present], axis=1).max(axis=1) <= 1e-8):
-        raise ValueError("degenerate hand observation")
-    points = source @ placement[:3, :3].T + placement[:3, 3]
-    camera_rotations = placement[:3, :3] @ cameras[:, :3, :3]
+    shape, geometry, present = _hand_observations(
+        sides, len(times), hands_world_m, joint_inliers, sparse_hand_sites_world_m
+    )
+    points = geometry @ placement[:3, :3].T + placement[:3, 3]
+    shape_points = shape @ placement[:3, :3].T + placement[:3, 3]
+    visible = np.isfinite(geometry).all(axis=3).reshape(len(times), -1)
+    available = np.asarray(np.isfinite(geometry[..., 0]).any(axis=2), dtype=np.bool_)
+    registered_camera = placement @ cameras
+    camera_rotations = registered_camera[:, :3, :3]
     mapped = [link for side in sides for link in profile.hands[side]]
     links = [name for name in mapped if name is not None]
     if profile.camera_optical_link is not None:
@@ -840,10 +914,7 @@ def _solve(
     map_indices = np.array([i for i, name in enumerate(mapped) if name is not None], dtype=np.int64)
     target_cache: dict[tuple[bool, ...], _Targets] = {}
     camera = len(links) - 1 if profile.camera_optical_link is not None else None
-    rel_head = (cameras[:, :3, 3] - cameras[0, :3, 3]) @ placement[:3, :3].T
-    if camera is not None:
-        rel_head += sites.positions(q)[camera]
-    camera_targets = np.concatenate((camera_rotations, rel_head[:, :, None]), axis=2)
+    camera_targets = registered_camera[:, :3, :]
     max_depth = np.full(len(times), np.nan)
     excess_depth = max_depth.copy()
     bad_depth = max_depth.copy()
@@ -853,17 +924,18 @@ def _solve(
     def frame_terms(mask: NDArray[np.bool_]) -> _Targets:
         key = tuple(bool(v) for v in mask)
         if key not in target_cache:
-            observed = mask[map_indices // 21]
+            observed = mask[map_indices]
             ids = np.flatnonzero(observed)
             indices = map_indices[observed]
             origins = np.searchsorted(map_indices, indices // 21 * 21)
+            origins = np.where(mask[indices // 21 * 21], origins, ids)
             digit = indices % 21
             weights = np.where(digit == 0, 2.5, np.where(digit % 4 == 0, 1.0, 0.45))
             target_cache[key] = _Targets(ids, origins, indices, weights, camera)
         return target_cache[key]
 
     if seed is None:
-        for i, mask in enumerate(present):
+        for i, mask in enumerate(visible):
             terms = frame_terms(mask)
             first = i == 0
             dt = 0.0 if first else (int(times[i]) - int(times[i - 1])) * 1e-9
@@ -946,8 +1018,8 @@ def _solve(
             before, after = intervals[:-1], intervals[1:]
             gaps = native_gaps(intervals, fps)
             supported = (
-                np.all(present[:-2] == present[1:-1], axis=1)
-                & np.all(present[1:-1] == present[2:], axis=1)
+                np.all(visible[:-2] == visible[1:-1], axis=1)
+                & np.all(visible[1:-1] == visible[2:], axis=1)
                 & ~gaps[:-1]
                 & ~gaps[1:]
             )
@@ -969,17 +1041,25 @@ def _solve(
         seq = seed
     elif digit_shape_limit_m is not None:
         seq = refine_digits(
-            sites, collision, map_indices, points, times, seed, fps, digit_shape_limit_m
+            sites,
+            collision,
+            map_indices,
+            shape_points,
+            times,
+            seed,
+            fps,
+            digit_shape_limit_m,
+            observed_sites=points,
         )
     else:
         influence = [
             np.any(sites.ancestor[np.flatnonzero(map_indices // 21 == side)], axis=0)
             for side in range(len(sides))
         ]
-        availability = present
+        availability = available
         if camera is not None:
             influence.append(sites.ancestor[camera])
-            availability = np.column_stack((present, np.ones(len(times), dtype=np.bool_)))
+            availability = np.column_stack((available, np.ones(len(times), dtype=np.bool_)))
         rows = np.asarray(influence, dtype=np.bool_)
         coupling = robot.coupling
         if coupling is not None:
@@ -989,7 +1069,7 @@ def _solve(
             return active if coupling is None else np.any(coupling[active] != 0, axis=0)
 
         articulation_targets = ArticulationTargets.from_landmarks(
-            map_indices, len(sides), points, times, fps, sites.ancestor, camera, coupling
+            map_indices, len(sides), shape_points, times, fps, sites.ancestor, camera, coupling
         )
         digits = articulation_targets.controls
 
@@ -999,7 +1079,7 @@ def _solve(
             # Preserve the original observed task-space motion with one damped
             # geometric Jacobian step about the smooth posture. Redundant joint
             # coordinates therefore retain their low-curvature solution.
-            terms = frame_terms(present[row])
+            terms = frame_terms(visible[row])
             flat = points[row].reshape(-1, 3)
             prior = terms.values(flat, camera_targets[row], sites.positions(initial), sites)
             poses = sites.positions(smooth)
@@ -1007,7 +1087,7 @@ def _solve(
             jac = terms.jacobian(poses, sites)
             if articulation:
                 digit_error, digit_jac = articulation_targets.residuals(
-                    row, flat, poses, sites.jacobian(poses), coupling
+                    row, shape_points[row].reshape(-1, 3), poses, sites.jacobian(poses), coupling
                 )
                 jac = np.vstack((jac, digit_jac))
                 error = np.r_[error, digit_error]
@@ -1058,7 +1138,7 @@ def _solve(
             tracking = np.zeros((len(times), 2))
             eligible = np.any(present, axis=1)
             for row in np.flatnonzero(np.any(seq != articulated, axis=1)):
-                flat = points[row].reshape(-1, 3)
+                flat = shape_points[row].reshape(-1, 3)
                 reference_positions = sites.positions(seq[row])
                 tracking[row, 0] = articulation_targets.tracking_cost(
                     row, flat, reference_positions
@@ -1092,7 +1172,9 @@ def _solve(
         else:
             worst_pairs.append(("", ""))
         if camera is not None:
-            camera_position_error[i] = np.linalg.norm(positions[camera] - rel_head[i])
+            camera_position_error[i] = np.linalg.norm(
+                positions[camera] - registered_camera[i, :3, 3]
+            )
             rotation = sites.data.xmat[sites.ids[camera]].reshape(3, 3)
             delta = rotation.T @ camera_rotations[i]
             gaze_error[i] = np.arccos(np.clip(delta[2, 2], -1.0, 1.0))
@@ -1146,7 +1228,8 @@ def _placement_score(fit: Fit) -> float:
     # Score each observed side separately, so one easy hand cannot hide the other.
     scores: list[float] = []
     for i in range(len(fit.side_names)):
-        wrist = fit.wrist_error_m[fit.observed[:, i], i]
+        wrist = fit.wrist_error_m[:, i]
+        wrist = wrist[np.isfinite(wrist)]
         if not wrist.size:
             continue
         score = float(np.quantile(wrist, 0.9) + np.mean(wrist))
@@ -1155,10 +1238,13 @@ def _placement_score(fit: Fit) -> float:
         if finite.size:
             score += float(np.quantile(finite, 0.9)) * 0.5
         scores.append(score)
+    if not scores:
+        return np.inf
     tracking = max(scores) + float(np.mean(scores))
     orientation = fit.camera_rotation_error_rad
     if np.isfinite(orientation).all():
         tracking += 0.14 * float(np.quantile(orientation, 0.9))
+        tracking += float(np.quantile(fit.camera_position_error_m, 0.9))
     depth = fit.self_collision_unallowed_m
     if np.isfinite(depth).all():
         # Rank contact-free trajectories first, then compare tracking error.
@@ -1175,6 +1261,8 @@ def _virtual_fit(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
     fps: float | None = None,
 ) -> Fit:
     """Choose one virtual workspace registration using upright (+z) source and robot frames.
@@ -1209,14 +1297,19 @@ def _virtual_fit(
     for side, sample in hands.items():
         if sample.shape != (len(times), 21, 3):
             raise ValueError(f"{side} must have one set of landmarks per timestamp")
-    observations = {side: np.isfinite(sample).all(axis=(1, 2)) for side, sample in hands.items()}
+    _, geometry, _ = _hand_observations(
+        sides, len(times), hands, joint_inliers, sparse_hand_sites_world_m
+    )
+    observations = {
+        side: np.isfinite(geometry[:, i, 0]).all(axis=1) for i, side in enumerate(sides)
+    }
     offsets: list[Floats] = []
     sample_ids: list[int] = []
     for i, side in enumerate(sides):
         indices = np.flatnonzero(observations[side])
         if not len(indices):
             continue
-        wrists_robot = hands[side][indices, 0] @ frame[:3, :3].T
+        wrists_robot = geometry[indices, i, 0] @ frame[:3, :3].T
         offsets.append(positions[i] - np.median(wrists_robot, axis=0))
         # Select across time and also include the extremes of the task workspace.
         for row in np.linspace(0, len(indices) - 1, min(len(indices), 24)).astype(int):
@@ -1231,7 +1324,8 @@ def _virtual_fit(
     if not offsets:
         raise ValueError("virtual registration needs observed wrist landmarks")
     chosen = np.array(sorted(set(sample_ids)), dtype=np.int64)
-    center = np.mean(offsets, axis=0)
+    optical_center = positions[-1] - np.median(cameras[:, :3, 3] @ frame[:3, :3].T, axis=0)
+    center = np.mean([*offsets, optical_center], axis=0)
 
     def fit_at(point: Floats, indices: Indices, *, checked: bool = False) -> Fit:
         frame[:3, 3] = point
@@ -1243,6 +1337,12 @@ def _virtual_fit(
             time_ns=times[indices],
             hands_world_m={side: hands[side][indices] for side in sides},
             world_from_camera=cameras[indices],
+            joint_inliers=None
+            if joint_inliers is None
+            else {s: joint_inliers[s][indices] for s in sides},
+            sparse_hand_sites_world_m=None
+            if sparse_hand_sites_world_m is None
+            else {s: sparse_hand_sites_world_m[s][indices] for s in sides},
             robot_from_world=frame,
             fps=fps if len(indices) == len(times) else None,
         )
@@ -1255,7 +1355,7 @@ def _virtual_fit(
     coarse = (
         np.array(delta) * (0.27 * reach) + center for delta in product((-1.0, 0.0, 1.0), repeat=3)
     )
-    for point in coarse:
+    for point in (*coarse, optical_center):
         fit = fit_at(point, chosen)
         score = _placement_score(fit)
         sampled.append((score, point))
@@ -1278,10 +1378,10 @@ def _virtual_fit(
     all_indices = np.arange(len(times), dtype=np.int64)
     observed = np.flatnonzero(np.logical_or.reduce(tuple(observations.values())))
     anchors = set(observed[np.linspace(0, len(observed) - 1, min(4, len(observed))).astype(int)])
-    for side in sides:
+    for i, side in enumerate(sides):
         indices = np.flatnonzero(observations[side])
         if len(indices):
-            displacement = hands[side][indices, 0] - np.median(hands[side][indices, 0], axis=0)
+            displacement = geometry[indices, i, 0] - np.median(geometry[indices, i, 0], axis=0)
             anchors.add(indices[np.linalg.norm(displacement, axis=1).argmax()])
     pieces = [all_indices[max(0, int(i) - 4) : min(len(times), int(i) + 5)] for i in anchors]
     probe = np.unique(np.concatenate(pieces))
@@ -1303,6 +1403,8 @@ def estimate_registration(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    joint_inliers: Mapping[str, Indices] | None = None,
+    sparse_hand_sites_world_m: Mapping[str, Floats] | None = None,
 ) -> Floats:
     """Return the selected virtual registration. The solve entry point also returns the FK."""
     return solve(
@@ -1311,5 +1413,7 @@ def estimate_registration(
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
+        joint_inliers=joint_inliers,
+        sparse_hand_sites_world_m=sparse_hand_sites_world_m,
         robot_from_world=None,
     ).robot_from_world

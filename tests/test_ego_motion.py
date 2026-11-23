@@ -408,3 +408,52 @@ def test_governed_alternate_retargets_the_remaining_axis_and_checks_full_objecti
             "q": q[:4],
         },
     )
+
+
+def test_coupled_achieved_optical_and_hand_relative_jacobians(tmp_path):
+    from sx_embodiments._ego_motion import _Tracking
+    from sx_embodiments.ego_retarget import _model, _Sites
+
+    path = tmp_path / "gaze.urdf"
+    elements = ['<robot name="view"><link name="base"/>']
+    for name, axis, kind, xyz in (
+        ("left", "1 0 0", "prismatic", "0 .1 .6"),
+        ("right", "0 1 0", "prismatic", ".1 -.1 .6"),
+        ("eye", "0 1 0", "revolute", "0 0 .1"),
+    ):
+        elements.append(
+            f'<link name="{name}"/><joint name="j{name}" type="{kind}">'
+            f'<parent link="base"/><child link="{name}"/><origin xyz="{xyz}"/>'
+            f'<axis xyz="{axis}"/><limit lower="-1" upper="1" effort="2" velocity="1"/></joint>'
+        )
+    path.write_text("".join(elements) + "</robot>")
+    profile = MappingProfile({s: (s,) + (None,) * 20 for s in ("left", "right")}, "eye")
+    robot = _model(path)
+    names = ("left", "right", "eye")
+    sites = _Sites(robot, names)
+    points = np.full((2, 2, 21, 3), np.nan)
+    points[:, 0, 0] = [0.12, 0.05, 0.6]
+    points[0, 1, 0] = [0.15, -0.03, 0.61]
+    targets = np.tile(np.eye(3), (2, 1, 1))
+    head = np.array([[0.05, 0.02, 0.15], [0.06, 0.02, 0.14]])
+    # A geometrically undefined ray receives no angular score.
+    points[1, 0, 0] = head[1]
+    tracking = _Tracking(sites, profile, names, points, targets, head, {}, {})
+    q = np.array([[0.12, 0.08, 0.3], [0.14, 0.075, 0.28]])
+    dt = np.array([0.1])
+    mass = np.array([0.05, 0.05])
+    delta = np.array([[0.41, -0.2, 0.36], [-0.24, 0.19, -0.11]])
+    normal = _Normal(2, len(tracking.controls))
+
+    def cost(values, system=None):
+        return tracking.cost(values, slice(0, 2), mass, dt, system)
+
+    cost(q, normal)
+    step = 1e-6
+    numerical = (cost(q + step * delta) - cost(q - step * delta)) / (2 * step)
+    prediction = 2 * np.sum(normal.gradient * delta[:, tracking.controls])
+    assert prediction == pytest.approx(numerical, rel=1e-7)
+    metrics = {"achieved_optical_palm_ray_error_deg": [], "inter_palm_vector_error_m": []}
+    tracking.cost(q, slice(0, 2), mass, dt, None, metrics)
+    assert len(metrics["inter_palm_vector_error_m"][0]) == 1
+    assert sum(len(values) for values in metrics["achieved_optical_palm_ray_error_deg"]) == 2

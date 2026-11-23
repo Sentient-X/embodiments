@@ -689,13 +689,27 @@ source-preserving FK tests do not silently rewrite that receipt.
 ## Offline retargeting of egocentric observations
 
 Install the `retarget` extra for the numerical solver. `sx_embodiments.ego_retarget.solve`
-fits a fixed-base URDF to native-clock human hand landmarks and camera orientation. Supply
+fits a fixed-base URDF to native-clock hand landmarks and the full optical camera pose. Supply
 a proper 4×4 `robot_from_world` registration, nanosecond timestamps, world-from-optical
 camera poses, and 21 world-space points per observed hand in wrist/thumb/index/middle/
 ring/little order. Missing hands are all NaN. An unmeasured recording can use
 `estimate_registration` to choose a *virtual* rigid workspace placement by scoring sampled
 IK fits. That call assumes a common gravity-up z convention and a declared robot optical
 link. An actual workcell needs its measured registration.
+
+Every source camera uses the same rigid registration as the hands, including in excerpts:
+`robot_from_camera = robot_from_world @ world_from_camera`. The saved camera position error
+compares the achieved URDF optical center to that registered center. The trajectory solver
+uses the achieved camera orientation and center to compare observed palm locations, and the
+vector connecting the two palms where both have support.
+
+For stereo reconstructions pass per-hand `joint_inliers` (one 21-bit integer per exposure)
+and optionally `sparse_hand_sites_world_m` (N × 21 × 3 world-space metres per hand).
+Each finite sparse site replaces that landmark's Cartesian target even if a complete hand
+fit is unavailable. An unsupported sparse landmark has three NaNs. Connected four-site
+observations can supply digit curvature, while a single fingertip supplies only its
+position. The shape model remains available between sparse observations. The returned
+`observed` mask records complete source hand fits; use the per-site evidence for labels.
 
 Use `MappingProfile.sentient_wuji()` for the Sentient static upper body and the Wuji fork.
 `sx_embodiments.ego_wuji.assemble(wuji_urdf_dir, output_urdf)` packages the nominal wrist seats

@@ -168,6 +168,8 @@ class _Tracking:
         where = {name: i for i, name in enumerate(links)}
         self.camera = where[profile.camera_optical_link] if profile.camera_optical_link else None
         self.rotations = camera
+        self.head = head
+        self.palm_centers: list[tuple[Indices, Floats, Floats]] = []
         self.positions: list[tuple[int, Floats, float]] = []
         self.directions: list[_Direction] = []
         wrists: list[int] = []
@@ -183,6 +185,15 @@ class _Tracking:
                 if name is not None:
                     self.positions.append((where[name], points[:, s, k], 85.0))
                     hand_tolerance.append(0.04)
+            anchors = [k for k in (0, 5, 9, 13, 17) if mapping[k] is not None]
+            ids = np.asarray([where[cast("str", mapping[k])] for k in anchors], dtype=np.int64)
+            targets = points[:, s, anchors]
+            evidence = np.isfinite(targets).all(axis=-1)
+            count = evidence.sum(axis=1, keepdims=True)
+            mix = evidence / np.maximum(1, count)
+            center = np.einsum("nk,nkj->nj", mix, np.nan_to_num(targets))
+            center[count[:, 0] == 0] = np.nan
+            self.palm_centers.append((ids, mix, center))
             a, b = mapping[5], mapping[17]
             if a is not None and b is not None:
                 self.directions.append(
@@ -206,7 +217,7 @@ class _Tracking:
         self.hand_tolerance = np.asarray(hand_tolerance, dtype=np.float64)
         if self.camera is not None:
             wrists.append(self.camera)
-            self.positions.append((self.camera, head, 10.0))
+            self.positions.append((self.camera, head, 145.0))
         ancestry = sites.ancestor[wrists].any(axis=0)
         self.controls = np.flatnonzero(
             ancestry
@@ -251,6 +262,9 @@ class _Tracking:
         poses = np.empty((n, k, 3))
         rotation = np.empty((n, 3, 3))
         jac = np.empty((n, k, 3, a)) if normal is not None else None
+        angular_axes = (
+            np.empty((n, 3, a)) if normal is not None and self.camera is not None else None
+        )
         axes = np.empty((n, 3, 3, a)) if normal is not None and self.camera is not None else None
         for t, pose in enumerate(q):
             sites = self.sites
@@ -265,6 +279,11 @@ class _Tracking:
                 if axes is not None:
                     active = sites.ancestor[self.camera] & ~sites.slide
                     axis = sites.data.xaxis * active[:, None]
+                    assert angular_axes is not None
+                    independent = (
+                        axis.T if sites.robot.coupling is None else axis.T @ sites.robot.coupling
+                    )
+                    angular_axes[t] = independent[:, self.controls]
                     for col in (1, 2):
                         angular = np.asarray(
                             np.cross(axis, rotation[t, :, col]), dtype=np.float64
@@ -297,6 +316,49 @@ class _Tracking:
                 weight,
                 0.035 if i != self.camera else None,
             )
+        # A palm center uses the same visible anatomical sites on the person and robot.
+        # FK of the achieved camera is part of the Jacobian. Moving the head alone
+        # therefore changes the predicted first-person hand positions.
+        palm_errors: list[Floats] = []
+        palm_jacs: list[Floats | None] = []
+        for ids, mixes, target in self.palm_centers:
+            mix = mixes[span]
+            actual = np.einsum("nk,nkd->nd", mix, poses[:, ids])
+            pj = None if jac is None else np.einsum("nk,nkdj->ndj", mix, jac[:, ids])
+            error = actual - target[span]
+            if self.camera is not None:
+                rel = actual - poses[:, self.camera]
+                source = np.einsum(
+                    "nij,ni->nj", self.rotations[span], target[span] - self.head[span]
+                )
+                achieved = np.einsum("nij,ni->nj", rotation, rel)
+                error = achieved - source
+                if pj is not None and jac is not None and angular_axes is not None:
+                    angular = np.asarray(
+                        np.cross(angular_axes.transpose(0, 2, 1), rel[:, None]), dtype=np.float64
+                    ).transpose(0, 2, 1)
+                    pj = np.einsum("nrk,nrj->nkj", rotation, pj - jac[:, self.camera] - angular)
+                term(error, pj, 155.0, 0.04)
+                if metrics is not None:
+                    u, achieved_size = _unit(achieved)
+                    v, source_size = _unit(source)
+                    angle = np.rad2deg(np.arccos(np.clip(np.sum(u * v, axis=1), -1, 1)))
+                    defined = (
+                        np.isfinite(angle)
+                        & (achieved_size[:, 0] > 1e-8)
+                        & (source_size[:, 0] > 1e-8)
+                    )
+                    metrics["achieved_optical_palm_ray_error_deg"].append(angle[defined])
+            palm_errors.append(error)
+            palm_jacs.append(pj)
+        if len(palm_errors) == 2:
+            delta = palm_errors[1] - palm_errors[0]
+            left_j, right_j = palm_jacs
+            j = None if left_j is None or right_j is None else right_j - left_j
+            term(delta, j, 120.0, 0.04)
+            if metrics is not None:
+                dist = np.linalg.norm(delta, axis=1)
+                metrics["inter_palm_vector_error_m"].append(dist[np.isfinite(dist)])
         for d in self.directions:
             v, length = _unit(poses[:, d.second] - poses[:, d.first])
             j = None
@@ -747,7 +809,13 @@ def optimize(
     q = seed.copy()
     initial_torque, torque = np.full_like(q, np.nan), np.full_like(q, np.nan)
     stats: list[dict[str, list[Floats]]] = [
-        {"arm_direction_error_deg": [], "worst_jerk_over_joint_speed_per_s2": []} for _ in range(2)
+        {
+            "arm_direction_error_deg": [],
+            "achieved_optical_palm_ray_error_deg": [],
+            "inter_palm_vector_error_m": [],
+            "worst_jerk_over_joint_speed_per_s2": [],
+        }
+        for _ in range(2)
     ]
     segments: list[JsonValue] = []
     for start, end in pairwise(edges):
@@ -840,7 +908,10 @@ def optimize(
             "aggregation": "sum of squared residuals integrated on native clock",
             "wrist_per_m": 220.0,
             "fingertip_per_m": 85.0,
-            "head_per_m": 10.0,
+            "registered_optical_center_per_m": 145.0,
+            "achieved_optical_palm_position_per_m": 155.0,
+            "inter_palm_vector_per_m": 120.0,
+            "palm_geometry_pseudo_huber_scale_m": 0.04,
             "camera_axis_direction": 72.0,
             "camera_axis_turn_rate_s": 7.0,
             "hand_position_pseudo_huber_scale_m": 0.035,
