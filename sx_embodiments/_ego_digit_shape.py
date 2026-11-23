@@ -300,6 +300,8 @@ def refine_digits(
     seed: Floats,
     fps: float | None,
     limit_m: float,
+    *,
+    observed_sites: Floats | None = None,
 ) -> Floats:
     """Fit measured digit bend and tip trajectories, preserving unrelated robot controls.
 
@@ -356,6 +358,12 @@ def refine_digits(
             reference = np.full((len(saved), len(group.sites), 4, 3), np.nan)
             reference[core] = points[begin:end, group.landmarks]
             target_angles = bends(reference)
+            if observed_sites is not None:
+                direct = observed_sites.reshape(len(times), -1, 3)[
+                    begin:end, group.landmarks[:, -1]
+                ]
+                measured = np.isfinite(direct).all(axis=-1, keepdims=True)
+                reference[core, :, -1] = np.where(measured, direct, reference[core, :, -1])
             desired = saved.copy()
             for row in range(core.start, core.stop):
                 desired[row] = group.converge(model, saved[row], reference[row], target_angles[row])

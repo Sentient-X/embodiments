@@ -350,3 +350,48 @@ def test_near_coincident_native_knots_preserve_affine_motion():
     np.testing.assert_allclose(
         smooth_acceleration(positions, dt), positions, atol=1.0e-12, rtol=0.0
     )
+
+
+def test_registered_optical_error_survives_clipping_and_sparse_sites_are_independent(setup):
+    urdf, profile = setup
+    times = np.array([10, 100_000_010, 200_000_010], dtype=np.int64)
+    cameras = np.tile(np.eye(4), (len(times), 1, 1))
+    cameras[:, 2, 3] = [0.05, 0.08, 0.12]
+    registration = np.eye(4)
+    registration[:3, 3] = [0.2, -0.01, 0.15]
+    dense = np.full((len(times), 21, 3), np.nan)
+    sparse = dense.copy()
+    # The eye is fixed at (0,0,.5). Supplying only a jaw cannot imply a wrist.
+    sparse[:, 4] = np.array([0.22, 0.02, 0.0]) - registration[:3, 3]
+    args = {
+        "hands_world_m": {"right": dense},
+        "joint_inliers": {"right": np.zeros(3, dtype=np.int64)},
+        "sparse_hand_sites_world_m": {"right": sparse},
+        "robot_from_world": registration,
+        "fps": 10.0,
+    }
+    fit = solve(urdf, profile, time_ns=times, world_from_camera=cameras, **args)
+    optical = (registration @ cameras)[:, :3, 3]
+    np.testing.assert_allclose(
+        fit.camera_position_error_m, np.linalg.norm(optical - [0, 0, 0.5], axis=1)
+    )
+    assert not fit.observed.any()
+    assert np.isnan(fit.wrist_error_m).all()
+    assert np.nanmax(fit.landmark_error_m[:, 0, 4]) < 0.001
+    for start in (1, 2):
+        window = slice(start, start + 1)
+        clipped = solve(
+            urdf,
+            profile,
+            time_ns=times[window],
+            world_from_camera=cameras[window],
+            hands_world_m={"right": dense[window]},
+            robot_from_world=registration,
+            sparse_hand_sites_world_m={"right": sparse[window]},
+        )
+        np.testing.assert_allclose(
+            clipped.camera_position_error_m, fit.camera_position_error_m[window]
+        )
+    sparse[0, 4, 1] = np.nan
+    with pytest.raises(ValueError, match="finite XYZ"):
+        solve(urdf, profile, time_ns=times, world_from_camera=cameras, **args)
