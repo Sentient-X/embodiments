@@ -738,6 +738,28 @@ Missing exposures and changes in hand evidence start separate spans, with the
 original endpoints anchoring the break. The bound covers the largest normalized
 value. Individual joint derivatives and source flexion errors still require inspection.
 
+To refine both interior bends of each complete four-landmark finger, pass a physical
+fingertip budget in metres to `solve` or `refine_trajectory`, for example
+`digit_shape_limit_m=0.04`. For a previously verified trajectory that already completed
+the temporal pass, use `refine_trajectory(..., digit_shape_limit_m=0.04, temporal_seed=True)`.
+The calling pipeline verifies the original reconstruction, robot, clock and seed data.
+
+The shape fit changes only controls exclusive to each complete digit. It computes two
+unsigned angles from the link origins and fits them together with the absolute tip.
+Both joints of each angle contribute through their actual kinematic Jacobians. It checks
+sampled URDF contacts, native position and velocity limits, and preserves the fingertip
+budget on frames that previously met it. The original pose remains a fallback. The search
+uses time derivatives to regularize the path. An increase in the worst single jerk remains
+possible. Logged source angles are estimates of human pose. Sources hidden by gloves or
+objects can retain substantial error.
+
+On two disjoint 525-frame windows of take 0005, the previous fit had zero accepted
+transitions meeting a 35-degree absolute angle error for all ten fingers at both ends
+and a 15-degree error in the bend change. The opt-in fit met those angle checks on
+235 of the same 268 pairs in the standing excerpt and 362 of 380 pairs in the later
+window. Median absolute fingertip error rose from 6.4 to 13.4 mm and 5.6 to 10.8 mm,
+respectively. The original source and all upper-body coordinates were fixed.
+
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
 smoothing window. Without a declared cadence, intervals longer than 1.5 times the
 fastest observed period or 150 ms split the window. The same refinement can reuse
