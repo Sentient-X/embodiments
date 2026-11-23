@@ -700,7 +700,8 @@ link. An actual workcell needs its measured registration.
 Use `MappingProfile.sentient_wuji()` for the Sentient static upper body and the Wuji fork.
 `sx_embodiments.ego_wuji.assemble(wuji_urdf_dir, output_urdf)` packages the nominal wrist seats
 and the meshes from the two local vendor descriptions. Keep the asset licenses with any
-redistribution. A measured physical adapter can be expressed in a supplied URDF.
+redistribution. The nominal mounts align the distal wrist and rear palm CAD housing envelopes. A measured
+physical adapter can be expressed in a supplied URDF.
 
 For another fixed-base body, `MappingProfile.read(path)` accepts a JSON object with
 `hands` mapping `left` or `right` to 21 URDF link names, and optional `camera_optical_link`.
@@ -712,6 +713,16 @@ the first posture is an initial condition.
 
 `Fit.save(path)` writes a numeric NPZ with named joint positions, the transform,
 timestamps, observed-hand masks, achieved FK landmarks, per-landmark/wrist/fingertip errors,
-and optical-axis/full-orientation errors. Error is against the supplied reconstruction.
-Missing evidence and unsupported landmarks have NaN residuals. Contact, force, collision,
-balance, physical safety and suitability for a training dataset require separate evidence.
+optical-axis/full-orientation errors, and camera translation relative to its neutral location.
+Error is against the supplied reconstruction.
+Missing evidence and unsupported landmarks have NaN residuals. Each fitted pose also records contact checks against the URDF collision shapes using
+MuJoCo's convex meshes and normal parent/welded-body filtering. Raw, neutral-relative,
+and unallowed penetrating depths are reported separately. Exactly named
+`allowed_collision_pairs` in the profile identify exempt mechanical pairs. The generic
+default is empty. The supplied Wuji profile records the torso bearing and the four compound
+MCP bearings in each palm. The archive lists neutral collisions, the worst unallowed
+pair per sample, missing rigid-body geometry, and a digest of URDF and collision mesh
+bytes. The IK penalizes unallowed contacts near the boundary. A blocked target can retain
+a larger tracking residual. Empty or incomplete collision geometry leaves the check
+unqualified. These endpoint checks do not measure swept volume, contact with the scene,
+force, balance or physical safety.

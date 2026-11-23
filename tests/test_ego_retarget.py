@@ -60,6 +60,8 @@ def test_mimic_limits_missing_samples_and_fk_at_final_solution(setup, tmp_path):
         robot_from_world=registration,
     )
     assert fit.joint_names == ("rail", "close")
+    assert not np.any(fit.self_collision_checked)
+    assert np.isnan(fit.self_collision_unallowed_m).all()
     assert fit.observed[:, 0].tolist() == [True, True, False, True]
     assert 0.019 < fit.q[0, 1] < 0.021
     assert np.all(fit.q[:, 1] <= 0.05)
@@ -101,3 +103,61 @@ def test_virtual_registration_commutes_with_source_translation(setup):
     np.testing.assert_allclose(second[:3, 3] + second[:3, :3] @ shift, first[:3, 3], atol=1e-12)
     with pytest.raises(ValueError, match="observed wrist"):
         estimate_registration(urdf, profile, hands_world_m={"right": fingers * np.nan}, **kwargs)
+
+
+def test_checked_clearance_blocks_collision_and_keeps_tracking_error(tmp_path):
+    description = """<robot name="slider">
+      <link name="base"><collision><origin xyz="0.3 0 0"/>
+        <geometry><sphere radius="0.065"/></geometry></collision></link>
+      <link name="jaw"><collision><geometry><sphere radius="0.065"/></geometry></collision></link>
+      <joint name="rail" type="prismatic">
+        <parent link="base"/><child link="jaw"/><axis xyz="1 0 0"/>
+        <limit lower="0" upper="0.4" effort="1" velocity="3"/></joint>
+    </robot>"""
+    path = tmp_path / "slide.urdf"
+    path.write_text(description)
+    times = np.array([0, 90_000_000, 190_000_000, 300_000_000], dtype=np.int64)
+    hands = np.zeros((4, 21, 3))
+    hands[:, :, 0] = np.array([0.0, 0.13, 0.23, 0.27])[:, None]
+    hands[:, 4, 1] = 0.01
+    profile = MappingProfile({"right": ("jaw",) + (None,) * 20})
+    fit = solve(
+        path,
+        profile,
+        time_ns=times,
+        hands_world_m={"right": hands},
+        world_from_camera=np.tile(np.eye(4), (4, 1, 1)),
+        robot_from_world=np.eye(4),
+    )
+    assert fit.self_collision_checked.all()
+    assert np.max(fit.self_collision_unallowed_m) <= 1e-6
+    assert 0.12 < fit.q[-1, 0] <= 0.171
+    assert fit.wrist_error_m[-1, 0] >= 0.099
+
+    permitted = MappingProfile(profile.hands, allowed_collision_pairs=(("base", "jaw"),))
+    allowed = solve(
+        path,
+        permitted,
+        time_ns=times,
+        hands_world_m={"right": hands},
+        world_from_camera=np.tile(np.eye(4), (4, 1, 1)),
+        robot_from_world=np.eye(4),
+    )
+    assert allowed.self_collision_max_m[-1] > 0.09
+    assert allowed.self_collision_excess_m[-1] > 0.09
+    assert allowed.self_collision_unallowed_m[-1] == 0.0
+
+
+def test_collision_identity_changes_with_mesh_contents(tmp_path):
+    from sx_embodiments.ego_retarget import collision_description_sha256
+
+    path = tmp_path / "arm.urdf"
+    path.write_text(
+        '<robot name="arm"><link name="p"><collision><geometry>'
+        '<mesh filename="pad.stl"/></geometry></collision></link></robot>'
+    )
+    mesh = tmp_path / "pad.stl"
+    mesh.write_bytes(b"first mesh")
+    before = collision_description_sha256(path)
+    mesh.write_bytes(b"second mesh")
+    assert before != collision_description_sha256(path)

@@ -11,15 +11,17 @@ import json
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib import import_module
 from itertools import product
 from pathlib import Path
+from types import ModuleType
 from typing import Protocol, cast
 
+import mujoco  # pyright: ignore[reportMissingTypeStubs] -- the extension has no Python stubs
 import numpy as np
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue
 
+from ._ego_collision import CollisionModel, Pair, collision_assets
 from .kinematics import JointType, Kinematics, from_xyz_rpy
 
 type Floats = NDArray[np.float64]
@@ -57,7 +59,7 @@ class _Data(Protocol):
     xaxis: Floats
 
 
-_mj = import_module("mujoco")
+_mj = cast("ModuleType", mujoco)
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class MappingProfile:
 
     hands: Mapping[str, tuple[str | None, ...]]
     camera_optical_link: str | None = None
+    allowed_collision_pairs: tuple[Pair, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.hands or set(self.hands) - {"left", "right"}:
@@ -98,12 +101,23 @@ class MappingProfile:
                 for part in (base, "link3", "link4", "tip_link"):
                     links.append(f"{side}_finger{finger}_{part}")
             hands[side] = tuple(links)
-        return cls(hands, "zed_left_optical")
+        # The torso rotates inside the base bearing and each non-thumb MCP uses
+        # two co-located axes in its palm. Thumb/wrist adapters are not exempt.
+        allowed = [("base_link", "torso_link")]
+        for side in hands:
+            allowed.extend(
+                (f"{side}_palm_link", f"{side}_finger{finger}_link2") for finger in range(2, 6)
+            )
+        return cls(hands, "zed_left_optical", tuple(allowed))
 
     @classmethod
     def read(cls, path: Path) -> MappingProfile:
         document = cast("JsonValue", json.loads(path.read_bytes()))
-        if not isinstance(document, dict) or set(document) - {"hands", "camera_optical_link"}:
+        if not isinstance(document, dict) or set(document) - {
+            "hands",
+            "camera_optical_link",
+            "allowed_collision_pairs",
+        }:
             raise ValueError("profile expects hands and optional camera_optical_link")
         hands = document.get("hands")
         if not isinstance(hands, dict):
@@ -121,7 +135,20 @@ class MappingProfile:
         camera = document.get("camera_optical_link")
         if camera is not None and not isinstance(camera, str):
             raise ValueError("expected an optical link name or null")
-        return cls(mapped, camera)
+        allowed = document.get("allowed_collision_pairs", [])
+        if not isinstance(allowed, list):
+            raise ValueError("allowed_collision_pairs must be an array of link pairs")
+        pairs: list[Pair] = []
+        for pair in allowed:
+            if (
+                not isinstance(pair, list)
+                or len(pair) != 2
+                or not isinstance(pair[0], str)
+                or not isinstance(pair[1], str)
+            ):
+                raise ValueError("each allowed collision pair needs two link names")
+            pairs.append((pair[0], pair[1]))
+        return cls(mapped, camera, tuple(pairs))
 
 
 @dataclass(frozen=True)
@@ -138,6 +165,17 @@ class Fit:
     robot_from_world: Floats
     landmark_error_m: Floats
     landmark_positions_robot_m: Floats
+    camera_position_error_m: Floats
+    self_collision_checked: NDArray[np.bool_]
+    self_collision_max_m: Floats
+    self_collision_excess_m: Floats
+    self_collision_unallowed_m: Floats
+    self_collision_worst_pair: NDArray[np.str_]
+    collision_link_pairs: NDArray[np.str_]
+    neutral_penetration_m: Floats
+    allowed_collision_pairs: NDArray[np.str_]
+    collision_missing_geometry: tuple[str, ...]
+    collision_description_sha256: str
 
     def save(self, path: Path) -> None:
         with path.open("wb") as handle:
@@ -266,10 +304,11 @@ class _Sites:
                 parent = int(model.body_parentid[parent])
         self.slide = model.jnt_type == int(_mj.mjtJoint.mjJNT_SLIDE)
 
+    def full_q(self, q: Floats) -> Floats:
+        return q if self.robot.coupling is None else self.robot.coupling @ q + self.robot.offset
+
     def positions(self, q: Floats) -> Floats:
-        self.data.qpos[:] = (
-            q if self.robot.coupling is None else self.robot.coupling @ q + self.robot.offset
-        )
+        self.data.qpos[:] = self.full_q(q)
         _mj.mj_kinematics(self.model, self.data)
         return self.data.xpos[self.ids]
 
@@ -307,6 +346,7 @@ class _Targets:
                 values,
                 0.16 * (rotation[:, 2] - camera_rotation[:, 2]),
                 0.08 * (rotation[:, 1] - camera_rotation[:, 1]),
+                0.6 * (poses[self.camera] - camera_rotation[:, 3]),
             ]
         return values
 
@@ -322,6 +362,7 @@ class _Targets:
             for index, weight in ((2, 0.16), (1, 0.08)):
                 camera_jac = np.cross(sites.data.xaxis, rotation[:, index]) * active[:, None]
                 jac = np.concatenate((jac, weight * camera_jac.T))
+            jac = np.concatenate((jac, 0.6 * full[self.camera]))
         return jac if sites.robot.coupling is None else jac @ sites.robot.coupling
 
 
@@ -335,6 +376,7 @@ def _fit_frame(
     lo: Floats,
     hi: Floats,
     iterations: int,
+    collision: CollisionModel | None = None,
 ) -> Floats:
     """Box-constrained damped Gauss-Newton, warm-started at the previous source timestamp."""
     q = previous.copy()
@@ -343,6 +385,13 @@ def _fit_frame(
         poses = sites.positions(q)
         residual = terms.values(points, gaze, poses, sites)
         jac = terms.jacobian(poses, sites)
+        if collision is not None:
+            contact = collision.at(sites.data.qpos, gradient=True)
+            contact_jac = contact.jacobian
+            if sites.robot.coupling is not None:
+                contact_jac = contact_jac @ sites.robot.coupling
+            jac = np.concatenate((jac, 20.0 * contact_jac))
+            residual = np.r_[residual, 20.0 * contact.violation]
         gradient = jac.T @ residual + temporal**2 * (q - previous)
         # A joint at a hard stop may still leave it if the gradient points inward.
         free = ~(((q <= lo + 1e-8) & (gradient > 0)) | ((q >= hi - 1e-8) & (gradient < 0)))
@@ -356,6 +405,8 @@ def _fit_frame(
         candidate = q.copy()
         candidate[free] = np.clip(q[free] + step, lo[free], hi[free])
         trial = terms.values(points, gaze, sites.positions(candidate), sites)
+        if collision is not None:
+            trial = np.r_[trial, 20.0 * collision.at(sites.data.qpos).violation]
         before = residual @ residual + temporal**2 * np.sum((q - previous) ** 2)
         after = trial @ trial + temporal**2 * np.sum((candidate - previous) ** 2)
         if after < before:
@@ -370,6 +421,11 @@ def _fit_frame(
     return q
 
 
+def collision_description_sha256(urdf: Path) -> str:
+    """Hash the complete URDF and every referenced collision mesh."""
+    return collision_assets(urdf)[2]
+
+
 def solve(
     urdf: Path,
     profile: MappingProfile,
@@ -380,6 +436,36 @@ def solve(
     robot_from_world: Floats | None,
 ) -> Fit:
     """Fit on the native clock. Registration explicitly maps the input world to the URDF root."""
+    robot = _model(urdf)
+    geometry = collision_assets(urdf)
+    native = tuple(robot.model.joint(i).name for i in range(robot.model.njnt))
+    neutral = robot.neutral
+    if robot.coupling is not None:
+        neutral = robot.coupling @ neutral + robot.offset
+    collision = CollisionModel.read(geometry, native, neutral, profile.allowed_collision_pairs)
+    return _solve(
+        robot,
+        collision,
+        geometry[2],
+        profile,
+        time_ns=time_ns,
+        hands_world_m=hands_world_m,
+        world_from_camera=world_from_camera,
+        robot_from_world=robot_from_world,
+    )
+
+
+def _solve(
+    robot: _Robot,
+    collision: CollisionModel | None,
+    geometry_id: str,
+    profile: MappingProfile,
+    *,
+    time_ns: Indices,
+    hands_world_m: Mapping[str, Floats],
+    world_from_camera: Floats,
+    robot_from_world: Floats | None,
+) -> Fit:
     times = np.asarray(time_ns)
     if (
         times.dtype != np.int64
@@ -390,7 +476,9 @@ def solve(
         raise ValueError("source time_ns must be strictly increasing int64")
     if robot_from_world is None:
         return _virtual_fit(
-            urdf,
+            robot,
+            collision,
+            geometry_id,
             profile,
             time_ns=times,
             hands_world_m=hands_world_m,
@@ -414,7 +502,6 @@ def solve(
         raise ValueError("degenerate hand observation")
     points = source @ placement[:3, :3].T + placement[:3, 3]
     camera_rotations = placement[:3, :3] @ cameras[:, :3, :3]
-    robot = _model(urdf)
     mapped = [link for side in sides for link in profile.hands[side]]
     links = [name for name in mapped if name is not None]
     if profile.camera_optical_link is not None:
@@ -429,6 +516,16 @@ def solve(
     map_indices = np.array([i for i, name in enumerate(mapped) if name is not None], dtype=np.int64)
     target_cache: dict[tuple[bool, ...], _Targets] = {}
     camera = len(links) - 1 if profile.camera_optical_link is not None else None
+    rel_head = (cameras[:, :3, 3] - cameras[0, :3, 3]) @ placement[:3, :3].T
+    if camera is not None:
+        rel_head += sites.positions(q)[camera]
+    camera_targets = np.concatenate((camera_rotations, rel_head[:, :, None]), axis=2)
+    max_depth = np.full(len(times), np.nan)
+    excess_depth = max_depth.copy()
+    bad_depth = max_depth.copy()
+    camera_position_error = max_depth.copy()
+    worst_pairs: list[Pair] = []
+
     for i, mask in enumerate(present):
         key = tuple(bool(v) for v in mask)
         if key not in target_cache:
@@ -445,17 +542,38 @@ def solve(
         # Penalize squared joint velocity on the native sampling interval. This weak
         # prior resolves redundancy while leaving positions in the capture's original clock.
         temporal = 0.0 if first else 0.0005 / max(dt, 1e-6)
+        lo = robot.lower if first else np.maximum(robot.lower, q - dt * robot.velocity)
+        hi = robot.upper if first else np.minimum(robot.upper, q + dt * robot.velocity)
+        previous = q
+        flat = points[i].reshape(-1, 3)
         q = _fit_frame(
-            sites,
-            terms,
-            points[i].reshape(-1, 3),
-            camera_rotations[i],
-            q,
-            temporal,
-            robot.lower if first else np.maximum(robot.lower, q - dt * robot.velocity),
-            robot.upper if first else np.minimum(robot.upper, q + dt * robot.velocity),
-            65 if first else 12,
+            sites, terms, flat, camera_targets[i], previous, temporal, lo, hi, 65 if first else 12
         )
+        if collision is not None and collision.at(sites.full_q(q)).violation.size:
+            q = _fit_frame(
+                sites,
+                terms,
+                flat,
+                camera_targets[i],
+                q,
+                temporal,
+                lo,
+                hi,
+                35 if first else 16,
+                collision,
+            )
+            # Preserve a clear preceding endpoint when the local step runs into
+            # a blocked IK branch. Its larger tracking error is kept in the archive.
+            if (
+                not first
+                and collision.at(sites.full_q(q)).unallowed > 1e-6
+                and collision.at(sites.full_q(previous)).unallowed <= 1e-6
+            ):
+                for alpha in (0.75, 0.5, 0.25, 0.0):
+                    shortened = previous + alpha * (q - previous)
+                    if collision.at(sites.full_q(shortened)).unallowed <= 1e-6:
+                        q = shortened
+                        break
         seq[i] = q
     # A symmetric pass damps alternating IK branches without adding a frame of lag.
     # At most half of each sample comes from its neighbours' time-weighted line.
@@ -473,13 +591,29 @@ def solve(
         fraction = (before / (before + after))[:, None]
         interpolated = (1 - fraction) * seq[:-2] + fraction * seq[2:]
         weight = (0.5 * supported)[:, None]
-        seq[1:-1] += weight * (interpolated - seq[1:-1])
+        filtered = seq[1:-1] + weight * (interpolated - seq[1:-1])
+        if collision is not None:
+            for row in np.flatnonzero(supported):
+                if collision.at(sites.full_q(filtered[row])).unallowed > 1e-6:
+                    filtered[row] = seq[row + 1]
+        seq[1:-1] = filtered
 
     for i, final_q in enumerate(seq):
         positions = sites.positions(final_q)
         actual[i].reshape(-1, 3)[map_indices] = positions[: len(map_indices)]
         errors[i] = np.linalg.norm(actual[i] - points[i], axis=-1)
+        if collision is not None:
+            contacts = collision.at(sites.data.qpos)
+            max_depth[i], excess_depth[i], bad_depth[i] = (
+                contacts.maximum,
+                contacts.excess,
+                contacts.unallowed,
+            )
+            worst_pairs.append(contacts.worst_pair)
+        else:
+            worst_pairs.append(("", ""))
         if camera is not None:
+            camera_position_error[i] = np.linalg.norm(positions[camera] - rel_head[i])
             rotation = sites.data.xmat[sites.ids[camera]].reshape(3, 3)
             delta = rotation.T @ camera_rotations[i]
             gaze_error[i] = np.arccos(np.clip(delta[2, 2], -1.0, 1.0))
@@ -497,6 +631,21 @@ def solve(
         placement.copy(),
         errors,
         actual,
+        camera_position_error,
+        np.full(len(times), collision is not None and collision.checked),
+        max_depth,
+        excess_depth,
+        bad_depth,
+        np.array(worst_pairs, dtype=str),
+        np.asarray(tuple(collision.neutral) if collision is not None else (), dtype=str).reshape(
+            -1, 2
+        ),
+        np.asarray(
+            tuple(collision.neutral.values()) if collision is not None else (), dtype=np.float64
+        ),
+        np.asarray(profile.allowed_collision_pairs, dtype=str).reshape(-1, 2),
+        collision.missing_geometry if collision is not None else ("no collision geometry",),
+        geometry_id,
     )
 
 
@@ -513,11 +662,18 @@ def _placement_score(fit: Fit) -> float:
         if finite.size:
             score += float(np.quantile(finite, 0.9)) * 0.5
         scores.append(score)
-    return max(scores) + float(np.mean(scores))
+    tracking = max(scores) + float(np.mean(scores))
+    depth = fit.self_collision_unallowed_m
+    if np.isfinite(depth).all():
+        # Rank contact-free trajectories first, then compare tracking error.
+        return tracking + 2.0 * float(np.mean(depth > 1e-6)) + 20.0 * float(np.max(depth))
+    return tracking
 
 
 def _virtual_fit(
-    urdf: Path,
+    robot: _Robot,
+    collision: CollisionModel | None,
+    geometry_id: str,
     profile: MappingProfile,
     *,
     time_ns: Indices,
@@ -537,7 +693,6 @@ def _virtual_fit(
     if times.ndim != 1 or not len(times) or cameras.shape != (len(times), 4, 4):
         raise ValueError("one camera pose is required for every source timestamp")
     _rigid(cameras)
-    robot = _model(urdf)
     sides = tuple(profile.hands)
     wrists = tuple(cast("str", profile.hands[side][0]) for side in sides)
     sites = _Sites(robot, (*wrists, profile.camera_optical_link))
@@ -581,10 +736,12 @@ def _virtual_fit(
     chosen = np.array(sorted(set(sample_ids)), dtype=np.int64)
     center = np.mean(offsets, axis=0)
 
-    def fit_at(point: Floats, indices: Indices) -> Fit:
+    def fit_at(point: Floats, indices: Indices, *, checked: bool = False) -> Fit:
         frame[:3, 3] = point
-        return solve(
-            urdf,
+        return _solve(
+            robot,
+            collision if checked else None,
+            geometry_id,
             profile,
             time_ns=times[indices],
             hands_world_m={side: hands[side][indices] for side in sides},
@@ -615,7 +772,7 @@ def _virtual_fit(
         sampled.append((score, point))
         if score < best_score:
             best, best_score = fit, score
-    if len(chosen) == len(times):
+    if collision is None and len(chosen) == len(times):
         return best
 
     # Sparse fits can choose a different IK branch from the native-clock fit.
@@ -624,7 +781,7 @@ def _virtual_fit(
     best_score = np.inf
     all_indices = np.arange(len(times), dtype=np.int64)
     for _, point in sorted(sampled, key=lambda item: item[0])[:3]:
-        fit = fit_at(point, all_indices)
+        fit = fit_at(point, all_indices, checked=True)
         score = _placement_score(fit)
         if score < best_score:
             best, best_score = fit, score

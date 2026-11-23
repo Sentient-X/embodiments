@@ -645,7 +645,7 @@ def _boxes(
             path = _mesh(filename)
             if path is None:
                 return []
-            low, high = _stl_bounds(path)
+            low, high = stl_bounds(path)
             centre = tuple((lo + hi) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
             half = tuple(abs(hi - lo) / 2 * s for lo, hi, s in zip(low, high, scale, strict=True))
             cx, cy, cz = centre
@@ -685,7 +685,7 @@ def _mesh(uri: str) -> Path | None:
 
 
 @cache
-def _stl_bounds(path: Path) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+def stl_bounds(path: Path) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     """An STL's axis-aligned bounds; cached for the life of the process, by verified path."""
     data = path.read_bytes()
     count = struct.unpack_from("<I", data, 80)[0] if len(data) >= 84 else 0

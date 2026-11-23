@@ -8,11 +8,14 @@ import math
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+from itertools import product
 from pathlib import Path
 
 from . import development_embodiments
 from .assembly import Assembly, Member, Pose, Subtree
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
+from .checks import stl_bounds
+from .kinematics import from_xyz_rpy
 from .known.static_upper_body import STATIC_UPPER_BODY_URDF
 from .materialize import materialize
 
@@ -56,6 +59,39 @@ def _publish(path: Path, payload: bytes) -> None:
                 os.close(directory)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _extent(root: ET.Element, link: str, axis: int, directory: Path) -> tuple[float, float]:
+    """Projection of the link's housing on the mounting axis, in link metres."""
+    extrema: list[float] = []
+    for geometry in root.findall(f"link[@name='{link}']/collision"):
+        mesh = geometry.find("geometry/mesh")
+        if mesh is None or not mesh.attrib["filename"].lower().endswith(".stl"):
+            raise ValueError(f"{link} needs a declared STL housing to place the nominal wrist")
+        low, high = stl_bounds(directory / mesh.attrib["filename"])
+        origin = geometry.find("origin")
+
+        def triple(
+            attribute: str, default: str, origin: ET.Element | None = origin
+        ) -> tuple[float, float, float]:
+            text = default if origin is None else origin.get(attribute, default)
+            a, b, c = (float(x) for x in text.split())
+            return (a, b, c)
+
+        transform = from_xyz_rpy(triple("xyz", "0 0 0"), triple("rpy", "0 0 0"))
+        scale = tuple(float(x) for x in mesh.get("scale", "1 1 1").split())
+        if len(scale) != 3:
+            raise ValueError("mesh scale must have three values")
+        # Bounding-box corners give the exact projection for these axis-aligned CAD
+        # housing frames and a conservative exterior plane for a rotated housing.
+        for corner in product(*zip(low, high, strict=True)):
+            extrema.append(
+                transform[4 * axis + 3]
+                + sum(transform[4 * axis + j] * corner[j] * scale[j] for j in range(3))
+            )
+    if not extrema or max(extrema) <= min(extrema):
+        raise ValueError(f"{link} has no housing extent along the mount axis")
+    return min(extrema), max(extrema)
 
 
 def assemble(wuji_urdf_dir: Path, output: Path) -> Path:
@@ -113,6 +149,16 @@ def assemble(wuji_urdf_dir: Path, output: Path) -> Path:
         note="Nominal Wuji palm +z along wrist +x. Unmeasured adapter geometry.",
     )
     root = ET.fromstring(assembly.urdf())
+    for side in ("left", "right"):
+        wrist = f"{side}_wrist_roll_link"
+        # Position the rear of the Wuji palm housing at the distal face of the
+        # wrist housing. The joint origins of these different vendors are not mating planes.
+        face = _extent(root, wrist, 0, output.parent)[1]
+        rear = _extent(root, f"{side}_palm_link", 2, output.parent)[0]
+        joint = root.find(f"joint[@name='{wrist}_to_{side}_wuji']/origin")
+        if joint is None:
+            raise ValueError(f"assembly lacks {side} Wuji mounting joint")
+        joint.set("xyz", f"{face - rear:.12g} 0 0")
     for compiler in root.findall("mujoco"):
         root.remove(compiler)
     ET.SubElement(
