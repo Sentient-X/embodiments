@@ -25,6 +25,7 @@ _EXTRAS = {
     "_ego_articulation.py": frozenset({"numpy"}),
     "_ego_digit_shape.py": frozenset({"numpy"}),
     "_ego_dynamics.py": frozenset({"numpy", "mujoco"}),
+    "_ego_governor.py": frozenset({"numpy", "scipy"}),
     "_ego_motion.py": frozenset({"numpy", "scipy"}),
     "_ego_temporal.py": frozenset({"numpy", "scipy"}),
     "_ego_collision.py": frozenset({"numpy", "mujoco"}),

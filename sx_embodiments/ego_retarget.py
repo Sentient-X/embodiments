@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -32,7 +32,8 @@ from ._ego_collision import (
     nominal_bearings,
 )
 from ._ego_digit_shape import refine_digits
-from ._ego_motion import MotionReport
+from ._ego_motion import MotionCheckpoint as MotionCheckpoint
+from ._ego_motion import MotionReport as MotionReport
 from ._ego_selection import choose_postures
 from ._ego_temporal import native_gaps, regularize
 from .kinematics import JointType, Kinematics, from_xyz_rpy
@@ -660,6 +661,8 @@ def optimize_trajectory(
     arm_posture_world_m: Mapping[str, Floats] | None = None,
     arm_links: Mapping[str, tuple[str, str, str]] | None = None,
     effort_limits: Path | None = None,
+    checkpoints: Mapping[tuple[int, int, str], MotionCheckpoint] | None = None,
+    on_checkpoint: Callable[[MotionCheckpoint], None] | None = None,
 ) -> tuple[Fit, MotionReport]:
     """Refine an offline fixed-base trajectory using the actual clock, FK, CAD and dynamics.
 
@@ -763,6 +766,8 @@ def optimize_trajectory(
         body,
         effort,
         unavailable,
+        checkpoints,
+        on_checkpoint,
     )
     return (baseline if np.array_equal(seed, result) else evaluate(result)), report
 

@@ -776,8 +776,26 @@ acceleration, jerk and unloaded rigid-body effort. The solver assembles coupled,
 banded Gauss-Newton systems, evaluates candidate steps through FK and collision
 geometry, and accepts objective decreases. The report records each segment's
 objective history, linear solve residual and termination reason. This establishes
-a local numerical solution. A global optimality certificate would require a
-different proof.
+a local continuous solution.
+
+When the original trajectory exceeds a declared operating speed, a second start
+projects the most over-governed coordinate onto its speed bound and re-fits the
+remaining wrist, arm and optical controls. Every native exposure offers five complete
+poses blending the two trajectories. The selector rejects sampled poses outside
+the original hand, camera and CAD envelopes, and transitions outside URDF rates.
+Dynamic programming remembers three successive poses, including their true clock
+intervals, so a fourth determines the jerk and each third determines the unloaded
+inverse dynamics. The chosen path minimizes the same objective over this finite
+set. Its directly recomputed full-sequence cost and per-blend availability are
+recorded alongside the two continuous histories. The finite certificate applies
+to these candidates. Nonlinear continuous IK has broader possibilities.
+
+An `on_checkpoint` callback receives a `MotionCheckpoint` per accepted iterate and
+at termination. Bind the checkpoint to the same source, clock, seed, robot, mounts,
+operating limits and solver version. Supply validated checkpoints keyed by
+`(first_index, stop_index, phase)` to continue in the original objective. The two
+phases are `whole` and `governed_start`. The optimizer checks the fixed coordinates,
+bounds, sampled geometry and objective against those original inputs on restore.
 
 The returned `MotionReport.torque_before` and `torque` arrays use the fit's joint
 order. Revolute efforts are in Nm and prismatic efforts in N. Exact source time and

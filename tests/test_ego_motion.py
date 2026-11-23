@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -204,17 +205,30 @@ def test_head_follows_source_camera_direction_and_turn_rate(tmp_path):
     cameras[:, 1, 2], cameras[:, 2, 1] = -sine, sine
     hand = np.zeros((n, 21, 3))
     hand[:, 4, 1] = 0.05
-    fit, _ = optimize_trajectory(
-        path,
-        MappingProfile({"right": ("palm",) + (None,) * 20}, camera_optical_link="eye"),
-        time_ns=times,
-        hands_world_m={"right": hand},
-        world_from_camera=cameras,
-        robot_from_world=np.eye(4),
-        joint_names=("neck",),
-        q=np.zeros((n, 1)),
-        fps=15,
-    )
+    profile = MappingProfile({"right": ("palm",) + (None,) * 20}, camera_optical_link="eye")
+    args = {
+        "time_ns": times,
+        "hands_world_m": {"right": hand},
+        "world_from_camera": cameras,
+        "robot_from_world": np.eye(4),
+        "joint_names": ("neck",),
+        "q": np.zeros((n, 1)),
+        "fps": 15,
+    }
+    observed = []
+    fit, expected = optimize_trajectory(path, profile, on_checkpoint=observed.append, **args)
+    assert len(observed) >= 2
+    first, complete = observed[0], observed[-1]
+    key = (first.first_index, first.stop_index, first.phase)
+    assert first.stop is None and complete.stop is not None
+    resumed, report = optimize_trajectory(path, profile, checkpoints={key: first}, **args)
+    np.testing.assert_array_equal(resumed.q, fit.q)
+    assert report.document() == expected.document()
+    final, _ = optimize_trajectory(path, profile, checkpoints={key: complete}, **args)
+    np.testing.assert_array_equal(final.q, fit.q)
+    invalid = replace(first, q=first.q + 0.1)
+    with pytest.raises(ValueError, match="checkpoint"):
+        optimize_trajectory(path, profile, checkpoints={key: invalid}, **args)
     assert np.rad2deg(np.max(fit.camera_rotation_error_rad)) < 1
     assert np.rad2deg(np.max(np.abs(np.diff(fit.q[:, 0] - angle)) / (np.diff(times) * 1e-9))) < 3
 
@@ -273,3 +287,73 @@ def test_operating_speed_qualifies_the_actual_edges_and_both_endpoints(tmp_path)
     np.testing.assert_array_equal(
         report.training_speed_ok, [True, False, False, True, True, True, True]
     )
+
+
+def test_governed_alternate_retargets_the_remaining_axis_and_checks_full_objective(tmp_path):
+    path = tmp_path / "coaxial.urdf"
+    inertial = (
+        '<inertial><mass value="0.2"/>'
+        '<inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>'
+    )
+    path.write_text(
+        f'<robot name="redundant"><link name="base"/><link name="car">{inertial}</link>'
+        f'<link name="palm">{inertial}</link>'
+        '<joint name="slow" type="prismatic"><parent link="base"/><child link="car"/>'
+        '<axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="100" velocity="3"/></joint>'
+        '<joint name="trim" type="prismatic"><parent link="car"/><child link="palm"/>'
+        '<axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="100" velocity="3"/></joint></robot>'
+    )
+    limits = tmp_path / "coaxial.effort.json"
+    limits.write_text(
+        json.dumps(
+            {
+                "urdf_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "joints": [
+                    {
+                        "joint": "slow",
+                        "unit": "N",
+                        "maximum": 100,
+                        "basis": "fixture",
+                        "reflected_inertia_kg_m2": None,
+                        "operating_velocity": {
+                            "maximum": 0.12,
+                            "unit": "m/s",
+                            "basis": "documented fixture governor",
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    n = 20
+    times = 100_000_000 * np.arange(n, dtype=np.int64)
+    displacement = 0.10 * np.sin(0.65 * np.arange(n))
+    q = np.column_stack((displacement, -displacement))
+    hand = np.zeros((n, 21, 3))
+    hand[:, 4, 1] = 0.04
+    states = []
+    args = {
+        "time_ns": times,
+        "hands_world_m": {"right": hand},
+        "joint_names": ("slow", "trim"),
+        "q": q,
+        "fps": 10,
+        "robot_from_world": np.eye(4),
+        "world_from_camera": np.tile(np.eye(4), (n, 1, 1)),
+        "effort_limits": limits,
+    }
+    prof = MappingProfile({"right": ("palm",) + (None,) * 20})
+    fit, rep = optimize_trajectory(path, prof, **args, on_checkpoint=states.append)
+    s = rep.document()["segments"][0]
+    assert {c.phase for c in states} == {"whole", "governed_start"}
+    assert s["governed_start"]["projected_joint"] == "slow"
+    assert s["final_objective"] <= s["objective"][-1] + 1.0e-9
+    lattice = s["feasible_lattice"]
+    assert lattice["finite_global_objective"] == pytest.approx(
+        lattice["direct_objective"], abs=1e-8
+    )
+    assert rep.speed_edge_ok.all() and np.max(fit.wrist_error_m) < 0.005
+    snapshots = {(c.first_index, c.stop_index, c.phase): c for c in states}
+    again, second = optimize_trajectory(path, prof, **args, checkpoints=snapshots)
+    np.testing.assert_array_equal(fit.q, again.q)
+    assert second.document() == rep.document()

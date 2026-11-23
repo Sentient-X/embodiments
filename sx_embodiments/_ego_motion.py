@@ -16,10 +16,11 @@ import scipy.linalg as linalg  # pyright: ignore[reportMissingTypeStubs] -- SciP
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue
 
+from ._ego_governor import governed_start, select_path
 from ._ego_temporal import native_gaps
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from ._ego_collision import CollisionModel
     from ._ego_dynamics import EffortModel
@@ -31,6 +32,19 @@ if TYPE_CHECKING:
 type Floats = NDArray[np.float64]
 type Indices = NDArray[np.int64]
 type Bools = NDArray[np.bool_]
+
+
+@dataclass(frozen=True)
+class MotionCheckpoint:
+    """One accepted iterate on a source-bound clock segment; the caller binds its inputs."""
+
+    first_index: int
+    stop_index: int
+    phase: str
+    q: Floats
+    objective: tuple[float, ...]
+    linear_residuals: tuple[float, ...]
+    stop: str | None
 
 
 @dataclass(frozen=True)
@@ -544,13 +558,95 @@ class _Span:
             previous = candidate
         return q.copy()
 
-    def optimize(self) -> tuple[Floats, list[float], list[float], str]:
-        q = self.seed.copy()
+    def pose_feasible(self, values: Floats) -> Bools:
+        tracking = self.tracking
+        robot = tracking.sites.robot
+        eligible = np.asarray(
+            np.all((values >= robot.lower - 1e-9) & (values <= robot.upper + 1e-9), axis=1)
+        )
+        for i, row in enumerate(values):
+            sites = tracking.sites.positions(row)[tracking.hand_sites]
+            error = np.linalg.norm(sites - self.hand_target[i], axis=1)
+            if np.any(error > self.hand_budget[i] + 1e-10):
+                eligible[i] = False
+            if tracking.camera is not None:
+                eligible[i] &= (
+                    tracking.camera_angle(self.span.start + i) <= self.camera_budget[i] + 1e-10
+                )
+        if self.collision is not None:
+            rows = np.flatnonzero(eligible)
+            contacts = self.collision.batch_at([tracking.sites.full_q(values[i]) for i in rows])
+            eligible[rows] &= (
+                np.array([c.unallowed for c in contacts]) <= self.clearance[rows] + 1e-12
+            )
+        return eligible
+
+    def optimize(
+        self,
+        phase: str,
+        initial: Floats,
+        checkpoints: Mapping[tuple[int, int, str], MotionCheckpoint],
+        on_checkpoint: Callable[[MotionCheckpoint], None] | None,
+    ) -> tuple[Floats, list[float], list[float], str]:
+        start, end = int(self.span.start), int(self.span.stop)
+        q = initial.copy()
         history = [self.cost(q)]
         residuals: list[float] = []
+        cached = checkpoints.get((start, end, phase))
+        if cached is not None:
+            if (
+                (cached.first_index, cached.stop_index, cached.phase) != (start, end, phase)
+                or cached.q.shape != q.shape
+                or not np.isfinite(cached.q).all()
+                or not 1 <= len(cached.objective) <= 37
+                or not np.all(np.isfinite(cached.objective))
+                or not np.all(np.diff(cached.objective) < 0)
+                or len(cached.linear_residuals)
+                != len(cached.objective) - 1 + (cached.stop == "no feasible decrease")
+                or not np.all(np.isfinite(cached.linear_residuals))
+                or cached.stop
+                not in (
+                    None,
+                    "no feasible decrease",
+                    "relative objective tolerance",
+                    "iteration limit",
+                    "no adjustable tracking coordinates",
+                )
+            ):
+                raise ValueError("invalid motion checkpoint clock segment or solver history")
+            other = np.ones(q.shape[1], dtype=bool)
+            other[self.ids] = False
+            robot = self.tracking.sites.robot
+            if (
+                not np.array_equal(cached.q[:, other], initial[:, other])
+                or not np.array_equal(cached.q[self.pinned], initial[self.pinned])
+                or np.any(
+                    np.abs(np.diff(cached.q, axis=0)) > self.h[:, None] * robot.velocity + 1e-8
+                )
+                or not self.pose_feasible(cached.q).all()
+                or not np.isclose(cached.objective[0], history[0], rtol=1e-9, atol=1e-10)
+                or not np.isclose(cached.objective[-1], self.cost(cached.q), rtol=1e-9, atol=1e-10)
+            ):
+                raise ValueError(
+                    "motion checkpoint violates the source objective or feasible trajectory"
+                )
+            q = cached.q.copy()
+            history, residuals = list(cached.objective), list(cached.linear_residuals)
+            if cached.stop is not None:
+                return q, history, residuals, cached.stop
+
+        def publish(stop: str | None) -> None:
+            if on_checkpoint is not None:
+                on_checkpoint(
+                    MotionCheckpoint(
+                        start, end, phase, q.copy(), tuple(history), tuple(residuals), stop
+                    )
+                )
+
         if not len(self.ids):
+            publish("no adjustable tracking coordinates")
             return q, history, residuals, "no adjustable tracking coordinates"
-        for _ in range(36):
+        for _ in range(len(history) - 1, 36):
             normal = _Normal(len(q), len(self.ids))
             self.cost(q, normal)
             step, residual = normal.step(1.0 / (0.35 * self.rate))
@@ -574,11 +670,15 @@ class _Span:
                 if decreased:
                     break
             else:
+                publish("no feasible decrease")
                 return q, history, residuals, "no feasible decrease"
             q = trial
             history.append(cost)
             if history[-2] - cost < 1e-4 * max(1.0, history[-2]):
+                publish("relative objective tolerance")
                 return q, history, residuals, "relative objective tolerance"
+            publish(None)
+        publish("iteration limit")
         return q, history, residuals, "iteration limit"
 
 
@@ -608,6 +708,8 @@ def optimize(
     body: Mapping[str, Floats],
     effort: EffortModel | None,
     unavailable: str | None,
+    checkpoints: Mapping[tuple[int, int, str], MotionCheckpoint] | None,
+    on_checkpoint: Callable[[MotionCheckpoint], None] | None,
 ) -> tuple[Floats, MotionReport]:
     intervals = np.diff(times).astype(np.float64) * 1e-9
     gaps = native_gaps(intervals, fps)
@@ -637,17 +739,34 @@ def optimize(
         span = slice(start, end)
         relative = (times[span] - times[start]).astype(np.float64) * 1e-9
         model = _Span(seed[span], span, relative, tracking, collision, effort, pinned[span])
-        q[span], history, residuals, status = model.optimize()
-        segments.append(
-            {
-                "first_index": int(start),
-                "stop_index": int(end),
-                "objective": list(history),
-                "accepted_steps": len(history) - 1,
-                "linear_system_relative_residual": list(residuals),
-                "stop": status,
-            }
+        q[span], history, residuals, status = model.optimize(
+            "whole", seed[span], checkpoints or {}, on_checkpoint
         )
+        segment: dict[str, JsonValue] = {
+            "first_index": int(start),
+            "stop_index": int(end),
+            "objective": list(history),
+            "accepted_steps": len(history) - 1,
+            "linear_system_relative_residual": list(residuals),
+            "stop": status,
+        }
+        second = governed_start(model)
+        if second is not None:
+            reduced, initial, control = second
+            alt, alternate_history, alternate_residuals, alternate_status = reduced.optimize(
+                "governed_start", initial, checkpoints or {}, on_checkpoint
+            )
+            q[span], lattice = select_path(model, q[span], alt)
+            segment["governed_start"] = {
+                "projected_joint": robot.names[control],
+                "objective": list(alternate_history),
+                "accepted_steps": len(alternate_history) - 1,
+                "stop": alternate_status,
+                "linear_system_relative_residual": list(alternate_residuals),
+            }
+            segment["feasible_lattice"] = lattice
+        segment["final_objective"] = model.cost(q[span])
+        segments.append(segment)
         for values, tau, measures in zip(
             [seed[span], q[span]], [initial_torque, torque], stats, strict=True
         ):
@@ -728,6 +847,12 @@ def optimize(
         },
         "sampled_camera_orientation_envelope_deg": {"angle": 7.0, "seed_error_allowance": 1.0},
         "continuous_segments": len(segments),
+        "solver": {
+            "max_iterations": 36,
+            "relative_objective_tolerance": 1e-4,
+            "line_search_scales": [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125],
+            "directions": ["damped Gauss-Newton", "diagonal gradient"],
+        },
         "training_effort_ok_frames": int(np.count_nonzero(ok)),
         "speed_qualification": {
             "criterion": "Each adjoining resolved native edge meets every effective speed ceiling",
