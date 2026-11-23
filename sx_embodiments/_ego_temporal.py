@@ -12,13 +12,13 @@ import numpy as np
 import scipy.linalg as linalg  # pyright: ignore[reportMissingTypeStubs] -- SciPy has no stubs.
 from numpy.typing import NDArray
 
-from ._ego_collision import CollisionModel
+from ._ego_collision import CollisionModel, Contacts
 
 type Floats = NDArray[np.float64]
 type Booleans = NDArray[np.bool_]
 
 
-def _smooth(positions: Floats, intervals: Floats) -> Floats:
+def smooth_acceleration(positions: Floats, intervals: Floats) -> Floats:
     """Fit the seed while minimizing integrated squared angular/linear acceleration.
 
     Trapezoid integration and divided differences use exposure time in seconds.
@@ -44,7 +44,7 @@ def _smooth(positions: Floats, intervals: Floats) -> Floats:
         if len(start) == 1:
             design = np.column_stack((np.ones(n), t / t[-1]))
             return np.asarray(design @ np.linalg.lstsq(design, positions, rcond=None)[0])
-        smoothed = _smooth(positions_at_knots, np.diff(knots))
+        smoothed = smooth_acceleration(positions_at_knots, np.diff(knots))
         clock = tuple(float(value) for value in knots)
         left = np.array(
             [min(max(bisect_right(clock, float(v)) - 1, 0), len(clock) - 2) for v in t],
@@ -92,7 +92,9 @@ def regularize(
     correct: Callable[[int, Floats, Floats], Floats],
     full_q: Callable[[Floats], Floats],
     blocked_controls: Callable[[Booleans], Booleans],
+    coupling: Floats | None,
     collision: CollisionModel | None,
+    digits: Booleans | None = None,
 ) -> Floats:
     if seed.shape != (len(times), len(speed)) or not np.isfinite(seed).all():
         raise ValueError("seed requires a finite native position per joint and exposure")
@@ -119,11 +121,13 @@ def regularize(
         edges = np.r_[0, np.flatnonzero(gap | transitions) + 1, len(times)]
         for start, stop in pairwise(edges):
             if stop - start >= 3:
-                wanted[start:stop, columns] = _smooth(
+                wanted[start:stop, columns] = smooth_acceleration(
                     seed[start:stop, columns], intervals[start : stop - 1]
                 )
     # A timestamp hole has no evidence for blending the two endpoints.
     isolated = np.r_[False, gap] | np.r_[gap, False]
+    if digits is not None:
+        wanted[:, ~digits] = seed[:, ~digits]
     for i in range(len(times)):
         if isolated[i]:
             wanted[i] = seed[i]
@@ -132,7 +136,11 @@ def regularize(
     result = seed.copy()
     # Each subpass updates non-adjacent rows with both neighbours fixed.
     # All accepted steps obey each neighbour's native velocity envelope.
-    for parity in (0, 1, 0, 1):
+    if digits is not None:
+        wanted[:, ~digits] = seed[:, ~digits]
+    passes = 4 if digits is None else 8
+    for sweep in range(passes):
+        parity = sweep % 2
         for i in range(parity, len(times), 2):
             lo, hi = lower, upper
             if i:
@@ -141,11 +149,29 @@ def regularize(
             if i + 1 < len(times):
                 lo = np.maximum(lo, result[i + 1] - travel[i])
                 hi = np.minimum(hi, result[i + 1] + travel[i])
-            candidate = np.clip(wanted[i], lo, hi)
+            if digits is not None:
+                lo = np.where(digits, lo, result[i])
+                hi = np.where(digits, hi, result[i])
+            preferred = wanted[i]
+            if sweep >= 4 and 0 < i < len(times) - 1 and not isolated[i]:
+                own = result[i]
+                blend = intervals[i - 1] / (intervals[i - 1] + intervals[i])
+                interp = (1 - blend) * result[i - 1] + blend * result[i + 1]
+                stable = np.logical_not(
+                    (present[i] != present[i - 1]) | (present[i] != present[i + 1])
+                )
+                eligible = np.all(~influence | stable[:, None], axis=0)
+                preferred = np.where(eligible, 0.3 * wanted[i] + 0.7 * interp, own)
+            candidate = np.clip(preferred, lo, hi)
             if np.max(np.abs(candidate - result[i])) < 1e-10:
                 continue
             if collision is not None:
                 contact = collision.at(full_q(candidate))
+                if digits is not None and contact.unallowed > 1e-6:
+                    candidate, contact = _relieve_penetration(
+                        collision, candidate, lo, hi, speed, full_q, coupling
+                    )
+                request = candidate.copy()
                 locked = np.zeros(len(speed), dtype=np.bool_)
                 while contact.unallowed > 1e-6:
                     blocked = locked | blocked_controls(contact.blocked_joints)
@@ -155,5 +181,39 @@ def regularize(
                     locked = blocked
                     candidate = np.where(locked, result[i], candidate)
                     contact = collision.at(full_q(candidate))
+                if digits is not None and np.any(locked) and contact.unallowed <= 1e-6:
+                    change = request - candidate
+                    for fraction in (0.875, 0.625, 0.375, 0.125):
+                        partial = candidate + fraction * change
+                        if collision.at(full_q(partial)).unallowed <= 1e-6:
+                            candidate = partial
+                            break
             result[i] = candidate
     return result
+
+
+def _relieve_penetration(
+    collision: CollisionModel,
+    candidate: Floats,
+    lower: Floats,
+    upper: Floats,
+    speed: Floats,
+    full_q: Callable[[Floats], Floats],
+    coupling: Floats | None,
+) -> tuple[Floats, Contacts]:
+    """Relieve actual penetration along contact normals within the native velocity bounds."""
+    scale = np.minimum(upper - lower, speed * 0.1)
+    for _ in range(5):
+        contact = collision.at(full_q(candidate), gradient=True, penetration_only=True)
+        if contact.unallowed <= 1e-6:
+            return candidate, contact
+        jac = contact.jacobian if coupling is None else contact.jacobian @ coupling
+        jac = jac * scale
+        gram = jac @ jac.T
+        gram.flat[:: len(gram) + 1] += 1e-8
+        delta = -jac.T @ np.linalg.solve(gram, contact.violation + 0.00002)
+        following = np.clip(candidate + scale * delta, lower, upper)
+        if np.max(abs(following - candidate)) <= 1e-8:
+            break
+        candidate = following
+    return candidate, collision.at(full_q(candidate))

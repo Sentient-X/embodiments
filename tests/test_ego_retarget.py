@@ -330,8 +330,10 @@ def test_fresh_fit_preserves_pre_gap_pose_with_declared_cadence(setup):
 
 
 def test_near_coincident_native_knots_preserve_affine_motion():
-    from sx_embodiments._ego_temporal import _smooth
+    from sx_embodiments._ego_temporal import smooth_acceleration
 
     dt = np.array([0.066, 1e-9, 1e-9, 1e-9, 1e-9, 0.066])
     positions = (0.15 * np.r_[0.0, np.cumsum(dt)])[:, None]
-    np.testing.assert_allclose(_smooth(positions, dt), positions, atol=1.0e-12, rtol=0.0)
+    np.testing.assert_allclose(
+        smooth_acceleration(positions, dt), positions, atol=1.0e-12, rtol=0.0
+    )

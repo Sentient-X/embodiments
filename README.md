@@ -718,6 +718,15 @@ inside both neighbours' URDF velocity bounds and its position bounds. The final 
 and self-collision measurements come from the emitted positions. The smoothing scale
 describes tracking bandwidth. URDF acceleration and jerk limits require separate evidence.
 
+When a profile maps the three distal landmarks of a digit, a second pass fits its
+observed fingertip position and flexion angle. Two segment lengths convert radians
+to metres in the fitting objective. The wrist, camera and their kinematic ancestors
+retain the first pass solution, including drivers shared by a mimic joint. Adjacent
+fingers can yield together along a contact normal, with the emitted endpoint checked
+against the same collision geometry. To inspect a contact reversal, compare the absolute
+fingertip location against the source images across successive native frames.
+A smoother angle alone can move the fingertip away from the observed contact.
+
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
 smoothing window. Without a declared cadence, intervals longer than 1.5 times the
 fastest observed period or 150 ms split the window. The same refinement can reuse
