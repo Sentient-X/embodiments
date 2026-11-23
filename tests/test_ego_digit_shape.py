@@ -105,6 +105,15 @@ def test_complete_digit_traces_measured_bends_with_a_fixed_wrist_and_real_contac
     np.testing.assert_array_equal(cut.q[6:], changed_cut.q[6:])
 
     sparse = MappingProfile({"left": tuple(["wrist", None, None, None, "tip"] + [None] * 16)})
+    for invalid in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="fps must be finite and positive"):
+            refine_trajectory(
+                urdf,
+                sparse,
+                **{**options, "fps": invalid},
+                digit_shape_limit_m=0.04,
+                temporal_seed=True,
+            )
     bad = seed.copy()
     bad[1, 0] += 0.5
     with pytest.raises(ValueError, match="velocity limits"):

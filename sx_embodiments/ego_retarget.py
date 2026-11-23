@@ -622,6 +622,8 @@ def _solve(
     fps: float | None = None,
     digit_shape_limit_m: float | None = None,
 ) -> Fit:
+    if fps is not None and (not np.isfinite(fps) or fps <= 0):
+        raise ValueError("fps must be finite and positive")
     times = np.asarray(time_ns)
     if (
         times.dtype != np.int64
