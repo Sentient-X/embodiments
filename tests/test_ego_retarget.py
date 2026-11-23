@@ -251,8 +251,11 @@ def test_verified_bearings_bind_to_visual_cad_and_hold_only_within_the_arc(tmp_p
     robot = _model(path)
     # A serialized v1 profile can still carry the nominal depth rows without
     # any new certificate field. It cannot grant clearances on a different arm.
-    with pytest.raises(ValueError, match="exact certified CAD"):
-        CollisionModel.read(geometry, robot.names, robot.neutral, (), nominal_bearings())
+    legacy = nominal_bearings()
+    a, b, depth = legacy[0]
+    for encoded in (legacy, ((b, a, depth), *reversed(legacy[1:]))):
+        with pytest.raises(ValueError, match="exact certified CAD"):
+            CollisionModel.read(geometry, robot.names, robot.neutral, (), encoded)
     arc = BearingArc(("case", "rotor"), (JointInterval("axle", -0.2, 0.2),), 0.151)
     collision = CollisionModel.read(geometry, robot.names, robot.neutral, (), (), (arc,))
     assert collision is not None

@@ -238,11 +238,15 @@ class CollisionModel:
         arcs: tuple[BearingArc, ...] = (),
     ) -> CollisionModel | None:
         root, assets, geometry_id = geometry
+
         # A pre-certificate saved nominal profile can still carry all old
         # depth allowances. Never transfer those grants onto changed geometry.
+        def unordered(values: tuple[Bearing, ...]) -> frozenset[Bearing]:
+            return frozenset((min(a, b), max(a, b), depth) for a, b, depth in values)
+
         if (
             bearings
-            and frozenset(bearings) == frozenset(nominal_bearings())
+            and unordered(bearings) == unordered(nominal_bearings())
             and not certified_arcs(cad_sweep_identity(), geometry_id)
         ):
             raise ValueError("nominal Sentient-Wuji bearing limits require the exact certified CAD")
