@@ -3,6 +3,7 @@
 import hashlib
 import json
 from dataclasses import replace
+from itertools import product
 
 import numpy as np
 import pytest
@@ -289,7 +290,9 @@ def test_operating_speed_qualifies_the_actual_edges_and_both_endpoints(tmp_path)
     )
 
 
-def test_governed_alternate_retargets_the_remaining_axis_and_checks_full_objective(tmp_path):
+def test_governed_alternate_retargets_the_remaining_axis_and_checks_full_objective(
+    tmp_path, monkeypatch
+):
     path = tmp_path / "coaxial.urdf"
     inertial = (
         '<inertial><mass value="0.2"/>'
@@ -357,3 +360,41 @@ def test_governed_alternate_retargets_the_remaining_axis_and_checks_full_objecti
     again, second = optimize_trajectory(path, prof, **args, checkpoints=snapshots)
     np.testing.assert_array_equal(fit.q, again.q)
     assert second.document() == rep.document()
+
+    # Compare the actual dynamic program with exhaustive enumeration on
+    # the same small nonlinear robot, retaining every admissibility check.
+    from sx_embodiments import _ego_motion
+
+    selection = _ego_motion.select_path
+
+    def exhaustive(model, first, second):
+        chosen, document = selection(model, first, second)
+        levels = np.asarray(document["blend_fractions"])
+        choices = first[:, None] + levels[None, :, None] * (second - first)[:, None]
+        valid = np.stack([model.pose_feasible(choices[:, i]) for i in range(len(levels))], axis=1)
+        minimum = float("inf")
+        for path in product(range(len(levels)), repeat=len(choices)):
+            if not valid[np.arange(len(choices)), path].all():
+                continue
+            seq = choices[np.arange(len(choices)), path]
+            if np.any(
+                abs(np.diff(seq, axis=0))
+                > model.h[:, None] * model.tracking.sites.robot.velocity + 1e-8
+            ):
+                continue
+            minimum = min(minimum, model.cost(seq))
+        assert document["finite_global_objective"] == pytest.approx(minimum, rel=1e-9, abs=1e-9)
+        return chosen, document
+
+    monkeypatch.setattr(_ego_motion, "select_path", exhaustive)
+    optimize_trajectory(
+        path,
+        prof,
+        **{
+            **args,
+            "time_ns": times[:4],
+            "hands_world_m": {"right": hand[:4]},
+            "world_from_camera": args["world_from_camera"][:4],
+            "q": q[:4],
+        },
+    )
