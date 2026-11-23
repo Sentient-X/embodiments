@@ -21,6 +21,7 @@ _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_contracts", "sx_embodiments
 
 _EXTRAS = {
     "ego_retarget.py": frozenset({"numpy", "mujoco"}),
+    "_ego_temporal.py": frozenset({"numpy", "scipy"}),
     "_ego_collision.py": frozenset({"numpy", "mujoco"}),
     "encoder_serial.py": frozenset({"serial"}),
     "calibrate": frozenset({"numpy", "scipy", "cv2"}),

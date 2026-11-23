@@ -711,6 +711,22 @@ The optical link looks along its own +z axis with +y down. Revolute, continuous,
 fixed and affine mimic joints are supported. The returned trajectory names only independent coordinates. The solve enforces URDF position and velocity limits on source time;
 the first posture is an initial condition.
 
+A final, two-sided temporal fit uses the exposure timestamps, a 75 ms acceleration
+regularization scale and each observed hand's kinematic ancestors. It retains rapid
+task-space motion through a damped FK Jacobian correction. Every updated pose stays
+inside both neighbours' URDF velocity bounds and its position bounds. The final FK
+and self-collision measurements come from the emitted positions. The smoothing scale
+describes tracking bandwidth. URDF acceleration and jerk limits require separate evidence.
+
+Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
+smoothing window. Without a declared cadence, intervals longer than 1.5 times the
+fastest observed period or 150 ms split the window. The same refinement can reuse
+a previously fitted native trajectory with `refine_trajectory(urdf, profile, time_ns=...,
+hands_world_m=..., world_from_camera=..., robot_from_world=..., joint_names=..., q=...,
+fps=...)`. Bind the original source, geometry, registration and joint ordering.
+A saved seed that already blended observations across a missing interval retains that
+history. Use a fresh solve at the declared cadence to regenerate those boundary poses.
+
 `Fit.save(path)` writes a numeric NPZ with named joint positions, the transform,
 timestamps, observed-hand masks, achieved FK landmarks, per-landmark/wrist/fingertip errors,
 optical-axis/full-orientation errors, and camera translation relative to its neutral location.
