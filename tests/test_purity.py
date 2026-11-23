@@ -1,13 +1,14 @@
 """sx-embodiments depends only on the lower sx-contracts vocabulary package.
 
-Two optional extras widen it for one tree each: ``capture`` lets ``encoder_serial.py`` read a
+Optional extras widen it for their owning modules: ``capture`` lets ``encoder_serial.py`` read a
 serial port, ``calibrate`` lets the solvers under ``calibrate/`` use NumPy, SciPy and OpenCV,
 and ``render`` lets ``render_pack.py`` use NumPy and the frames kernel ``sx_geometry`` (its
 root rotation computed from axes, #246), the ``collision_proxies.py`` it fits
 use NumPy and SciPy (its convex pieces), as ``tool_frames.py`` reading the jaws from that
 geometry uses NumPy and ``frames.py`` (each frame's axes and roles) the frames kernel,
 ``sx_geometry``. Nothing else in the package may import them,
-so the registry stays importable bare.
+so the registry stays importable bare. The offline ego retargeter has its own NumPy
+and MuJoCo extra.
 """
 
 import ast
@@ -19,6 +20,8 @@ SRC = Path(__file__).resolve().parent.parent / "sx_embodiments"
 _ALLOWED = frozenset(sys.stdlib_module_names) | {"sx_contracts", "sx_embodiments"}
 
 _EXTRAS = {
+    "ego_retarget.py": frozenset({"numpy", "mujoco"}),
+    "_ego_collision.py": frozenset({"numpy", "mujoco"}),
     "encoder_serial.py": frozenset({"serial"}),
     "calibrate": frozenset({"numpy", "scipy", "cv2"}),
     "render_pack.py": frozenset({"numpy", "sx_geometry"}),
@@ -71,7 +74,7 @@ def test_the_bare_registry_imports_no_extra() -> None:
     only when imported, so the bare registry runs without NumPy or the frames kernel."""
     probe = (
         "import sys, sx_embodiments; "
-        "loaded = [m for m in ('numpy', 'scipy', 'cv2', 'sx_geometry', 'serial') "
+        "loaded = [m for m in ('numpy', 'scipy', 'cv2', 'sx_geometry', 'serial', 'mujoco') "
         "if m in sys.modules]; "
         "assert not loaded, loaded"
     )

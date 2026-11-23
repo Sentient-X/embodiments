@@ -685,3 +685,44 @@ so the generated candidate pack exposes `tcp_candidates` but `tcp_frames={}`.
 No tool-point hardware acceptance is transferred by a nominal humanoid simulation
 approval. The historical 51db79c… document still resolves the exact checked chain;
 source-preserving FK tests do not silently rewrite that receipt.
+
+## Offline retargeting of egocentric observations
+
+Install the `retarget` extra for the numerical solver. `sx_embodiments.ego_retarget.solve`
+fits a fixed-base URDF to native-clock human hand landmarks and camera orientation. Supply
+a proper 4×4 `robot_from_world` registration, nanosecond timestamps, world-from-optical
+camera poses, and 21 world-space points per observed hand in wrist/thumb/index/middle/
+ring/little order. Missing hands are all NaN. An unmeasured recording can use
+`estimate_registration` to choose a *virtual* rigid workspace placement by scoring sampled
+IK fits. That call assumes a common gravity-up z convention and a declared robot optical
+link. An actual workcell needs its measured registration.
+
+Use `MappingProfile.sentient_wuji()` for the Sentient static upper body and the Wuji fork.
+`sx_embodiments.ego_wuji.assemble(wuji_urdf_dir, output_urdf)` packages the nominal wrist seats
+and the meshes from the two local vendor descriptions. Keep the asset licenses with any
+redistribution. The nominal mounts align the distal wrist and rear palm CAD housing envelopes. A measured
+physical adapter can be expressed in a supplied URDF.
+
+For another fixed-base body, `MappingProfile.read(path)` accepts a JSON object with
+`hands` mapping `left` or `right` to 21 URDF link names, and optional `camera_optical_link`.
+The first entry maps the wrist, then four entries per digit in proximal-to-distal order.
+Use JSON null for unavailable digit landmarks, including unrepresented fingers on a gripper.
+The optical link looks along its own +z axis with +y down. Revolute, continuous, prismatic,
+fixed and affine mimic joints are supported. The returned trajectory names only independent coordinates. The solve enforces URDF position and velocity limits on source time;
+the first posture is an initial condition.
+
+`Fit.save(path)` writes a numeric NPZ with named joint positions, the transform,
+timestamps, observed-hand masks, achieved FK landmarks, per-landmark/wrist/fingertip errors,
+optical-axis/full-orientation errors, and camera translation relative to its neutral location.
+Error is against the supplied reconstruction.
+Missing evidence and unsupported landmarks have NaN residuals. Each fitted pose also records contact checks against the URDF collision shapes using
+MuJoCo's convex meshes and normal parent/welded-body filtering. Raw, neutral-relative,
+and unallowed penetrating depths are reported separately. Exactly named
+`allowed_collision_pairs` in the profile identify exempt mechanical pairs. The generic
+default is empty. The supplied Wuji profile records the torso bearing and the four compound
+MCP bearings in each palm. The archive lists neutral collisions, the worst unallowed
+pair per sample, missing rigid-body geometry, and a digest of URDF and collision mesh
+bytes. The IK penalizes unallowed contacts near the boundary. A blocked target can retain
+a larger tracking residual. Empty or incomplete collision geometry leaves the check
+unqualified. These endpoint checks do not measure swept volume, contact with the scene,
+force, balance or physical safety.
