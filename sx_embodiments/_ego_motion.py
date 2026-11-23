@@ -410,6 +410,7 @@ class _Span:
         self.seed, self.span, self.tracking = q, span, tracking
         self.effort, self.collision, self.pinned = effort, collision, pinned
         self.ids = tracking.controls
+        self._moving_pairs: dict[tuple[int, ...], CollisionModel] = {}
         self.rate = tracking.sites.robot.velocity[self.ids]
         self.operating_rate = (
             np.full(len(self.ids), np.inf)
@@ -535,7 +536,22 @@ class _Span:
                         normal.lower[i - j][start + j : end + j] += jt @ derivatives[j]
         return total
 
-    def candidate(self, q: Floats, delta: Floats) -> Floats:
+    def candidate_collisions(self) -> CollisionModel | None:
+        if self.collision is None:
+            return None
+        key = tuple(map(int, self.ids))
+        if key not in self._moving_pairs:
+            coupling = self.tracking.sites.robot.coupling
+            physical = (
+                self.ids
+                if coupling is None
+                else np.flatnonzero(np.any(coupling[:, self.ids] != 0, axis=1))
+            )
+            self._moving_pairs[key] = self.collision.moving_pairs(physical)
+        return self._moving_pairs[key]
+
+    def candidate(self, q: Floats, delta: Floats, *, full_cad: bool = False) -> Floats:
+        collision = self.collision if full_cad else self.candidate_collisions()
         robot = self.tracking.sites.robot
         # A trust region bounds the local FK/effort linearization. A separate
         # nonlinear line search decides whether the resulting motion helps.
@@ -578,10 +594,8 @@ class _Span:
             changed = np.flatnonzero(np.any(candidate != previous, axis=1))
             contacts = (
                 []
-                if self.collision is None
-                else self.collision.batch_at(
-                    [self.tracking.sites.full_q(candidate[i]) for i in changed]
-                )
+                if collision is None
+                else collision.batch_at([self.tracking.sites.full_q(candidate[i]) for i in changed])
             )
             for k, i in enumerate(changed):
                 tracking = self.tracking
@@ -596,7 +610,7 @@ class _Span:
                 ):
                     unsafe = True
                     active |= tracking.camera_influence
-                if self.collision is not None:
+                if collision is not None:
                     contact = contacts[k]
                     if contact.unallowed > threshold[i]:
                         unsafe = True
@@ -741,7 +755,27 @@ class _Span:
                     if np.array_equal(q, trial):
                         continue
                     cost = self.cost(trial)
-                    if cost < history[-1] - 1e-10 * max(1.0, history[-1]):
+                    target = history[-1] - 1e-10 * max(1.0, history[-1])
+                    if cost < target:
+                        if (
+                            self.collision is not None
+                            and self.candidate_collisions() is not self.collision
+                        ):
+                            # Check all pairs before saving an iterate. Re-run
+                            # the original projection if a numerically marginal
+                            # frozen contact changes side of its baseline ceiling.
+                            changed = np.flatnonzero(np.any(trial != q, axis=1))
+                            contacts = self.collision.batch_at(
+                                [self.tracking.sites.full_q(trial[i]) for i in changed]
+                            )
+                            if any(
+                                c.unallowed > self.clearance[i] + 1e-12
+                                for i, c in zip(changed, contacts, strict=True)
+                            ):
+                                trial = self.candidate(q, scale * direction, full_cad=True)
+                                cost = self.cost(trial)
+                                if not cost < target:
+                                    continue
                         decreased = True
                         break
                 if decreased:
