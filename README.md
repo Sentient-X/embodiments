@@ -760,6 +760,58 @@ and a 15-degree error in the bend change. The opt-in fit met those angle checks 
 window. Median absolute fingertip error rose from 6.4 to 13.7 mm and 5.6 to 10.9 mm,
 respectively. The original source and all upper-body coordinates were fixed.
 
+For whole-body motion, call `optimize_trajectory` with the verified fit's named `q`,
+registration and source timestamps, landmarks and camera transforms. The optional
+`arm_posture_world_m` maps each side to an N × 3 × 3 array of human shoulder, elbow
+and wrist positions in world metres. A body profile may declare the corresponding
+three URDF link names per side under `arm_links`. This fits the directions of the human
+upper arm and forearm across different limb lengths. Each wrist and observed fingertip contributes a robust position residual. The camera
+contributes optical-axis orientation and native turn-rate residuals. The optimizer preserves the fitted
+digit coordinates, source exposure clock, URDF position and velocity limits, and
+sampled collision-depth budgets.
+
+All wrist and head ancestors in a continuous span participate in the same nonlinear
+least-squares problem. The objective integrates tracking, normalized speed,
+acceleration, jerk and unloaded rigid-body effort. The solver assembles coupled,
+banded Gauss-Newton systems, evaluates candidate steps through FK and collision
+geometry, and accepts objective decreases. The report records each segment's
+objective history, linear solve residual and termination reason. This establishes
+a local continuous solution.
+
+When the original trajectory exceeds a declared operating speed, a second start
+projects the most over-governed coordinate onto its speed bound and re-fits the
+remaining wrist, arm and optical controls. Every native exposure offers five complete
+poses blending the two trajectories. The selector rejects sampled poses outside
+the original hand, camera and CAD envelopes, and transitions outside URDF rates.
+Dynamic programming remembers three successive poses, including their true clock
+intervals, so a fourth determines the jerk and each third determines the unloaded
+inverse dynamics. The chosen path minimizes the same objective over this finite
+set. Its directly recomputed full-sequence cost and per-blend availability are
+recorded alongside the two continuous histories. The finite certificate applies
+to these candidates. Nonlinear continuous IK has broader possibilities.
+
+An `on_checkpoint` callback receives a `MotionCheckpoint` per accepted iterate and
+at termination. Bind the checkpoint to the same source, clock, seed, robot, mounts,
+operating limits and solver version. Supply validated checkpoints keyed by
+`(first_index, stop_index, phase)` to continue in the original objective. The two
+phases are `whole` and `governed_start`. The optimizer checks the fixed coordinates,
+bounds, sampled geometry and objective against those original inputs on restore.
+
+The returned `MotionReport.torque_before` and `torque` arrays use the fit's joint
+order. Revolute efforts are in Nm and prismatic efforts in N. Exact source time and
+interior three-pose stencils determine the derivatives. Endpoints and breaks remain
+NaN. `effort_limits` and `training_effort_ok` permit a caller to exclude exposures
+with missing or exceeded bounds. The separate `speed_limits`, `speed_edge_ok`
+and `training_speed_ok` arrays record the strictest declared speed ceiling, each
+resolved interval’s result and whether its adjoining native intervals support an
+exposure. A governor exceedance excludes both affected endpoints. The fit penalizes
+exceedances while retaining reach, camera orientation and collision evidence.
+Pass a hash-bound `effort_limits` companion file to
+use actuator effort limits, available operating speed governors and reflected inertias. Robot-root gravity follows
+the supplied world-to-robot rotation. Contact forces, payload, friction and actuator
+thermal duty are outside this unloaded estimate. Source-body agreement measures
+agreement with the reconstruction.
+
 Pass `fps` from the reconstruction to `solve` so skipped camera exposures split the
 smoothing window. Without a declared cadence, intervals longer than 1.5 times the
 fastest observed period or 150 ms split the window. The same refinement can reuse
