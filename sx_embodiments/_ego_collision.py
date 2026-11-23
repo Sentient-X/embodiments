@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -37,10 +38,78 @@ def collision_assets(path: Path) -> tuple[ET.Element, dict[str, bytes], str]:
             identities[ref] = digest
             assets[digest + Path(ref).suffix.lower()] = data
         mesh.set("filename", identities[ref] + Path(ref).suffix.lower())
+    # The nominal bearing certificate is derived from the individual visual CAD
+    # parts. Those bytes are therefore also input evidence whenever materialized.
+    visuals: dict[str, str | None] = {}
+    for mesh in root.findall(".//visual/geometry/mesh"):
+        ref = mesh.attrib["filename"]
+        if ref not in visuals:
+            candidate = path.parent / ref
+            visuals[ref] = (
+                hashlib.sha256(candidate.read_bytes()).hexdigest()
+                if "://" not in ref and candidate.is_file()
+                else None
+            )
     identity = str(
-        content_digest({"urdf": hashlib.sha256(source).hexdigest(), "meshes": identities})
+        content_digest(
+            {"urdf": hashlib.sha256(source).hexdigest(), "meshes": identities, "visuals": visuals}
+        )
     )
     return root, assets, identity
+
+
+@dataclass(frozen=True)
+class JointInterval:
+    joint: str
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True)
+class BearingArc:
+    pair: Pair
+    axes: tuple[JointInterval, ...]
+    depth: float
+
+
+_CAD_SWEEPS = Path(__file__).with_name("sentient_wuji_cad_sweeps.csv")
+
+
+def nominal_bearings() -> tuple[Bearing, ...]:
+    table = Path(__file__).with_name("sentient_wuji_bearings.csv")
+    with table.open(newline="") as stream:
+        return tuple(
+            (row["link_a"], row["link_b"], float(row["cap_m"])) for row in csv.DictReader(stream)
+        )
+
+
+def cad_sweep_identity() -> str:
+    return hashlib.sha256(_CAD_SWEEPS.read_bytes()).hexdigest()
+
+
+def certified_arcs(certificate: str | None, geometry_id: str) -> tuple[BearingArc, ...]:
+    if certificate is None:
+        return ()
+    if certificate != cad_sweep_identity():
+        raise ValueError("unknown CAD bearing certificate")
+    with _CAD_SWEEPS.open(newline="") as stream:
+        arcs: list[BearingArc] = []
+        for row in csv.DictReader(stream):
+            if row["geometry_sha256"] != geometry_id:
+                continue
+            axes = tuple(
+                JointInterval(
+                    row["joint" + suffix],
+                    float(row["lower_rad" + suffix]),
+                    float(row["upper_rad" + suffix]),
+                )
+                for suffix in ("", "_2")
+                if row.get("joint" + suffix)
+            )
+            arcs.append(
+                BearingArc((row["link_a"], row["link_b"]), axes, float(row["convex_cap_m"]))
+            )
+        return tuple(arcs)
 
 
 class _Named(Protocol):
@@ -107,6 +176,7 @@ class CollisionModel:
         allowed: frozenset[Pair],
         missing_geometry: tuple[str, ...],
         bearings: dict[Pair, float],
+        arcs: tuple[BearingArc, ...],
     ) -> None:
         self.model = model
         self.data = cast("_Data", _mj.MjData(model))
@@ -122,6 +192,14 @@ class CollisionModel:
                 parent = int(model.body_parentid[parent])
         self.names = tuple(model.body(i).name for i in range(model.nbody))
         self.slide = model.jnt_type == int(_mj.mjtJoint.mjJNT_SLIDE)
+        self.arcs = arcs
+        self.arc_joints = {
+            arc.pair: (
+                tuple((model.joint(axis.joint).id, axis.lower, axis.upper) for axis in arc.axes),
+                arc.depth,
+            )
+            for arc in arcs
+        }
         self.allowed = allowed
         self.missing_geometry = missing_geometry
         self.checked = not missing_geometry and len(np.unique(model.geom_bodyid)) >= 2
@@ -157,8 +235,18 @@ class CollisionModel:
         neutral: Floats,
         allowed: tuple[Pair, ...],
         bearings: tuple[Bearing, ...] = (),
+        arcs: tuple[BearingArc, ...] = (),
     ) -> CollisionModel | None:
-        root, assets, _ = geometry
+        root, assets, geometry_id = geometry
+        # A pre-certificate saved nominal profile can still carry all old
+        # depth allowances. Never transfer those grants onto changed geometry.
+        if (
+            bearings
+            and frozenset(bearings) == frozenset(nominal_bearings())
+            and not certified_arcs(cad_sweep_identity(), geometry_id)
+        ):
+            raise ValueError("nominal Sentient-Wuji bearing limits require the exact certified CAD")
+
         tree = Kinematics.of(ET.tostring(root))
         caps: dict[Pair, float] = {}
         for a, b, depth in bearings:
@@ -220,7 +308,9 @@ class CollisionModel:
         model.opt.disableflags |= int(_mj.mjtDisableBit.mjDSBL_FILTERPARENT)
         model.geom_margin[:] = cls.margin_m
         pairs = frozenset((min(a, b), max(a, b)) for a, b in allowed)
-        return cls(model, ordered_joints, neutral, pairs, tuple(sorted(all_groups - bearing)), caps)
+        return cls(
+            model, ordered_joints, neutral, pairs, tuple(sorted(all_groups - bearing)), caps, arcs
+        )
 
     def _contacts(self, q_full: Floats) -> dict[tuple[int, int], _Contact]:
         self.data.qpos[self.permutation] = q_full
@@ -250,6 +340,13 @@ class CollisionModel:
             if pair in self.allowed:
                 continue
             cap = self.geom_bearing_cap.get(geoms, 0.0)
+            arc_entry = self.arc_joints.get(pair)
+            if arc_entry is not None:
+                axes, certified_depth = arc_entry
+                # This evidence covers only the original CAD, one named rotary pair,
+                # and its certified angle interval. Keep absolute penetration unchanged.
+                if all(lo <= self.data.qpos[index] <= hi for index, lo, hi in axes):
+                    cap = max(cap, certified_depth)
             if depth > cap:
                 if depth > unallowed:
                     unallowed, worst = depth, pair

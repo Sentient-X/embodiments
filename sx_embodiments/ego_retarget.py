@@ -7,7 +7,6 @@ observation and a kinematically feasible robot fit are distinct pieces of eviden
 
 from __future__ import annotations
 
-import csv
 import json
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
@@ -22,7 +21,15 @@ import numpy as np
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue
 
-from ._ego_collision import Bearing, CollisionModel, Pair, collision_assets
+from ._ego_collision import (
+    Bearing,
+    CollisionModel,
+    Pair,
+    cad_sweep_identity,
+    certified_arcs,
+    collision_assets,
+    nominal_bearings,
+)
 from .kinematics import JointType, Kinematics, from_xyz_rpy
 
 type Floats = NDArray[np.float64]
@@ -71,6 +78,7 @@ class MappingProfile:
     camera_optical_link: str | None = None
     allowed_collision_pairs: tuple[Pair, ...] = ()
     bearing_depth_limits_m: tuple[Bearing, ...] = ()
+    cad_sweep_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not self.hands or set(self.hands) - {"left", "right"}:
@@ -103,15 +111,17 @@ class MappingProfile:
                 for part in (base, "link3", "link4", "tip_link"):
                     links.append(f"{side}_finger{finger}_{part}")
             hands[side] = tuple(links)
-        with Path(__file__).with_name("sentient_wuji_bearings.csv").open(newline="") as stream:
-            bearings = tuple(
-                (row["link_a"], row["link_b"], float(row["cap_m"]))
-                for row in csv.DictReader(stream)
-            )
-        return cls(hands, "zed_left_optical", bearing_depth_limits_m=bearings)
+        bearings = nominal_bearings()
+        return cls(
+            hands,
+            "zed_left_optical",
+            bearing_depth_limits_m=bearings,
+            cad_sweep_sha256=cad_sweep_identity(),
+        )
 
     def document(self) -> dict[str, JsonValue]:
         return {
+            "cad_sweep_sha256": self.cad_sweep_sha256,
             "hands": {s: list(links) for s, links in self.hands.items()},
             "camera_optical_link": self.camera_optical_link,
             "allowed_collision_pairs": [list(pair) for pair in self.allowed_collision_pairs],
@@ -125,6 +135,7 @@ class MappingProfile:
             "hands",
             "camera_optical_link",
             "allowed_collision_pairs",
+            "cad_sweep_sha256",
             "bearing_depth_limits_m",
         }:
             raise ValueError("profile expects hands and optional camera_optical_link")
@@ -172,7 +183,10 @@ class MappingProfile:
             ):
                 raise ValueError("each bounded bearing needs two link names and a depth in metres")
             limited.append((row[0], row[1], float(row[2])))
-        return cls(mapped, camera, tuple(pairs), tuple(limited))
+        certificate = document.get("cad_sweep_sha256")
+        if certificate is not None and not isinstance(certificate, str):
+            raise ValueError("cad_sweep_sha256 must be a certificate digest or null")
+        return cls(mapped, camera, tuple(pairs), tuple(limited), certificate)
 
 
 @dataclass(frozen=True)
@@ -202,6 +216,9 @@ class Fit:
     bearing_depth_limits_m: Floats
     collision_missing_geometry: tuple[str, ...]
     collision_description_sha256: str
+    applied_cad_sweep_sha256: str
+    cad_sweep_joint_names: tuple[str, ...]
+    cad_sweep_bounds_rad: Floats
 
     def save(self, path: Path) -> None:
         with path.open("wb") as handle:
@@ -370,9 +387,9 @@ class _Targets:
             rotation = sites.data.xmat[sites.ids[self.camera]].reshape(3, 3)
             values = np.r_[
                 values,
-                0.16 * (rotation[:, 2] - camera_rotation[:, 2]),
-                0.08 * (rotation[:, 1] - camera_rotation[:, 1]),
-                0.6 * (poses[self.camera] - camera_rotation[:, 3]),
+                0.32 * (rotation[:, 2] - camera_rotation[:, 2]),
+                0.40 * (rotation[:, 1] - camera_rotation[:, 1]),
+                0.42 * (poses[self.camera] - camera_rotation[:, 3]),
             ]
         return values
 
@@ -385,10 +402,10 @@ class _Targets:
         if self.camera is not None:
             rotation = sites.data.xmat[sites.ids[self.camera]].reshape(3, 3)
             active = sites.ancestor[self.camera] & ~sites.slide
-            for index, weight in ((2, 0.16), (1, 0.08)):
+            for index, weight in ((2, 0.32), (1, 0.40)):
                 camera_jac = np.cross(sites.data.xaxis, rotation[:, index]) * active[:, None]
                 jac = np.concatenate((jac, weight * camera_jac.T))
-            jac = np.concatenate((jac, 0.6 * full[self.camera]))
+            jac = np.concatenate((jac, 0.42 * full[self.camera]))
         return jac if sites.robot.coupling is None else jac @ sites.robot.coupling
 
 
@@ -468,8 +485,23 @@ def solve(
     neutral = robot.neutral
     if robot.coupling is not None:
         neutral = robot.coupling @ neutral + robot.offset
+    arcs = certified_arcs(profile.cad_sweep_sha256, geometry[2])
+    if profile.cad_sweep_sha256 is not None and not arcs:
+        raise ValueError(
+            "this CAD sweep certificate does not apply to the supplied URDF and assets"
+        )
+    for arc in arcs:
+        for axis in arc.axes:
+            i = robot.names.index(axis.joint)
+            robot.lower[i] = max(robot.lower[i], axis.lower)
+            robot.upper[i] = min(robot.upper[i], axis.upper)
     collision = CollisionModel.read(
-        geometry, native, neutral, profile.allowed_collision_pairs, profile.bearing_depth_limits_m
+        geometry,
+        native,
+        neutral,
+        profile.allowed_collision_pairs,
+        profile.bearing_depth_limits_m,
+        arcs,
     )
     return _solve(
         robot,
@@ -697,6 +729,16 @@ def _solve(
         np.asarray([depth for _, _, depth in profile.bearing_depth_limits_m], dtype=np.float64),
         collision.missing_geometry if collision is not None else ("no collision geometry",),
         geometry_id,
+        (profile.cad_sweep_sha256 or "") if collision is not None and collision.arcs else "",
+        tuple(axis.joint for arc in collision.arcs for axis in arc.axes)
+        if collision is not None
+        else (),
+        np.asarray(
+            [(axis.lower, axis.upper) for arc in collision.arcs for axis in arc.axes]
+            if collision is not None
+            else (),
+            dtype=np.float64,
+        ).reshape(-1, 2),
     )
 
 
@@ -714,6 +756,9 @@ def _placement_score(fit: Fit) -> float:
             score += float(np.quantile(finite, 0.9)) * 0.5
         scores.append(score)
     tracking = max(scores) + float(np.mean(scores))
+    orientation = fit.camera_rotation_error_rad
+    if np.isfinite(orientation).all():
+        tracking += 0.14 * float(np.quantile(orientation, 0.9))
     depth = fit.self_collision_unallowed_m
     if np.isfinite(depth).all():
         # Rank contact-free trajectories first, then compare tracking error.
@@ -826,17 +871,27 @@ def _virtual_fit(
     if collision is None and len(chosen) == len(times):
         return best
 
-    # Sparse fits can choose a different IK branch from the native-clock fit.
-    # Compare the best three candidates on the actual ordered sequence and reuse
-    # the winning trajectory. No frames are dropped from final FK residuals.
-    best_score = np.inf
+    # Rank the shortlist on contiguous native-cadence spans near the start,
+    # middle, end, and extreme wrists. Only the winner needs a complete episode.
     all_indices = np.arange(len(times), dtype=np.int64)
+    observed = np.flatnonzero(np.logical_or.reduce(tuple(observations.values())))
+    anchors = set(observed[np.linspace(0, len(observed) - 1, min(4, len(observed))).astype(int)])
+    for side in sides:
+        indices = np.flatnonzero(observations[side])
+        if len(indices):
+            displacement = hands[side][indices, 0] - np.median(hands[side][indices, 0], axis=0)
+            anchors.add(indices[np.linalg.norm(displacement, axis=1).argmax()])
+    pieces = [all_indices[max(0, int(i) - 4) : min(len(times), int(i) + 5)] for i in anchors]
+    probe = np.unique(np.concatenate(pieces))
+    best_score = np.inf
     for _, point in sorted(sampled, key=lambda item: item[0])[:3]:
-        fit = fit_at(point, all_indices, checked=True)
+        fit = fit_at(point, probe, checked=True)
         score = _placement_score(fit)
         if score < best_score:
             best, best_score = fit, score
-    return best
+    if len(probe) == len(times):
+        return best
+    return fit_at(best.robot_from_world[:3, 3], all_indices, checked=True)
 
 
 def estimate_registration(
