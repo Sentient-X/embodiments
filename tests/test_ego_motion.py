@@ -227,6 +227,16 @@ def test_head_follows_source_camera_direction_and_turn_rate(tmp_path):
     assert report.document() == expected.document()
     final, _ = optimize_trajectory(path, profile, checkpoints={key: complete}, **args)
     np.testing.assert_array_equal(final.q, fit.q)
+    for stop in (
+        "iteration limit",
+        "relative objective tolerance",
+        "no adjustable tracking coordinates",
+    ):
+        impossible = replace(
+            first, q=args["q"].copy(), objective=first.objective[:1], linear_residuals=(), stop=stop
+        )
+        with pytest.raises(ValueError, match="termination"):
+            optimize_trajectory(path, profile, checkpoints={key: impossible}, **args)
     invalid = replace(first, q=first.q + 0.1)
     with pytest.raises(ValueError, match="checkpoint"):
         optimize_trajectory(path, profile, checkpoints={key: invalid}, **args)

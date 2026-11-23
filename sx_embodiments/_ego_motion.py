@@ -614,6 +614,21 @@ class _Span:
                 )
             ):
                 raise ValueError("invalid motion checkpoint clock segment or solver history")
+            steps = len(cached.objective) - 1
+            if (
+                (cached.stop == "iteration limit" and steps != 36)
+                or ((cached.stop == "no adjustable tracking coordinates") != (len(self.ids) == 0))
+                or (not len(self.ids) and steps != 0)
+                or (
+                    cached.stop == "relative objective tolerance"
+                    and (
+                        steps == 0
+                        or cached.objective[-2] - cached.objective[-1]
+                        >= 1e-4 * max(1.0, cached.objective[-2])
+                    )
+                )
+            ):
+                raise ValueError("motion checkpoint termination disagrees with the solver history")
             other = np.ones(q.shape[1], dtype=bool)
             other[self.ids] = False
             robot = self.tracking.sites.robot
