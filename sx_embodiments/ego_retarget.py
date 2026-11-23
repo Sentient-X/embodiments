@@ -30,6 +30,7 @@ from ._ego_collision import (
     collision_assets,
     nominal_bearings,
 )
+from ._ego_temporal import native_gaps, regularize
 from .kinematics import JointType, Kinematics, from_xyz_rpy
 
 type Floats = NDArray[np.float64]
@@ -469,16 +470,7 @@ def collision_description_sha256(urdf: Path) -> str:
     return collision_assets(urdf)[2]
 
 
-def solve(
-    urdf: Path,
-    profile: MappingProfile,
-    *,
-    time_ns: Indices,
-    hands_world_m: Mapping[str, Floats],
-    world_from_camera: Floats,
-    robot_from_world: Floats | None,
-) -> Fit:
-    """Fit on the native clock. Registration explicitly maps the input world to the URDF root."""
+def _configured(urdf: Path, profile: MappingProfile) -> tuple[_Robot, CollisionModel | None, str]:
     robot = _model(urdf)
     geometry = collision_assets(urdf)
     native = tuple(robot.model.joint(i).name for i in range(robot.model.njnt))
@@ -503,15 +495,78 @@ def solve(
         profile.bearing_depth_limits_m,
         arcs,
     )
-    return _solve(
+    return robot, collision, geometry[2]
+
+
+def solve(
+    urdf: Path,
+    profile: MappingProfile,
+    *,
+    time_ns: Indices,
+    hands_world_m: Mapping[str, Floats],
+    world_from_camera: Floats,
+    robot_from_world: Floats | None,
+    fps: float | None = None,
+) -> Fit:
+    """Fit on the native clock. Registration explicitly maps the input world to the URDF root."""
+
+    robot, collision, geometry_id = _configured(urdf, profile)
+    fit = _solve(
         robot,
         collision,
-        geometry[2],
+        geometry_id,
         profile,
         time_ns=time_ns,
         hands_world_m=hands_world_m,
         world_from_camera=world_from_camera,
         robot_from_world=robot_from_world,
+        fps=fps,
+    )
+    return _solve(
+        robot,
+        collision,
+        geometry_id,
+        profile,
+        time_ns=time_ns,
+        hands_world_m=hands_world_m,
+        world_from_camera=world_from_camera,
+        robot_from_world=fit.robot_from_world,
+        seed=fit.q,
+        fps=fps,
+    )
+
+
+def refine_trajectory(
+    urdf: Path,
+    profile: MappingProfile,
+    *,
+    time_ns: Indices,
+    hands_world_m: Mapping[str, Floats],
+    world_from_camera: Floats,
+    robot_from_world: Floats,
+    joint_names: tuple[str, ...],
+    q: Floats,
+    fps: float | None = None,
+) -> Fit:
+    """Refine a source-matched, previously solved native trajectory, rechecking final geometry.
+
+    The caller binds the source and seed provenance. The joint ordering and native
+    kinematic limits are checked here. Use the capture's declared fps when available.
+    """
+    robot, collision, geometry_id = _configured(urdf, profile)
+    if tuple(joint_names) != robot.names:
+        raise ValueError("seed joint names must match independent URDF coordinates in order")
+    return _solve(
+        robot,
+        collision,
+        geometry_id,
+        profile,
+        time_ns=time_ns,
+        hands_world_m=hands_world_m,
+        world_from_camera=world_from_camera,
+        robot_from_world=robot_from_world,
+        seed=np.asarray(q, dtype=np.float64),
+        fps=fps,
     )
 
 
@@ -525,6 +580,8 @@ def _solve(
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
     robot_from_world: Floats | None,
+    seed: Floats | None = None,
+    fps: float | None = None,
 ) -> Fit:
     times = np.asarray(time_ns)
     if (
@@ -543,6 +600,7 @@ def _solve(
             time_ns=times,
             hands_world_m=hands_world_m,
             world_from_camera=world_from_camera,
+            fps=fps,
         )
     placement = np.asarray(robot_from_world, dtype=np.float64)
     cameras = np.asarray(world_from_camera, dtype=np.float64)
@@ -586,7 +644,7 @@ def _solve(
     camera_position_error = max_depth.copy()
     worst_pairs: list[Pair] = []
 
-    for i, mask in enumerate(present):
+    def frame_terms(mask: NDArray[np.bool_]) -> _Targets:
         key = tuple(bool(v) for v in mask)
         if key not in target_cache:
             observed = mask[map_indices // 21]
@@ -596,86 +654,161 @@ def _solve(
             digit = indices % 21
             weights = np.where(digit == 0, 2.5, np.where(digit % 4 == 0, 1.0, 0.45))
             target_cache[key] = _Targets(ids, origins, indices, weights, camera)
-        terms = target_cache[key]
-        first = i == 0
-        dt = 0.0 if first else (int(times[i]) - int(times[i - 1])) * 1e-9
-        # Penalize squared joint velocity on the native sampling interval. This weak
-        # prior resolves redundancy while leaving positions in the capture's original clock.
-        temporal = 0.0 if first else 0.0005 / max(dt, 1e-6)
-        lo = robot.lower if first else np.maximum(robot.lower, q - dt * robot.velocity)
-        hi = robot.upper if first else np.minimum(robot.upper, q + dt * robot.velocity)
-        previous = q
-        flat = points[i].reshape(-1, 3)
-        q = _fit_frame(
-            sites, terms, flat, camera_targets[i], previous, temporal, lo, hi, 65 if first else 12
-        )
-        if collision is not None and collision.at(sites.full_q(q)).unallowed > 1e-6:
+        return target_cache[key]
+
+    if seed is None:
+        for i, mask in enumerate(present):
+            terms = frame_terms(mask)
+            first = i == 0
+            dt = 0.0 if first else (int(times[i]) - int(times[i - 1])) * 1e-9
+            # Penalize squared joint velocity on the native sampling interval. This weak
+            # prior resolves redundancy while leaving positions in the capture's original clock.
+            temporal = 0.0 if first else 0.0005 / max(dt, 1e-6)
+            lo = robot.lower if first else np.maximum(robot.lower, q - dt * robot.velocity)
+            hi = robot.upper if first else np.minimum(robot.upper, q + dt * robot.velocity)
+            previous = q
+            flat = points[i].reshape(-1, 3)
             q = _fit_frame(
                 sites,
                 terms,
                 flat,
                 camera_targets[i],
-                q,
+                previous,
                 temporal,
                 lo,
                 hi,
-                35 if first else 16,
-                collision,
+                65 if first else 12,
             )
-            # If the local IK step enters a blocked branch, recover only the
-            # joints changing the relative pose of colliding surfaces. Common ancestors,
-            # the other arm, and unaffected digits can keep tracking.
-            contact = collision.at(sites.full_q(q))
-            if contact.unallowed > 1e-6 and collision.at(sites.full_q(previous)).unallowed <= 1e-6:
-                candidate = q.copy()
-                locked = np.zeros(len(q), dtype=np.bool_)
-                for _ in range(6):
-                    blockers = contact.blocked_joints
-                    if robot.coupling is not None:
-                        blockers = np.asarray(np.any(robot.coupling[blockers] != 0.0, axis=0))
-                    if not np.any(blockers & ~locked):
+            if collision is not None and collision.at(sites.full_q(q)).unallowed > 1e-6:
+                q = _fit_frame(
+                    sites,
+                    terms,
+                    flat,
+                    camera_targets[i],
+                    q,
+                    temporal,
+                    lo,
+                    hi,
+                    35 if first else 16,
+                    collision,
+                )
+                # If the local IK step enters a blocked branch, recover only the
+                # joints changing the relative pose of colliding surfaces. Common ancestors,
+                # the other arm, and unaffected digits can keep tracking.
+                contact = collision.at(sites.full_q(q))
+                if (
+                    contact.unallowed > 1e-6
+                    and collision.at(sites.full_q(previous)).unallowed <= 1e-6
+                ):
+                    candidate = q.copy()
+                    locked = np.zeros(len(q), dtype=np.bool_)
+                    for _ in range(6):
+                        blockers = contact.blocked_joints
+                        if robot.coupling is not None:
+                            blockers = np.asarray(np.any(robot.coupling[blockers] != 0.0, axis=0))
+                        if not np.any(blockers & ~locked):
+                            q = previous
+                            break
+                        locked |= blockers
+                        q = np.where(locked, previous, candidate)
+                        contact = collision.at(sites.full_q(q))
+                        if contact.unallowed <= 1e-6:
+                            # Recover the feasible fraction of the restricted joint motion.
+                            delta = candidate - q
+                            low, high = 0.0, 1.0
+                            for _ in range(5):
+                                fraction = (low + high) / 2
+                                if (
+                                    collision.at(sites.full_q(q + fraction * delta)).unallowed
+                                    <= 1e-6
+                                ):
+                                    low = fraction
+                                else:
+                                    high = fraction
+                            q = q + low * delta
+                            break
+                    else:
                         q = previous
-                        break
-                    locked |= blockers
-                    q = np.where(locked, previous, candidate)
-                    contact = collision.at(sites.full_q(q))
-                    if contact.unallowed <= 1e-6:
-                        # Recover the feasible fraction of the restricted joint motion.
-                        delta = candidate - q
-                        low, high = 0.0, 1.0
-                        for _ in range(5):
-                            fraction = (low + high) / 2
-                            if collision.at(sites.full_q(q + fraction * delta)).unallowed <= 1e-6:
-                                low = fraction
-                            else:
-                                high = fraction
-                        q = q + low * delta
-                        break
-                else:
-                    q = previous
-        seq[i] = q
-    # A symmetric pass damps alternating IK branches without adding a frame of lag.
-    # At most half of each sample comes from its neighbours' time-weighted line.
-    # This convex combination preserves box bounds; adjacent velocities are also
-    # convex combinations of the original three velocities on an irregular clock.
-    # Keep observed/occluded transitions and recording gaps at their solved values.
-    if len(times) >= 3:
-        intervals = np.diff(times).astype(np.float64) * 1e-9
-        before, after = intervals[:-1], intervals[1:]
-        supported = (
-            np.all(present[:-2] == present[1:-1], axis=1)
-            & np.all(present[1:-1] == present[2:], axis=1)
-            & (np.maximum(before, after) <= 0.15)
+            seq[i] = q
+        # A symmetric pass damps alternating IK branches without adding a frame of lag.
+        # At most half of each sample comes from its neighbours' time-weighted line.
+        # This convex combination preserves box bounds; adjacent velocities are also
+        # convex combinations of the original three velocities on an irregular clock.
+        # Keep observed/occluded transitions and recording gaps at their solved values.
+        if len(times) >= 3:
+            intervals = np.diff(times).astype(np.float64) * 1e-9
+            before, after = intervals[:-1], intervals[1:]
+            gaps = native_gaps(intervals, fps)
+            supported = (
+                np.all(present[:-2] == present[1:-1], axis=1)
+                & np.all(present[1:-1] == present[2:], axis=1)
+                & ~gaps[:-1]
+                & ~gaps[1:]
+            )
+            fraction = (before / (before + after))[:, None]
+            interpolated = (1 - fraction) * seq[:-2] + fraction * seq[2:]
+            weight = (0.5 * supported)[:, None]
+            filtered = seq[1:-1] + weight * (interpolated - seq[1:-1])
+            if collision is not None:
+                for row in np.flatnonzero(supported):
+                    if collision.at(sites.full_q(filtered[row])).unallowed > 1e-6:
+                        filtered[row] = seq[row + 1]
+            proposed = seq.copy()
+            proposed[1:-1] = filtered
+            if np.all(
+                np.abs(np.diff(proposed, axis=0)) <= intervals[:, None] * robot.velocity + 1e-10
+            ):
+                seq = proposed
+    else:
+        influence = [
+            np.any(sites.ancestor[np.flatnonzero(map_indices // 21 == side)], axis=0)
+            for side in range(len(sides))
+        ]
+        availability = present
+        if camera is not None:
+            influence.append(sites.ancestor[camera])
+            availability = np.column_stack((present, np.ones(len(times), dtype=np.bool_)))
+        rows = np.asarray(influence, dtype=np.bool_)
+        coupling = robot.coupling
+        if coupling is not None:
+            rows = (rows.astype(np.int64) @ (coupling != 0).astype(np.int64)) > 0
+
+        def blocked(active: NDArray[np.bool_]) -> NDArray[np.bool_]:
+            return active if coupling is None else np.any(coupling[active] != 0, axis=0)
+
+        def correct(row: int, initial: Floats, smooth: Floats) -> Floats:
+            # Preserve the original observed task-space motion with one damped
+            # geometric Jacobian step about the smooth posture. Redundant joint
+            # coordinates therefore retain their low-curvature solution.
+            terms = frame_terms(present[row])
+            flat = points[row].reshape(-1, 3)
+            prior = terms.values(flat, camera_targets[row], sites.positions(initial), sites)
+            poses = sites.positions(smooth)
+            error = prior - terms.values(flat, camera_targets[row], poses, sites)
+            jac = terms.jacobian(poses, sites)
+            # Scale by a tenth of a second of each joint's native travel. The
+            # normalized increment works for prismatic and revolute coordinates.
+            metric = 0.1 * robot.velocity
+            jac = jac * metric
+            normal = jac.T @ jac
+            normal.flat[:: len(metric) + 1] += 0.12**2
+            step = np.linalg.solve(normal, jac.T @ error)
+            return smooth + 0.8 * metric * step
+
+        seq = regularize(
+            seed,
+            times,
+            availability,
+            rows,
+            robot.lower,
+            robot.upper,
+            robot.velocity,
+            fps,
+            correct,
+            sites.full_q,
+            blocked,
+            collision,
         )
-        fraction = (before / (before + after))[:, None]
-        interpolated = (1 - fraction) * seq[:-2] + fraction * seq[2:]
-        weight = (0.5 * supported)[:, None]
-        filtered = seq[1:-1] + weight * (interpolated - seq[1:-1])
-        if collision is not None:
-            for row in np.flatnonzero(supported):
-                if collision.at(sites.full_q(filtered[row])).unallowed > 1e-6:
-                    filtered[row] = seq[row + 1]
-        seq[1:-1] = filtered
 
     for i, final_q in enumerate(seq):
         positions = sites.positions(final_q)
@@ -775,6 +908,7 @@ def _virtual_fit(
     time_ns: Indices,
     hands_world_m: Mapping[str, Floats],
     world_from_camera: Floats,
+    fps: float | None = None,
 ) -> Fit:
     """Choose one virtual workspace registration using upright (+z) source and robot frames.
 
@@ -843,6 +977,7 @@ def _virtual_fit(
             hands_world_m={side: hands[side][indices] for side in sides},
             world_from_camera=cameras[indices],
             robot_from_world=frame,
+            fps=fps if len(indices) == len(times) else None,
         )
 
     # Coupled shoulders and the torso admit local IK branches, so greedy moves in

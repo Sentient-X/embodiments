@@ -262,3 +262,76 @@ def test_verified_bearings_bind_to_visual_cad_and_hold_only_within_the_arc(tmp_p
     assert np.isclose(collision.at(np.array([0.1])).maximum, 0.15)
     assert collision.at(np.array([0.1])).unallowed == 0
     assert np.isclose(collision.at(np.array([0.25])).unallowed, 0.15)
+
+
+def test_native_mimic_refinement_reduces_reversals_and_keeps_fk(setup):
+    from sx_embodiments.ego_retarget import refine_trajectory
+
+    urdf, profile = setup
+    times = 3_000_000_000 + np.arange(17, dtype=np.int64) * 66_666_667
+    seed = np.column_stack((np.zeros(17), np.tile([0.0, 0.006], 9)[:17]))
+    source = np.zeros((17, 21, 3))
+    source[:, 4, 1] = seed[:, 1]
+    source[:, 8, 1] = -seed[:, 1]
+    source[:, 5, 2] = 0.02
+    fit = refine_trajectory(
+        urdf,
+        profile,
+        time_ns=times,
+        hands_world_m={"right": source},
+        world_from_camera=np.tile(np.eye(4), (17, 1, 1)),
+        robot_from_world=np.eye(4),
+        joint_names=("rail", "close"),
+        q=seed,
+        fps=15,
+    )
+    assert np.max(np.abs(np.diff(fit.q[:, 1], n=3))) < 0.7 * np.max(
+        np.abs(np.diff(seed[:, 1], n=3))
+    )
+    assert np.max(np.abs(np.diff(fit.q[:, 1]) / (np.diff(times) * 1e-9))) <= 0.1 + 1e-9
+    np.testing.assert_allclose(fit.landmark_positions_robot_m[:, 0, 8, 1], -fit.q[:, 1], atol=1e-12)
+
+
+def test_fresh_fit_preserves_pre_gap_pose_with_declared_cadence(setup):
+    from sx_embodiments.ego_retarget import refine_trajectory
+
+    urdf, profile = setup
+    ticks = np.array([0, 1, 2, 3, 6, 7, 8, 9], dtype=np.int64)
+    times = np.rint(ticks * 1e9 / 30).astype(np.int64)
+    source = np.zeros((len(ticks), 21, 3))
+    source[:, 5, 2] = 0.02
+    args = {
+        "time_ns": times,
+        "hands_world_m": {"right": source},
+        "world_from_camera": np.tile(np.eye(4), (len(ticks), 1, 1)),
+        "robot_from_world": np.eye(4),
+        "fps": 30,
+    }
+    baseline = solve(urdf, profile, **args)
+    source[4:, :, 0] += 0.12
+    shifted = solve(urdf, profile, **args)
+    np.testing.assert_allclose(baseline.q[:4], shifted.q[:4], atol=1e-10)
+
+    sparse = np.array([0, 1, 8, 16, 24, 25], dtype=np.int64) * 66_666_667
+    seed = np.zeros((len(sparse), 2))
+    seed[-2:, 0] = 0.1
+    isolated = refine_trajectory(
+        urdf,
+        profile,
+        time_ns=sparse,
+        hands_world_m={"right": source[: len(sparse)]},
+        world_from_camera=np.tile(np.eye(4), (len(sparse), 1, 1)),
+        robot_from_world=np.eye(4),
+        joint_names=("rail", "close"),
+        q=seed,
+        fps=15,
+    )
+    np.testing.assert_array_equal(isolated.q, seed)
+
+
+def test_near_coincident_native_knots_preserve_affine_motion():
+    from sx_embodiments._ego_temporal import _smooth
+
+    dt = np.array([0.066, 1e-9, 1e-9, 1e-9, 1e-9, 0.066])
+    positions = (0.15 * np.r_[0.0, np.cumsum(dt)])[:, None]
+    np.testing.assert_allclose(_smooth(positions, dt), positions, atol=1.0e-12, rtol=0.0)

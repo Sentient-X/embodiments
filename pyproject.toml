@@ -8,7 +8,7 @@ license = { text = "Apache-2.0" }
 dependencies = ["sx-contracts>=0.1.0"]
 
 [project.optional-dependencies]
-retarget = ["mujoco>=3.11,<4", "numpy>=2.1"]
+retarget = ["mujoco>=3.11,<4", "numpy>=2.1", "scipy>=1.13"]
 capture = ["pyserial>=3.5,<4"]
 render = ["numpy>=2.1", "scipy>=1.13", "sx-geometry>=0.1.0"]
 calibrate = [
