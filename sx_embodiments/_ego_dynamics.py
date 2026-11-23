@@ -55,11 +55,13 @@ class EffortModel:
         model: _Model,
         joint_names: tuple[str, ...],
         effort_limits: Floats,
+        operating_velocity_limits: Floats,
         mapping: Floats,
         origin: Floats,
     ) -> None:
         self.joint_names = joint_names
         self.effort_limits = effort_limits
+        self.operating_velocity_limits = operating_velocity_limits
         self._model = model
         self._data = cast("_Data", _mj.MjData(model))
         self._mapping = mapping
@@ -136,11 +138,16 @@ class EffortModel:
         native = tuple(
             str(_mj.mj_id2name(model, _mj.mjtObj.mjOBJ_JOINT, i)) for i in range(model.nv)
         )
+        operating_velocity = np.full(len(joint_names), np.nan)
         if effort_limits is not None:
             if effort_limits.urdf_sha256 != hashlib.sha256(source).hexdigest():
                 raise ValueError("effort limits do not match the URDF SHA-256")
             for rating in effort_limits.joints:
                 limits[rating.joint] = rating.maximum
+                if rating.operating_velocity is not None:
+                    operating_velocity[joint_names.index(rating.joint)] = (
+                        rating.operating_velocity.maximum
+                    )
                 if rating.reflected_inertia_kg_m2 is not None:
                     model.dof_armature[native.index(rating.joint)] = rating.reflected_inertia_kg_m2
         independent = dict.fromkeys(joint_names, 0.0)
@@ -159,6 +166,7 @@ class EffortModel:
             model,
             joint_names,
             np.array([limits.get(name, np.nan) for name in joint_names]),
+            operating_velocity,
             mapping,
             origin,
         )

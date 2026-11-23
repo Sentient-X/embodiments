@@ -1069,12 +1069,15 @@ def _solve(
             )
             seq[chosen] = articulated[chosen]
 
+    contacts_by_row = (
+        [] if collision is None else collision.batch_at([sites.full_q(row) for row in seq])
+    )
     for i, final_q in enumerate(seq):
         positions = sites.positions(final_q)
         actual[i].reshape(-1, 3)[map_indices] = positions[: len(map_indices)]
         errors[i] = np.linalg.norm(actual[i] - points[i], axis=-1)
         if collision is not None:
-            contacts = collision.at(sites.data.qpos)
+            contacts = contacts_by_row[i]
             max_depth[i], excess_depth[i], bad_depth[i] = (
                 contacts.maximum,
                 contacts.excess,

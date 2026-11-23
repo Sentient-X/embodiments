@@ -38,6 +38,9 @@ class MotionReport:
     torque_before: Floats
     torque: Floats
     effort_limits: Floats
+    speed_limits: Floats
+    speed_edge_ok: Bools
+    training_speed_ok: Bools
     training_effort_ok: Bools
     effort_model_available: bool
     effort_evaluated: bool
@@ -226,6 +229,7 @@ class _Tracking:
         q: Floats,
         span: slice,
         mass: Floats,
+        interval: Floats,
         normal: _Normal | None,
         metrics: dict[str, list[Floats]] | None = None,
     ) -> float:
@@ -256,17 +260,29 @@ class _Tracking:
                         axes[t, :, col] = angular[:, self.controls]
         cost = 0.0
 
-        def term(delta: Floats, j: Floats | None, w: float) -> None:
+        def term(delta: Floats, j: Floats | None, w: float, robust: float | None = None) -> None:
             nonlocal cost
             valid = np.asarray(np.isfinite(delta).all(axis=1))
             weight = np.where(valid, w * np.sqrt(mass), 0.0)
-            r = np.where(valid[:, None], delta, 0.0) * weight[:, None]
-            cost += float(np.sum(r * r))
+            finite = np.where(valid[:, None], delta, 0.0)
+            squared = np.sum(finite**2, axis=1)
+            if robust is not None:
+                scale = np.sqrt(1 + squared / robust**2)
+                cost += float(np.sum(weight**2 * 2 * squared / (1 + scale)))
+                weight /= np.sqrt(scale)
+            else:
+                cost += float(np.sum(weight**2 * squared))
+            r = finite * weight[:, None]
             if normal is not None and j is not None:
                 normal.spatial(r, j * weight[:, None, None])
 
         for i, target, weight in self.positions:
-            term(poses[:, i] - target[span], None if jac is None else jac[:, i], weight)
+            term(
+                poses[:, i] - target[span],
+                None if jac is None else jac[:, i],
+                weight,
+                0.035 if i != self.camera else None,
+            )
         for d in self.directions:
             v, length = _unit(poses[:, d.second] - poses[:, d.first])
             j = None
@@ -285,8 +301,22 @@ class _Tracking:
                 term(
                     rotation[:, :, col] - self.rotations[span, :, col],
                     None if axes is None else axes[:, :, col],
-                    16.0,
+                    72.0,
                 )
+                # Native optical-axis rate from consecutive SLAM orientations.
+                factor = 7.0 / np.sqrt(interval)
+                error = rotation[:, :, col] - self.rotations[span, :, col]
+                residual = np.diff(error, axis=0) * factor[:, None]
+                cost += float(np.sum(residual**2))
+                if axes is not None and normal is not None and len(interval):
+                    prev = -axes[:-1, :, col] * factor[:, None, None]
+                    nex = axes[1:, :, col] * factor[:, None, None]
+                    pt, nt = prev.swapaxes(1, 2), nex.swapaxes(1, 2)
+                    normal.gradient[:-1] += (pt @ residual[:, :, None])[:, :, 0]
+                    normal.gradient[1:] += (nt @ residual[:, :, None])[:, :, 0]
+                    normal.lower[0][:-1] += pt @ prev
+                    normal.lower[0][1:] += nt @ nex
+                    normal.lower[1] += nt @ prev
         return cost
 
 
@@ -305,6 +335,15 @@ class _Span:
         self.effort, self.collision, self.pinned = effort, collision, pinned
         self.ids = tracking.controls
         self.rate = tracking.sites.robot.velocity[self.ids]
+        self.operating_rate = (
+            np.full(len(self.ids), np.inf)
+            if effort is None
+            else np.where(
+                np.isfinite(effort.operating_velocity_limits[self.ids]),
+                effort.operating_velocity_limits[self.ids],
+                np.inf,
+            )
+        )
         self.h = np.diff(time)
         self.mass = (
             np.r_[self.h[0] / 2, (self.h[:-1] + self.h[1:]) / 2, self.h[-1] / 2]
@@ -319,24 +358,27 @@ class _Span:
             original_sites[i] = tracking.sites.positions(row)[tracking.hand_sites]
             if tracking.camera is not None:
                 angle = tracking.camera_angle(span.start + i)
-                threshold = np.deg2rad(12)
-                self.camera_budget[i] = threshold if angle <= threshold else angle + np.deg2rad(2)
+                threshold = np.deg2rad(7)
+                self.camera_budget[i] = threshold if angle <= threshold else angle + np.deg2rad(1)
         original_error = np.linalg.norm(original_sites - self.hand_target, axis=2)
         self.hand_budget = np.where(
             original_error <= tracking.hand_tolerance,
             tracking.hand_tolerance,
-            original_error + 0.004,
+            original_error + np.maximum(0.004, 0.5 * (original_error - tracking.hand_tolerance)),
         )
         self.clearance = (
             np.zeros(len(q))
             if collision is None
             else np.array(
-                [max(1e-6, collision.at(tracking.sites.full_q(row)).unallowed) for row in q]
+                [
+                    max(1e-6, c.unallowed)
+                    for c in collision.batch_at([tracking.sites.full_q(row) for row in q])
+                ]
             )
         )
 
     def cost(self, q: Floats, normal: _Normal | None = None) -> float:
-        total = self.tracking.cost(q, self.span, self.mass, normal)
+        total = self.tracking.cost(q, self.span, self.mass, self.h, normal)
         active = q[:, self.ids]
         ref_weight = np.sqrt(self.mass)[:, None] / (0.45 * self.rate)
         reference = ref_weight * (active - self.seed[:, self.ids])
@@ -359,6 +401,14 @@ class _Span:
             total += float(np.sum(residual**2))
             if normal is not None:
                 normal.temporal(residual, coefficients, weight)
+        if np.any(np.isfinite(self.operating_rate)):
+            speed = _apply(active, self.v) / self.operating_rate
+            hinge = np.maximum(np.abs(speed) - 0.85, 0.0)
+            weight = 9.0 * np.sqrt(self.h)[:, None]
+            residual = weight * np.sign(speed) * hinge
+            total += float(np.sum(residual**2))
+            if normal is not None:
+                normal.temporal(residual, self.v, weight * (hinge > 0) / self.operating_rate)
         if self.effort is None or len(q) < 3:
             return total
         rated = np.isfinite(self.effort.effort_limits)
@@ -447,8 +497,17 @@ class _Span:
                 second[i] = np.clip(second[i], second[i + 1] - travel[i], second[i + 1] + travel[i])
             candidate = q.copy()
             candidate[:, ids] = (first + second) * 0.5
+            candidate[self.pinned] = q[self.pinned]
             invalid = False
-            for i in np.flatnonzero(np.any(candidate != previous, axis=1)):
+            changed = np.flatnonzero(np.any(candidate != previous, axis=1))
+            contacts = (
+                []
+                if self.collision is None
+                else self.collision.batch_at(
+                    [self.tracking.sites.full_q(candidate[i]) for i in changed]
+                )
+            )
+            for k, i in enumerate(changed):
                 tracking = self.tracking
                 positions = tracking.sites.positions(candidate[i])[tracking.hand_sites]
                 error = np.linalg.norm(positions - self.hand_target[i], axis=1)
@@ -462,7 +521,7 @@ class _Span:
                     unsafe = True
                     active |= tracking.camera_influence
                 if self.collision is not None:
-                    contact = self.collision.at(tracking.sites.full_q(candidate[i]))
+                    contact = contacts[k]
                     if contact.unallowed > threshold[i]:
                         unsafe = True
                         blocked = contact.blocked_joints
@@ -491,18 +550,28 @@ class _Span:
         residuals: list[float] = []
         if not len(self.ids):
             return q, history, residuals, "no adjustable tracking coordinates"
-        for _ in range(6):
+        for _ in range(36):
             normal = _Normal(len(q), len(self.ids))
             self.cost(q, normal)
             step, residual = normal.step(1.0 / (0.35 * self.rate))
             residuals.append(residual)
+            diagonal = normal.lower[0].diagonal(axis1=1, axis2=2)
+            descent = -normal.gradient / diagonal
             del normal
-            for scale in (1.0, 0.5, 0.25, 0.125):
-                trial = self.candidate(q, scale * step)
-                if np.array_equal(q, trial):
-                    continue
-                cost = self.cost(trial)
-                if cost < history[-1] - 1e-10 * max(1.0, history[-1]):
+            decreased = False
+            # A Newton step can point uphill once dependent coordinates are
+            # stopped by a sampled contact or upper bound. Each coordinate
+            # of the diagonal-gradient fallback independently points downhill.
+            for direction in (step, descent):
+                for scale in (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125):
+                    trial = self.candidate(q, scale * direction)
+                    if np.array_equal(q, trial):
+                        continue
+                    cost = self.cost(trial)
+                    if cost < history[-1] - 1e-10 * max(1.0, history[-1]):
+                        decreased = True
+                        break
+                if decreased:
                     break
             else:
                 return q, history, residuals, "no feasible decrease"
@@ -582,7 +651,7 @@ def optimize(
         for values, tau, measures in zip(
             [seed[span], q[span]], [initial_torque, torque], stats, strict=True
         ):
-            tracking.cost(values, span, model.mass, None, measures)
+            tracking.cost(values, span, model.mass, model.h, None, measures)
             if len(values) >= 4 and len(tracking.controls):
                 jerk = _apply(values[:, tracking.controls], model.jerk)
                 measures["worst_jerk_over_joint_speed_per_s2"].append(
@@ -608,6 +677,20 @@ def optimize(
         result["over_rated_frames"] = int(np.count_nonzero(peaks > 1.0 + 1e-9))
         return result
 
+    operating = (
+        np.full(len(robot.names), np.nan) if effort is None else effort.operating_velocity_limits
+    )
+    speed_limits = np.fmin(robot.velocity, operating)
+    native = ~(gaps | tiny)
+
+    def speed_edges(values: Floats) -> Bools:
+        speed = np.abs(np.diff(values, axis=0)) / intervals[:, None]
+        return np.asarray(native & np.all(speed <= speed_limits * (1.0 + 1e-9), axis=1))
+
+    initial_edge_ok, edge_ok = speed_edges(seed), speed_edges(q)
+    failed_edge = native & ~edge_ok
+    has_edge = np.r_[native, False] | np.r_[False, native]
+    training_speed_ok = has_edge & ~(np.r_[failed_edge, False] | np.r_[False, failed_edge])
     available = effort is not None and bool(np.all(np.isfinite(limits)))
     info: dict[str, JsonValue] = {
         "method": "whole-segment damped Gauss-Newton on native exposures with feasible line search",
@@ -624,7 +707,11 @@ def optimize(
             "wrist_per_m": 220.0,
             "fingertip_per_m": 85.0,
             "head_per_m": 10.0,
-            "camera_axis_direction": 16.0,
+            "camera_axis_direction": 72.0,
+            "camera_axis_turn_rate_s": 7.0,
+            "hand_position_pseudo_huber_scale_m": 0.035,
+            "declared_operating_speed_knee_fraction": 0.85,
+            "declared_operating_speed_excess_weight": 9.0,
             "palm_transverse_direction": 2.0,
             "upper_arm_and_forearm_direction": 2.2,
             "seed_displacement_over_speed_s": 0.45,
@@ -636,14 +723,36 @@ def optimize(
         "sampled_hand_tracking_envelope_m": {
             "wrist": 0.025,
             "fingertip": 0.04,
-            "seed_error_allowance": 0.004,
+            "outside_budget_min_allowance": 0.004,
+            "outside_budget_allowance_fraction_of_excess": 0.5,
         },
-        "sampled_camera_orientation_envelope_deg": {"angle": 12.0, "seed_error_allowance": 2.0},
+        "sampled_camera_orientation_envelope_deg": {"angle": 7.0, "seed_error_allowance": 1.0},
         "continuous_segments": len(segments),
         "training_effort_ok_frames": int(np.count_nonzero(ok)),
+        "speed_qualification": {
+            "criterion": "Each adjoining resolved native edge meets every effective speed ceiling",
+            "declared_operating_limits": {
+                robot.names[i]: float(operating[i]) for i in np.flatnonzero(np.isfinite(operating))
+            },
+            "native_edges": int(native.sum()),
+            "over_limit_edges_before": int(np.count_nonzero(native & ~initial_edge_ok)),
+            "over_limit_edges_after": int(failed_edge.sum()),
+            "supported_exposures": int(training_speed_ok.sum()),
+        },
         "optimized_joints": [robot.names[i] for i in tracking.controls],
         "segments": segments,
         "before": metrics(stats[0], initial_torque),
         "after": metrics(stats[1], torque),
     }
-    return q, MotionReport(initial_torque, torque, limits, ok, available, effort is not None, info)
+    return q, MotionReport(
+        initial_torque,
+        torque,
+        limits,
+        speed_limits,
+        edge_ok,
+        training_speed_ok,
+        ok,
+        available,
+        effort is not None,
+        info,
+    )

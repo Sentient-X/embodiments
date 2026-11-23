@@ -105,6 +105,12 @@ def test_source_bound_drive_budget_and_reflected_mass(tmp_path: Path) -> None:
     zero = np.zeros(1)
     torque, _, _, mass = model.linearize(zero, zero, np.ones(1))
     assert model.effort_limits[0] == 8
+    assert np.isnan(model.operating_velocity_limits).all()  # historical companion
+    operating = {"maximum": 0.25, "unit": "rad/s", "basis": "test axis governor"}
+    config.write_text(json.dumps(dict(data, joints=[dict(row, operating_velocity=operating)])))
+    governed = EffortModel.of(urdf, ("pitch",), effort_limits=load_effort_limits(config, urdf))
+    np.testing.assert_array_equal(governed.operating_velocity_limits, [0.25])
+    np.testing.assert_array_equal(governed.effort_limits, model.effort_limits)
     assert mass[0, 0] == pytest.approx(0.32)
     assert torque[0] == pytest.approx(0.32 - 0.6 * STANDARD_GRAVITY)
     for invalid, match in [
@@ -114,6 +120,10 @@ def test_source_bound_drive_budget_and_reflected_mass(tmp_path: Path) -> None:
         (dict(row, joint="optical"), "independent"),
         (dict(row, reflected_inertia_kg_m2=-1), "inertia"),
         (dict(row, basis=" "), "basis"),
+        (dict(row, operating_velocity=dict(operating, maximum=3)), "loosen"),
+        (dict(row, operating_velocity=dict(operating, unit="m/s")), "rad/s"),
+        (dict(row, operating_velocity=dict(operating, basis=" ")), "basis"),
+        (dict(row, operating_velocity=dict(operating, maximum=0)), "positive"),
     ]:
         config.write_text(json.dumps(dict(data, joints=[invalid])))
         with pytest.raises(ValueError, match=match):

@@ -14,12 +14,32 @@ from .kinematics import JointType, Kinematics
 
 
 @dataclass(frozen=True, slots=True)
+class OperatingVelocity:
+    maximum: float
+    unit: str
+    basis: str
+
+    @classmethod
+    def read(cls, value: object, expected: str, urdf_limit: float) -> OperatingVelocity:
+        doc = decode.exactly(value, {f.name for f in fields(cls)}, where="operating velocity")
+        maximum = decode.number(doc, "maximum")
+        unit = decode.text(doc, "unit")
+        basis = decode.text(doc, "basis").strip()
+        if unit != expected or not basis:
+            raise ValueError(f"operating velocity needs {expected} units and a source basis")
+        if maximum <= 0 or (urdf_limit > 0 and maximum > urdf_limit):
+            raise ValueError("operating velocity must be positive and cannot loosen a URDF limit")
+        return cls(maximum, unit, basis)
+
+
+@dataclass(frozen=True, slots=True)
 class EffortLimit:
     joint: str
     unit: str
     maximum: float
     basis: str
     reflected_inertia_kg_m2: float | None
+    operating_velocity: OperatingVelocity | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,13 +68,19 @@ def load_effort_limits(path: Path, urdf: Path) -> EffortLimits:
         raise ValueError("effort limits do not match the URDF SHA-256")
     tree = Kinematics.of(source)
     limits = {
-        j.attrib["name"]: float(limit.get("effort", "nan"))
+        j.attrib["name"]: limit
         for j in ET.fromstring(source).findall("joint")  # nosec B314 - input robot description
         if (limit := j.find("limit")) is not None
     }
     rows: dict[str, EffortLimit] = {}
     for obj in decode.sequence(doc, "joints"):
-        row = decode.exactly(obj, {f.name for f in fields(EffortLimit)}, where="joint effort limit")
+        raw = decode.document(obj, where="joint effort limit")
+        # Existing source-bound ratings predate the optional governor evidence.
+        row = decode.exactly(
+            {"operating_velocity": None, **raw},
+            {f.name for f in fields(EffortLimit)},
+            where="joint effort limit",
+        )
         joint = decode.text(row, "joint")
         if joint in rows or joint not in tree.independent:
             raise ValueError(f"effort limits require a unique independent joint: {joint}")
@@ -63,7 +89,8 @@ def load_effort_limits(path: Path, urdf: Path) -> EffortLimits:
         if unit != expected:
             raise ValueError(f"{joint} effort needs units of {expected}")
         maximum = decode.number(row, "maximum")
-        urdf_limit = limits.get(joint, 0)
+        limit = limits.get(joint)
+        urdf_limit = float(limit.get("effort", "nan")) if limit is not None else 0
         if maximum <= 0 or (urdf_limit > 0 and maximum > urdf_limit):
             raise ValueError(f"{joint} effort must be positive and cannot loosen a URDF limit")
         basis = decode.text(row, "basis").strip()
@@ -74,7 +101,14 @@ def load_effort_limits(path: Path, urdf: Path) -> EffortLimits:
             raise ValueError(
                 f"{joint} reflected rotational inertia requires a positive kg m² value"
             )
-        rows[joint] = EffortLimit(joint, unit, maximum, basis, rotor)
+        velocity = None
+        if row["operating_velocity"] is not None:
+            velocity = OperatingVelocity.read(
+                row["operating_velocity"],
+                "m/s" if expected == "N" else "rad/s",
+                float(limit.get("velocity", "nan")) if limit is not None else 0,
+            )
+        rows[joint] = EffortLimit(joint, unit, maximum, basis, rotor, velocity)
     if not rows:
         raise ValueError("effort limits contain no joint ratings")
     return EffortLimits(digest, tuple(rows.values()))

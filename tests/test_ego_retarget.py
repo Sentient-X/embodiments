@@ -208,6 +208,19 @@ def test_moving_parent_and_child_contact_is_visible_and_bearing_depth_is_bounded
     assert model is not None
     assert model.at(robot.neutral).unallowed == 0.0
     assert model.at(np.array([0.0, -0.64])).unallowed > 0.19
+    # Interleave clear, touching and penetrating poses across worker chunks.
+    rows = list(np.random.default_rng(53).uniform(-1, 1, (43, 2)))
+    serial = [model.at(row) for row in rows]
+    assert any(c.unallowed == 0 for c in serial) and any(c.unallowed > 0 for c in serial)
+    for expected, got in zip(serial, model.batch_at(rows), strict=True):
+        assert (expected.maximum, expected.excess, expected.unallowed, expected.worst_pair) == (
+            got.maximum,
+            got.excess,
+            got.unallowed,
+            got.worst_pair,
+        )
+        np.testing.assert_array_equal(expected.blocked_joints, got.blocked_joints)
+        np.testing.assert_array_equal(expected.violation, got.violation)
 
 
 def test_builtin_bearing_profile_round_trip(tmp_path):

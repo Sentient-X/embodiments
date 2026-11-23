@@ -1,5 +1,6 @@
 """Exercise whole-segment coupling, native clocks and admission evidence."""
 
+import hashlib
 import json
 
 import numpy as np
@@ -127,3 +128,148 @@ def test_semantic_arm_profile_roundtrip_and_validation(tmp_path):
         file.write_text(json.dumps({**legacy.document(), "arm_links": malformed}))
         with pytest.raises(ValueError, match="arm_links"):
             MappingProfile.read(file)
+
+
+@pytest.mark.parametrize(("limit", "admitted"), [(1, False), (100, True), (None, False)])
+def test_gravity_exceedance_and_unknown_axis_cannot_train(tmp_path, limit, admitted):
+    path = tmp_path / "lift.urdf"
+    effort = f' effort="{limit}"' if limit is not None else ""
+    path.write_text(
+        '<robot name="lift"><link name="base"/><link name="wrist"><inertial>'
+        '<mass value="0.6"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/>'
+        '</inertial></link><joint name="lift" type="prismatic"><parent link="base"/>'
+        '<child link="wrist"/><axis xyz="0 0 1"/>'
+        f'<limit lower="-0.1" upper="0.1" velocity="1"{effort}/></joint></robot>'
+    )
+    times = np.arange(7, dtype=np.int64) * 100_000_000
+    hands = np.zeros((len(times), 21, 3))
+    hands[:, 4, 1] = 0.03
+    fit, report = optimize_trajectory(
+        path,
+        MappingProfile({"right": ("wrist",) + (None,) * 20}),
+        time_ns=times,
+        hands_world_m={"right": hands},
+        world_from_camera=np.tile(np.eye(4), (len(times), 1, 1)),
+        robot_from_world=np.eye(4),
+        joint_names=("lift",),
+        q=np.zeros((len(times), 1)),
+        fps=10,
+    )
+    assert report.effort_evaluated
+    assert report.effort_model_available == (limit is not None)
+    expected = 0.6 * (9.81 + np.diff(fit.q[:, 0], n=2) / 0.1**2)
+    np.testing.assert_allclose(report.torque[1:-1, 0], expected, rtol=0.001)
+    np.testing.assert_array_equal(report.training_effort_ok, [False] + [admitted] * 5 + [False])
+
+
+def test_near_coincident_native_exposures_are_pinned_and_break_effort_stencils(tmp_path):
+    source = tmp_path / "arm.urdf"
+    source.write_text(DESCRIPTION)
+    mapping = MappingProfile({"right": ("wrist",) + (None,) * 20})
+    times = np.array([0, 100_000_000, 200_000_000, 200_000_001, 300_000_001, 400_000_001])
+    hands = np.zeros((len(times), 21, 3))
+    hands[:, 4, 1] = 0.02
+    seed = np.zeros((len(times), 2))
+    seed[:, 0] = [0.03, 0.07, 0.11, 0.11 + 1e-10, 0.08, 0.05]
+    fit, _ = optimize_trajectory(
+        source,
+        mapping,
+        time_ns=times,
+        hands_world_m={"right": hands},
+        world_from_camera=np.tile(np.eye(4), (len(times), 1, 1)),
+        robot_from_world=np.eye(4),
+        joint_names=("rail", "close"),
+        q=seed,
+        fps=10,
+    )
+    np.testing.assert_array_equal(fit.q[2:4].view(np.uint64), seed[2:4].view(np.uint64))
+    assert not np.array_equal(fit.q[:2], seed[:2])
+
+
+def test_head_follows_source_camera_direction_and_turn_rate(tmp_path):
+    path = tmp_path / "neck.urdf"
+    path.write_text(
+        '<robot name="neck"><link name="base"/><link name="eye"/><link name="palm"/>'
+        '<joint name="neck" type="revolute"><parent link="base"/><child link="eye"/>'
+        '<axis xyz="1 0 0"/><limit effort="3" lower="-1" upper="1" velocity="3"/></joint>'
+        '<joint name="palm_mount" type="fixed"><parent link="base"/><child link="palm"/>'
+        "</joint></robot>"
+    )
+    n = 51
+    times = 66_666_667 * np.arange(n, dtype=np.int64)
+    angle = 0.3 * np.sin(1.8 * times * 1e-9)
+    cameras = np.tile(np.eye(4), (n, 1, 1))
+    cosine, sine = np.cos(angle), np.sin(angle)
+    cameras[:, 1, 1] = cameras[:, 2, 2] = cosine
+    cameras[:, 1, 2], cameras[:, 2, 1] = -sine, sine
+    hand = np.zeros((n, 21, 3))
+    hand[:, 4, 1] = 0.05
+    fit, _ = optimize_trajectory(
+        path,
+        MappingProfile({"right": ("palm",) + (None,) * 20}, camera_optical_link="eye"),
+        time_ns=times,
+        hands_world_m={"right": hand},
+        world_from_camera=cameras,
+        robot_from_world=np.eye(4),
+        joint_names=("neck",),
+        q=np.zeros((n, 1)),
+        fps=15,
+    )
+    assert np.rad2deg(np.max(fit.camera_rotation_error_rad)) < 1
+    assert np.rad2deg(np.max(np.abs(np.diff(fit.q[:, 0] - angle)) / (np.diff(times) * 1e-9))) < 3
+
+
+def test_operating_speed_qualifies_the_actual_edges_and_both_endpoints(tmp_path):
+    path = tmp_path / "slider.urdf"
+    path.write_text(
+        '<robot name="slider"><link name="base"/><link name="palm"/><link name="guide"><inertial>'
+        '<mass value="0.1"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/>'
+        '</inertial></link><joint name="palm_mount" type="fixed"><parent link="base"/>'
+        '<child link="palm"/></joint><joint name="slide" type="prismatic"><parent link="base"/>'
+        '<child link="guide"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" '
+        'effort="100" velocity="5"/></joint></robot>'
+    )
+    limits = tmp_path / "slider.effort.json"
+    limits.write_text(
+        json.dumps(
+            {
+                "urdf_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "joints": [
+                    {
+                        "joint": "slide",
+                        "maximum": 100,
+                        "basis": "fixture rating",
+                        "unit": "N",
+                        "reflected_inertia_kg_m2": None,
+                        "operating_velocity": {
+                            "maximum": 0.1,
+                            "unit": "m/s",
+                            "basis": "fixture governor",
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    times = np.array([0, 100, 200, 300, 400, 1000, 1100], dtype=np.int64) * 1_000_000
+    q = np.array([0, 0.005, 0.025, 0.025, 0.03, 0.95, 0.946])[:, None]
+    hand = np.zeros((len(q), 21, 3))
+    hand[:, 4, 1] = 0.05
+    fit, report = optimize_trajectory(
+        path,
+        MappingProfile({"right": ("palm",) + (None,) * 20}),
+        time_ns=times,
+        hands_world_m={"right": hand},
+        joint_names=("slide",),
+        q=q,
+        fps=10,
+        effort_limits=limits,
+        robot_from_world=np.eye(4),
+        world_from_camera=np.tile(np.eye(4), (len(q), 1, 1)),
+    )
+    np.testing.assert_array_equal(fit.q, q)
+    np.testing.assert_array_equal(report.speed_limits, [0.1])
+    np.testing.assert_array_equal(report.speed_edge_ok, [True, False, True, True, False, True])
+    np.testing.assert_array_equal(
+        report.training_speed_ok, [True, False, False, True, True, True, True]
+    )

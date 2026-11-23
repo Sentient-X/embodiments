@@ -765,8 +765,8 @@ registration and source timestamps, landmarks and camera transforms. The optiona
 `arm_posture_world_m` maps each side to an N × 3 × 3 array of human shoulder, elbow
 and wrist positions in world metres. A body profile may declare the corresponding
 three URDF link names per side under `arm_links`. This fits the directions of the human
-upper arm and forearm across different limb lengths. Each wrist, observed fingertip
-and the camera also contribute tracking terms. The optimizer preserves the fitted
+upper arm and forearm across different limb lengths. Each wrist and observed fingertip contributes a robust position residual. The camera
+contributes optical-axis orientation and native turn-rate residuals. The optimizer preserves the fitted
 digit coordinates, source exposure clock, URDF position and velocity limits, and
 sampled collision-depth budgets.
 
@@ -783,8 +783,13 @@ The returned `MotionReport.torque_before` and `torque` arrays use the fit's join
 order. Revolute efforts are in Nm and prismatic efforts in N. Exact source time and
 interior three-pose stencils determine the derivatives. Endpoints and breaks remain
 NaN. `effort_limits` and `training_effort_ok` permit a caller to exclude exposures
-with missing or exceeded bounds. Pass a hash-bound `effort_limits` companion file to
-use more specific actuator limits and reflected inertias. Robot-root gravity follows
+with missing or exceeded bounds. The separate `speed_limits`, `speed_edge_ok`
+and `training_speed_ok` arrays record the strictest declared speed ceiling, each
+resolved interval’s result and whether its adjoining native intervals support an
+exposure. A governor exceedance excludes both affected endpoints. The fit penalizes
+exceedances while retaining reach, camera orientation and collision evidence.
+Pass a hash-bound `effort_limits` companion file to
+use actuator effort limits, available operating speed governors and reflected inertias. Robot-root gravity follows
 the supplied world-to-robot rotation. Contact forces, payload, friction and actuator
 thermal duty are outside this unloaded estimate. Source-body agreement measures
 agreement with the reconstruction.

@@ -15,7 +15,7 @@ from pathlib import Path
 from sx_contracts.identity import canonical_json
 
 from . import development_embodiments
-from ._ego_effort_limits import EffortLimit, EffortLimits
+from ._ego_effort_limits import EffortLimit, EffortLimits, OperatingVelocity
 from .assembly import Assembly, Member, Pose, Subtree
 from .assets import PACKAGE_URI_PREFIX, description_asset_uri
 from .checks import stl_bounds
@@ -24,6 +24,8 @@ from .known.static_upper_body import (
     STATIC_UPPER_BODY_LEFT_ARM,
     STATIC_UPPER_BODY_NECK,
     STATIC_UPPER_BODY_RIGHT_ARM,
+    STATIC_UPPER_BODY_SERVO_APPROACH,
+    STATIC_UPPER_BODY_SPEED_CAP,
     STATIC_UPPER_BODY_TORSO,
     STATIC_UPPER_BODY_URDF,
 )
@@ -126,7 +128,22 @@ def _body_effort_limits(urdf: bytes) -> EffortLimits:
             maximum = rating.effort if continuous is None else continuous * drive.actuator.reduction
             basis = "stall at 12 V" if continuous is None else "continuous rated torque"
             source = f"sx_embodiments.layout.ACTUATOR_RATINGS {drive.actuator.model.value}, {basis}"
-            rows.append(EffortLimit(axis.name, "Nm", maximum, source, rating.armature))
+            velocity = None
+            if axis.name in STATIC_UPPER_BODY_SPEED_CAP:
+                velocity = OperatingVelocity(
+                    STATIC_UPPER_BODY_SPEED_CAP[axis.name],
+                    "rad/s",
+                    "sx_embodiments.known.static_upper_body.STATIC_UPPER_BODY_SPEED_CAP, "
+                    "torso controller",
+                )
+            elif servo := STATIC_UPPER_BODY_SERVO_APPROACH.get(drive.actuator.bus_port):
+                velocity = OperatingVelocity(
+                    min(servo.speed, rating.velocity),
+                    "rad/s",
+                    "sx_embodiments.known.static_upper_body.STATIC_UPPER_BODY_SERVO_APPROACH, "
+                    f"{drive.actuator.bus_port} port firmware approach",
+                )
+            rows.append(EffortLimit(axis.name, "Nm", maximum, source, rating.armature, velocity))
     return EffortLimits(hashlib.sha256(urdf).hexdigest(), tuple(rows))
 
 

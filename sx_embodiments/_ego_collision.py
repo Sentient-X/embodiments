@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -328,6 +332,28 @@ class CollisionModel:
             if old is None or contact.dist < old.dist:
                 result[pair] = contact
         return result
+
+    def batch_at(self, rows: Sequence[Floats]) -> list[Contacts]:
+        """Check independent poses in input order with the same narrow-phase CAD query as at()."""
+        # MjModel and the allowances are read-only. Each chunk owns its own
+        # native MjData so the GIL-releasing collision recursion can run in parallel.
+        count = len(rows)
+        workers = min(8, os.cpu_count() or 1, (count + 3) // 4)
+        if count < 16 or workers < 2:
+            return [self.at(row) for row in rows]
+
+        def check_chunk(start: int) -> list[Contacts]:
+            worker = copy(self)
+            worker.data = cast("_Data", _mj.MjData(self.model))
+            return [worker.at(row) for row in rows[start : start + width]]
+
+        width = (count + workers - 1) // workers
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return [
+                contact
+                for chunk in pool.map(check_chunk, range(0, count, width))
+                for contact in chunk
+            ]
 
     def at(
         self, q_full: Floats, *, gradient: bool = False, penetration_only: bool = False
