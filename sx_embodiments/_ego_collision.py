@@ -329,7 +329,9 @@ class CollisionModel:
                 result[pair] = contact
         return result
 
-    def at(self, q_full: Floats, *, gradient: bool = False) -> Contacts:
+    def at(
+        self, q_full: Floats, *, gradient: bool = False, penetration_only: bool = False
+    ) -> Contacts:
         contacts = self._contacts(q_full)
         maximum, excess, unallowed = 0.0, 0.0, 0.0
         worst: Pair = ("", "")
@@ -360,7 +362,8 @@ class CollisionModel:
                         self.model.geom_bodyid[contact.geom2],
                     )
                     blocked |= self.ancestor[first] != self.ancestor[second]
-            residual = (-cap if cap > 0 else self.margin_m) - contact.dist
+            padding = 0.0 if penetration_only else self.margin_m
+            residual = (-cap if cap > 0 else padding) - contact.dist
             if residual <= 0:
                 continue
             residuals.append(residual)

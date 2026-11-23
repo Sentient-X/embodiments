@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue
 
+from ._ego_articulation import ArticulationTargets
 from ._ego_collision import (
     Bearing,
     CollisionModel,
@@ -776,7 +777,14 @@ def _solve(
         def blocked(active: NDArray[np.bool_]) -> NDArray[np.bool_]:
             return active if coupling is None else np.any(coupling[active] != 0, axis=0)
 
-        def correct(row: int, initial: Floats, smooth: Floats) -> Floats:
+        articulation_targets = ArticulationTargets.from_landmarks(
+            map_indices, len(sides), points, times, fps, sites.ancestor, camera, coupling
+        )
+        digits = articulation_targets.controls
+
+        def correct(
+            row: int, initial: Floats, smooth: Floats, articulation: bool = False
+        ) -> Floats:
             # Preserve the original observed task-space motion with one damped
             # geometric Jacobian step about the smooth posture. Redundant joint
             # coordinates therefore retain their low-curvature solution.
@@ -786,9 +794,17 @@ def _solve(
             poses = sites.positions(smooth)
             error = prior - terms.values(flat, camera_targets[row], poses, sites)
             jac = terms.jacobian(poses, sites)
+            if articulation:
+                digit_error, digit_jac = articulation_targets.residuals(
+                    row, flat, poses, sites.jacobian(poses), coupling
+                )
+                jac = np.vstack((jac, digit_jac))
+                error = np.r_[error, digit_error]
             # Scale by a tenth of a second of each joint's native travel. The
             # normalized increment works for prismatic and revolute coordinates.
             metric = 0.1 * robot.velocity
+            if articulation:
+                metric = metric * digits
             jac = jac * metric
             normal = jac.T @ jac
             normal.flat[:: len(metric) + 1] += 0.12**2
@@ -807,8 +823,26 @@ def _solve(
             correct,
             sites.full_q,
             blocked,
+            coupling,
             collision,
         )
+        if digits.any():
+            seq = regularize(
+                seq,
+                times,
+                availability,
+                rows,
+                robot.lower,
+                robot.upper,
+                robot.velocity,
+                fps,
+                lambda row, initial, smooth: correct(row, initial, smooth, True),
+                sites.full_q,
+                blocked,
+                coupling,
+                collision,
+                digits,
+            )
 
     for i, final_q in enumerate(seq):
         positions = sites.positions(final_q)
