@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 sx-embodiment-drivers.workspace = true
+sx-embodiment-ik = { path = "../sx-embodiment-ik" }
 sx-feetech-serial = { path = "../sx-feetech-serial" }
 sx-damiao-can = { path = "../sx-damiao-can" }
 sx-zlg-usbcanfd = { path = "../sx-zlg-usbcanfd" }
@@ -29,6 +30,7 @@ serialport = { version = "4.7", default-features = false }
 nusb = "0.2"
 # Caught SIGINT/SIGTERM/SIGHUP/SIGQUIT set a flag `calibrate` checks; `unsafe_code` is forbidden here.
 signal-hook = { version = "0.3", default-features = false }
+nix = { version = "0.30", default-features = false, features = ["term", "signal", "process"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sx-embodiment-bodies = { path = "../sx-embodiment-bodies", features = ["socketcan"] }
@@ -36,7 +38,6 @@ sx-embodiment-bodies = { path = "../sx-embodiment-bodies", features = ["socketca
 [dev-dependencies]
 sx-damiao-can = { path = "../sx-damiao-can", features = ["sim"] }
 sx-feetech-serial = { path = "../sx-feetech-serial", features = ["sim"] }
-nix = { version = "0.30", default-features = false, features = ["term", "signal", "process"] }
 
 [lints]
 workspace = true

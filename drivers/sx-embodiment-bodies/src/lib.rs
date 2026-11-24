@@ -79,8 +79,9 @@ use sx_embodiment_drivers::rail::{AxisDerate, RailCheck, Rails, derates};
 use sx_embodiment_drivers::serial::{SerialPort, SharedSerialPort};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ApproachLimit, Axes, AxisReading, BodyBindings, BodyError,
-    BoundAxis, ChainError, ChainFailure, Chains, ChainsError, CommandRange, Feedforward,
-    FeedforwardLimit, InstanceDrive, Masked, Observe, Receipt, StopReport,
+    BoundAxis, ChainError, ChainFailure, Chains, ChainsError, CommandRange, CompliantCommand,
+    CompliantError, Feedforward, FeedforwardLimit, InstanceDrive, Masked, Observe, Receipt,
+    StopReport,
 };
 use sx_feetech_serial::FEETECH_SERIAL;
 use sx_feetech_serial::body::{FeetechBody, ServoSetup as FeetechSetup};
@@ -2421,6 +2422,34 @@ where
             .0
             .command_with(joints, feedforward)
             .map_err(Into::into)?;
+        Ok(Receipt {
+            evidence: receipt.evidence,
+            observed: receipt.observed,
+            feedback: Answer::into_feedback(receipt.feedback, self.0.axes()),
+        })
+    }
+
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<BusError>> {
+        self.0
+            .validate_compliant(joints, feedforward, compliant)
+            .map_err(|error| error.map_driver(Into::into))
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<MotorFeedback>, CompliantError<BusError>> {
+        let receipt = self
+            .0
+            .command_compliant(joints, feedforward, compliant)
+            .map_err(|error| error.map_driver(Into::into))?;
         Ok(Receipt {
             evidence: receipt.evidence,
             observed: receipt.observed,

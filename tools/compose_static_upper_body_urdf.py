@@ -56,7 +56,7 @@ from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_TORSO,
 )
 from sx_embodiments.known.zed import EYES, eye_offset, optical_frame
-from sx_embodiments.layout import ACTUATOR_RATINGS, DirectDrive
+from sx_embodiments.layout import ACTUATOR_RATINGS, Bounds, DirectDrive
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "assets/sentient_static_upper_body"
@@ -501,6 +501,13 @@ def render() -> dict[Path, bytes]:
     _graft_neck(robot)
     _split_fixed_shoulder_mounts(robot)
     rated = _rated_limits()
+    # The operator changed this reach from the donor CAD's upper bound. Keep the
+    # canonical registry as its one source without altering encoder zeros/signs.
+    left_yaw = next(
+        axis for axis in STATIC_UPPER_BODY_LEFT_ARM.layout.axes
+        if axis.name == "left_upper_arm_yaw_joint"
+    )
+    assert isinstance(left_yaw.bounds, Bounds)
     for joint in robot.findall("joint"):
         limit = joint.find("limit")
         if limit is not None and (rating := rated.get(joint.get("name", ""))) is not None:
@@ -510,6 +517,8 @@ def render() -> dict[Path, bytes]:
             lower, upper = limit.get("lower", ""), limit.get("upper", "")
             limit.set("lower", _negated(upper))
             limit.set("upper", _negated(lower))
+        if joint.get("name") == left_yaw.name and limit is not None:
+            limit.set("upper", str(left_yaw.bounds.upper))
 
     for link in robot.findall("link"):
         name = link.get("name", "")

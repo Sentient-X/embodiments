@@ -1,0 +1,17 @@
+[Unit]
+Description=Local teach robot viewer (read-only)
+After=network.target
+
+[Service]
+Type=simple
+User=sx-station
+Group=sx-station
+LimitRTPRIO=80
+NoNewPrivileges=yes
+EnvironmentFile=/etc/sx-teach/viewer.env
+ExecStart=/usr/bin/python3 /opt/sx-teach/bin/serve-local-teach.py --root /opt/sx-teach/web --robot ${SX_TEACH_ROBOT} --status-file /var/lib/sx-station/local-teach/web/status.json --ranges-file /opt/sx-teach/web/ranges.json --port 8765
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

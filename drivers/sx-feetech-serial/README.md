@@ -33,6 +33,13 @@ it on an SO-101's serial adapter once a serial device binding exists there.
   `enable_torque` (`Torque_Enable` 1, `Lock` 1) before the first command after open or a stop,
   one `Goal_Position` SYNC WRITE per command, `disable_torque` (`Torque_Enable` 0, `Lock` 0)
   on every servo at stop, then the read-back.
+- **Hand-guided grippers.** `command_compliant` accepts `CompliantCommand::Released`
+  only for every axis of an all-gripper bus. Preflight does not write. Entry proves
+  torque disabled using the existing stop; subsequent ticks only SYNC READ, checking
+  `Torque_Enable` remains 0 while reporting fresh finger positions. Missing answers or
+  unexpected torque produce non-fresh observations. An ordinary position command restores
+  powered control through the normal current-position preload and bounded approach setup.
+  Partial release, arm buses and torque/damping requests are refused before writes.
 - **Read-only positions.** `read_positions` reads every servo's `Present_Position` (56), one `READ` per
   servo; the packet handler clears the port before each, so every value is a fresh answer. It
   returns one `AxisReading` per axis in native state order, always all of them: a silent,

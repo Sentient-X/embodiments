@@ -35,4 +35,6 @@ pub mod record;
 pub mod station_loan;
 pub mod step_response;
 pub mod sysfs;
+pub mod teach;
+pub mod teach_episode;
 pub mod tty;

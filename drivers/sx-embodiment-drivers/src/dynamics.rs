@@ -185,11 +185,10 @@ pub struct JointFriction {
     /// `m_s` and `e_s`: the same near standstill.
     pub load_motor_stribeck: f64,
     pub load_external_stribeck: f64,
-    /// rad/s (m/s): below this speed feed-forward adds no friction, and above it the smooth
-    /// sign rises from zero as `tanh((|q̇| − deadband) / stiction_velocity)`. A joint whose
-    /// reference velocity jitters about zero (an operator's hand at rest, an encoder's
-    /// quantum) otherwise gets a friction push that flips with the noise. Zero by default:
-    /// the plain smooth sign.
+    /// rad/s (m/s): below this speed dry-friction feedforward is zero. Above it,
+    /// the smooth sign rises as `tanh((|q̇| − deadband) / stiction_velocity)`.
+    /// Reflected inertia and viscous drag retain their acceleration/speed terms.
+    /// Zero by default retains the plain smooth sign.
     #[serde(default)]
     pub velocity_deadband: f64,
 }
@@ -254,8 +253,8 @@ impl JointFriction {
     }
 
     /// What the drive adds to move at `speed` and `acceleration`: armature, viscous, and the
-    /// budget with the smooth sign `tanh(speed / stiction_velocity)`, nothing of it inside
-    /// [`JointFriction::velocity_deadband`].
+    /// budget with a smooth sign outside [`Self::velocity_deadband`]. Reflected
+    /// inertia and viscous drag retain their original acceleration/speed terms.
     #[must_use]
     pub fn torque(
         &self,
@@ -937,6 +936,88 @@ impl Dynamics {
         self.gravity
     }
 
+    /// Whether changing this coordinate leaves every static gravity torque unchanged.
+    ///
+    /// This conservative proof admits only one root rotation, including a fixed mount,
+    /// about an axis parallel to this model's gravity. Moving ancestors, shared mimic
+    /// leaders and every other joint kind are refused. The angular tolerance of 1e-10
+    /// accounts for tiny URDF axis-rounding errors; it does not establish mechanical
+    /// mounting alignment. This says nothing about inertia, Coriolis terms, geometry
+    /// or collision checks, all of which still depend on the coordinate.
+    #[must_use]
+    pub fn gravity_independent(&self, joint: &str) -> bool {
+        if !self.tree.joints().iter().any(|axis| axis.name == joint) {
+            return false;
+        }
+        let mut matching = self
+            .tree
+            .joints
+            .iter()
+            .enumerate()
+            .filter(|(_, physical)| physical.leader == joint);
+        let Some((index, physical)) = matching.next() else {
+            return false;
+        };
+        if matching.next().is_some()
+            || !matches!(physical.kind, JointType::Revolute | JointType::Continuous)
+        {
+            return false;
+        }
+        let path = moving_path(&self.tree, index);
+        if path.len() != 1 {
+            return false;
+        }
+        let axis = times(&rotation(&path[0].1), physical.axis);
+        let gravity_norm_squared = dot(self.gravity, self.gravity);
+        let misalignment = cross(axis, self.gravity);
+        gravity_norm_squared.is_finite()
+            && gravity_norm_squared > 0.0
+            && axis.iter().all(|value| value.is_finite())
+            && dot(misalignment, misalignment) <= 1e-20 * gravity_norm_squared
+    }
+
+    /// Whether `coordinate` can affect `target`'s static gravity torque.
+    ///
+    /// Only disjoint kinematic branches (or a coordinate proven gravity-independent)
+    /// are independent. Ancestor/descendant relationships are checked for every physical
+    /// joint sharing either folded mimic leader. Unknown names fail closed. This does
+    /// not establish independence of geometry, collision checks or dynamic torques.
+    #[must_use]
+    pub fn gravity_depends_on(&self, target: &str, coordinate: &str) -> bool {
+        if ![target, coordinate]
+            .iter()
+            .all(|name| self.tree.joints().iter().any(|axis| axis.name == *name))
+        {
+            return true;
+        }
+        let physical = |name: &str| {
+            self.tree
+                .joints
+                .iter()
+                .enumerate()
+                .filter_map(|(index, joint)| (joint.leader == name).then_some(index))
+                .collect::<Vec<_>>()
+        };
+        let targets = physical(target);
+        let coordinates = physical(coordinate);
+        if targets.is_empty() || coordinates.is_empty() {
+            return true;
+        }
+        if self.gravity_independent(coordinate) {
+            return false;
+        }
+        targets.iter().any(|target| {
+            coordinates.iter().any(|coordinate| {
+                moving_path(&self.tree, *target)
+                    .iter()
+                    .any(|(index, _)| index == coordinate)
+                    || moving_path(&self.tree, *coordinate)
+                        .iter()
+                        .any(|(index, _)| index == target)
+            })
+        })
+    }
+
     /// Buffers sized for this tree, for [`Dynamics::inverse_into`] to reuse every tick.
     #[must_use]
     pub fn scratch(&self) -> Scratch {
@@ -1307,6 +1388,243 @@ fn is_semidefinite(m: &Matrix, tolerance: f64) -> bool {
 mod tests {
     use super::*;
 
+    const ROOT_YAW: &str = r#"<robot name="root-yaw">
+      <link name="base"/><link name="mount"/><link name="chest"/>
+      <link name="arm"><inertial><origin xyz="0.3 0 -0.2"/><mass value="2"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+      </inertial></link>
+      <joint name="mount" type="fixed"><parent link="base"/><child link="mount"/>
+        <origin xyz="0.2 0.1 0.4"/></joint>
+      <joint name="yaw" type="continuous"><parent link="mount"/><child link="chest"/>
+        <axis xyz="0 0 1"/></joint>
+      <joint name="pitch" type="revolute"><parent link="chest"/><child link="arm"/>
+        <axis xyz="0 1 0"/><limit lower="-2" upper="2"/></joint>
+    </robot>"#;
+
+    #[test]
+    fn only_unshared_root_rotation_about_gravity_proves_static_independence() {
+        let model = Dynamics::of(ROOT_YAW, UPRIGHT).expect("root yaw model");
+        assert!(model.gravity_independent("yaw"));
+        assert!(!model.gravity_independent("pitch"));
+        assert!(!model.gravity_independent("missing"));
+        // A rotated fixed mount takes the local +y axis onto root +z.
+        let rotated = ROOT_YAW
+            .replace(
+                "xyz=\"0.2 0.1 0.4\"",
+                "xyz=\"0.2 0.1 0.4\" rpy=\"1.5707963267948966 0 0\"",
+            )
+            .replace("axis xyz=\"0 0 1\"", "axis xyz=\"0 1 0\"");
+        assert!(
+            Dynamics::of(&rotated, UPRIGHT)
+                .expect("fixed mount")
+                .gravity_independent("yaw")
+        );
+        let tilted = ROOT_YAW.replace("axis xyz=\"0 0 1\"", "axis xyz=\"0.000001 0 1\"");
+        assert!(
+            !Dynamics::of(&tilted, UPRIGHT)
+                .expect("tilt")
+                .gravity_independent("yaw")
+        );
+        assert!(
+            !Dynamics::of(ROOT_YAW, [0.1, 0.0, -9.81])
+                .expect("tilted gravity")
+                .gravity_independent("yaw")
+        );
+        assert!(
+            !Dynamics::of(ROOT_YAW, [0.0; 3])
+                .expect("zero gravity")
+                .gravity_independent("yaw")
+        );
+        let sliding = ROOT_YAW.replace(
+            "name=\"yaw\" type=\"continuous\"",
+            "name=\"yaw\" type=\"prismatic\"",
+        );
+        assert!(
+            !Dynamics::of(&sliding, UPRIGHT)
+                .expect("sliding")
+                .gravity_independent("yaw")
+        );
+        let ancestor = ROOT_YAW.replace(
+            "name=\"mount\" type=\"fixed\"",
+            "name=\"mount\" type=\"continuous\"",
+        );
+        assert!(
+            !Dynamics::of(&ancestor, UPRIGHT)
+                .expect("moving mount")
+                .gravity_independent("yaw")
+        );
+        let mimicked = ROOT_YAW.replace(
+            "<axis xyz=\"0 1 0\"/><limit",
+            "<axis xyz=\"0 1 0\"/><mimic joint=\"yaw\"/><limit",
+        );
+        assert!(
+            !Dynamics::of(&mimicked, UPRIGHT)
+                .expect("shared leader")
+                .gravity_independent("yaw")
+        );
+    }
+
+    #[test]
+    fn static_upper_body_torso_yaw_does_not_change_any_gravity_torque() {
+        let model = Dynamics::of(
+            include_str!(
+                "../../../assets/sentient_static_upper_body/sentient_static_upper_body.urdf"
+            ),
+            UPRIGHT,
+        )
+        .expect("actual upper body");
+        assert!(model.gravity_independent("torso_joint"));
+        assert!(!model.gravity_independent("left_shoulder_pitch_joint"));
+        let torso = model
+            .tree()
+            .joints()
+            .iter()
+            .position(|a| a.name == "torso_joint")
+            .expect("torso");
+        let mut scratch = model.scratch();
+        let mut position = vec![0.0; model.tree().joints().len()];
+        let mut reference = vec![0.0; position.len()];
+        let mut actual = reference.clone();
+        // Several independent arm postures ensure a nonzero, changing gravity load.
+        for phase in [-0.7_f64, 0.0, 0.6] {
+            for (index, value) in position.iter_mut().enumerate() {
+                #[allow(clippy::cast_precision_loss)] // Actual robot has fewer than 32 joints.
+                let offset = (index as f64 * 0.31 + phase).sin() * 0.4;
+                *value = offset;
+            }
+            position[torso] = 0.0;
+            model
+                .gravity_torque_into(&position, &mut scratch, &mut reference)
+                .expect("reference");
+            assert!(reference.iter().any(|torque| torque.abs() > 0.1));
+            for yaw in [-1.1, -0.3, 0.7, 1.1] {
+                position[torso] = yaw;
+                model
+                    .gravity_torque_into(&position, &mut scratch, &mut actual)
+                    .expect("yaw sweep");
+                for (index, (actual, reference)) in actual.iter().zip(&reference).enumerate() {
+                    assert!(
+                        (actual - reference).abs() < 1e-8,
+                        "{}: {actual} != {reference}",
+                        model.tree().joints()[index].name
+                    );
+                }
+            }
+        }
+    }
+
+    const GRAVITY_BRANCHES: &str = r#"<robot name="branches">
+      <link name="base"/><link name="torso"/><link name="left"/>
+      <link name="right"/><link name="finger"/><link name="head"/>
+      <joint name="base_pitch" type="continuous"><parent link="base"/><child link="torso"/>
+        <axis xyz="0 1 0"/></joint>
+      <joint name="left" type="continuous"><parent link="torso"/><child link="left"/>
+        <axis xyz="0 1 0"/></joint>
+      <joint name="right" type="continuous"><parent link="torso"/><child link="right"/>
+        <axis xyz="0 1 0"/></joint>
+      <joint name="finger" type="continuous"><parent link="left"/><child link="finger"/>
+        <axis xyz="1 0 0"/></joint>
+      <joint name="neck" type="continuous"><parent link="torso"/><child link="head"/>
+        <axis xyz="0 1 0"/></joint>
+    </robot>"#;
+
+    #[test]
+    fn gravity_dependency_keeps_ancestors_descendants_and_every_folded_mimic_branch() {
+        let model = Dynamics::of(GRAVITY_BRANCHES, UPRIGHT).expect("branched model");
+        assert!(!model.gravity_depends_on("left", "right"));
+        assert!(!model.gravity_depends_on("left", "neck"));
+        assert!(model.gravity_depends_on("left", "base_pitch"));
+        assert!(model.gravity_depends_on("base_pitch", "left"));
+        assert!(model.gravity_depends_on("left", "finger"));
+        assert!(model.gravity_depends_on("finger", "left"));
+        assert!(model.gravity_depends_on("left", "left"));
+        assert!(model.gravity_depends_on("missing", "right"));
+        assert!(model.gravity_depends_on("left", "missing"));
+        let coupled = GRAVITY_BRANCHES.replace(
+            "<axis xyz=\"1 0 0\"/>",
+            "<axis xyz=\"1 0 0\"/><mimic joint=\"right\"/>",
+        );
+        let coupled = Dynamics::of(&coupled, UPRIGHT).expect("cross-branch mimic");
+        assert!(coupled.gravity_depends_on("left", "right"));
+        assert!(coupled.gravity_depends_on("right", "left"));
+        let yaw = Dynamics::of(ROOT_YAW, UPRIGHT).expect("root yaw");
+        assert!(!yaw.gravity_depends_on("pitch", "yaw"));
+        assert!(yaw.gravity_depends_on("missing", "yaw"));
+    }
+
+    #[test]
+    fn left_arm_gravity_is_unchanged_by_actual_right_arm_and_neck_coordinates() {
+        let model = Dynamics::of(
+            include_str!(
+                "../../../assets/sentient_static_upper_body/sentient_static_upper_body.urdf"
+            ),
+            UPRIGHT,
+        )
+        .expect("actual upper body");
+        let axes = model.tree().joints();
+        let left: Vec<_> = axes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, joint)| {
+                (joint.name.starts_with("left_") && !joint.name.contains("gripper"))
+                    .then_some(index)
+            })
+            .collect();
+        assert_eq!(left.len(), 7);
+        let other: Vec<_> = axes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, joint)| {
+                (joint.name.starts_with("right_") || joint.name.starts_with("so101_"))
+                    .then_some(index)
+            })
+            .collect();
+        assert!(!other.is_empty());
+        for &target in &left {
+            for &coordinate in &other {
+                assert!(!model.gravity_depends_on(&axes[target].name, &axes[coordinate].name));
+            }
+        }
+        assert!(
+            model.gravity_depends_on("left_wrist_roll_joint", "left_gripper_left_finger_joint")
+        );
+        let mut scratch = model.scratch();
+        let mut position = vec![0.0; axes.len()];
+        let mut reference = vec![0.0; axes.len()];
+        let mut actual = reference.clone();
+        for left_phase in [-0.8_f64, 0.2, 0.9] {
+            for (index, value) in position.iter_mut().enumerate() {
+                #[allow(clippy::cast_precision_loss)] // The actual robot has fewer than 32 joints.
+                let phase = index as f64 * 0.37 + left_phase;
+                *value = 0.4 * phase.sin();
+            }
+            model
+                .gravity_torque_into(&position, &mut scratch, &mut reference)
+                .expect("reference");
+            assert!(left.iter().any(|index| reference[*index].abs() > 0.1));
+            for right_phase in [-1.1_f64, -0.3, 0.4, 1.2] {
+                for &index in &other {
+                    #[allow(clippy::cast_precision_loss)]
+                    // The actual robot has fewer than 32 joints.
+                    let phase = index as f64 * 0.29 + right_phase;
+                    position[index] = phase.sin();
+                }
+                model
+                    .gravity_torque_into(&position, &mut scratch, &mut actual)
+                    .expect("other branches");
+                for &index in &left {
+                    assert!(
+                        (actual[index] - reference[index]).abs() < 1e-8,
+                        "{} changes with the other branches: {} != {}",
+                        axes[index].name,
+                        actual[index],
+                        reference[index]
+                    );
+                }
+            }
+        }
+    }
+
     fn digest(text: &str) -> String {
         sha256_hex(text)
     }
@@ -1371,6 +1689,114 @@ mod tests {
             rubbed.inverse(&[q], &[0.0], &[0.0]),
             plain.inverse(&[q], &[0.0], &[0.0])
         );
+    }
+
+    #[test]
+    fn deployed_deadband_calibration_preserves_gravity_and_suppresses_only_dry_friction() {
+        let mut document = serde_json::json!({
+            "schema": "sx.calibration/v1", "kind": "dynamics",
+            "description_sha256": digest(PENDULUM), "stiction_velocity": 0.05,
+            "units": [], "measurement": {"method":"synthetic"}, "links": [], "joints": [{
+                "joint": "hinge", "coulomb": 0.4, "viscous": 0.2, "armature": 0.03,
+                "stribeck": 0.0, "stribeck_velocity": 0.0, "stribeck_exponent": 0.0,
+                "load_motor": 0.0, "load_external": 0.0,
+                "load_motor_stribeck": 0.0, "load_external_stribeck": 0.0
+            }]
+        });
+        let legacy = DynamicsCalibration::parse(&document.to_string()).expect("legacy calibration");
+        assert_eq!(
+            legacy.joints[0].1.velocity_deadband.to_bits(),
+            0.0_f64.to_bits()
+        );
+        document["joints"][0]["velocity_deadband"] = serde_json::json!(0.02);
+        let calibration =
+            DynamicsCalibration::parse(&document.to_string()).expect("deployed calibration");
+        let base = Dynamics::of(PENDULUM, UPRIGHT).expect("base");
+        let model = base.clone().calibrated(&calibration).expect("calibrated");
+        let mut original_gravity = vec![0.0];
+        let mut calibrated_gravity = vec![0.0];
+        base.gravity_torque_into(&[0.3], &mut base.scratch(), &mut original_gravity)
+            .unwrap();
+        model
+            .gravity_torque_into(&[0.3], &mut model.scratch(), &mut calibrated_gravity)
+            .unwrap();
+        assert_eq!(calibrated_gravity, original_gravity);
+        for (speed, dry) in [
+            (0.0, 0.0),
+            (0.01, 0.0),
+            (-0.01, 0.0),
+            (0.02, 0.0),
+            (-0.02, 0.0),
+            (0.03, 0.4 * 0.2_f64.tanh()),
+            (-0.03, -0.4 * 0.2_f64.tanh()),
+        ] {
+            let actual = model.inverse(&[0.3], &[speed], &[2.0]).unwrap()[0]
+                - base.inverse(&[0.3], &[speed], &[2.0]).unwrap()[0];
+            assert!(
+                (actual - (0.03 * 2.0 + 0.2 * speed + dry)).abs() < 1e-12,
+                "speed {speed}: {actual}"
+            );
+        }
+        document["joints"][0]["velocity_deadband"] = serde_json::json!(-0.01);
+        assert!(matches!(
+            DynamicsCalibration::parse(&document.to_string()),
+            Err(DynamicsError::Unphysical(_))
+        ));
+        document["joints"][0]["velocity_deadband"] = serde_json::Value::Null;
+        assert!(DynamicsCalibration::parse(&document.to_string()).is_err());
+        document["joints"][0]["velocity_deadband"] = serde_json::json!(0.02);
+        document["joints"][0]["unexpected_term"] = serde_json::json!(1.0);
+        assert!(DynamicsCalibration::parse(&document.to_string()).is_err());
+    }
+
+    #[test]
+    fn disjoint_calibrations_keep_each_joints_smoothing_independent_of_load_order() {
+        let urdf = branched("0 0 0", "2.0");
+        let plain = Dynamics::of(&urdf, UPRIGHT).unwrap();
+        let calibration = |joint: &str, coulomb, stiction_velocity| DynamicsCalibration {
+            certification: Certification::Fitted,
+            sources: Vec::new(),
+            description_sha256: digest(&urdf),
+            stiction_velocity,
+            links: vec![],
+            joints: vec![(
+                joint.to_owned(),
+                JointFriction {
+                    coulomb,
+                    ..JointFriction::default()
+                },
+            )],
+        };
+        let hinge = calibration("hinge", 0.4, 0.02);
+        let pan = calibration("pan", 0.6, 0.04);
+        let forward = plain
+            .clone()
+            .calibrated(&hinge)
+            .unwrap()
+            .calibrated(&pan)
+            .unwrap();
+        let reverse = plain
+            .clone()
+            .calibrated(&pan)
+            .unwrap()
+            .calibrated(&hinge)
+            .unwrap();
+        let width = plain.tree().joints().len();
+        let q = vec![0.0; width];
+        let speed = vec![0.02; width];
+        let acceleration = vec![0.0; width];
+        let base = plain.inverse(&q, &speed, &acceleration).unwrap();
+        let actual = forward.inverse(&q, &speed, &acceleration).unwrap();
+        let reversed = reverse.inverse(&q, &speed, &acceleration).unwrap();
+        for (index, joint) in plain.tree().joints().iter().enumerate() {
+            let expected = match joint.name.as_str() {
+                "hinge" => 0.4 * 1.0_f64.tanh(),
+                "pan" => 0.6 * 0.5_f64.tanh(),
+                _ => 0.0,
+            };
+            assert!((actual[index] - base[index] - expected).abs() < 1e-12);
+            assert!((reversed[index] - actual[index]).abs() < 1e-12);
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 {
   "embodiment": "sentient-static-upper-body",
-  "id": "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc",
+  "id": "9343a4ec2e1a87dd796204a83c433754359c17c5f4bbf6abbc9bab644d29d8a0",
   "axes": [
     {
       "joint": "torso_joint",
@@ -16,7 +16,7 @@
       "home": 0.0,
       "speed": 0.25,
       "acceleration": 2.5,
-      "inertia": 1.601894319145006
+      "inertia": 1.6470759010561575
     },
     {
       "joint": "left_shoulder_pitch_joint",
@@ -31,8 +31,8 @@
       "reduction": 1.0,
       "home": 0.0,
       "speed": 10.471975511965978,
-      "acceleration": 25.045922363619415,
-      "inertia": 0.41602054433679153
+      "acceleration": 25.731913728851243,
+      "inertia": 0.4082452106293722
     },
     {
       "joint": "left_shoulder_roll_joint",
@@ -47,13 +47,13 @@
       "reduction": 1.0,
       "home": 0.0,
       "speed": 10.471975511965978,
-      "acceleration": 27.726233104269436,
-      "inertia": 0.45227332923502445
+      "acceleration": 26.963801546550005,
+      "inertia": 0.45194926503186955
     },
     {
       "joint": "left_upper_arm_yaw_joint",
       "lower": -5.1230258640421145,
-      "upper": 0.8070115205615327,
+      "upper": 2.792526803190927,
       "model": "damiao_dm4340",
       "bus": "damiao_can",
       "port": "can",
@@ -409,13 +409,15 @@
     "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
     "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db",
     "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a",
-    "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834"
+    "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834",
+    "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc"
   ],
   "tool_chains": {
     "477da76253f1654d647381ff81165206b6976603370b9f79b0aa0fa01ca35d97": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "5d5ba1e968aceafbfd663ebcc8b659f746831de19fb10255a5250fce8e5d26db": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
+    "9343a4ec2e1a87dd796204a83c433754359c17c5f4bbf6abbc9bab644d29d8a0": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "b33e0d04ef8bdb8450d2d373a739bb134772dbe764eee32801b4939713781e1a": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "d3b5f72b9a397358ba9eede23af77976c03481013cfe342ff4e9141de2ce0834": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a",
     "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc": "2fa5068c9efa36d91ae115f06b839886006b89d7e452db2bdd4781e9bc89f25a"

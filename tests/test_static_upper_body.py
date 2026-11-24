@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -220,8 +221,8 @@ def test_the_arm_bindings_are_the_hardware_profile() -> None:
 
 def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None:
     """Every source joint but the neck's renders with its origin and axis; the four reversed
-    wrist axes carry the donor's motor-coordinate limits negated, every other joint its limits
-    unchanged."""
+    wrist axes carry the donor's motor-coordinate limits negated. The operator-requested
+    left upper-arm yaw upper bound is 160 degrees; other donor limits are unchanged."""
     asset = ROOT / "assets/sentient_static_upper_body"
     source = {
         j.attrib["name"]: j
@@ -266,6 +267,8 @@ def test_the_description_is_allisa_bot_with_the_wrists_in_motor_limits() -> None
             continue
         lower, upper = float(theirs.attrib["lower"]), float(theirs.attrib["upper"])
         expected = (-upper, -lower) if name in reversed_axes else (lower, upper)
+        if name == "left_upper_arm_yaw_joint":
+            expected = (lower, math.radians(160.0))
         assert (float(mine.attrib["lower"]), float(mine.attrib["upper"])) == expected, name
 
 
