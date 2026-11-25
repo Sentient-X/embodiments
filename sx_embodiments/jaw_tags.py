@@ -17,12 +17,11 @@ about its hinge axis was 1.02 and 0.98 times the encoder angle over 43 degrees.
    lower limit, for a rig with no working-encoder history.
 3. Reading: each visible marker's rotation from its reference pose about its hinge gives the
    joint angle. The two readings must agree (the mirror check), and they are averaged.
-4. Track, offline: the visible readings are smoothed. Gaps are interpolated between their
-   visible ends and labelled, and a gap at either end is held. Every sample says where it
-   came from, so a held or interpolated sample is never mistaken for a measured one.
+4. Track, offline: :mod:`sx_embodiments.jaw_fusion` fuses the frames' readings with the
+   encoder's reads, whichever of the two saw the jaw, into one angle with its deviation.
 
 Held out on yubi-0006 (borrowed intrinsics), smoothed two-tag readings matched the encoder
-within 1.34 mm of gap at the 95th percentile.
+within 1.34 mm of gap at the 95th percentile; fused with it, 1.44 mm over a grasp take.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import pairwise
-from pathlib import Path
 from typing import cast
 
 import cv2
@@ -61,12 +59,6 @@ MAX_MIRROR_DISAGREEMENT_RAD = math.radians(6.0)
 #: A reference needs this many working-encoder sightings of a marker over this much travel.
 MIN_REFERENCE_SIGHTINGS = 60
 MIN_REFERENCE_TRAVEL_RAD = math.radians(15.0)
-#: Smoothing window over visible readings and its polynomial order. A duration, not a frame
-#: count, so a 30 fps clip and an 85 fps bench camera smooth alike. On yubi-0006's grasp run
-#: (85 fps) 0.18 s gave p95 2.09 mm against the encoder; 0.37 s blurred quick grasps (3.04 mm)
-#: and no smoothing left the pose noise (3.41 mm).
-SMOOTHING_S = 0.18
-SMOOTHING_ORDER = 2
 #: Frames to look at before deciding a recording has no jaw markers at all.
 NO_TAGS_PROBE_FRAMES = 300
 
@@ -428,18 +420,12 @@ def closed_stop_reference(
     return JawReference(layout, refs[0], refs[1], ReferenceOrigin.CLOSED_STOP)
 
 
-class JawSampleSource(StrEnum):
-    BOTH_TAGS = "both_tags"
-    ONE_TAG = "one_tag"
-    INTERPOLATED = "interpolated"
-    HELD = "held"
-    NONE = "none"
-
-
 @dataclass(frozen=True, slots=True)
 class JawReading:
     angle_rad: float
-    source: JawSampleSource
+    #: How many of the two finger markers the reading came from.
+    tags: int
+    #: The two markers' disagreement (NaN with one marker).
     mirror_disagreement_rad: float
 
 
@@ -453,79 +439,11 @@ def read_frame(reference: JawReference, frame: Mapping[int, TagPose]) -> JawRead
     if not angles:
         return None
     if len(angles) == 1:
-        return JawReading(angles[0], JawSampleSource.ONE_TAG, math.nan)
+        return JawReading(angles[0], 1, math.nan)
     disagreement = abs(angles[0] - angles[1])
     if disagreement > MAX_MIRROR_DISAGREEMENT_RAD:
         return None
-    return JawReading((angles[0] + angles[1]) / 2.0, JawSampleSource.BOTH_TAGS, disagreement)
-
-
-@dataclass(frozen=True, slots=True)
-class JawTrack:
-    """A recording's jaw angle on its frame timeline, with each sample's source."""
-
-    t_ns: NDArray[np.int64]
-    angle_rad: Vector
-    source: tuple[JawSampleSource, ...]
-    mirror_p95_rad: float
-    measured_fraction: float
-    longest_gap_s: float
-
-
-def _smooth(values: Vector, frame_s: float) -> Vector:
-    half = max(SMOOTHING_ORDER, round(SMOOTHING_S / frame_s / 2))
-    window = 2 * half + 1
-    if len(values) < window:
-        return values
-    # Savitzky-Golay: a least-squares quadratic over each centred window; the first and last
-    # half-windows take the end windows' own fits, so the ends are not pulled toward the middle.
-    offsets = np.arange(-half, half + 1, dtype=np.float64)
-    fit = np.linalg.pinv(np.vander(offsets, SMOOTHING_ORDER + 1, increasing=True))
-    out = np.asarray(np.convolve(values, fit[0][::-1], mode="same"), np.float64)
-    ends = np.vander(offsets, SMOOTHING_ORDER + 1, increasing=True)
-    out[:half] = (ends @ (fit @ values[:window]))[:half]
-    out[-half:] = (ends @ (fit @ values[-window:]))[-half:]
-    return out
-
-
-def solve_track(
-    reference: JawReference, t_ns: Sequence[int], frames: Sequence[Mapping[int, TagPose]]
-) -> JawTrack:
-    """The whole recording's jaw angle, smoothed over visible readings, gaps filled and labelled."""
-    times = np.asarray(t_ns, np.int64)
-    if len(times) != len(frames) or len(times) == 0 or np.any(np.diff(times) <= 0):
-        raise JawTagError("frames need one strictly increasing timestamp each")
-    frames = consistent_frames(reference.layout, frames)
-    readings = [read_frame(reference, frame) for frame in frames]
-    seen = np.array([reading is not None for reading in readings])
-    if not seen.any():
-        raise JawTagError("no frame shows the finger markers")
-    measured = np.array([r.angle_rad for r in readings if r is not None], np.float64)
-    angle = np.full(len(times), np.nan)
-    angle[seen] = _smooth(
-        measured, float(np.median(np.diff(times))) / 1e9 if len(times) > 1 else 1.0
-    )
-    source = [r.source if r is not None else JawSampleSource.NONE for r in readings]
-    visible = np.flatnonzero(seen)
-    inside = (np.arange(len(times)) > visible[0]) & (np.arange(len(times)) < visible[-1]) & ~seen
-    angle[inside] = np.interp(times[inside], times[seen], angle[seen])
-    for i in np.flatnonzero(inside):
-        source[i] = JawSampleSource.INTERPOLATED
-    for i in range(visible[0]):
-        angle[i], source[i] = angle[visible[0]], JawSampleSource.HELD
-    for i in range(visible[-1] + 1, len(times)):
-        angle[i], source[i] = angle[visible[-1]], JawSampleSource.HELD
-    gaps = np.diff(times[seen]) / 1e9
-    disagreement = [r.mirror_disagreement_rad for r in readings if r is not None]
-    finite = [d for d in disagreement if math.isfinite(d)]
-    return JawTrack(
-        t_ns=times,
-        angle_rad=angle,
-        source=tuple(source),
-        mirror_p95_rad=float(np.percentile(finite, 95)) if finite else math.nan,
-        measured_fraction=float(seen.mean()),
-        longest_gap_s=float(gaps.max()) if len(gaps) else 0.0,
-    )
+    return JawReading((angles[0] + angles[1]) / 2.0, 2, disagreement)
 
 
 def has_jaw_tags(
@@ -533,32 +451,3 @@ def has_jaw_tags(
 ) -> bool:
     """Whether a recording's opening frames show either finger marker at all; stop early if not."""
     return any(sight_tags(gray, lens, layout) for gray in gray_frames[:NO_TAGS_PROBE_FRAMES])
-
-
-#: The seal's solved-jaw spool for one side (sx-seal ``process::jaw``), beside the raw spool.
-SOLVED_SPOOL_HEADER = "t_monotonic_ns,angle_rad,source"
-
-
-def solved_spool_name(side: str) -> str:
-    return f"gripper_{side}.jaw_from_tags.csv"
-
-
-def write_solved_spool(track: JawTrack, path: Path, envelope_rad: tuple[float, float]) -> int:
-    """Write ``track`` as the seal reads it; returns how many angles were clamped to the envelope.
-
-    The jaw law refuses an angle outside its envelope. A reading a hair past a stop (noise at a
-    closed jaw) is clamped and counted; a track that leaves the envelope by more is refused.
-    """
-    low, high = envelope_rad
-    if np.any(track.angle_rad < low - MAX_MIRROR_DISAGREEMENT_RAD) or np.any(
-        track.angle_rad > high + MAX_MIRROR_DISAGREEMENT_RAD
-    ):
-        raise JawTagError("the solved jaw leaves the jaw law's envelope; check the reference")
-    clamped = np.clip(track.angle_rad, low, high)
-    rows = [SOLVED_SPOOL_HEADER]
-    rows += [
-        f"{int(t)},{angle:.6f},{source.value}"
-        for t, angle, source in zip(track.t_ns, clamped, track.source, strict=True)
-    ]
-    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    return int(np.count_nonzero(clamped != track.angle_rad))

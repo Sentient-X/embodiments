@@ -581,17 +581,26 @@ existing clamping behavior; this migration adds no physical qualification.
 drifting or relative. Each marker's pose is IPPE PnP on corners undistorted through the
 rig's own lens (`calibrate.lens.Lens`); its turn about its hinge is the joint angle, with no
 per-unit calibration. A reference is fitted from encoder-alive frames (`fit_reference`) or,
-with no encoder, from the closed stop (`closed_stop_reference`). `solve_track` chooses IPPE's
-planar ambiguity as one temporally continuous family, smooths over visible readings
-(Savitzky-Golay over 0.18 s), interpolates inside gaps, holds at the ends, and labels every
-sample's source; the two jaws mirroring within 6 degrees is the broken-gripper check.
-`write_solved_spool` writes `gripper_{side}.jaw_from_tags.csv`, the spool the seal reads in
-place of a dead encoder. It sits behind the `calibrate` extra (NumPy, OpenCV).
+with no encoder, from the closed stop (`closed_stop_reference`). IPPE's planar ambiguity is
+chosen as one temporally continuous family; the two jaws mirroring within 6 degrees is the
+broken-gripper check.
+
+`sx_embodiments.jaw_fusion` turns the tag readings, and whatever the encoder read, into one jaw
+angle per take and side: an offline robust smoother (Kalman filter, RTS pass, Cauchy-weighted
+and reweighted coarse to fine) whose state is the angle, its rate and the encoder's drifting
+bias, under a bound on finger acceleration. An encoder dropout, a spike train no finger could
+make, a zero offset or hidden tags each stay within 1 degree at p95 on rendered markers
+(`tests/test_jaw_fusion.py`). Every sample carries its posterior deviation and the sensors that
+saw it; QC refuses only where neither did for over 0.5 s. `write_solved_spool` writes
+`gripper_{side}.jaw_from_tags.csv` (`t_monotonic_ns,angle_rad,angle_std_rad,sensors`), the spool
+the seal reads for a side recorded without its encoder. Both sit behind the `calibrate` extra
+(NumPy, OpenCV).
 
 Measured on yubi-0006's right hand (2026-11-25, intrinsics borrowed from the same camera
-model): tags against a working encoder p95 1.33 mm with both tags, 1.62 mm with one. Against
-a 34.7 mm calipered grasp the encoder-free reading gave 32.8 to 37.4 mm and the encoder 28.2
-to 31.3 mm; that encoder read -0.04 rad fully closed, a zero offset the tags correct.
+model), grasps of a 34.7 mm calipered object: fused against the encoder p95 1.44 mm (Savitzky-Golay
+tags alone were 2.31 mm). With the closed-stop reference the fused holds read 37.4, 34.3, 33.1
+and 33.0 mm and the closed jaw 0.1 mm, where the encoder read 31.3, 28.9, 28.2, 28.4 and 5.3 mm:
+that encoder is 0.04 rad low on a grasp and 0.04 rad high shut, an error the fused bias absorbs.
 
 ## Assets
 
