@@ -92,7 +92,7 @@ def _within(reference: JawReference, tolerance_rad: float) -> None:
     theta = np.concatenate([np.linspace(0.0, 0.57, 150), np.linspace(0.57, 0.0, 150)])
     for hide in (None, 0, 1):
         frames = [sight_tags(_render(float(a), hide=hide), LENS, LAYOUT) for a in theta.tolist()]
-        track = solve_track(reference, list(range(1, len(theta) + 1)), frames)
+        track = solve_track(reference, [i * 33_333_333 for i in range(len(theta))], frames)
         error = np.abs(track.angle_rad - theta)
         assert float(np.percentile(error, 95)) < tolerance_rad, hide
 
