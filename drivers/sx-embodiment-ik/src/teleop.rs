@@ -1241,19 +1241,19 @@ impl Teleop {
             let filtered = match self.elbows[hand] {
                 Some((_, weighed, _)) if weighed <= 1e-6 => (direction, blend * weight, slack),
                 Some((before, weighed, slacked)) => {
-                    let mixed = [0, 1, 2].map(|k| before[k] + blend * (direction[k] - before[k]));
-                    let norm_sq: f64 = mixed.iter().map(|x| x * x).sum();
-                    let unit = if norm_sq > 1e-12 {
-                        let inv = 1.0 / norm_sq.sqrt();
-                        mixed.map(|x| x * inv)
+                    // The gradient is proportional to weight * direction. Filter that vector
+                    // so opposing readings first cancel and then pull toward the new side.
+                    let mixed = [0, 1, 2].map(|k| {
+                        let previous = weighed * before[k];
+                        previous + blend * (weight * direction[k] - previous)
+                    });
+                    let magnitude = mixed.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    let unit = if magnitude > 0.0 {
+                        mixed.map(|x| x / magnitude)
                     } else {
                         direction
                     };
-                    (
-                        unit,
-                        weighed + blend * (weight - weighed),
-                        slacked + blend * (slack - slacked),
-                    )
+                    (unit, magnitude, slacked + blend * (slack - slacked))
                 }
                 None => seen,
             };

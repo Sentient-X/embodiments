@@ -1819,12 +1819,10 @@ impl Ik {
         any
     }
 
-    /// Add [`Settings::smoothness`]: the step's change from the last step, in the motion that
-    /// moves no driven tool, `(dq - dq_prev)' N' D N (dq - dq_prev)`. `N = I - A' (A A' +
-    /// eps I)^-1 A` over this tick's task rows `A` (`eps` [`NULL_DAMPING`] of the damping) is
-    /// the projector onto what the tools leave free, and `D` weighs each column by how far it swings the tools, so a shoulder weighs
-    /// more than a wrist. The tools' own motion is never smoothed: their tracking and speed
-    /// are the task's.
+    /// Penalize changes in motion left free by the driven tools with `(dq - dq_prev)' N' D N
+    /// (dq - dq_prev)`. The damped projection `N = I - A' (A A' + eps I)^-1 A` suppresses
+    /// motion along the task rows `A`. The regularizer `eps = NULL_DAMPING * damping` keeps
+    /// the Gram system solvable. `D` weights each eligible column by how far it swings the tools.
     fn smooth_null_space(&mut self, dt: f64) -> bool {
         let s = &self.settings;
         let w = &mut self.work;
@@ -1870,8 +1868,8 @@ impl Ik {
             }
         }
         // H += 2 N' D N; g -= 2 N' D N p, p the last step carried on.
-        // Zero D_kk on unsmoothed columns while keeping full rows of N so A * N' D N = 0 stays exact
-        // across shared axes (torso) and never pulls a paced/resting limb's tool into task space.
+        // Mask D, keeping every column of each selected row of the damped projection N.
+        // Dropping columns from N would discard the coupling through shared joints.
         for k in 0..n {
             if w.unsmoothed[k] {
                 continue;

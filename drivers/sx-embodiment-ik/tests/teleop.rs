@@ -1850,6 +1850,65 @@ fn elbow_deadband_crossing_has_no_step_snap() {
     );
 }
 
+/// Cross the shoulder-wrist line before the old aim has decayed, then hold on the new side.
+#[test]
+fn the_elbow_reacquires_the_opposite_side_without_a_jump_in_its_weighted_aim() {
+    use sx_embodiment_ik::teleop::{ELBOW_FILTER_S, OperatorArm, hands};
+
+    let blend = 1.0 - (-DT / ELBOW_FILTER_S).exp();
+    for (side, skew_m) in [(1.0, 0.0), (-1.0, 1e-7)] {
+        let mut solve = teleop();
+        solve.set_input_filter(None);
+        solve.set_target_shaping(false);
+        let mut q = start(&solve);
+        let available = vec![true; q.len()];
+        let hand = solve.tool_poses(&q)[0].expect("left tool");
+        let mut previous = [0.0; 3];
+        let mut initial_weight = 0.0;
+        for tick in 0..125_u32 {
+            let y = (0.15 - 0.01 * f64::from(tick.saturating_sub(25))).max(-0.15);
+            let targets = Targets {
+                tcp: hands([Some(hand), None]),
+                arm: hands([
+                    Some(OperatorArm {
+                        shoulder_m: [0.0, 0.0, 0.4],
+                        elbow_m: [0.2, side * y, 0.4 + skew_m],
+                        wrist_m: [0.4, 0.0, 0.4],
+                    }),
+                    None,
+                ]),
+                ..Targets::default()
+            };
+            let measured = q.iter().copied().map(Some).collect::<Vec<_>>();
+            let step = solve
+                .step(&q, &measured, &available, &targets, DT)
+                .expect("step");
+            q.copy_from_slice(&step.q);
+            let aim = solve.ik().elbow_aim()[0];
+            let weighted = aim.map_or([0.0; 3], |a| a.direction.map(|x| a.weight * x));
+            if tick == 24 {
+                initial_weight = aim.expect("initial elbow aim").weight;
+                assert!(side * weighted[1] > 0.9 * initial_weight);
+            }
+            if tick >= 25 {
+                let change = (0..3)
+                    .map(|k| (weighted[k] - previous[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                assert!(
+                    change <= 2.0 * blend * initial_weight + 1e-8,
+                    "elbow aim jumped {change} at tick {tick}"
+                );
+            }
+            previous = weighted;
+        }
+        assert!(
+            side * previous[1] < -0.9 * initial_weight,
+            "elbow remained on the old side or lost its weight: {previous:?}"
+        );
+    }
+}
+
 fn project_null(rows: &[Vec<f64>], vector: &[f64]) -> Vec<f64> {
     let row_count = rows.len();
     let mut gram = vec![vec![0.0; row_count]; row_count];
