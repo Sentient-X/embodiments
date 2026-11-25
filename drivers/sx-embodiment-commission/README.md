@@ -3,8 +3,9 @@
 The way a robot is commissioned: find every bridge on the host and what answers on each, then
 match each port a body declares to its one bridge. `probe` and `commission` only read. Every
 scan speaks through its vendor crate's read-only port, which refuses any other packet or frame
-before the link sees a byte. The one part that can write a register or move a joint is
-`calibrate` ([below](#calibrating-a-feetech-bus)), and only under `--move`.
+before the link sees a byte. Within `sx-commission`, the subcommand that can write a register or move a joint is
+`calibrate` ([below](#calibrating-a-feetech-bus)), and only under `--move`. The
+crate also supplies the supervised bench tools, including local `sx-teach` below.
 
 ```text
 sx-commission probe [--json] [--feetech-ids 1-20] [--damiao-ids 1-32]
@@ -236,3 +237,200 @@ port writes nothing, so `--allow-provisional` needs no supervision there.
 `tests/bench_layering.rs` refuses a bench binary that names a vendor crate, a CAN or serial
 port or a USB stack. `sx-identify` is the one still listed, until it moves onto `open_with`
 and `observe`.
+## Local keyboard teaching (`sx-teach`)
+
+`sx-teach` uses local robot files, the embodiment drivers and an attached
+terminal on the robot host; an SSH PTY also works. It requires no account or
+Fleet session, and direct host operation needs no network. It records measured
+joint and gripper trajectories to local JSONL files, without camera video.
+In Teach, active grippers release torque for manual guidance while arm gravity
+support continues. For keyboard gripper actions during a take, press `h` to hold
+while recording continues, use `-`/`+`, then `t` to resume hand guidance.
+Other active noncompliant axes use normal governed position control.
+
+Build from the embodiments workspace:
+
+```bash
+cargo build --release -p sx-embodiment-commission --bin sx-teach
+```
+
+Supply the robot's existing drive, commissioning, URDF and identified dynamics
+files. Serial calibrations beside commissioning load automatically, as they do
+for the other bench tools. `--dynamics` may be repeated for disjoint calibrations;
+`--held joint=rad` explicitly supplies measured, mechanically fixed positions for
+unobserved model joints. An out-of-service joint with live encoder feedback can
+instead contribute its measured position to gravity compensation without being
+commanded; no fixed reference is required. Passive feedback is required unless
+the dynamics model proves a root rotation parallel to gravity,
+whose angle is irrelevant to static gravity compensation. Such an internal
+placeholder is not recorded as a measured joint or used to prove world poses.
+Teaching joints must support compliant control. The following paths and joint
+names illustrate the invocation; replace them with the exact files/names for the
+physical robot:
+
+```bash
+./target/release/sx-teach \
+  --drive /path/to/robot/drive.json \
+  --commissioning /path/to/robot/commissioning.json \
+  --urdf /path/to/robot/body.urdf \
+  --dynamics /path/to/robot/identified.dynamics.json \
+  --joints left_shoulder_pitch_joint,left_shoulder_roll_joint,left_upper_arm_yaw_joint,left_elbow_pitch_joint,left_forearm_yaw_joint,left_wrist_pitch_joint,left_wrist_roll_joint \
+  --out-dir /path/to/recordings
+```
+
+Without `--move`, startup parses the local files and opens the read-only observer;
+no motor is enabled. With an attending operator, supported arms, verified supply
+and free workspace, add `--move`. The same startup checks run; no separate
+preview session is needed by default. Defaults are `--speed 0.2`, `--share 0.25`,
+`--damping 0.5` and `--max-seconds 3600`. The intended control period is 10 ms;
+physical full-arm loop timing and gravity compensation still require bench
+qualification before claiming sustained 100 Hz operation.
+
+`--speed` caps positioning and approach motion. Playback uses the recorded
+timestamps at 1×, with the Governor's validated actuator, share, acceleration,
+tracking and device limits still bounding robot commands. Physically infeasible
+motion can lag or fault; 1× timing is not a guarantee of perfect tracking.
+Observed speed is checked against actuator ratings and device derates.
+
+Replay arrival uses a 0.05 rad joint-position tolerance held for 300 ms. Axes
+that report native velocity must also return fresh feedback below 0.05 rad/s;
+position-only servos are checked by position, without inferring a velocity from
+coarse encoder steps. The approach timeout includes travel at the effective
+speed and acceleration limits plus 30 seconds to settle. Arrival tolerance
+does not change joint limits or improve the underlying tracking accuracy.
+
+Engagement prepares the motors with zero arm torque and positive damping, then
+reads a fresh pose before applying position hold and ramping gravity support.
+The one-time activation transaction has a separate one-second budget. Fresh
+reads and subsequent control cycles retain their 50 ms deadline. Keep the arms
+physically supported through preparation and the gravity ramp.
+
+Pressing `t` in Hold enters hand guidance immediately. It does not wait for
+steady readings or require another keypress. An optional support correction is
+used if suitable Hold data is already available; otherwise the current gravity
+compensation is retained. Calibration files are unchanged. Effort, physical
+speed, range and feedback-freshness checks remain active.
+
+| Key | Action |
+| --- | --- |
+| `e` | Engage a hold at the measured position; keep supporting the arm during the one-second gravity ramp |
+| `t` | Enter hand guidance immediately from Hold |
+| `r` | Start recording during teaching; press again to hold and save |
+| `h` | Hold the current position; recording continues |
+| `p` | Approach the selected recording's start; press again when ready to play |
+| `-` / `+` | Adjust grippers in hold; record the change if a take is active |
+| Space, `q` | Stop into a fault hold; never release torque or home |
+| Ctrl-C | Stop, release torque and exit; physically support both arms before pressing |
+| `x` | Release torque and exit from hold/fault, after physically supporting arms |
+
+The tool reports when the recording has finished writing and is ready for replay.
+During creation/finalization it refuses a new teaching/replay operation. The last
+successfully saved recording becomes the selected replay. To replay after a tool
+restart, provide `--replay /path/to/recordings/episode-....jsonl` with the same
+configuration. Replay follows the recorded timestamps at 1×; governed commands
+retain their speed, acceleration and tracking bounds. Replay refuses a different configuration/joint order, incomplete
+files and malformed/non-finite measurements. Recordings use unique names and
+never replace existing files. An interrupted take is retained without a completion
+footer and cannot be replayed.
+
+A bounded writer queue keeps disk operations off the control thread. Queue
+saturation or disk failure invalidates the take and stops teaching into hold.
+Terminal EOF/disconnection and SIGTERM/SIGHUP/SIGQUIT also stop into hold;
+the process keeps refreshing holds. SIGINT/Ctrl-C explicitly stops and releases
+torque, so support both arms before using it.
+Keyboard Space is a software stop, not a substitute for the physical emergency
+stop. On a process crash or power loss, software cannot keep a brakeless arm up.
+
+Before starting, hand bus ownership over from any resident station or bench tool
+only after the arms are physically supported or parked. Never kill a station that
+is their only support. The local tool refuses a bus already held by another
+process. Physical operation remains subject to attending-operator authorization;
+a successful compile or simulated test does not qualify hand contact or replay.
+
+The local controller checks joint ranges, speeds, torque, feedback freshness and
+control timing. It does not yet check Cartesian workspace clearance or robot
+self-collision against a scene. This is a software candidate for attended bench
+qualification, not a physically qualified teach mode.
+
+Startup reads the configuration into one immutable snapshot. The digest saved in
+recordings covers the same drive, commissioning, serial calibration, dynamics and
+URDF bytes used by the hardware opener. Replacing a source file while the operator
+reads the instructions does not change that running snapshot; restart to load a
+new configuration. Explicit serial calibration files override automatic files for
+their ports. Selected joints marked unidentified are refused from this snapshot.
+
+For dynamics identified against an earlier description, startup looks for the
+exact earlier URDF at `<URDF directory>/_by_digest/<description digest>/<URDF filename>`.
+It verifies those bytes against the calibration's digest, then uses the existing
+embodiment dynamics compatibility check before accepting the fit. Missing,
+changed or incompatible historical descriptions are refused; no calibration is
+converted or re-keyed. Accepted historical URDF bytes also enter the recording's
+configuration digest.
+
+Space, Ctrl-C and `q` preempt incomplete terminal escape sequences: pressing Escape
+or receiving a partial arrow-key sequence cannot swallow a subsequent stop/exit key.
+Ctrl-C (raw terminal byte or SIGINT) is an explicit operator release request from
+any mode, including recording and replay. It first runs the existing motion-stop
+path, then disables actuators and exits only after release is proven. An active
+take interrupted this way remains incomplete. If disabling cannot be confirmed,
+the tool reports the failure and stays in Fault for an explicit retry.
+Terminal loss, SIGTERM, SIGHUP and SIGQUIT still request hold. Motor faults retain
+their existing per-axis safety handling. The launcher uses `exec`,
+so this is handled in the controller rather than a shell kill trap.
+
+In Teach, active Feetech grippers have torque disabled so the operator can move
+fingers by hand while arm gravity support continues. Fresh measured finger
+positions remain part of every recording sample. Hold captures those current
+positions before restoring powered gripper control; replay uses the recorded
+finger trajectory. Release is supported only for complete gripper-only Feetech
+chains; unsupported hardware is refused before engagement. Joint ranges and
+feedback freshness still apply, including the calibrated gripper endpoints.
+An object held only by motor force may drop when entering Teach.
+
+In Hold, `-` closes and `+` opens both available grippers. Finger angles come from
+the embodiment's canonical geometric gripper mapping, including opposite joint
+signs on mirrored fingers. Startup selects the embedded render pack only when its
+URDF SHA matches the supplied description exactly, maps its finger names into the
+hardware drive order, and includes the pack/collision bytes in recording identity.
+Without a matching canonical mapping the arm can still be taught, but gripper
+keyboard actions are refused; the tool never guesses finger directions.
+
+To investigate a concrete local configuration parse failure without touching any
+bus, append `--check-config` to the usual invocation. This optional file-only
+check reads, parses and hashes the same immutable input snapshot, including
+historical description and calibration compatibility. It returns before opening
+an observer, actuator, terminal or recording directory, even if `--move` is also
+present. It does not establish live joint feedback, floating stability or motion
+readiness. Ordinary startup still runs its usual checks; a separate check-config
+session is not required for normal operation.
+
+An optional `--guidance FILE` selects a separate `sx.guidance/v1` hand-guidance
+profile. Its affine coordinate mapping, gravity-only model, per-joint gravity
+scale, damping, torque cap and slew rate apply only in Teach. Entering and leaving
+Teach blends support over two seconds, without a settled-readings gate. Hold,
+Approach and Replay keep the original `--dynamics` model and position gains;
+the platform station does not read this file. `--damping` remains the legacy
+common Teach gain only when no guidance profile is supplied.
+The profile's torque cap bounds every Teach support command. If inherited Hold
+support is outside that cap, the cap takes precedence over the soft transition
+slew bound. Held joints outside the selected set keep receiving updated support
+from the original model as the guided joints move.
+
+The profile binds exact physical description and drive bytes; it never rewrites
+encoder zeros, signs, limits or the collision model. Its lumped wrist payloads
+occur once inside the guidance-only model. Rotational inertias in that model are
+numerical regularization for point masses, not identified dynamic parameters;
+only static gravity is evaluated. `friction_coulomb` preserves handoff values,
+but `friction_scale` must be zero in v1. Enabling friction requires an explicit
+controller implementation, rather than making that field appear effective.
+
+For the November 23 Allisa handoff, `tools/import_allisa_guidance.py` in the
+embodiments root generates a profile and reference torque fixtures without
+opening a socket. It uses the handoff's recommended left J4 multiplier 0.70,
+left J2 default 1.00 and tested right baseline, not the optional fitted profiles.
+`guidance_handoff` compares 256 matching encoder poses against the supplied
+Python controller, including motor signs, payload, gravity scales and caps.
+
+Guidance bytes are part of the recording configuration identity. Recordings made
+before this profile was enabled require the old invocation without `--guidance`;
+do not rewrite episode headers to force them through a changed configuration.

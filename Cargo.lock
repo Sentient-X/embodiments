@@ -1247,6 +1247,7 @@ dependencies = [
  "sx-damiao-can",
  "sx-embodiment-bodies",
  "sx-embodiment-drivers",
+ "sx-embodiment-ik",
  "sx-feetech-serial",
  "sx-realtime",
  "sx-socketcan",

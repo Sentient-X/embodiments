@@ -305,7 +305,7 @@ fn the_arm_s_file_applies_only_with_its_trimmed_companion() {
             Err(DynamicsError::Uncertified { file, .. }) if file == "left-arm"
         ));
     }
-    let over = CALIBRATION.replacen("\"value\": 1.938168995352374e-05", "\"value\": 0.061", 1);
+    let over = CALIBRATION.replacen("\"value\": 2.0972408022346123e-05", "\"value\": 0.061", 1);
     assert_ne!(over, CALIBRATION, "the fixture's residual");
     assert!(matches!(
         DynamicsCalibration::parse(&over),

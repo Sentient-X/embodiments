@@ -44,6 +44,7 @@ pub mod drive;
 pub mod dynamics;
 pub mod ending;
 pub mod governor;
+pub mod guidance;
 pub mod holder;
 pub mod host_needs;
 pub mod inertial;
@@ -67,9 +68,10 @@ pub use binding::{
 pub use body::{BodyBindings, BodyError, Bus, Twin};
 pub use bus_timing::BusTiming;
 pub use chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
-    FeedforwardLimit, MissingReason, Motor, MotorTemperature, Observe, ProvenStop, Receipt,
-    Reports, StopReport, TargetError, TrackingCeiling, check_reach, check_targets, fresh_positions,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, CompliantCommand,
+    CompliantError, Evidence, Feedforward, FeedforwardLimit, MissingReason, Motor,
+    MotorTemperature, Observe, ProvenStop, Receipt, Reports, StopReport, TargetError,
+    TrackingCeiling, check_compliant, check_reach, check_targets, fresh_positions,
 };
 pub use chains::{Chains, ChainsError};
 pub use composite::{Composite, CompositeError};
@@ -85,6 +87,9 @@ pub use ending::{
 pub use governor::{
     AxisLimits, Clock, Governor, GovernorError, LimitsError, MAX_STEP_INTERVAL, MonotonicClock,
     TRACKING_REPEAT,
+};
+pub use guidance::{
+    GUIDANCE_SCHEMA, GuidanceError, GuidanceProfile, GuidanceScratch, JointSettings,
 };
 pub use holder::{Holder, Process, holder_of};
 pub use host_needs::{HOST_NEEDS_SCHEMA, HostNeed, HostNeeds};

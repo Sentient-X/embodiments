@@ -1,4 +1,5 @@
-"""Dynamics documents move to a re-rendered description only when it changed velocity limits."""
+"""Dynamics documents move to a re-rendered description only when it changed what they never
+read."""
 
 import importlib.util
 import json
@@ -41,6 +42,9 @@ def test_a_velocity_only_rerender_rekeys_every_digest_a_document_carries(tmp_pat
         json.dumps({"description_sha256": old_sha, "calibration": {"description_sha256": old_sha}})
     )
     rekey_dynamics.check_only_velocity(old, new)
+    # A joint's reach is not read by dynamics either (the left yaw's 160 degrees, 2026-11-24).
+    reach = _write(tmp_path, "reach.urdf", "1.0", "0.5", lower="-2")
+    rekey_dynamics.check_only_velocity(old, reach)
     assert rekey_dynamics.rekey(document, old_sha, new_sha)
     assert json.loads(document.read_text())["calibration"]["description_sha256"] == new_sha
     assert not rekey_dynamics.rekey(document, old_sha, new_sha)
@@ -52,7 +56,6 @@ def test_a_rerender_that_changes_dynamics_or_a_foreign_document_is_refused(
     old = _write(tmp_path, "old.urdf", "1.0", "0.5")
     for changed in [
         _write(tmp_path, "mass.urdf", "2.0", "0.5"),
-        _write(tmp_path, "lower.urdf", "1.0", "0.5", lower="-2"),
         _write(tmp_path, "nan.urdf", "1.0", "nan"),
         _write(tmp_path, "negative.urdf", "1.0", "-5"),
         _write(tmp_path, "effortless.urdf", "1.0", "0.5", effort="0"),

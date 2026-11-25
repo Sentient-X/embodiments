@@ -34,8 +34,9 @@ use std::time::{Duration, Instant};
 use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, AxisReading, CommandRange, Feedforward, FeedforwardLimit, MissingReason,
-    Observe, Receipt, StopReport, TargetError, check_targets,
+    ActuatorChain, AxisReading, CommandRange, CompliantCommand, CompliantError, Feedforward,
+    FeedforwardLimit, MissingReason, Observe, Receipt, StopReport, TargetError, check_compliant,
+    check_targets,
 };
 use crate::rail::AxisDerate;
 
@@ -432,6 +433,44 @@ impl<C: ActuatorChain> ActuatorChain for Masked<C, C::Feedback> {
         feedforward: &[Feedforward],
     ) -> Result<Receipt<C::Feedback>, C::Error> {
         self.drive(joints, Some(feedforward))
+    }
+
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        check_compliant(self.axes.len(), joints, feedforward, compliant)?;
+        if let Some(axis) = self
+            .unavailable
+            .iter()
+            .copied()
+            .find(|index| compliant[*index].is_some())
+        {
+            return Err(CompliantError::Unsupported { axis });
+        }
+        let positions: Axes<f64> = self.present.iter().map(|i| joints[*i]).collect();
+        let ff: Axes<Feedforward> = self.present.iter().map(|i| feedforward[*i]).collect();
+        let control: Axes<Option<CompliantCommand>> =
+            self.present.iter().map(|i| compliant[*i]).collect();
+        self.inner.validate_compliant(&positions, &ff, &control)
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        self.validate_compliant(joints, feedforward, compliant)?;
+        let positions: Axes<f64> = self.present.iter().map(|i| joints[*i]).collect();
+        let ff: Axes<Feedforward> = self.present.iter().map(|i| feedforward[*i]).collect();
+        let control: Axes<Option<CompliantCommand>> =
+            self.present.iter().map(|i| compliant[*i]).collect();
+        let receipt = self.inner.command_compliant(&positions, &ff, &control)?;
+        self.sense(SENSE_PERIOD);
+        Ok(self.spread_receipt(receipt))
     }
 
     /// The available axes' bounds to `inner`.

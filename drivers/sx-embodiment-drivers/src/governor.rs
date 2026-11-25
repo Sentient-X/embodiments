@@ -221,7 +221,7 @@ impl Clock for MonotonicClock {
     }
 }
 
-/// Limits the governor refuses to be built with.
+/// Limits the governor refuses to construct or apply.
 #[derive(Debug, Error, PartialEq)]
 pub enum LimitsError {
     #[error("expected limits for {expected} axes, got {actual}")]
@@ -240,6 +240,12 @@ pub enum LimitsError {
     /// The chain refused the governor's velocity bounds.
     #[error("the chain refused its planned-velocity bounds: {0}")]
     Feedforward(String),
+    #[error("a speed cap must be finite and positive, not {0}")]
+    SpeedCap(f64),
+    #[error(
+        "reset the motion profile with start_at or a proven stop before changing its speed cap"
+    )]
+    ActiveProfile,
 }
 
 /// A command the governor refused, or a fault it stopped the chain for.
@@ -339,6 +345,10 @@ struct Held {
 pub struct Governor<C, K = MonotonicClock> {
     chain: C,
     limits: Vec<AxisLimits>,
+    /// Constructor speeds after validated tracking/rail limits; temporary caps cannot lift them.
+    original_speeds: Vec<f64>,
+    /// The complete bounds most recently accepted by the underlying chain.
+    feedforward_limits: Vec<FeedforwardLimit>,
     clock: K,
     held: Option<Held>,
     start: Option<Axes<f64>>,
@@ -517,9 +527,12 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         chain
             .set_feedforward_limits(&velocity)
             .map_err(|error| LimitsError::Feedforward(error.to_string()))?;
+        let original_speeds = limits.iter().map(|limit| limit.max_speed).collect();
         Ok(Self {
             chain,
             limits,
+            original_speeds,
+            feedforward_limits: velocity,
             clock,
             held: None,
             start: None,
@@ -558,6 +571,49 @@ impl<C: ActuatorChain, K: Clock> Governor<C, K> {
         self.interval = None;
         self.outside.fill(None);
         self.noted = None;
+        Ok(())
+    }
+
+    /// Set a temporary phase speed cap, or restore the constructor's validated speeds.
+    /// Tracking ceilings, rail derates, acceleration, jerk, tracking and torque bounds are
+    /// retained. The caller must first establish a stationary transition and reset the motion
+    /// profile with [`Governor::start_at`] or a stop. This setter sends no motion command and
+    /// never clears a latched fault.
+    ///
+    /// # Errors
+    /// Invalid cap, an active motion profile, or the chain refusing new feed-forward bounds.
+    /// A refused change leaves the governor's limits and cached accepted bounds unchanged.
+    pub fn set_speed_cap(&mut self, cap: Option<f64>) -> Result<(), LimitsError> {
+        if let Some(cap) = cap
+            && !(cap.is_finite() && cap > 0.0)
+        {
+            return Err(LimitsError::SpeedCap(cap));
+        }
+        if self.held.is_some() {
+            return Err(LimitsError::ActiveProfile);
+        }
+        let capped_speed = |original: f64| cap.map_or(original, |cap| original.min(cap));
+        let bounded: Vec<_> = self
+            .original_speeds
+            .iter()
+            .zip(&self.feedforward_limits)
+            .map(|(original, accepted)| FeedforwardLimit {
+                velocity: Some(capped_speed(*original)),
+                torque: accepted.torque,
+            })
+            .collect();
+        self.chain
+            .set_feedforward_limits(&bounded)
+            .map_err(|error| LimitsError::Feedforward(error.to_string()))?;
+        for (limit, original) in self.limits.iter_mut().zip(&self.original_speeds) {
+            limit.max_speed = capped_speed(*original);
+        }
+        self.feedforward_limits = bounded;
+        for derate in &mut self.derated {
+            if let Some(limit) = self.limits.get(derate.axis) {
+                derate.limits.max_speed = limit.max_speed;
+            }
+        }
         Ok(())
     }
 
@@ -1316,6 +1372,12 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
     /// velocity is always the governor's step speed, bounded by each axis's speed cap,
     /// whatever is asked.
     fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
+        if limits.len() != self.limits.len() {
+            return Err(GovernorError::Target(TargetError::Width {
+                expected: self.limits.len(),
+                actual: limits.len(),
+            }));
+        }
         let bounded: Vec<FeedforwardLimit> = limits
             .iter()
             .zip(&self.limits)
@@ -1331,7 +1393,9 @@ impl<C: ActuatorChain, K: Clock> ActuatorChain for Governor<C, K> {
             .collect();
         self.chain
             .set_feedforward_limits(&bounded)
-            .map_err(GovernorError::Chain)
+            .map_err(GovernorError::Chain)?;
+        self.feedforward_limits = bounded;
+        Ok(())
     }
 
     fn stop(&mut self) -> StopReport {
@@ -1449,6 +1513,7 @@ mod tests {
         /// Each `command_with`'s feed-forward, and each feed-forward bound set.
         feedforward: Vec<Vec<Feedforward>>,
         feedforward_limits: Vec<Vec<FeedforwardLimit>>,
+        refuse_feedforward: bool,
         /// An axis that never moves: it observes this whatever it is sent.
         pinned: Option<(usize, f64)>,
         /// What the chain's own controller follows at most.
@@ -1502,6 +1567,7 @@ mod tests {
             derated: Vec::new(),
             feedforward: Vec::new(),
             feedforward_limits: Vec::new(),
+            refuse_feedforward: false,
             pinned: None,
             ceilings: Vec::new(),
         }
@@ -1561,6 +1627,9 @@ mod tests {
         }
 
         fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), FakeError> {
+            if self.refuse_feedforward {
+                return Err(FakeError(ChainFailure::Refused));
+            }
             self.feedforward_limits.push(limits.to_vec());
             Ok(())
         }
@@ -2753,6 +2822,172 @@ mod tests {
         assert!(
             last.torque == 0.0 && last.velocity == 0.0,
             "still pushing: {last:?}"
+        );
+    }
+    #[test]
+    fn phase_speed_cap_restores_only_validated_hardware_tracking_and_rail_speeds() {
+        let mut chain = rated(fake(true));
+        chain.axes[1].motion.speed = 0.4;
+        chain.ceilings = vec![(
+            1,
+            crate::chain::TrackingCeiling {
+                speed: 0.2,
+                acceleration: Some(2.0),
+                rise_s: Some(0.1),
+            },
+        )];
+        chain.derated = vec![AxisDerate {
+            axis: 0,
+            over: crate::rail::OverRail {
+                rail_volts: 54.0,
+                max_volts: 48.0,
+            },
+            limits: crate::rail::OVER_RAIL,
+        }];
+        let limits = AxisLimits::rated_all(chain.axes(), 1.0).unwrap();
+        let mut governor = Governor::new(chain, limits).unwrap();
+        let original = governor.limits().to_vec();
+        assert!(close(
+            &original
+                .iter()
+                .map(|limit| limit.max_speed)
+                .collect::<Vec<_>>(),
+            &[0.3, 0.2]
+        ));
+        governor.set_speed_cap(Some(0.05)).unwrap();
+        assert!(close(
+            &governor
+                .limits()
+                .iter()
+                .map(|limit| limit.max_speed)
+                .collect::<Vec<_>>(),
+            &[0.05, 0.05]
+        ));
+        assert!((governor.derated()[0].limits.max_speed - 0.05).abs() < 1e-12);
+        assert!(
+            governor
+                .chain()
+                .feedforward_limits
+                .last()
+                .unwrap()
+                .iter()
+                .all(|limit| limit.torque.is_none())
+        );
+        governor.set_speed_cap(Some(10.0)).unwrap();
+        assert_eq!(governor.limits(), original);
+        governor.set_speed_cap(None).unwrap();
+        assert_eq!(governor.limits(), original);
+        assert!((governor.derated()[0].limits.max_speed - 0.3).abs() < 1e-12);
+        governor
+            .set_feedforward_limits(
+                &[FeedforwardLimit {
+                    velocity: None,
+                    torque: Some(30.0),
+                }; 2],
+            )
+            .unwrap();
+        governor.set_speed_cap(Some(0.1)).unwrap();
+        governor.set_speed_cap(None).unwrap();
+        let accepted = governor.chain().feedforward_limits.last().unwrap();
+        assert_eq!(accepted[0].torque, Some(20.0));
+        assert_eq!(accepted[1].torque, Some(30.0));
+        assert_eq!(
+            governor.limits(),
+            original,
+            "acceleration/jerk/tracking must remain unchanged"
+        );
+        assert!(governor.chain().sent.is_empty());
+        assert_eq!(
+            governor.chain().stops,
+            0,
+            "changing a cap must not issue any motor command"
+        );
+    }
+
+    #[test]
+    fn phase_speed_cap_rejects_invalid_or_active_profiles_and_preserves_faults() {
+        let (mut governor, _) = governed(fake(true));
+        let accepted = governor.chain().feedforward_limits.len();
+        for cap in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                governor.set_speed_cap(Some(cap)),
+                Err(LimitsError::SpeedCap(_))
+            ));
+        }
+        assert_eq!(governor.chain().feedforward_limits.len(), accepted);
+        governor.command(&[0.0, 0.5]).unwrap();
+        assert!(matches!(
+            governor.set_speed_cap(None),
+            Err(LimitsError::ActiveProfile)
+        ));
+        governor.start_at(&[0.0, 0.5]).unwrap();
+        governor.set_speed_cap(Some(0.1)).unwrap();
+        governor.chain_mut().fail = Some(ChainFailure::Fault);
+        assert!(matches!(
+            governor.command(&[0.0, 0.5]),
+            Err(GovernorError::Faulted { .. })
+        ));
+        governor.chain_mut().fail = None;
+        let commands = governor.chain().sent.len();
+        governor.start_at(&[0.0, 0.5]).unwrap();
+        governor.set_speed_cap(None).unwrap();
+        assert!(governor.is_latched());
+        assert!(matches!(
+            governor.command(&[0.0, 0.5]),
+            Err(GovernorError::Latched)
+        ));
+        assert_eq!(governor.chain().sent.len(), commands);
+    }
+
+    #[test]
+    fn rejected_phase_or_torque_bounds_never_replace_accepted_feedforward_state() {
+        let (mut governor, _) = governed(fake(true));
+        governor
+            .set_feedforward_limits(
+                &[FeedforwardLimit {
+                    velocity: None,
+                    torque: Some(2.0),
+                }; 2],
+            )
+            .unwrap();
+        governor.set_speed_cap(Some(0.1)).unwrap();
+        let capped = governor.limits().to_vec();
+        governor.chain_mut().refuse_feedforward = true;
+        assert!(matches!(
+            governor.set_speed_cap(None),
+            Err(LimitsError::Feedforward(_))
+        ));
+        assert_eq!(governor.limits(), capped);
+        assert!(
+            governor
+                .set_feedforward_limits(&[FeedforwardLimit::default(); 2])
+                .is_err()
+        );
+        governor.chain_mut().refuse_feedforward = false;
+        governor.set_speed_cap(None).unwrap();
+        let accepted = governor.chain().feedforward_limits.last().unwrap();
+        assert!(accepted.iter().all(|limit| limit.torque == Some(2.0)));
+        assert!(close(
+            &accepted
+                .iter()
+                .map(|limit| limit.velocity.unwrap())
+                .collect::<Vec<_>>(),
+            &[0.25, 0.25]
+        ));
+        assert!(
+            governor
+                .set_feedforward_limits(&[FeedforwardLimit::default(); 1])
+                .is_err()
+        );
+        governor.set_speed_cap(Some(0.05)).unwrap();
+        assert!(
+            governor
+                .chain()
+                .feedforward_limits
+                .last()
+                .unwrap()
+                .iter()
+                .all(|limit| limit.torque == Some(2.0))
         );
     }
 }

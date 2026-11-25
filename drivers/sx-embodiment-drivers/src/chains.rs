@@ -45,8 +45,9 @@ use thiserror::Error;
 use crate::axes::Axes;
 use crate::binding::BoundAxis;
 use crate::chain::{
-    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, Evidence, Feedforward,
-    FeedforwardLimit, Receipt, StopReport, TargetError, check_reach,
+    ActuatorChain, AxisReading, ChainError, ChainFailure, CommandRange, CompliantCommand,
+    CompliantError, Evidence, Feedforward, FeedforwardLimit, Receipt, StopReport, TargetError,
+    check_compliant, check_reach,
 };
 use crate::rail::AxisDerate;
 
@@ -626,6 +627,94 @@ impl<C: ActuatorChain> ActuatorChain for Chains<C> {
         self.drive(joints, Some(feedforward))
     }
 
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        check_compliant(self.axes.len(), joints, feedforward, compliant)?;
+        self.check_every_reach(joints)
+            .map_err(|e| CompliantError::Driver(e.into()))?;
+        let mut first = 0;
+        for (index, member) in self.members.iter().enumerate() {
+            let chain = lock(member);
+            let end = first + chain.axes().len();
+            chain
+                .validate_compliant(
+                    &joints[first..end],
+                    &feedforward[first..end],
+                    &compliant[first..end],
+                )
+                .map_err(|error| {
+                    error.map_driver(|error| ChainsError::Chain {
+                        index,
+                        applied: false,
+                        error,
+                    })
+                })?;
+            first = end;
+        }
+        Ok(())
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        self.validate_compliant(joints, feedforward, compliant)?;
+        if compliant.iter().all(Option::is_none) {
+            return self
+                .command_with(joints, feedforward)
+                .map_err(CompliantError::Driver);
+        }
+        self.kept = None;
+        let mut observed = Axes::new();
+        let mut feedback = Axes::new();
+        let mut evidence = Evidence::BusObservedComplete;
+        let mut first = 0;
+        let mut feedback_whole = true;
+        for (index, member) in self.members.iter().enumerate() {
+            let mut chain = lock(member);
+            let width = chain.axes().len();
+            let end = first + width;
+            let receipt = chain
+                .command_compliant(
+                    &joints[first..end],
+                    &feedforward[first..end],
+                    &compliant[first..end],
+                )
+                .map_err(|error| {
+                    error.map_driver(|error| ChainsError::Chain {
+                        index,
+                        applied: index > 0,
+                        error,
+                    })
+                })?;
+            if receipt.evidence == Evidence::DispatchAttempted {
+                evidence = Evidence::DispatchAttempted;
+            }
+            if receipt.observed.len() == width {
+                observed.extend(receipt.observed);
+            } else {
+                observed.extend(std::iter::repeat_n(f64::NAN, width));
+            }
+            feedback_whole &= receipt.feedback.len() == width;
+            feedback.extend(receipt.feedback);
+            first = end;
+        }
+        if !feedback_whole {
+            feedback.clear();
+        }
+        Ok(Receipt {
+            evidence,
+            observed,
+            feedback,
+        })
+    }
+
     /// Each chain its own slice of `limits`.
     fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {
         if limits.len() != self.axes.len() {
@@ -871,6 +960,24 @@ impl<C: ActuatorChain + ?Sized> ActuatorChain for Box<C> {
         feedforward: &[Feedforward],
     ) -> Result<Receipt<Self::Feedback>, Self::Error> {
         (**self).command_with(joints, feedforward)
+    }
+
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        (**self).validate_compliant(joints, feedforward, compliant)
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        (**self).command_compliant(joints, feedforward, compliant)
     }
 
     fn set_feedforward_limits(&mut self, limits: &[FeedforwardLimit]) -> Result<(), Self::Error> {

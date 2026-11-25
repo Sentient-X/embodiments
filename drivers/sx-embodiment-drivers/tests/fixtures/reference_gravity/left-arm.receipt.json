@@ -33,49 +33,49 @@
     "left_wrist_roll_joint": -1.0
   },
   "residual_nm": {
-    "left_shoulder_pitch_joint": 1.8331997859721838e-05,
-    "left_shoulder_roll_joint": 1.938168995352374e-05,
-    "left_upper_arm_yaw_joint": 1.5675008394833156e-05,
-    "left_elbow_pitch_joint": 1.5587563885061106e-05,
-    "left_forearm_yaw_joint": 6.513839909488839e-06,
-    "left_wrist_pitch_joint": 1.1562069317426482e-05,
-    "left_wrist_roll_joint": 5.787011616287512e-07
+    "left_shoulder_pitch_joint": 1.7919909609531715e-05,
+    "left_shoulder_roll_joint": 1.8034326473514994e-05,
+    "left_upper_arm_yaw_joint": 1.3989439974770868e-05,
+    "left_elbow_pitch_joint": 2.0972408022346123e-05,
+    "left_forearm_yaw_joint": 6.395429026306854e-06,
+    "left_wrist_pitch_joint": 8.343226937369136e-06,
+    "left_wrist_roll_joint": 1.2624904740116951e-07
   },
   "links": {
     "left_shoulder_pitch_link": {
       "mass_kg": 1.28,
       "description_mass_kg": 0.346967,
-      "centre_shift_m": 0.06252206689126875
+      "centre_shift_m": 0.06252206693475987
     },
     "left_shoulder_roll_link": {
       "mass_kg": 1.2,
       "description_mass_kg": 0.360351,
-      "centre_shift_m": 0.06172368207736796
+      "centre_shift_m": 0.061723656370048556
     },
     "left_upper_arm_yaw_link": {
       "mass_kg": 0.55,
       "description_mass_kg": 0.181364,
-      "centre_shift_m": 0.03179398131621316
+      "centre_shift_m": 0.03179392648111312
     },
     "left_elbow_pitch_link": {
       "mass_kg": 0.54,
       "description_mass_kg": 0.133283,
-      "centre_shift_m": 0.05270068652369493
+      "centre_shift_m": 0.05270074585410542
     },
     "left_forearm_yaw_link": {
       "mass_kg": 0.4,
       "description_mass_kg": 0.263184,
-      "centre_shift_m": 0.017461624893077926
+      "centre_shift_m": 0.017461604414682683
     },
     "left_wrist_pitch_link": {
       "mass_kg": 0.34,
       "description_mass_kg": 0.141803,
-      "centre_shift_m": 0.04138408303438455
+      "centre_shift_m": 0.04138424372726469
     },
     "left_wrist_roll_link": {
       "mass_kg": 0.16161192822593423,
       "description_mass_kg": 0.2007,
-      "centre_shift_m": 0.04834398363811985
+      "centre_shift_m": 0.0483443416264191
     }
   },
   "not_carried": {

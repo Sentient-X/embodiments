@@ -352,3 +352,147 @@ fn each_motor_carries_its_own_residual_through_the_chain() {
         }
     }
 }
+
+#[test]
+fn compliant_joint_has_zero_stiffness_real_gravity_torque_and_restores_position_gains() {
+    use sx_embodiment_drivers::{CompliantCommand, Rest};
+    let wrist = index_of("left_wrist_roll_joint");
+    let mut axes = STATIC_UPPER_BODY.axes(&drive()).expect("axes");
+    axes[wrist].axis.binding.reduction = 2.0;
+    let bus = Sim::for_axes(&axes);
+    let mut chain = DamiaoChain::open(bus.clone(), axes.clone()).expect("opens");
+    let rest = chain.last_observed().expect("rest").to_vec();
+    let motor = &axes[wrist];
+    let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
+    let mut limits = vec![FeedforwardLimit::default(); rest.len()];
+    limits[wrist].torque = Some(2.0);
+    chain.set_feedforward_limits(&limits).expect("bounds");
+    let ff = vec![Feedforward::default(); rest.len()];
+    let mut compliant = vec![None; rest.len()];
+    compliant[wrist] = Some(CompliantCommand::Torque {
+        torque: 1.0,
+        damping: 0.5,
+    });
+    chain.read_positions();
+    chain
+        .command_compliant(&rest, &ff, &compliant)
+        .expect("gravity teaching");
+    let bytes = last_mit(&bus, motor.axis.binding.bus_id);
+    let kp = (u16::from(bytes[3] & 0xf) << 8) | u16::from(bytes[4]);
+    let kd = (u16::from(bytes[5]) << 4) | u16::from(bytes[6] >> 4);
+    let tau = (u16::from(bytes[6] & 0xf) << 8) | u16::from(bytes[7]);
+    assert_eq!(kp, 0, "hand guidance must not pull toward a position");
+    assert_eq!(
+        kd,
+        float_to_uint(0.5 / (gain * gain), 0.0, 5.0, 12).expect("damping")
+    );
+    let tmax = f64::from(chain.limits()[wrist].t_max);
+    assert_eq!(
+        tau,
+        float_to_uint(1.0 / gain, -tmax, tmax, 12).expect("support torque")
+    );
+    assert!((chain.applied_feedforward()[wrist].gravity - 1.0).abs() < 1e-12);
+    let rests = vec![Rest::Hold { gravity: 1.0 }; rest.len()];
+    let stop = chain.stop_holding(&rests);
+    assert!(stop.is_proven());
+    assert!(!stop.held.is_empty());
+    let bytes = last_mit(&bus, motor.axis.binding.bus_id);
+    let kp = (u16::from(bytes[3] & 0xf) << 8) | u16::from(bytes[4]);
+    assert_eq!(
+        kp,
+        float_to_uint(motor.kp, 0.0, 500.0, 12).expect("position stiffness")
+    );
+}
+
+#[test]
+fn invalid_compliant_request_never_enables_or_writes_a_frame() {
+    use sx_embodiment_drivers::CompliantCommand;
+    let (bus, mut chain, rest) = opened();
+    let wrist = index_of("left_wrist_roll_joint");
+    let mut limits = vec![FeedforwardLimit::default(); rest.len()];
+    limits[wrist].torque = Some(2.0);
+    chain.set_feedforward_limits(&limits).expect("bounds");
+    let ff = vec![Feedforward::default(); rest.len()];
+    chain.read_positions();
+    let mut valid = vec![None; rest.len()];
+    valid[wrist] = Some(CompliantCommand::Torque {
+        torque: 1.0,
+        damping: 0.5,
+    });
+    chain
+        .validate_compliant(&rest, &ff, &valid)
+        .expect("fresh bounded request is admissible");
+    for (torque, damping) in [(2.1, 0.5), (1.0, 0.0), (f64::NAN, 0.5), (1.0, 6.0)] {
+        let mut control = vec![None; rest.len()];
+        control[wrist] = Some(CompliantCommand::Torque { torque, damping });
+        let before = bus.state().frames.len();
+        assert!(chain.command_compliant(&rest, &ff, &control).is_err());
+        assert_eq!(bus.state().frames.len(), before);
+    }
+    let mut released = vec![None; rest.len()];
+    released[wrist] = Some(CompliantCommand::Released);
+    let before = bus.state().frames.len();
+    assert!(matches!(
+        chain.command_compliant(&rest, &ff, &released),
+        Err(sx_embodiment_drivers::CompliantError::Unsupported { axis }) if axis == wrist
+    ));
+    assert_eq!(
+        bus.state().frames.len(),
+        before,
+        "an arm release must never reach CAN"
+    );
+    let mut control = vec![None; rest.len()];
+    control[wrist] = Some(CompliantCommand::Torque {
+        torque: 1.0,
+        damping: 0.5,
+    });
+    std::thread::sleep(std::time::Duration::from_millis(55));
+    let before = bus.state().frames.len();
+    assert!(
+        chain.command_compliant(&rest, &ff, &control).is_err(),
+        "old measurements cannot support torque-only control"
+    );
+    assert_eq!(bus.state().frames.len(), before);
+}
+
+#[test]
+fn composite_preflights_later_compliant_axis_before_any_bus_moves() {
+    use sx_embodiment_drivers::{Chains, CompliantCommand};
+    let (first_bus, first, first_rest) = opened();
+    let (second_bus, second, second_rest) = opened();
+    let mut body = Chains::new(vec![first, second]);
+    let mut rest = first_rest.clone();
+    rest.extend(second_rest);
+    let limits = vec![
+        FeedforwardLimit {
+            velocity: None,
+            torque: Some(2.0)
+        };
+        rest.len()
+    ];
+    body.set_feedforward_limits(&limits).expect("bounds");
+    let ff = vec![Feedforward::default(); rest.len()];
+    let mut compliant = vec![None; rest.len()];
+    let wrist = index_of("left_wrist_roll_joint");
+    compliant[wrist] = Some(CompliantCommand::Torque {
+        torque: 1.0,
+        damping: 0.5,
+    });
+    compliant[first_rest.len() + wrist] = Some(CompliantCommand::Torque {
+        torque: 3.0,
+        damping: 0.5,
+    });
+    body.read_positions();
+    let before = (
+        first_bus.state().frames.len(),
+        second_bus.state().frames.len(),
+    );
+    assert!(body.command_compliant(&rest, &ff, &compliant).is_err());
+    assert_eq!(
+        (
+            first_bus.state().frames.len(),
+            second_bus.state().frames.len()
+        ),
+        before
+    );
+}

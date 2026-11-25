@@ -376,6 +376,74 @@ pub struct Feedforward {
     pub gravity: f64,
 }
 
+/// One joint guided by hand instead of its position spring.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CompliantCommand {
+    /// Gravity support (N·m) and viscous damping (N·m·s/rad), in joint coordinates.
+    Torque {
+        /// Support retained while braking; do not include motion feedforward.
+        torque: f64,
+        damping: f64,
+    },
+    /// Torque disabled, with fresh encoders still observed. Only supported grippers
+    /// may use this; it must never silently release a gravity-supported arm.
+    Released,
+}
+
+/// A compliant request is refused before writing, or a bus failed while applying it.
+#[derive(Debug, Error)]
+pub enum CompliantError<E> {
+    #[error("compliant command needs {expected} entries per vector")]
+    Width { expected: usize },
+    #[error("axis {axis} does not support compliant control")]
+    Unsupported { axis: usize },
+    #[error("axis {axis} has invalid or unbounded compliant control")]
+    Invalid { axis: usize },
+    #[error(transparent)]
+    Driver(E),
+}
+
+impl<E> CompliantError<E> {
+    /// Preserve refusal details while adapting the underlying driver's error.
+    pub fn map_driver<F>(self, map: impl FnOnce(E) -> F) -> CompliantError<F> {
+        match self {
+            Self::Width { expected } => CompliantError::Width { expected },
+            Self::Unsupported { axis } => CompliantError::Unsupported { axis },
+            Self::Invalid { axis } => CompliantError::Invalid { axis },
+            Self::Driver(error) => CompliantError::Driver(map(error)),
+        }
+    }
+}
+
+/// Validate the widths and finite values common to every compliant implementation.
+/// Unsupported axes and physical bounds remain the owning driver's responsibility.
+///
+/// # Errors
+/// A wrong vector width, non-finite position/feedforward or nonpositive damping.
+pub fn check_compliant<E>(
+    width: usize,
+    joints: &[f64],
+    feedforward: &[Feedforward],
+    compliant: &[Option<CompliantCommand>],
+) -> Result<(), CompliantError<E>> {
+    if joints.len() != width || feedforward.len() != width || compliant.len() != width {
+        return Err(CompliantError::Width { expected: width });
+    }
+    for index in 0..width {
+        let ff = feedforward[index];
+        if !joints[index].is_finite()
+            || !ff.velocity.is_finite()
+            || !ff.torque.is_finite()
+            || !ff.gravity.is_finite()
+            || matches!(compliant[index], Some(CompliantCommand::Torque { torque, damping })
+                if !torque.is_finite() || !damping.is_finite() || damping <= 0.0)
+        {
+            return Err(CompliantError::Invalid { axis: index });
+        }
+    }
+    Ok(())
+}
+
 /// How much [`Feedforward`] one axis accepts, at the joint. `None` switches that part off: the
 /// actuator is sent zero, as before feed-forward existed. A vendor chain clamps a value to its
 /// bound, then to what the actuator itself accepts.
@@ -506,6 +574,42 @@ pub trait ActuatorChain {
     ) -> Result<Receipt<Self::Feedback>, Self::Error> {
         let _ = feedforward;
         self.command(joints)
+    }
+
+    /// Check a mixed position/compliant request without writing or enabling motors.
+    /// `Some` selects torque/damping or a torque-released gripper; `None` retains
+    /// ordinary position control and feedforward. Unsupported drivers refuse.
+    ///
+    /// # Errors
+    /// Invalid widths/values or an unsupported compliant axis.
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        check_compliant(self.axes().len(), joints, feedforward, compliant)?;
+        if let Some(axis) = compliant.iter().position(Option::is_some) {
+            return Err(CompliantError::Unsupported { axis });
+        }
+        Ok(())
+    }
+
+    /// Apply a mixed request after validating every axis before any write.
+    /// The caller supplies observed-state freshness, velocity and workspace guards;
+    /// compliant control has no position-target tracking or spring stopping proof.
+    ///
+    /// # Errors
+    /// A preflight refusal or an underlying bus failure.
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        self.validate_compliant(joints, feedforward, compliant)?;
+        self.command_with(joints, feedforward)
+            .map_err(CompliantError::Driver)
     }
 
     /// Bound, or switch off, each axis' feed-forward, in native state order. Every part is off

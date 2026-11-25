@@ -102,8 +102,9 @@ use std::time::{Duration, Instant};
 use sx_embodiment_drivers::can::{CanFrame, CanPort, LinkHealth};
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
-    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, Feedforward, FeedforwardLimit,
-    MissingReason, Receipt, Rest, StopReport, TargetError, check_reach, validate_chain,
+    BoundAxis, ChainError, ChainFailure, CommandRange, CompliantCommand, CompliantError, Evidence,
+    Feedforward, FeedforwardLimit, MissingReason, Receipt, Rest, StopReport, TargetError,
+    check_compliant, check_reach, validate_chain,
 };
 use thiserror::Error;
 
@@ -401,6 +402,8 @@ pub struct MotorLimits {
 
 #[derive(Debug, Error)]
 pub enum DamiaoChainError {
+    #[error("axis {axis} cannot be torque-released through compliant control")]
+    ReleasedControl { axis: usize },
     #[error(transparent)]
     Binding(#[from] BindingError),
     #[error(transparent)]
@@ -1355,6 +1358,29 @@ impl<P: CanPort> DamiaoChain<P> {
         joints: &[f64],
         feedforward: Option<&[Feedforward]>,
     ) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
+        self.drive_control(joints, feedforward, None)
+    }
+
+    fn compliant_feedforward(&self, index: usize, torque: f64) -> ((f64, f64), Feedforward) {
+        let motor = &self.motors[index];
+        let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
+        (
+            (0.0, torque / gain),
+            Feedforward {
+                velocity: 0.0,
+                torque,
+                gravity: torque,
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // Keep the preflight-to-dispatch transaction contiguous.
+    fn drive_control(
+        &mut self,
+        joints: &[f64],
+        feedforward: Option<&[Feedforward]>,
+        compliant: Option<&[Option<CompliantCommand>]>,
+    ) -> Result<Receipt<MotorFeedback>, DamiaoChainError> {
         if self.stop_pending {
             return Err(DamiaoChainError::StopPending);
         }
@@ -1383,6 +1409,15 @@ impl<P: CanPort> DamiaoChain<P> {
                     .map(|feedback| f64::from(feedback[index].position)),
                 feedforward.map_or(Feedforward::default(), |all| all[index]),
             );
+            let (frame, at_joint) = match compliant.and_then(|all| all[index]) {
+                Some(CompliantCommand::Torque { torque, .. }) => {
+                    self.compliant_feedforward(index, torque)
+                }
+                Some(CompliantCommand::Released) => {
+                    return Err(DamiaoChainError::ReleasedControl { axis: index });
+                }
+                None => (frame, at_joint),
+            };
             sent.push(frame);
             applied.push(at_joint);
         }
@@ -1390,14 +1425,19 @@ impl<P: CanPort> DamiaoChain<P> {
         let mut residuals: Axes<MitResidual> = Axes::new();
         for (index, motor) in self.motors.iter().enumerate() {
             let (dq, tau) = sent[index];
-            let (frame, residual) = self.control.mit_frame(
-                self.ids[index],
-                motor.kp,
-                motor.kd,
-                targets[index],
-                dq,
-                tau,
-            )?;
+            let (kp, kd) = match compliant.and_then(|all| all[index]) {
+                Some(CompliantCommand::Torque { damping, .. }) => {
+                    let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
+                    (0.0, damping / (gain * gain))
+                }
+                Some(CompliantCommand::Released) => {
+                    return Err(DamiaoChainError::ReleasedControl { axis: index });
+                }
+                None => (motor.kp, motor.kd),
+            };
+            let (frame, residual) =
+                self.control
+                    .mit_frame(self.ids[index], kp, kd, targets[index], dq, tau)?;
             frames.push(frame);
             residuals.push(residual);
         }
@@ -2008,6 +2048,80 @@ impl<P: CanPort> ActuatorChain for DamiaoChain<P> {
         DamiaoChain::command_with(self, joints, feedforward)
     }
 
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        check_compliant(self.motors.len(), joints, feedforward, compliant)?;
+        check_reach(
+            &self.axes,
+            &self.commandable,
+            self.last_observed().as_deref(),
+            joints,
+        )
+        .map_err(|error| CompliantError::Driver(error.into()))?;
+        if self.stop_pending {
+            return Err(CompliantError::Driver(DamiaoChainError::StopPending));
+        }
+        for (index, wanted) in compliant.iter().enumerate() {
+            let Some(wanted) = wanted else {
+                continue;
+            };
+            let CompliantCommand::Torque { torque, damping } = wanted else {
+                return Err(CompliantError::Unsupported { axis: index });
+            };
+            let motor = &self.motors[index];
+            let gain = motor.axis.actuator_from_joint(motor.axis.zero + 1.0);
+            let kd = damping / (gain * gain);
+            let configured = self.feedforward_limits[index].torque;
+            let limit = f64::from(self.limits[index].t_max) * gain.abs();
+            if !(5.0 / 4095.0..=5.0).contains(&kd)
+                || configured.is_none_or(|bound| bound <= 0.0 || torque.abs() > bound)
+                || torque.abs() > limit
+                || self
+                    .tick
+                    .received
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .is_none_or(|at| at.elapsed() > Duration::from_millis(50))
+            {
+                return Err(CompliantError::Invalid { axis: index });
+            }
+            let cached = self
+                .control
+                .motor(self.ids[index])
+                .map_err(|_| CompliantError::Invalid { axis: index })?;
+            let expected = if self.enabled || self.holding[index].is_some() {
+                MotorState::Enabled
+            } else {
+                MotorState::Disabled
+            };
+            let position = motor
+                .axis
+                .joint_from_actuator(f64::from(cached.get_position()));
+            if !self.in_state(index, MotorState::from_err(cached.get_error()), expected)
+                || !self.commandable[index].admits(position)
+            {
+                return Err(CompliantError::Invalid { axis: index });
+            }
+        }
+        Ok(())
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        self.validate_compliant(joints, feedforward, compliant)?;
+        self.drive_control(joints, Some(feedforward), Some(compliant))
+            .map_err(CompliantError::Driver)
+    }
+
     fn set_feedforward_limits(
         &mut self,
         limits: &[FeedforwardLimit],
@@ -2146,7 +2260,8 @@ impl ChainError for DamiaoChainError {
             | Self::ClearWhileEnabled
             | Self::Feedforward { .. }
             | Self::FeedforwardLimit { .. }
-            | Self::FeedforwardLength { .. } => ChainFailure::Refused,
+            | Self::FeedforwardLength { .. }
+            | Self::ReleasedControl { .. } => ChainFailure::Refused,
             Self::Silent(_) => ChainFailure::Timeout,
             Self::NothingAnswering { .. } => ChainFailure::Unavailable,
             _ => ChainFailure::Fault,

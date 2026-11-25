@@ -169,8 +169,9 @@ use sx_embodiment_drivers::lerobot::{normalize, unnormalize};
 use sx_embodiment_drivers::serial::SerialPort;
 use sx_embodiment_drivers::{
     ActuatorBus, ActuatorChain, ActuatorModel, Axes, AxisReading, BindingError, BodyError,
-    BoundAxis, ChainError, ChainFailure, CommandRange, Evidence, MissingReason, Motor, Receipt,
-    StopReport, TargetError, check_reach, fresh_positions, validate_chain,
+    BoundAxis, ChainError, ChainFailure, CommandRange, CompliantCommand, CompliantError, Evidence,
+    Feedforward, MissingReason, Motor, Receipt, StopReport, TargetError, check_compliant,
+    check_reach, fresh_positions, validate_chain,
 };
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
@@ -538,13 +539,21 @@ pub enum FeetechChainError {
     FaultedAtStop { faults: Vec<(u16, u8)> },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TorqueState {
+    Disabled,
+    Position,
+    /// A gripper's disable was proven; subsequent ticks only read.
+    Released,
+}
+
 /// Bound Feetech servos on one serial link, in native state order.
 pub struct FeetechChain<P> {
     sms: SmsSts<P>,
     servos: Vec<FeetechServo>,
     axes: Vec<BoundAxis>,
     commandable: Vec<CommandRange>,
-    enabled: bool,
+    torque_state: TorqueState,
     stop_pending: bool,
     faults: Vec<(u16, u8)>,
     /// Every servo's position, read at open and after each stop; `None` once a command may
@@ -743,7 +752,7 @@ impl<P: SerialPort> FeetechChain<P> {
             servos,
             axes,
             commandable,
-            enabled: false,
+            torque_state: TorqueState::Disabled,
             stop_pending: false,
             faults: Vec::new(),
             observed: None,
@@ -987,7 +996,7 @@ impl<P: SerialPort> FeetechChain<P> {
     /// error flags, or faulted with 0 for a torque or approach limit it no longer holds.
     /// A servo being pulled in that this read finds inside its limits is then raised to its
     /// declared approach ([`Self::raise_pulled_in`]).
-    fn sync_read_positions(&mut self) -> Result<Axes<f64>, FeetechChainError> {
+    fn sync_read_positions(&mut self, powered: bool) -> Result<Axes<f64>, FeetechChainError> {
         let _ = self.reader.tx_rx_packet(&mut self.sms.ph);
         // One lost answer is asked again, once: a read moves nothing, and every servo must
         // still answer this command's own read. The miss already waited the packet timeout
@@ -1026,7 +1035,11 @@ impl<P: SerialPort> FeetechChain<P> {
             ) {
                 (None, _) | (_, None) => AxisReading::Missing(MissingReason::Timeout),
                 (Some(_), Some(error)) if error != 0 => AxisReading::Faulted(error),
-                (Some(_), Some(_)) if torque != Some(1) || !approach => AxisReading::Faulted(0),
+                (Some(_), Some(_))
+                    if torque != Some(u8::from(powered)) || (powered && !approach) =>
+                {
+                    AxisReading::Faulted(0)
+                }
                 (Some(raw), Some(_)) => AxisReading::Fresh {
                     position: servo.joint_from_raw(ProtocolPacketHandler::<()>::scs_tohost(
                         raw,
@@ -1043,7 +1056,7 @@ impl<P: SerialPort> FeetechChain<P> {
                 self.approach_limited[index] = false;
             }
             if !reading.is_fresh() {
-                self.enabled = false;
+                self.torque_state = TorqueState::Disabled;
             }
             readings.push(reading);
         }
@@ -1051,7 +1064,7 @@ impl<P: SerialPort> FeetechChain<P> {
             .iter()
             .map(|reading| reading.position().unwrap_or(f64::NAN))
             .collect();
-        if arrived {
+        if powered && arrived {
             self.raise_pulled_in(&readings);
         }
         self.command_readings = Some(readings);
@@ -1155,7 +1168,7 @@ impl<P: SerialPort> FeetechChain<P> {
                 faults.push((bus_id, error));
             }
         }
-        self.enabled = false;
+        self.torque_state = TorqueState::Disabled;
         self.stop_pending = true;
         let ids: Vec<(usize, u16, u8)> = self
             .servos
@@ -1400,17 +1413,20 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             }
         }
         // From here the servos may move: what open or the last stop read no longer holds.
+        if self.torque_state == TorqueState::Released {
+            self.torque_state = TorqueState::Disabled;
+        }
         self.observed = None;
         self.command_readings = None;
-        if !self.enabled {
+        if self.torque_state != TorqueState::Position {
             self.enable_torque()?;
-            self.enabled = true;
+            self.torque_state = TorqueState::Position;
         }
         // Driven now: no servo is held where a stop left it.
         self.holding.fill(false);
         match self.writer.tx_packet(&mut self.sms.ph) {
             CommResult::Success => {
-                let observed = self.sync_read_positions()?;
+                let observed = self.sync_read_positions(true)?;
                 self.observed = observed
                     .iter()
                     .all(|joint| joint.is_finite())
@@ -1423,10 +1439,84 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
             }
             result => {
                 // Whatever the servos hold now, the next command proves it again.
-                self.enabled = false;
+                self.torque_state = TorqueState::Disabled;
                 Err(FeetechChainError::SyncWrite(result))
             }
         }
+    }
+
+    fn validate_compliant(
+        &self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<(), CompliantError<Self::Error>> {
+        check_compliant(self.axes.len(), joints, feedforward, compliant)?;
+        check_reach(
+            &self.axes,
+            &self.commandable,
+            self.observed.as_deref(),
+            joints,
+        )
+        .map_err(|error| CompliantError::Driver(error.into()))?;
+        if compliant.iter().any(Option::is_some) {
+            // Release only an entire gripper bus. A mixed arm/gripper bus or a
+            // partially selected gripper cannot silently lose position support.
+            if let Some(axis) = self.axes.iter().zip(compliant).position(|(axis, command)| {
+                !axis.gripper || *command != Some(CompliantCommand::Released)
+            }) {
+                return Err(CompliantError::Unsupported { axis });
+            }
+        }
+        if self.stop_pending {
+            return Err(CompliantError::Driver(FeetechChainError::StopPending));
+        }
+        if !self.faults.is_empty() {
+            return Err(CompliantError::Driver(FeetechChainError::FaultedAtStop {
+                faults: self.faults.clone(),
+            }));
+        }
+        Ok(())
+    }
+
+    fn command_compliant(
+        &mut self,
+        joints: &[f64],
+        feedforward: &[Feedforward],
+        compliant: &[Option<CompliantCommand>],
+    ) -> Result<Receipt<Self::Feedback>, CompliantError<Self::Error>> {
+        self.validate_compliant(joints, feedforward, compliant)?;
+        if compliant.iter().all(Option::is_none) {
+            return self.command(joints).map_err(CompliantError::Driver);
+        }
+        if self.torque_state != TorqueState::Released {
+            let report = self.stop();
+            if !report.is_proven() {
+                return Err(CompliantError::Driver(FeetechChainError::StopPending));
+            }
+            if !self.faults.is_empty() {
+                return Err(CompliantError::Driver(FeetechChainError::FaultedAtStop {
+                    faults: self.faults.clone(),
+                }));
+            }
+            self.torque_state = TorqueState::Released;
+        }
+        // The same batch reads torque-enable and position: torque must still be
+        // off. No goals, enables, or approach-register writes happen while released.
+        let observed = self
+            .sync_read_positions(false)
+            .map_err(CompliantError::Driver)?;
+        self.observed = observed
+            .iter()
+            .all(|joint| joint.is_finite())
+            .then_some(observed);
+        Ok(Receipt {
+            // The common enabled-command evidence does not describe a released
+            // servo; fresh per-axis readings carry its position/torque-off proof.
+            evidence: Evidence::DispatchAttempted,
+            observed,
+            feedback: Axes::new(),
+        })
     }
 
     fn stop(&mut self) -> StopReport {
@@ -1441,7 +1531,7 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
     fn stop_holding(&mut self, rests: &[sx_embodiment_drivers::Rest]) -> StopReport {
         let hold: Vec<bool> = (0..self.servos.len())
             .map(|index| {
-                (self.enabled || self.holding[index])
+                (self.torque_state == TorqueState::Position || self.holding[index])
                     && rests.get(index).is_some_and(|rest| rest.holds())
             })
             .collect();

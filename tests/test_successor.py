@@ -21,6 +21,8 @@ REWIRED = "35e41a6209ee550da7ef857e8fef4f5011a388c68f9bc47834f8ca925a248c6f"
         "4b394c4ba404577fee7089ef1e2365afa3adee543c4e7822caf6bd94a69869b4",
         # Before the arms and grippers became reusable modules on fixed shoulder mounts.
         "51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402",
+        # Before the operator-requested left upper-arm yaw upper limit became 160 degrees.
+        "f3662c3f16689875e1e87382f6e926511aa9b24b267ebb6fa7ee1d6cd67ed1dc",
     ],
 )
 def test_an_earlier_revision_wired_the_same_way_is_the_same_robot(identity: str) -> None:
