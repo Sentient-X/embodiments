@@ -41,6 +41,13 @@ fn every_model_is_rated() {
         ActuatorModel::new("damiao_dm8009")
             .rating()
             .admits_supply(24.0),
+        Some(true)
+    );
+    // A model whose maker publishes no supply range admits nothing and refuses nothing.
+    assert_eq!(
+        ActuatorModel::new("damiao_dm4310")
+            .rating()
+            .admits_supply(24.0),
         None
     );
 }

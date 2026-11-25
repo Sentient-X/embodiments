@@ -17,7 +17,7 @@ use sx_embodiment_commission::teach::{Action, Config, Controller, Mode};
 use sx_embodiment_commission::teach_episode::{Episode, Header, Sample};
 use sx_embodiment_drivers::can::{CanFrame, CanPort};
 use sx_embodiment_drivers::guidance::GuidanceProfile;
-use sx_embodiment_drivers::{ActuatorChain, Dynamics, InstanceDrive};
+use sx_embodiment_drivers::{ActuatorChain, Dynamics, InstanceDrive, MAX_STEP_INTERVAL};
 
 const SELECTED: &str = "left_shoulder_pitch_joint";
 const DRIVES: &str = include_str!("../../sx-damiao-can/tests/fixtures/drives.json");
@@ -217,6 +217,9 @@ enum GuidanceCase {
 
 struct Rig {
     controller: Controller<Body>,
+    /// The instant just before the last `Controller::tick`: no clock reading inside that
+    /// tick, the governor's included, can be earlier.
+    dispatched: Instant,
     bus: Sim,
     selected: usize,
     id: u16,
@@ -430,6 +433,7 @@ impl Rig {
         let selected_motor = &axes[selected];
         Self {
             controller,
+            dispatched: Instant::now(),
             bus: bus.clone(),
             selected,
             id: selected_motor.axis.binding.bus_id,
@@ -461,7 +465,16 @@ impl Rig {
             self.wait_engagement();
         }
         std::thread::sleep(Duration::from_millis(10));
+        self.dispatched = Instant::now();
         self.controller.tick(action).expect("controller tick")
+    }
+
+    /// The farthest one commanded step may move at `speed`: the governor bounds each step by
+    /// its own interval since the previous one, capped at [`MAX_STEP_INTERVAL`]. That interval
+    /// is at most the time from just before the previous tick (`since`) until now, so a slow
+    /// tick on a loaded host widens the allowance exactly as it widened the governor's step.
+    fn step_allowance(speed: f64, since: Instant) -> f64 {
+        speed * since.elapsed().min(MAX_STEP_INTERVAL).as_secs_f64()
     }
 
     fn wait_engagement(&mut self) {
@@ -1361,17 +1374,35 @@ fn blocking_hold_pauses_engagement_ramp_without_a_support_jump() {
     while began.elapsed() < Duration::from_millis(200) {
         rig.tick(None);
     }
-    let before = rig.support_torque();
+    let applied = |rig: &Rig| {
+        rig.controller.diagnostics()[rig.selected]
+            .completed_gravity_command_nm
+            .expect("applied support")
+    };
+    let before = applied(&rig);
+    let previous = rig.dispatched;
     rig.next_hold_delay_ms.store(300, Ordering::Relaxed);
     let began = Instant::now();
     let held = rig.tick(Some(Action::Hold));
     assert!(began.elapsed() >= Duration::from_millis(300));
     assert_eq!(held.mode, Mode::Hold);
     assert!(!rig.controller.engagement_ready());
-    let quantum = 2.0 * rig.tmax * rig.gain.abs() / 4095.0;
+    // The first command after the block is where a catch-up would land. It is checked in the
+    // controller's own unquantised support: the full support is only about seven 12-bit torque
+    // codes, so encoded frames flicker by a code from tick to tick and cannot resolve the ramp.
+    // The ramp still advances by the unblocked part of the interval (two ordinary ticks,
+    // longer on a loaded host) over its 1 s length; catching up the 300 ms block adds 30 %.
+    rig.tick(None);
+    let unblocked = previous
+        .elapsed()
+        .saturating_sub(Duration::from_millis(300));
+    let full = rig.controller.diagnostics()[rig.selected]
+        .calculated_gravity_nm
+        .expect("full model support");
+    let after = applied(&rig);
     assert!(
-        (rig.support_torque() - before).abs() <= quantum + 1e-12,
-        "blocking hold must not catch up the support ramp in one frame"
+        (after - before).abs() <= full.abs() * unblocked.as_secs_f64() + 1e-3,
+        "blocking hold must not catch up the support ramp in one frame: {before} -> {after}, unblocked {unblocked:?}, full {full}"
     );
     let resumed = Instant::now();
     while resumed.elapsed() < Duration::from_millis(550) {
@@ -1507,14 +1538,18 @@ fn missing_post_activation_reading_never_enters_the_normal_hold_cycle() {
 
 #[test]
 fn settled_native_support_replaces_pd_cancellation_without_a_teach_torque_step_or_drift() {
+    // Joint N m the simulated plant needs to stay still. The learned support is checked against
+    // it, not against one native torque sample: a sample read after a slow tick on a loaded host
+    // can be 0.03 N m off while the controller's settled window is not.
+    const PLANT_SUPPORT: f64 = 0.1;
     let mut rig = Rig::new();
     {
         let mut state = rig.bus.state();
         let motor = state.motors.get_mut(&rig.id).expect("motor");
         let mut dynamics = sx_damiao_can::sim::MitDynamics::loaded(motor.model);
-        // The plant requires +0.1 joint N m while the deliberately biased model
+        // The plant requires PLANT_SUPPORT while the deliberately biased model
         // requests about -0.19 N m. Hold must cancel the mismatch through its spring.
-        dynamics.load = -0.1 / rig.gain;
+        dynamics.load = -PLANT_SUPPORT / rig.gain;
         dynamics.coulomb = 0.0;
         dynamics.damping = 3.0;
         dynamics.inertia = 0.2;
@@ -1538,10 +1573,10 @@ fn settled_native_support_replaces_pd_cancellation_without_a_teach_torque_step_o
     let offset = diagnostic.support_offset_nm.expect("session offset");
     let quantum = 2.0 * rig.tmax / 4095.0;
     assert!(
-        (corrected - before).abs() <= quantum + 0.005,
-        "removing the spring must retain measured support"
+        (corrected - PLANT_SUPPORT).abs() <= quantum + 0.005,
+        "removing the spring must retain measured support: {corrected} (last sample {before})"
     );
-    assert!((offset - (before - raw)).abs() <= quantum + 0.005);
+    assert!((offset - (PLANT_SUPPORT - raw)).abs() <= quantum + 0.005);
     let began = Instant::now();
     while began.elapsed() < Duration::from_millis(500) {
         assert_eq!(rig.tick(None).mode, Mode::Teach);
@@ -1794,18 +1829,16 @@ fn replay_uses_recorded_time_and_restores_slow_positioning_after_completion() {
     assert_eq!(rig.tick(Some(Action::Replay)).mode, Mode::Approach);
     let quantum = 2.0 * rig.bus.state().motors[&rig.id].limits[0] / 65535.0 / rig.gain.abs();
     let mut previous = commanded_joint_position(&rig);
-    let mut previous_at = Instant::now();
+    let mut previous_at = rig.dispatched;
     for _ in 0..160 {
         let mode = rig.tick(None).mode;
-        let now = Instant::now();
         let position = commanded_joint_position(&rig);
         assert!(
-            (position - previous).abs()
-                <= 0.2 * now.duration_since(previous_at).as_secs_f64() + 3.0 * quantum,
+            (position - previous).abs() <= Rig::step_allowance(0.2, previous_at) + 3.0 * quantum,
             "approach must retain configured .2 rad/s cap"
         );
         previous = position;
-        previous_at = now;
+        previous_at = rig.dispatched;
         if mode == Mode::ReadyReplay {
             break;
         }
@@ -1847,18 +1880,16 @@ fn replay_uses_recorded_time_and_restores_slow_positioning_after_completion() {
     rig.tick(None);
     assert_eq!(rig.tick(Some(Action::Replay)).mode, Mode::Approach);
     let mut previous = commanded_joint_position(&rig);
-    let mut previous_at = Instant::now();
+    let mut previous_at = rig.dispatched;
     for _ in 0..25 {
         rig.tick(None);
-        let now = Instant::now();
         let position = commanded_joint_position(&rig);
         assert!(
-            (position - previous).abs()
-                <= 0.2 * now.duration_since(previous_at).as_secs_f64() + 3.0 * quantum,
+            (position - previous).abs() <= Rig::step_allowance(0.2, previous_at) + 3.0 * quantum,
             "completed replay must restore the positioning cap"
         );
         previous = position;
-        previous_at = now;
+        previous_at = rig.dispatched;
     }
     assert_eq!(rig.tick(Some(Action::Hold)).mode, Mode::Hold);
 }

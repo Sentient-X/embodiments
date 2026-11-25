@@ -348,9 +348,15 @@ mod tests {
             RailCheck::Refused(over(56.0))
         );
         assert_eq!(RailCheck::of(j8009p, None), RailCheck::Unchecked);
-        // The DM8009 publishes no supply range: nothing to check against.
+        // The DM8009 publishes 24-48 V since #294 (Damiao's 2025 selection manual).
         let dm8009 = ActuatorModel::new("damiao_dm8009");
-        assert_eq!(RailCheck::of(dm8009, Some(80.0)), RailCheck::Unchecked);
+        assert_eq!(
+            RailCheck::of(dm8009, Some(80.0)),
+            RailCheck::Refused(over(80.0))
+        );
+        // The DM4310 publishes no supply range: nothing to check against.
+        let dm4310 = ActuatorModel::new("damiao_dm4310");
+        assert_eq!(RailCheck::of(dm4310, Some(80.0)), RailCheck::Unchecked);
         let derate = AxisDerate {
             axis: 0,
             over: over(54.0),

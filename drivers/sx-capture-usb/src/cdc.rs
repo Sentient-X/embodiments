@@ -682,7 +682,11 @@ mod tests {
         let bulk = std::sync::Arc::new(FlakyBulk::new(vec![os(libc::ENODEV)]));
         let mut source = link.open(&controls, &interfaces(), bulk).unwrap();
         let error = read_until_quiet(&mut source).unwrap_err();
-        assert!(error.to_string().contains("No such device"), "{error}");
+        // The OS's own words for ENODEV: "No such device" on Linux, "Operation not supported
+        // by device" on macOS.
+        let gone = std::io::Error::from_raw_os_error(libc::ENODEV).to_string();
+        let gone = gone.split(" (os error").next().expect("message");
+        assert!(error.to_string().contains(gone), "{error}");
         drop(source);
         drop(link);
     }
