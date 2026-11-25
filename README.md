@@ -574,6 +574,25 @@ These are the existing standard-YUBI facts. They neither define Parallel YUBI's 
 nor replace measured per-unit calibration. The nominal CAD aperture curve retains its
 existing clamping behavior; this migration adds no physical qualification.
 
+## YUBI jaw angle from the wrist camera's tags
+
+`sx_embodiments.jaw_tags` reads the YUBI jaw angle from the two ArUco markers (DICT_4X4_50,
+15 mm, right IDs 0/1, left 2/3) each wrist camera sees, for a side whose encoder is dead,
+drifting or relative. Each marker's pose is IPPE PnP on corners undistorted through the
+rig's own lens (`calibrate.lens.Lens`); its turn about its hinge is the joint angle, with no
+per-unit calibration. A reference is fitted from encoder-alive frames (`fit_reference`) or,
+with no encoder, from the closed stop (`closed_stop_reference`). `solve_track` chooses IPPE's
+planar ambiguity as one temporally continuous family, smooths over visible readings
+(Savitzky-Golay, 31 frames), interpolates inside gaps, holds at the ends, and labels every
+sample's source; the two jaws mirroring within 6 degrees is the broken-gripper check.
+`write_solved_spool` writes `gripper_{side}.jaw_from_tags.csv`, the spool the seal reads in
+place of a dead encoder. It sits behind the `calibrate` extra (NumPy, OpenCV).
+
+Measured on yubi-0006's right hand (2026-11-25, intrinsics borrowed from the same camera
+model): tags against a working encoder p95 1.33 mm with both tags, 1.62 mm with one. Against
+a 34.7 mm calipered grasp the encoder-free reading gave 32.8 to 37.4 mm and the encoder 28.2
+to 31.3 mm; that encoder read -0.04 rad fully closed, a zero offset the tags correct.
+
 ## Assets
 
 Canonical robot and capture-hardware descriptions live under `assets/`; provenance and licensing
