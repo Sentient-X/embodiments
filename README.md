@@ -583,7 +583,7 @@ rig's own lens (`calibrate.lens.Lens`); its turn about its hinge is the joint an
 per-unit calibration. A reference is fitted from encoder-alive frames (`fit_reference`) or,
 with no encoder, from the closed stop (`closed_stop_reference`). `solve_track` chooses IPPE's
 planar ambiguity as one temporally continuous family, smooths over visible readings
-(Savitzky-Golay, 31 frames), interpolates inside gaps, holds at the ends, and labels every
+(Savitzky-Golay over 0.18 s), interpolates inside gaps, holds at the ends, and labels every
 sample's source; the two jaws mirroring within 6 degrees is the broken-gripper check.
 `write_solved_spool` writes `gripper_{side}.jaw_from_tags.csv`, the spool the seal reads in
 place of a dead encoder. It sits behind the `calibrate` extra (NumPy, OpenCV).

@@ -61,8 +61,11 @@ MAX_MIRROR_DISAGREEMENT_RAD = math.radians(6.0)
 #: A reference needs this many working-encoder sightings of a marker over this much travel.
 MIN_REFERENCE_SIGHTINGS = 60
 MIN_REFERENCE_TRAVEL_RAD = math.radians(15.0)
-#: Smoothing window over visible readings (frames) and its polynomial order.
-SMOOTHING_FRAMES = 31
+#: Smoothing window over visible readings and its polynomial order. A duration, not a frame
+#: count, so a 30 fps clip and an 85 fps bench camera smooth alike. On yubi-0006's grasp run
+#: (85 fps) 0.18 s gave p95 2.09 mm against the encoder; 0.37 s blurred quick grasps (3.04 mm)
+#: and no smoothing left the pose noise (3.41 mm).
+SMOOTHING_S = 0.18
 SMOOTHING_ORDER = 2
 #: Frames to look at before deciding a recording has no jaw markers at all.
 NO_TAGS_PROBE_FRAMES = 300
@@ -469,18 +472,19 @@ class JawTrack:
     longest_gap_s: float
 
 
-def _smooth(values: Vector) -> Vector:
-    if len(values) < SMOOTHING_FRAMES:
+def _smooth(values: Vector, frame_s: float) -> Vector:
+    half = max(SMOOTHING_ORDER, round(SMOOTHING_S / frame_s / 2))
+    window = 2 * half + 1
+    if len(values) < window:
         return values
     # Savitzky-Golay: a least-squares quadratic over each centred window; the first and last
     # half-windows take the end windows' own fits, so the ends are not pulled toward the middle.
-    half = SMOOTHING_FRAMES // 2
     offsets = np.arange(-half, half + 1, dtype=np.float64)
     fit = np.linalg.pinv(np.vander(offsets, SMOOTHING_ORDER + 1, increasing=True))
     out = np.asarray(np.convolve(values, fit[0][::-1], mode="same"), np.float64)
     ends = np.vander(offsets, SMOOTHING_ORDER + 1, increasing=True)
-    out[:half] = (ends @ (fit @ values[:SMOOTHING_FRAMES]))[:half]
-    out[-half:] = (ends @ (fit @ values[-SMOOTHING_FRAMES:]))[-half:]
+    out[:half] = (ends @ (fit @ values[:window]))[:half]
+    out[-half:] = (ends @ (fit @ values[-window:]))[-half:]
     return out
 
 
@@ -498,7 +502,9 @@ def solve_track(
         raise JawTagError("no frame shows the finger markers")
     measured = np.array([r.angle_rad for r in readings if r is not None], np.float64)
     angle = np.full(len(times), np.nan)
-    angle[seen] = _smooth(measured)
+    angle[seen] = _smooth(
+        measured, float(np.median(np.diff(times))) / 1e9 if len(times) > 1 else 1.0
+    )
     source = [r.source if r is not None else JawSampleSource.NONE for r in readings]
     visible = np.flatnonzero(seen)
     inside = (np.arange(len(times)) > visible[0]) & (np.arange(len(times)) < visible[-1]) & ~seen
