@@ -12,9 +12,9 @@ import pytest
 from numpy.typing import NDArray
 
 from sx_embodiments.calibrate.lens import Lens
+from sx_embodiments.jaw_fusion import JawSensors, solve_jaw, solved_spool_name, write_solved_spool
 from sx_embodiments.jaw_tags import (
     JawReference,
-    JawSampleSource,
     JawTagLayout,
     ReferenceOrigin,
     TagPose,
@@ -22,9 +22,6 @@ from sx_embodiments.jaw_tags import (
     fit_reference,
     has_jaw_tags,
     sight_tags,
-    solve_track,
-    solved_spool_name,
-    write_solved_spool,
 )
 
 LENS = Lens(
@@ -43,7 +40,7 @@ LEVER = 0.03
 GLUE = (math.radians(4.0), math.radians(-7.0))  # each marker glued a little askew
 
 
-def _render(theta: float, *, hide: int | None = None) -> NDArray[np.uint8]:
+def render_jaw(theta: float, *, hide: int | None = None) -> NDArray[np.uint8]:
     frame = np.full((480, 640), 255, np.uint8)
     tilt = math.radians(40.0)  # about the camera x axis, away from the lens
     facing = np.array(
@@ -75,24 +72,24 @@ def _render(theta: float, *, hide: int | None = None) -> NDArray[np.uint8]:
     return frame
 
 
-def _sweep() -> tuple[NDArray[np.float64], list[dict[int, TagPose]]]:
+def rendered_sweep() -> tuple[NDArray[np.float64], list[dict[int, TagPose]]]:
     theta = np.concatenate([np.zeros(8), np.linspace(0.0, 0.6, 150), np.linspace(0.6, 0.0, 150)])
     return np.asarray(theta, np.float64), [
-        sight_tags(_render(float(a)), LENS, LAYOUT) for a in theta.tolist()
+        sight_tags(render_jaw(float(a)), LENS, LAYOUT) for a in theta.tolist()
     ]
 
 
 @pytest.fixture(scope="module")
 def sweep() -> tuple[NDArray[np.float64], list[dict[int, TagPose]]]:
-    return _sweep()
+    return rendered_sweep()
 
 
 def _within(reference: JawReference, tolerance_rad: float) -> None:
     # Read a fresh sweep as the ingest node does: a whole track, frame to frame consistent.
     theta = np.concatenate([np.linspace(0.0, 0.57, 150), np.linspace(0.57, 0.0, 150)])
     for hide in (None, 0, 1):
-        frames = [sight_tags(_render(float(a), hide=hide), LENS, LAYOUT) for a in theta.tolist()]
-        track = solve_track(reference, [i * 33_333_333 for i in range(len(theta))], frames)
+        frames = [sight_tags(render_jaw(float(a), hide=hide), LENS, LAYOUT) for a in theta.tolist()]
+        track, _ = solve_jaw(reference, [i * 33_333_333 for i in range(len(theta))], frames)
         error = np.abs(track.angle_rad - theta)
         assert float(np.percentile(error, 95)) < tolerance_rad, hide
 
@@ -115,32 +112,31 @@ def test_without_an_encoder_the_closed_stop_fixes_the_joint(
     _within(reference, math.radians(1.0))
 
 
-def test_every_sample_says_where_it_came_from_and_the_spool_is_the_seals(
+def test_every_sample_says_which_sensor_saw_it_and_the_spool_is_the_seals(
     sweep: tuple[NDArray[np.float64], list[dict[int, TagPose]]], tmp_path: Path
 ) -> None:
     theta, frames = sweep
     reference = cast("JawReference", fit_reference(LAYOUT, frames, theta.tolist()))
     shown = [dict(frame) for frame in frames]
     for i in (0, 1, 120, 121, 122):
-        shown[i] = {}  # hidden at the start (held) and mid-sweep (interpolated)
+        shown[i] = {}  # hidden at the start and mid-sweep
     shown[180] = {k: v for k, v in frames[180].items() if k == LAYOUT.first_id}
     t_ns = [1_000_000_000 + i * 33_333_333 for i in range(len(frames))]
-    track = solve_track(reference, t_ns, shown)
-    assert track.source[0] is JawSampleSource.HELD
-    assert track.source[121] is JawSampleSource.INTERPOLATED
-    assert track.source[180] is JawSampleSource.ONE_TAG
-    assert track.source[20] is JawSampleSource.BOTH_TAGS
-    assert float(np.max(np.abs(track.angle_rad[2:] - theta[2:]))) < math.radians(1.5)
+    track, tags = solve_jaw(reference, t_ns, shown)
+    assert track.sensors[121] is JawSensors.NEITHER and track.sensors[180] is JawSensors.TAGS
+    assert track.std_rad[121] > track.std_rad[20]  # the bridged frame says it is less sure
+    assert float(np.max(np.abs(track.angle_rad - theta))) < math.radians(1.5)
+    assert tags.mirror_p95_rad < math.radians(2.0)  # rendered markers: 1.5 degrees
 
     spool = tmp_path / solved_spool_name("right")
     clamped = write_solved_spool(track, spool, (0.0, 0.9599))
     lines = spool.read_text().splitlines()
-    assert lines[0] == "t_monotonic_ns,angle_rad,source"
+    assert lines[0] == "t_monotonic_ns,angle_rad,angle_std_rad,sensors"
     assert len(lines) == len(frames) + 1 and clamped >= 0
-    assert lines[122].endswith(",interpolated") and lines[1].endswith(",held")
+    assert lines[122].endswith(",neither") and lines[21].endswith(",tags")
 
 
 def test_a_recording_without_the_markers_stops_early() -> None:
     blank = np.full((480, 640), 200, np.uint8)
     assert not has_jaw_tags([blank] * 5, LENS, LAYOUT)
-    assert has_jaw_tags([_render(0.2)], LENS, LAYOUT)
+    assert has_jaw_tags([render_jaw(0.2)], LENS, LAYOUT)
