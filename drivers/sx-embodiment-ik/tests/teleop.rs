@@ -53,6 +53,9 @@ fn teleop() -> Teleop {
 }
 
 /// Every axis inside its range, the mid of zero and its range's middle.
+/// The left upper-arm yaw's upper bound when [`start`]'s posture was chosen.
+const LEFT_YAW_POSED_UPPER: f64 = 0.807_011_520_561_532_7;
+
 fn start(teleop: &Teleop) -> Vec<f64> {
     teleop
         .model()
@@ -60,6 +63,13 @@ fn start(teleop: &Teleop) -> Vec<f64> {
         .iter()
         .map(|a| {
             a.limits.map_or(0.0, |[l, u]| {
+                // The suite's scenarios are tuned from this posture; the left yaw's reach rose to
+                // 160 degrees on 2026-11-24, so it keeps the bound it was posed from.
+                let u = if a.name == "left_upper_arm_yaw_joint" {
+                    LEFT_YAW_POSED_UPPER
+                } else {
+                    u
+                };
                 0.0_f64.clamp(l, u).midpoint(f64::midpoint(l, u))
             })
         })

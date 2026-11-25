@@ -993,7 +993,7 @@
   },
   {
     "embodiment": "sentient-humanoid",
-    "id": "f3a817065b83337b5af558b283a83be182ede43e4a296b8897dfb48083a557f7",
+    "id": "aa444ddbd0779b82616ecab579ff5f74756ae529dfe4d5f540ef60bcd6358b10",
     "axes": [
       {
         "joint": "torso_joint",
@@ -1013,8 +1013,8 @@
           "joint": "torso_joint"
         },
         "speed": 20.943951023931955,
-        "acceleration": 23.066308896855457,
-        "inertia": 0.8670654715252912
+        "acceleration": 22.78355694902473,
+        "inertia": 0.8778260587118778
       },
       {
         "joint": "left_shoulder_pitch_joint",
@@ -1034,8 +1034,8 @@
           "joint": "left_shoulder_pitch_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 90.84322346641821,
-        "inertia": 0.17973222378873907
+        "acceleration": 90.92704805794926,
+        "inertia": 0.17922273215967618
       },
       {
         "joint": "left_shoulder_roll_joint",
@@ -1055,13 +1055,13 @@
           "joint": "left_shoulder_roll_joint"
         },
         "speed": 10.471975511965978,
-        "acceleration": 96.42897670513021,
-        "inertia": 0.18108092869162215
+        "acceleration": 96.31570622834906,
+        "inertia": 0.18142671219067394
       },
       {
         "joint": "left_upper_arm_yaw_joint",
         "lower": -5.1230258640421145,
-        "upper": 0.8070115205615327,
+        "upper": 2.792526803190927,
         "model": "damiao_dm4340",
         "bus": "damiao_can",
         "port": "torso_can",
@@ -1119,7 +1119,7 @@
         },
         "speed": 3.7699111843077517,
         "acceleration": 37.69911184307752,
-        "inertia": 0.038826468179434165
+        "inertia": 0.038826468179434276
       },
       {
         "joint": "left_wrist_pitch_joint",
@@ -1140,7 +1140,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.00851686551796008
+        "inertia": 0.008516865517960024
       },
       {
         "joint": "left_wrist_roll_joint",
@@ -1161,7 +1161,7 @@
         },
         "speed": 12.56637061435917,
         "acceleration": 125.6637061435917,
-        "inertia": 0.002116040562494806
+        "inertia": 0.0021160405624948094
       },
       {
         "joint": "right_shoulder_pitch_joint",

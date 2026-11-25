@@ -785,8 +785,8 @@ SENTIENT_HUMANOID_SPEC: Final = EmbodimentDefinition(
         replace(STATIC_UPPER_BODY_URDF, role=AssetRole.OTHER),
         packaged_asset(
             relpath="sentient_humanoid/sentient_humanoid.urdf",
-            sha256="efd7b79a44ce84d5ae33d6ad28f346ca95d53db422f6af6cef020cb9203a5c80",
-            size_bytes=185027,
+            sha256="f09b4627860b613e25ac260f21b880a854071a2c9e74f5b6b78b3c1b71863502",
+            size_bytes=185026,
             format=AssetFormat.URDF,
             role=AssetRole.DESCRIPTION,
             provenance=AssetProvenance(

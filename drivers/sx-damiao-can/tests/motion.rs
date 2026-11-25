@@ -114,8 +114,11 @@ fn run(axes: Vec<DamiaoAxis>) -> Run {
 }
 
 /// Recorded from sx-damiao-can before `DamiaoAxis::coast` existed (`MAX_COAST` a constant): what
-/// every static upper body axis was sent, and its ceilings, over [`run`].
-const BEFORE: u64 = 0xc55f_6a58_0d17_dbaf;
+/// every static upper body axis was sent, and its ceilings, over [`run`]. Re-recorded when the
+/// left upper-arm yaw's reach rose to 160 degrees (2026-11-24): the bindings' inertias and
+/// acceleration ceilings moved with it; the driver code with the earlier bindings still gives
+/// `0xc55f_6a58_0d17_dbaf`.
+const BEFORE: u64 = 0x10cb_79e1_8671_134c;
 
 #[test]
 fn standard_is_the_driver_as_it_was_frame_for_frame() {

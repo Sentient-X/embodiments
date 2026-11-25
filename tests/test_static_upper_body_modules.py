@@ -2,6 +2,7 @@
 
 import hashlib
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -19,10 +20,26 @@ from sx_embodiments.known.static_upper_body import (
     STATIC_UPPER_BODY_URDF,
 )
 from sx_embodiments.mechanical import Build, Mate, Placed
+from sx_embodiments.parts import ChainSpec
 from sx_embodiments.recorded import historical_document, read_recorded
 from sx_embodiments.successor import successor
 
 PREVIOUS = EmbodimentId("51db79c80289f76c9f20f2043c114836dfcb80baca88e8f5094762c925a37402")
+
+
+def _with_recorded_reach(part: object, recorded: object) -> object:
+    """``part`` with its left upper-arm yaw reach put back to ``recorded``'s: the operator raised
+    that upper bound to 160 degrees (2026-11-24), a limit, not a physical fact."""
+    if not isinstance(part, ChainSpec) or not isinstance(recorded, ChainSpec):
+        return part
+    then = {axis.name: axis for axis in recorded.layout.axes}
+    axes = tuple(
+        replace(axis, bounds=then[axis.name].bounds)
+        if axis.name == "left_upper_arm_yaw_joint" and axis.name in then
+        else axis
+        for axis in part.layout.axes
+    )
+    return replace(part, layout=replace(part.layout, axes=axes))
 
 
 def test_previous_recordings_keep_their_native_order_and_physical_facts() -> None:
@@ -64,7 +81,7 @@ def test_previous_recordings_keep_their_native_order_and_physical_facts() -> Non
     before = {c.instance: c for c in old.embodiment.components}
     after = {c.instance: c for c in current.components}
     for name, component in before.items():
-        assert component.part == after[name].part
+        assert _with_recorded_reach(after[name].part, component.part) == component.part
         if name in {"left_arm", "right_arm"}:
             assert after[name].mount.frame == name.replace("arm", "shoulder_mount_link")
             assert after[name].mount.parent == component.mount.parent

@@ -7,8 +7,8 @@ and ``Dynamics::calibrated`` refuses one whose digest is not the description's. 
 leaves every identified parameter true, so the documents move to the new digest, when it
 changes only
 
-* what dynamics never read (each joint's ``<limit velocity>`` and ``effort``, each still a
-  finite positive number), or
+* what dynamics never read (each joint's ``<limit lower>`` and ``upper``, and its
+  ``velocity`` and ``effort``, each of those two still a finite positive number), or
 * links outside every identified joint's reach: no document identifies the link, no joint a
   document identifies lies between the root and it (a changed joint counts as a change to its
   child), and no joint above an identified one moves. A fixed link inserted above an
@@ -39,7 +39,7 @@ from pathlib import Path
 
 
 class RekeyError(ValueError):
-    """The two descriptions differ in more than joint velocity limits, or a document is not
+    """The two descriptions differ in more than joint limits, or a document is not
     keyed to the old one."""
 
 
@@ -47,8 +47,11 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-#: The ``<limit>`` attributes dynamics never read.
-UNREAD = ("velocity", "effort")
+#: The ``<limit>`` rates dynamics never read; each must stay a finite positive number.
+RATES = ("velocity", "effort")
+#: Every ``<limit>`` attribute dynamics never read: a joint's reach bounds the poses a fit is
+#: used at, not the torque at a pose, so ``Dynamics::superseding`` ignores it too.
+UNREAD = ("lower", "upper", *RATES)
 
 
 def _without_unread(path: Path) -> bytes:
@@ -61,7 +64,7 @@ def _without_unread(path: Path) -> bytes:
 
 def _limits_are_numbers(path: Path) -> None:
     for limit in ET.parse(path).getroot().iter("limit"):
-        for name in UNREAD:
+        for name in RATES:
             text = limit.get(name)
             if text is None:
                 raise RekeyError(f"{path}: a <limit> has no {name}")
@@ -108,7 +111,7 @@ Matrix = tuple[tuple[float, ...], ...]
 
 
 class _Description:
-    """One description's links and joints (velocity and effort dropped), by name."""
+    """One description's links and joints (every unread ``<limit>`` attribute dropped), by name."""
 
     def __init__(self, path: Path) -> None:
         root = ET.fromstring(_without_unread(path))
@@ -269,13 +272,11 @@ def check_rekeyable(old: Path, new: Path, identified: tuple[set[str], set[str]])
 
 
 def check_only_velocity(old: Path, new: Path) -> None:
-    """Refuse two descriptions that differ in anything but ``<limit velocity>`` and
-    ``effort``, and a new one whose values for those are not finite positive numbers."""
+    """Refuse two descriptions that differ in anything but unread ``<limit>`` attributes
+    (``UNREAD``), and a new one whose velocity or effort is not a finite positive number."""
     _limits_are_numbers(new)
     if _without_unread(old) != _without_unread(new):
-        raise RekeyError(
-            f"{new} differs from {old} beyond joint velocity and effort limits: identify again"
-        )
+        raise RekeyError(f"{new} differs from {old} beyond joint limits: identify again")
 
 
 def _recorded(node: object) -> list[object]:

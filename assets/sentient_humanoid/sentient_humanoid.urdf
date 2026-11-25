@@ -717,7 +717,7 @@
     <parent link="left_shoulder_roll_link" />
     <child link="left_upper_arm_yaw_link" />
     <axis xyz="-5.57458961264e-06 -1.01955801458e-06 -0.999999999984" />
-    <limit lower="-5.1230258640421145" upper="0.8070115205615327" effort="27" velocity="3.76991" />
+    <limit lower="-5.1230258640421145" upper="2.792526803190927" effort="27" velocity="3.76991" />
   </joint>
   <link name="left_elbow_pitch_link">
     <inertial>
