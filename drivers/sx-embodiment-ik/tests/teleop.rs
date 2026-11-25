@@ -1737,3 +1737,841 @@ fn linear(m_s: f64) -> ToolSpeed {
         rad_s: f64::INFINITY,
     }
 }
+
+#[test]
+fn elbow_deadband_crossing_has_no_step_snap() {
+    let mut solve = teleop();
+    solve.set_input_filter(None);
+    solve.set_target_shaping(false);
+    let mut q = start(&solve);
+    let width = q.len();
+    let available = vec![true; width];
+    let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+    let initial = solve.tool_poses(&q);
+    let left_pose = initial[0].expect("left pose");
+    let mut prev_weight = 0.0_f64;
+    let mut max_weight_step_deadband = 0.0_f64;
+    let mut max_weight_step_expiry = 0.0_f64;
+    let mut decayed_weight = f64::INFINITY;
+    let mut post_expiry_weight = 0.0_f64;
+
+    solve.reset();
+    // Phase 1 (0..15): elbow outside deadband (radius 0.15 m in the shoulder-wrist z=0.4 plane).
+    // Phase 2 (15..45): elbow drops to 0.01 m inside the 0.04 m deadband and decays toward zero.
+    // Phase 3 (45..85): arm disappears past ARM_HOLD_S (0.25 s), engaging ELBOW_PRIOR smoothly.
+    for tick in 0..85 {
+        let arm = if tick < 45 {
+            let elbow_offset = if tick < 15 { 0.15 } else { 0.01 };
+            Some(sx_embodiment_ik::teleop::OperatorArm {
+                shoulder_m: [0.0, 0.2, 0.4],
+                elbow_m: [0.2, 0.2 + elbow_offset, 0.4],
+                wrist_m: [0.4, 0.2, 0.4],
+            })
+        } else {
+            None
+        };
+        let targets = Targets {
+            tcp: sx_embodiment_ik::teleop::hands([Some(left_pose), None]),
+            arm: sx_embodiment_ik::teleop::hands([arm, None]),
+            ..Targets::default()
+        };
+        let step = solve
+            .step(&q, &measured, &available, &targets, DT)
+            .expect("step");
+        assert_eq!(step.solve, Solve::Solved);
+        q.copy_from_slice(&step.q);
+
+        let weight = solve.ik().elbow_aim()[0].map_or(0.0, |aim| aim.weight);
+        if (15..45).contains(&tick) {
+            max_weight_step_deadband = max_weight_step_deadband.max((weight - prev_weight).abs());
+            decayed_weight = decayed_weight.min(weight);
+        } else if tick >= 45 {
+            max_weight_step_expiry = max_weight_step_expiry.max((weight - prev_weight).abs());
+            post_expiry_weight = post_expiry_weight.max(weight);
+        }
+        prev_weight = weight;
+    }
+    let blend = 1.0 - (-DT / 0.038_69).exp();
+    assert!(
+        decayed_weight < 1e-3,
+        "deadband decay never reached < 1e-3: {decayed_weight}"
+    );
+    assert!(
+        post_expiry_weight > 0.5,
+        "ELBOW_PRIOR never re-engaged after ARM_HOLD_S expiry: {post_expiry_weight}"
+    );
+    // Past deadband weight ~0.2037 at 0.15 m: instant drop would step ~0.20 (vs ~blend * 0.20).
+    assert!(
+        max_weight_step_deadband <= blend * 0.35,
+        "deadband entry snapped elbow weight by {max_weight_step_deadband:.4}"
+    );
+    // Re-engaging ELBOW_PRIOR (weight 2.0) must ramp from 0.0 (~blend * 2.0 <= 0.5), not jump to 2.0.
+    assert!(
+        max_weight_step_expiry <= blend * 2.5,
+        "ARM_HOLD_S expiry snapped ELBOW_PRIOR weight by {max_weight_step_expiry:.4}"
+    );
+
+    // Engaging straight inside the deadband, then losing the arm past ARM_HOLD_S, also ramps.
+    let mut solve_in = teleop();
+    solve_in.set_input_filter(None);
+    solve_in.set_target_shaping(false);
+    let mut q_in = start(&solve_in);
+    let mut prev_w_in = 0.0_f64;
+    let mut max_step_in = 0.0_f64;
+    let mut post_in_weight = 0.0_f64;
+    solve_in.reset();
+    for tick in 0..50 {
+        let arm = (tick < 10).then_some(sx_embodiment_ik::teleop::OperatorArm {
+            shoulder_m: [0.0, 0.2, 0.4],
+            elbow_m: [0.2, 0.2 + 0.01, 0.4],
+            wrist_m: [0.4, 0.2, 0.4],
+        });
+        let targets = Targets {
+            tcp: sx_embodiment_ik::teleop::hands([Some(left_pose), None]),
+            arm: sx_embodiment_ik::teleop::hands([arm, None]),
+            ..Targets::default()
+        };
+        let step = solve_in
+            .step(&q_in, &measured, &available, &targets, DT)
+            .expect("step");
+        assert_eq!(step.solve, Solve::Solved);
+        q_in.copy_from_slice(&step.q);
+        let w = solve_in.ik().elbow_aim()[0].map_or(0.0, |aim| aim.weight);
+        if tick >= 10 {
+            max_step_in = max_step_in.max((w - prev_w_in).abs());
+            post_in_weight = post_in_weight.max(w);
+        }
+        prev_w_in = w;
+    }
+    assert!(post_in_weight > 0.5);
+    assert!(
+        max_step_in <= blend * 2.5,
+        "deadband-engage expiry snapped ELBOW_PRIOR weight by {max_step_in:.4}"
+    );
+}
+
+fn project_null(rows: &[Vec<f64>], vector: &[f64]) -> Vec<f64> {
+    let row_count = rows.len();
+    let mut gram = vec![vec![0.0; row_count]; row_count];
+    for i in 0..row_count {
+        for j in 0..row_count {
+            gram[i][j] = rows[i].iter().zip(&rows[j]).map(|(x, y)| x * y).sum();
+        }
+        gram[i][i] += 1e-10;
+    }
+    let mut rhs: Vec<f64> = rows
+        .iter()
+        .map(|row| row.iter().zip(vector).map(|(x, y)| x * y).sum())
+        .collect();
+    for j in 0..row_count {
+        let mut diag = gram[j][j];
+        for &entry in &gram[j][..j] {
+            diag -= entry * entry;
+        }
+        let diag = diag.max(1e-18).sqrt();
+        gram[j][j] = diag;
+        for i in (j + 1)..row_count {
+            let dot: f64 = gram[i][..j]
+                .iter()
+                .zip(&gram[j][..j])
+                .map(|(a, b)| a * b)
+                .sum();
+            gram[i][j] = (gram[i][j] - dot) / diag;
+        }
+    }
+    for i in 0..row_count {
+        for col in 0..i {
+            rhs[i] -= gram[i][col] * rhs[col];
+        }
+        rhs[i] /= gram[i][i];
+    }
+    for i in (0..row_count).rev() {
+        for col in (i + 1)..row_count {
+            rhs[i] -= gram[col][i] * rhs[col];
+        }
+        rhs[i] /= gram[i][i];
+    }
+    let mut projected = vector.to_vec();
+    for (row, &coeff) in rows.iter().zip(&rhs) {
+        for (out, &entry) in projected.iter_mut().zip(row) {
+            *out -= entry * coeff;
+        }
+    }
+    projected
+}
+
+fn left_arm_jacobian(
+    body: &sx_embodiment_ik::Body,
+    q: &[f64],
+    left_limb: usize,
+    left_cols: &[usize],
+) -> Vec<Vec<f64>> {
+    let step_h = 1e-6;
+    let mut rows = vec![vec![0.0; left_cols.len()]; 6];
+    let mut moved = q.to_vec();
+    for (col_idx, &axis) in left_cols.iter().enumerate() {
+        moved[axis] = q[axis] + step_h;
+        let plus = body.model().poses(&moved);
+        moved[axis] = q[axis] - step_h;
+        let minus = body.model().poses(&moved);
+        moved[axis] = q[axis];
+        let pose_plus = body.frame(&plus, left_limb);
+        let pose_minus = body.frame(&minus, left_limb);
+        for (axis_idx, row) in rows.iter_mut().enumerate().take(3) {
+            row[col_idx] = (pose_plus.t[axis_idx] - pose_minus.t[axis_idx]) / (2.0 * step_h);
+        }
+        let mut rot_delta = [[0.0; 3]; 3];
+        for (row_idx, delta_row) in rot_delta.iter_mut().enumerate() {
+            for (inner_idx, entry) in delta_row.iter_mut().enumerate() {
+                *entry = (0..3)
+                    .map(|dim| pose_plus.r[row_idx][dim] * pose_minus.r[inner_idx][dim])
+                    .sum();
+            }
+        }
+        let omega = [
+            rot_delta[2][1] - rot_delta[1][2],
+            rot_delta[0][2] - rot_delta[2][0],
+            rot_delta[1][0] - rot_delta[0][1],
+        ];
+        for (axis_idx, &omega_comp) in omega.iter().enumerate() {
+            rows[3 + axis_idx][col_idx] = 0.15 * omega_comp / 2.0 / (2.0 * step_h);
+        }
+    }
+    rows
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn mixed_null_rms_jerk(
+    body: &sx_embodiment_ik::Body,
+    history: &[Vec<f64>],
+    left_limb: usize,
+    left_cols: &[usize],
+    active_len: usize,
+    tick_dt: f64,
+) -> f64 {
+    let dt3 = tick_dt * tick_dt * tick_dt;
+    let mut null_jerk_sq = 0.0_f64;
+    let mut sample_count = 0usize;
+    for win in 3..active_len {
+        let j_left = left_arm_jacobian(body, &history[win], left_limb, left_cols);
+        let third_diff: Vec<f64> = left_cols
+            .iter()
+            .map(|&col| {
+                (history[win][col] - 3.0 * history[win - 1][col] + 3.0 * history[win - 2][col]
+                    - history[win - 3][col])
+                    / dt3
+            })
+            .collect();
+        let null = project_null(&j_left, &third_diff);
+        null_jerk_sq += null.iter().map(|val| val * val).sum::<f64>();
+        sample_count += 1;
+    }
+    (null_jerk_sq / (sample_count as f64)).sqrt()
+}
+
+#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
+fn run_mixed_session_with_pace(
+    smoothness: f64,
+    tick_dt: f64,
+    release_right: bool,
+    sweep_left: bool,
+    pace_right: bool,
+) -> (f64, f64, f64, f64) {
+    let mut solve = teleop();
+    solve.set_input_filter(None);
+    solve.set_target_shaping(release_right);
+    solve.set_smoothness(smoothness);
+    let mut q = start(&solve);
+    let width = q.len();
+    let available = vec![true; width];
+    let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+    let initial = solve.tool_poses(&q);
+    let left_pose = initial[0].expect("left pose");
+    let mut right_goal = initial[1].expect("right pose");
+    if !sweep_left {
+        right_goal.translation_m[0] += 0.12;
+    }
+    let left_cols: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, axis)| {
+            (axis.name.starts_with("left_") || (sweep_left && axis.name == "torso_joint"))
+                .then_some(idx)
+        })
+        .collect();
+    let right_cols: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, axis)| axis.name.starts_with("right_").then_some(idx))
+        .collect();
+    let torso_axis = solve
+        .model()
+        .axes()
+        .iter()
+        .position(|axis| axis.name == "torso_joint")
+        .expect("torso_joint");
+    let body = solve.ik().body().clone();
+    let left_limb = body
+        .limbs()
+        .iter()
+        .position(|limb| *limb == "left")
+        .expect("left limb");
+    let total_ticks = if tick_dt < 0.005 { 100 } else { 80 };
+    let mut history: Vec<Vec<f64>> = Vec::with_capacity(total_ticks + 1);
+    history.push(q.clone());
+    let mut right_max_speed = 0.0_f64;
+    let mut right_rest_peak_jerk = 0.0_f64;
+    let mut prev_right_accel = vec![0.0_f64; right_cols.len()];
+    let mut prev_right_vel = vec![0.0_f64; right_cols.len()];
+    let mut right_settled_any = false;
+
+    solve.reset();
+    for tick in 0..total_ticks {
+        let time_s = f64::from(u32::try_from(tick).expect("tick")) * tick_dt;
+        let elbow_y = 0.35 + 0.04 * (time_s * 2.0 * std::f64::consts::PI * 9.0).sin();
+        let mut tcp_left = left_pose;
+        if sweep_left {
+            tcp_left.translation_m[0] += 0.12 * (time_s * 2.0 * std::f64::consts::PI * 0.8).sin();
+            tcp_left.translation_m[1] += 0.08 * (time_s * 2.0 * std::f64::consts::PI * 1.1).sin();
+        }
+        tcp_left.translation_m[1] += 0.001 * (time_s * 2.0 * std::f64::consts::PI * 10.0).sin();
+        tcp_left.translation_m[2] += 0.0008 * (time_s * 2.0 * std::f64::consts::PI * 7.5).cos();
+        let arm = sx_embodiment_ik::teleop::OperatorArm {
+            shoulder_m: [0.0, 0.2, 0.4],
+            elbow_m: [0.2, elbow_y, 0.4],
+            wrist_m: [0.4, 0.2, 0.4],
+        };
+        let right_active = !release_right || tick < total_ticks / 2;
+        let targets = Targets {
+            tcp: sx_embodiment_ik::teleop::hands([
+                Some(tcp_left),
+                right_active.then_some(right_goal),
+            ]),
+            arm: sx_embodiment_ik::teleop::hands([Some(arm), None]),
+            tool_speed: sx_embodiment_ik::teleop::hands([None, pace_right.then_some(linear(0.15))]),
+            ..Targets::default()
+        };
+        let before_right = solve.tool_poses(&q)[1].expect("right pose").translation_m;
+        let step = solve
+            .step(&q, &measured, &available, &targets, tick_dt)
+            .expect("step");
+        assert_eq!(step.solve, Solve::Solved);
+        q.copy_from_slice(&step.q);
+        history.push(q.clone());
+        for (slot, &col) in right_cols.iter().enumerate() {
+            let vel = step.qdot[col];
+            let accel = (vel - prev_right_vel[slot]) / tick_dt;
+            if tick >= total_ticks / 2 + 2 && release_right {
+                right_rest_peak_jerk =
+                    right_rest_peak_jerk.max((accel - prev_right_accel[slot]).abs() / tick_dt);
+            }
+            prev_right_vel[slot] = vel;
+            prev_right_accel[slot] = accel;
+        }
+        if !right_active && solve.settling() {
+            right_settled_any = true;
+        }
+        if right_active {
+            let after_right = solve.tool_poses(&q)[1].expect("right pose").translation_m;
+            let dist = ((after_right[0] - before_right[0]).powi(2)
+                + (after_right[1] - before_right[1]).powi(2)
+                + (after_right[2] - before_right[2]).powi(2))
+            .sqrt();
+            right_max_speed = right_max_speed.max(dist / tick_dt);
+        }
+    }
+    if release_right {
+        assert!(
+            right_settled_any,
+            "release_right never entered Target::Rest settling"
+        );
+        assert!(
+            right_rest_peak_jerk > 0.0,
+            "release_right moved nothing on rest"
+        );
+    }
+
+    let active_len = if release_right {
+        total_ticks / 2
+    } else {
+        history.len()
+    };
+    let null_rms_jerk =
+        mixed_null_rms_jerk(&body, &history, left_limb, &left_cols, active_len, tick_dt);
+    let dt3 = tick_dt * tick_dt * tick_dt;
+    let mut torso_sq = 0.0_f64;
+    for win in 3..active_len {
+        let j = (history[win][torso_axis] - 3.0 * history[win - 1][torso_axis]
+            + 3.0 * history[win - 2][torso_axis]
+            - history[win - 3][torso_axis])
+            / dt3;
+        torso_sq += j * j;
+    }
+    let torso_rms_jerk = (torso_sq / ((active_len - 3) as f64)).sqrt();
+    (
+        right_max_speed,
+        null_rms_jerk,
+        right_rest_peak_jerk,
+        torso_rms_jerk,
+    )
+}
+
+#[test]
+fn mixed_tool_speed_keeps_cap_and_smooths_operator_limb() {
+    let (before_speed, before_null_jerk, _, _) =
+        run_mixed_session_with_pace(0.0, DT, false, false, true);
+    let (after_speed, after_null_jerk, _, _) =
+        run_mixed_session_with_pace(1e-4, DT, false, false, true);
+    assert!(before_speed <= 0.15 + 1e-3);
+    assert!(
+        after_speed <= 0.15 + 1e-3,
+        "right tool exceeded speed cap: {after_speed:.4} m/s"
+    );
+    assert!(
+        after_null_jerk < before_null_jerk,
+        "mixed-session smoothing did not reduce operator-arm null-space jerk: before {before_null_jerk:.2} vs after {after_null_jerk:.2}"
+    );
+
+    // The torso is shared on this sweep, including when the other hand is paced.
+    let (_, n_unpaced_0, _, t_unpaced_0) = run_mixed_session_with_pace(0.0, DT, false, true, false);
+    let (_, n_unpaced_1, _, t_unpaced_1) =
+        run_mixed_session_with_pace(1e-4, DT, false, true, false);
+    let (sweep_speed_off, n_paced_0, _, torso_off) =
+        run_mixed_session_with_pace(0.0, DT, false, true, true);
+    let (sweep_speed_on, sweep_null_on, _, torso_on) =
+        run_mixed_session_with_pace(1e-4, DT, false, true, true);
+    eprintln!(
+        "unpaced null {n_unpaced_0:.2}->{n_unpaced_1:.2}, torso {t_unpaced_0:.2}->{t_unpaced_1:.2} | paced null {n_paced_0:.2}->{sweep_null_on:.2}, torso {torso_off:.2}->{torso_on:.2}"
+    );
+    assert!(sweep_speed_off <= 0.15 + 1e-3 && sweep_speed_on <= 0.15 + 1e-3);
+    assert!(
+        torso_on <= torso_off,
+        "shared torso jerk regressed in mixed session: before {torso_off:.2} vs after {torso_on:.2}"
+    );
+    assert!(
+        sweep_null_on <= n_paced_0 + 1e-6,
+        "operator left null-space jerk regressed on shared-torso sweep: before {n_paced_0:.2} vs after {sweep_null_on:.2} (torso {torso_off:.2} -> {torso_on:.2})"
+    );
+
+    // Genuine Target::Rest (shaping enabled) keeps operator smoothing without spiking Rest release jerk.
+    let (_, rest_off_null_jerk, rest_off_peak_jerk, _) =
+        run_mixed_session_with_pace(0.0, DT, true, false, true);
+    let (_, rest_on_null_jerk, rest_on_peak_jerk, _) =
+        run_mixed_session_with_pace(1e-4, DT, true, false, true);
+    assert!(
+        rest_on_null_jerk < rest_off_null_jerk,
+        "operator limb not smoothed with mixed Target::Rest: {rest_off_null_jerk:.2} vs {rest_on_null_jerk:.2}"
+    );
+    assert!(
+        rest_on_peak_jerk <= rest_off_peak_jerk + 5.0,
+        "mixed Target::Rest jerk jumped under operator smoothing: {rest_off_peak_jerk:.2} vs {rest_on_peak_jerk:.2}"
+    );
+}
+
+fn held_torso_teleop_config() -> sx_embodiment_ik::teleop::TeleopConfig {
+    let mut cfg_json: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/static-teleop-config.json")).expect("cfg");
+    cfg_json["held"] = serde_json::json!(["torso_joint"]);
+    sx_embodiment_ik::teleop::TeleopConfig::parse(&cfg_json.to_string()).expect("held cfg")
+}
+
+fn measure_off_center_held_torso_sweep(smoothness: f64) -> (f64, f64) {
+    use std::collections::BTreeMap;
+    use sx_embodiment_ik::ToolSpeed;
+    use sx_embodiment_ik::teleop::{OperatorArm, Targets, Teleop, hands};
+
+    let files = sx_embodiment_ik::registered("sentient-static-upper-body").expect("pack");
+    let config = held_torso_teleop_config();
+    let ready_map: BTreeMap<String, f64> =
+        serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
+    let mut solve = Teleop::new(files.urdf, files.collision, &config).expect("solve");
+    solve.set_deadline(std::time::Duration::from_secs(3600));
+    solve.set_smoothness(smoothness);
+    let body = solve.ik().body().clone();
+    let left_limb = body
+        .limbs()
+        .iter()
+        .position(|limb| *limb == "left")
+        .expect("left");
+    let left_cols: Vec<usize> = solve
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, axis)| axis.name.starts_with("left_").then_some(idx))
+        .collect();
+    let mut q: Vec<f64> = solve
+        .model()
+        .axes()
+        .iter()
+        .map(|axis| ready_map.get(&axis.name).copied().unwrap_or(0.0))
+        .collect();
+    let available = vec![true; q.len()];
+    let initial = solve.tool_poses(&q);
+    let left0 = initial[0].expect("left");
+    let mut right_hold = initial[1].expect("right");
+    right_hold.translation_m[1] -= 0.15;
+    let step_dt = 0.01;
+    let mut history = Vec::with_capacity(80);
+    let mut left_err_sq = 0.0;
+    solve.reset();
+    for tick in 0..80_u32 {
+        let time_s = f64::from(tick) * step_dt;
+        let mut left_goal = left0;
+        left_goal.translation_m[0] += 0.15 * (time_s * std::f64::consts::TAU * 0.8).sin();
+        left_goal.translation_m[1] += 0.10 * (time_s * std::f64::consts::TAU * 1.1).sin();
+        let arm = OperatorArm {
+            shoulder_m: [0.0, 0.2, 0.4],
+            elbow_m: [
+                0.2,
+                0.35 + 0.04 * (time_s * std::f64::consts::TAU * 9.0).sin(),
+                0.4,
+            ],
+            wrist_m: [0.4, 0.2, 0.4],
+        };
+        let targets = Targets {
+            tcp: hands([Some(left_goal), Some(right_hold)]),
+            arm: hands([Some(arm), None]),
+            tool_speed: hands([
+                None,
+                Some(ToolSpeed {
+                    m_s: 0.15,
+                    rad_s: 1.0,
+                }),
+            ]),
+            ..Targets::default()
+        };
+        let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+        let next_q = solve
+            .step(&q, &measured, &available, &targets, step_dt)
+            .expect("step")
+            .q
+            .clone();
+        let after_left = solve.tool_poses(&next_q)[0].expect("left").translation_m;
+        left_err_sq += (after_left[0] - left_goal.translation_m[0]).powi(2)
+            + (after_left[1] - left_goal.translation_m[1]).powi(2)
+            + (after_left[2] - left_goal.translation_m[2]).powi(2);
+        history.push(next_q.clone());
+        q.copy_from_slice(&next_q);
+    }
+    let null_jerk = mixed_null_rms_jerk(
+        &body,
+        &history,
+        left_limb,
+        &left_cols,
+        history.len(),
+        step_dt,
+    );
+    (null_jerk, (left_err_sq / 80.0).sqrt())
+}
+
+fn measure_fast_mixed_tool_speed(smoothness: f64) -> f64 {
+    use std::collections::BTreeMap;
+    use sx_embodiment_ik::ToolSpeed;
+    use sx_embodiment_ik::teleop::{Targets, Teleop, hands};
+
+    let files = sx_embodiment_ik::registered("sentient-static-upper-body").expect("pack");
+    let ready_map: BTreeMap<String, f64> =
+        serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready");
+    let held_cfg = held_torso_teleop_config();
+    let mut solve = Teleop::new(files.urdf, files.collision, &held_cfg).expect("solve");
+    solve.set_deadline(std::time::Duration::from_secs(3600));
+    solve.set_smoothness(smoothness);
+    let mut q: Vec<f64> = solve
+        .model()
+        .axes()
+        .iter()
+        .map(|axis| ready_map.get(&axis.name).copied().unwrap_or(0.0))
+        .collect();
+    let available = vec![true; q.len()];
+    let init = solve.tool_poses(&q);
+    let left0 = init[0].expect("left");
+    let mut right_goal = init[1].expect("right");
+    right_goal.translation_m[0] += 0.15;
+    solve.reset();
+    let fast_dt = 0.002;
+    let mut max_right_speed = 0.0_f64;
+    for tick in 0..200_u32 {
+        let time_s = f64::from(tick) * fast_dt;
+        let mut left_goal = left0;
+        left_goal.translation_m[1] += 0.05 * (time_s * 40.0).sin();
+        let targets = Targets {
+            tcp: hands([Some(left_goal), Some(right_goal)]),
+            tool_speed: hands([
+                None,
+                Some(ToolSpeed {
+                    m_s: 0.15,
+                    rad_s: f64::INFINITY,
+                }),
+            ]),
+            ..Targets::default()
+        };
+        let measured: Vec<Option<f64>> = q.iter().copied().map(Some).collect();
+        let before_right = solve.tool_poses(&q)[1].expect("right").translation_m;
+        let next_q = solve
+            .step(&q, &measured, &available, &targets, fast_dt)
+            .expect("step")
+            .q
+            .clone();
+        let after_right = solve.tool_poses(&next_q)[1].expect("right").translation_m;
+        let speed = ((after_right[0] - before_right[0]).powi(2)
+            + (after_right[1] - before_right[1]).powi(2)
+            + (after_right[2] - before_right[2]).powi(2))
+        .sqrt()
+            / fast_dt;
+        max_right_speed = max_right_speed.max(speed);
+        q.copy_from_slice(&next_q);
+    }
+    max_right_speed
+}
+
+#[test]
+fn mixed_off_center_sweep_and_500hz_pace_keep_smoothing_contract() {
+    let (null_jerk_off, left_err_off) = measure_off_center_held_torso_sweep(0.0);
+    let (null_jerk_on, left_err_on) = measure_off_center_held_torso_sweep(1e-4);
+    assert!(
+        null_jerk_on < null_jerk_off,
+        "operator left null-space jerk regressed on off-center mixed sweep: {null_jerk_off:.2} vs {null_jerk_on:.2}"
+    );
+    assert!(
+        left_err_on <= left_err_off + 2e-3,
+        "left tracking regressed on off-center mixed sweep: {left_err_off:.4} m vs {left_err_on:.4} m"
+    );
+
+    let max_right_speed = measure_fast_mixed_tool_speed(1e-2);
+    assert!(
+        (0.145..=0.15 + 1e-3).contains(&max_right_speed),
+        "500 Hz mixed right tool failed to track its 0.15 m/s pace: {max_right_speed:.4} m/s"
+    );
+}
+
+fn measure_rest_peak_jerk(smoothness: f64) -> f64 {
+    use sx_embodiment_ik::{Caps, Ik, Settings, Target};
+
+    let body = sx_embodiment_ik::registered("sentient-static-upper-body")
+        .expect("pack")
+        .body()
+        .expect("body");
+    let available = vec![true; body.model().axes().len()];
+    let mut ik_rest = Ik::new(
+        body.clone(),
+        Caps::declared(&body, 0.25).expect("caps").at_most(1.0),
+        Settings::default(),
+        Vec::new(),
+    )
+    .expect("ik");
+    ik_rest.set_deadline(std::time::Duration::from_secs(3600));
+    ik_rest.set_smoothness(smoothness);
+    let right_cols: Vec<usize> = body
+        .model()
+        .axes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, axis)| axis.name.starts_with("right_").then_some(idx))
+        .collect();
+    let mut q_rest = ik_rest.rest().to_vec();
+    let base_frames = body.model().poses(&q_rest);
+    let left_base = body.frame(&base_frames, 0).pose();
+    let mut right_goal = body.frame(&base_frames, 1).pose();
+    right_goal.translation_m[0] += 0.20;
+    let mut prev_v = vec![0.0; q_rest.len()];
+    let mut prev_a = vec![0.0; q_rest.len()];
+    let mut max_jerk = 0.0_f64;
+    ik_rest.reset();
+    for tick in 0..40 {
+        let right_target = if tick < 15 {
+            Some(Target::Pose(right_goal))
+        } else {
+            Some(Target::Rest)
+        };
+        let step = ik_rest
+            .step(
+                &q_rest,
+                &available,
+                &[Some(Target::Pose(left_base)), right_target, None],
+                0.01,
+            )
+            .expect("step");
+        for &col in &right_cols {
+            let vel = step.qdot[col];
+            let accel = (vel - prev_v[col]) / 0.01;
+            let jerk = (accel - prev_a[col]) / 0.01;
+            if tick >= 17 {
+                max_jerk = max_jerk.max(jerk);
+            }
+            prev_v[col] = vel;
+            prev_a[col] = accel;
+        }
+        q_rest.copy_from_slice(&step.q);
+    }
+    max_jerk
+}
+
+#[test]
+fn paced_limb_projects_elbow_aim_without_tool_drift() {
+    use sx_embodiment_ik::{Caps, ElbowAim, Ik, Settings, Target, ToolSpeed};
+
+    let body = sx_embodiment_ik::registered("sentient-static-upper-body")
+        .expect("pack")
+        .body()
+        .expect("body");
+    let link = |name: &str| body.model().link(name).expect(name);
+    let rest_q: Vec<f64> = body
+        .model()
+        .axes()
+        .iter()
+        .map(|axis| axis.limits.map_or(0.0, |[lo, hi]| 0.0_f64.clamp(lo, hi)))
+        .collect();
+    let available = vec![true; rest_q.len()];
+    let base_frames = body.model().poses(&rest_q);
+    let left_base = body.frame(&base_frames, 0).pose();
+    let right_base = body.frame(&base_frames, 1).pose();
+
+    // mut5: paced right + elbow_aim projects elbow gradient into null space so hold error stays tiny.
+    let mut ik_elbow = Ik::new(
+        body.clone(),
+        Caps::declared(&body, 0.25).expect("caps").at_most(1.0),
+        Settings::default(),
+        Vec::new(),
+    )
+    .expect("ik");
+    ik_elbow.set_deadline(std::time::Duration::from_secs(3600));
+    ik_elbow.set_smoothness(1e-4);
+    ik_elbow.set_tool_speed(
+        1,
+        Some(ToolSpeed {
+            m_s: 0.05,
+            rad_s: 0.2,
+        }),
+        None,
+    );
+    ik_elbow.set_elbow_aim(
+        1,
+        Some(ElbowAim {
+            shoulder: link("right_shoulder_roll_link"),
+            elbow: link("right_elbow_pitch_link"),
+            wrist: link("right_wrist_pitch_link"),
+            direction: [0.0, 0.0, -1.0],
+            weight: 2.0,
+            slack_rad: 0.0,
+        }),
+    );
+    let mut q_elbow = ik_elbow.rest().to_vec();
+    let mut max_right_hold_err = 0.0_f64;
+    ik_elbow.reset();
+    for _ in 0..50 {
+        let step = ik_elbow
+            .step(
+                &q_elbow,
+                &available,
+                &[
+                    Some(Target::Pose(left_base)),
+                    Some(Target::Pose(right_base)),
+                    None,
+                ],
+                0.01,
+            )
+            .expect("step");
+        q_elbow.copy_from_slice(&step.q);
+        max_right_hold_err = max_right_hold_err.max(step.limbs[1].residual_m);
+    }
+    assert!(
+        max_right_hold_err < 5e-5,
+        "paced limb elbow gradient leaked into task pose hold: {max_right_hold_err:.6} m"
+    );
+}
+
+#[test]
+fn idle_none_target_and_rest_limb_keep_expected_smoothing() {
+    use sx_embodiment_ik::{Active, Caps, Ik, Settings, Target, ToolSpeed};
+
+    let body = sx_embodiment_ik::registered("sentient-static-upper-body")
+        .expect("pack")
+        .body()
+        .expect("body");
+    let rest_q: Vec<f64> = body
+        .model()
+        .axes()
+        .iter()
+        .map(|axis| axis.limits.map_or(0.0, |[lo, hi]| 0.0_f64.clamp(lo, hi)))
+        .collect();
+    let available = vec![true; rest_q.len()];
+    let left_base = body.frame(&body.model().poses(&rest_q), 0).pose();
+
+    // mut7: tool_speed on an idle limb (Target None) keeps null-space smoothing active.
+    let mut ik_idle = Ik::new(
+        body.clone(),
+        Caps::declared(&body, 0.25).expect("caps").at_most(1.0),
+        Settings::default(),
+        Vec::new(),
+    )
+    .expect("ik");
+    let right_elbow_axis = body
+        .model()
+        .axes()
+        .iter()
+        .position(|axis| axis.name == "right_elbow_pitch_joint")
+        .expect("right elbow");
+    let mut pref = rest_q.clone();
+    pref[right_elbow_axis] = 0.5;
+    ik_idle.prefer_posture(&pref).expect("pref");
+    ik_idle.set_deadline(std::time::Duration::from_secs(3600));
+    ik_idle.set_smoothness(1e-2);
+    ik_idle.set_tool_speed(
+        1,
+        Some(ToolSpeed {
+            m_s: 0.01,
+            rad_s: 0.05,
+        }),
+        None,
+    );
+    let mut q_idle = rest_q;
+    let mut right_capped_ticks = 0_usize;
+    let mut max_idle_right_speed = 0.0_f64;
+    ik_idle.reset();
+    for tick in 0..30 {
+        let before_r = body.frame(&body.model().poses(&q_idle), 1).t;
+        let step = ik_idle
+            .step(
+                &q_idle,
+                &available,
+                &[Some(Target::Pose(left_base)), None, None],
+                0.01,
+            )
+            .expect("step");
+        if step.limbs[1]
+            .active
+            .iter()
+            .any(|active| matches!(active, Active::ToolSpeed { .. }))
+        {
+            right_capped_ticks += 1;
+        }
+        let after_r = body.frame(&body.model().poses(&step.q), 1).t;
+        let speed = ((after_r[0] - before_r[0]).powi(2)
+            + (after_r[1] - before_r[1]).powi(2)
+            + (after_r[2] - before_r[2]).powi(2))
+        .sqrt()
+            / 0.01;
+        if tick > 0 {
+            max_idle_right_speed = max_idle_right_speed.max(speed);
+        }
+        q_idle.copy_from_slice(&step.q);
+    }
+    assert_eq!(right_capped_ticks, 0);
+    assert!(
+        max_idle_right_speed < 0.005,
+        "idle None-target limb stopped being smoothed when tool_speed was set: {max_idle_right_speed:.6} m/s"
+    );
+
+    // mut6: Target::Rest exclusion keeps rest deceleration invariant under smoothing.
+    let rest_jerk_0 = measure_rest_peak_jerk(0.0);
+    let rest_jerk_high = measure_rest_peak_jerk(0.5);
+    assert!(
+        (rest_jerk_high - rest_jerk_0).abs() <= 0.05,
+        "Target::Rest deceleration changed under high smoothing: 0 -> {rest_jerk_0:.3}, 0.5 -> {rest_jerk_high:.3}"
+    );
+}

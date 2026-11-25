@@ -1200,15 +1200,27 @@ impl Teleop {
                 .filter(|(_, weight)| *weight > 0.0);
             let seen = match (targets.tcp[hand], *kept, operator) {
                 (_, _, Some((direction, weight))) => (direction, weight, 0.0),
-                // An operator arm held straight, or within the deadband, aims nothing, as before
-                // the prior: falling back to it there flipped the aim between the operator's
-                // elbow at weight 0.01 and the prior at 2.0 on every tick of tracking noise across
-                // the deadband's edge (2880 rad/s^3 of arm jerk; refute of 356541f).
+                // An operator arm held straight, or within the deadband, ramps weight smoothly to
+                // zero instead of snapping off in one tick; seed/keep weight 0.0 while `kept` is
+                // active so bending out later or `ARM_HOLD_S` expiry into `ELBOW_PRIOR` also
+                // ramps smoothly from zero.
                 (_, Some(_), None) => {
-                    self.elbows[hand] = None;
-                    self.ik.set_elbow_aim(limb, None);
-                    self.ik.set_home_pull(limb, true);
-                    continue;
+                    if let Some((before, weighed, slacked)) = self.elbows[hand] {
+                        let next_weight = weighed + blend * (0.0 - weighed);
+                        if next_weight < 1e-3 {
+                            self.elbows[hand] = Some((before, 0.0, slacked));
+                            self.ik.set_elbow_aim(limb, None);
+                            self.ik.set_home_pull(limb, true);
+                            continue;
+                        }
+                        (before, 0.0, slacked)
+                    } else {
+                        self.elbows[hand] =
+                            Some((ELBOW_PRIOR_DIRECTION, 0.0, ELBOW_PRIOR_SLACK_RAD));
+                        self.ik.set_elbow_aim(limb, None);
+                        self.ik.set_home_pull(limb, true);
+                        continue;
+                    }
                 }
                 (Some(_), None, None) => (
                     ELBOW_PRIOR_DIRECTION,
@@ -1227,11 +1239,18 @@ impl Teleop {
             // the prior and the operator's elbow eases across rather than switching in a tick.
             let (direction, weight, slack) = seen;
             let filtered = match self.elbows[hand] {
+                Some((_, weighed, _)) if weighed <= 1e-6 => (direction, blend * weight, slack),
                 Some((before, weighed, slacked)) => {
                     let mixed = [0, 1, 2].map(|k| before[k] + blend * (direction[k] - before[k]));
-                    let length = mixed.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-9);
+                    let norm_sq: f64 = mixed.iter().map(|x| x * x).sum();
+                    let unit = if norm_sq > 1e-12 {
+                        let inv = 1.0 / norm_sq.sqrt();
+                        mixed.map(|x| x * inv)
+                    } else {
+                        direction
+                    };
                     (
-                        mixed.map(|x| x / length),
+                        unit,
                         weighed + blend * (weight - weighed),
                         slacked + blend * (slack - slacked),
                     )
@@ -1270,6 +1289,11 @@ impl Teleop {
     pub fn set_input_filter(&mut self, filter: Option<OneEuro>) {
         self.input_filter = filter;
         self.filters = [PoseFilter::default(); MAX_HANDS];
+    }
+
+    /// Override the underlying IK solver's null-space smoothness weight.
+    pub fn set_smoothness(&mut self, smoothness: f64) {
+        self.ik.set_smoothness(smoothness);
     }
 
     /// The last step's targets as the solve took them: the operator's hands with their tremor

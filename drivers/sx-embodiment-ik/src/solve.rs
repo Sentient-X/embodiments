@@ -552,6 +552,7 @@ struct Workspace {
     lower_by: Vec<Bound>,
     upper_by: Vec<Bound>,
     yielded: Vec<bool>,
+    unsmoothed: Vec<bool>,
     still: Vec<f64>,
     candidates: Vec<Candidate>,
     rows: Vec<f64>,
@@ -795,6 +796,7 @@ impl Ik {
             lower_by: vec![Bound::Speed; n],
             upper_by: vec![Bound::Speed; n],
             yielded: vec![false; n],
+            unsmoothed: vec![false; n],
             still: vec![0.0; n],
             candidates,
             rows: vec![0.0; k * n],
@@ -902,6 +904,19 @@ impl Ik {
     #[must_use]
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Override the null-space smoothness weight. Not finite or negative: ignored.
+    pub fn set_smoothness(&mut self, smoothness: f64) {
+        if smoothness.is_finite() && smoothness >= 0.0 {
+            self.settings.smoothness = smoothness;
+        }
+    }
+
+    /// Each limb's current elbow aim, in [`Body::limbs`] order.
+    #[must_use]
+    pub fn elbow_aim(&self) -> &[Option<ElbowAim>] {
+        &self.elbow_aim
     }
 
     /// The neutral posture (every axis): zero, held inside each limit. Scene pairs are those
@@ -1688,11 +1703,41 @@ impl Ik {
             w.h[column * n + column] += 2.0 * (weight + s.damping);
             w.g[column] -= 2.0 * weight * error;
         }
-        // A tool held to a speed ([`Ik::set_tool_speed`]: a program's goal) is a hard cap, and
-        // carried null-space motion can keep a joint from slowing as the cap's shortening needs:
-        // at 500 Hz a tool went 0.26 m/s against 0.2 (`a_tool_speed_never_shortens_a_step_past_a_row`).
-        // Such a step is not smoothed; an operator's hands, which set no speed, are.
-        let smooth = s.smoothness > 0.0 && self.tool_speed.iter().all(Option::is_none);
+        // A paced program alone keeps its existing solve. In a mixed session an active
+        // unpaced pose or axis can smooth its joints, including a shared torso. A resting
+        // limb keeps control of the columns it needs to stop.
+        w.unsmoothed.fill(false);
+        let mut active_unpaced = false;
+        for (limb_idx, target) in targets.iter().enumerate() {
+            let paced = self.tool_speed[limb_idx].is_some()
+                && matches!(target, Some(Target::Pose(_) | Target::Axis { .. }));
+            if paced {
+                for &col in &self.limb_columns[limb_idx] {
+                    w.unsmoothed[col] = true;
+                }
+            }
+        }
+        for (limb_idx, target) in targets.iter().enumerate() {
+            let operator = self.tool_speed[limb_idx].is_none()
+                && matches!(target, Some(Target::Pose(_) | Target::Axis { .. }));
+            if operator {
+                active_unpaced = true;
+                for &col in &self.limb_columns[limb_idx] {
+                    w.unsmoothed[col] = false;
+                }
+            }
+        }
+        for (limb_idx, target) in targets.iter().enumerate() {
+            if matches!(target, Some(Target::Rest)) {
+                for &col in &self.limb_columns[limb_idx] {
+                    w.unsmoothed[col] = true;
+                }
+            }
+        }
+        let all_unsmoothed = w.unsmoothed.iter().all(|&flag| flag);
+        let smooth = s.smoothness > 0.0
+            && !all_unsmoothed
+            && (active_unpaced || self.tool_speed.iter().all(Option::is_none));
         let aimed = self.elbow_gradient();
         let projected = smooth && self.smooth_null_space(dt);
         if aimed {
@@ -1825,7 +1870,12 @@ impl Ik {
             }
         }
         // H += 2 N' D N; g -= 2 N' D N p, p the last step carried on.
+        // Zero D_kk on unsmoothed columns while keeping full rows of N so A * N' D N = 0 stays exact
+        // across shared axes (torso) and never pulls a paced/resting limb's tool into task space.
         for k in 0..n {
+            if w.unsmoothed[k] {
+                continue;
+            }
             let weight = s.smoothness * (w.lever[k] / rho2).max(1.0);
             // N's row k (= column k), weighed.
             let row = &w.null[k * n..(k + 1) * n];
