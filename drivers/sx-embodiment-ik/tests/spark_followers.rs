@@ -31,7 +31,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sx_embodiment_ik::teleop::{Targets, Teleop, TeleopConfig};
-use sx_embodiment_ik::{READING_JITTER, Solve, ToolSpeed};
+use sx_embodiment_ik::{READING_JITTER, Settings, Solve, ToolSpeed};
 use sx_frames::Pose;
 
 /// The static upper body's committed render pack: one fixture among the registry's bodies.
@@ -336,7 +336,7 @@ fn counter(clear: f64) -> Vec<[f64; 6]> {
     }
 }
 
-fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
+fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>, smoothness: f64) -> Out {
     let obstacles = match scene {
         Scene::Counter { .. } => counter(0.03),
         Scene::Box { .. } => {
@@ -354,6 +354,7 @@ fn run(scene: Scene, m: Motor, dt: f64, tool_speed: Option<f64>) -> Out {
         _ => Vec::new(),
     };
     let (mut teleop, rest) = base(obstacles.clone(), &m);
+    teleop.set_smoothness(smoothness);
     let pieces = pieces(&teleop);
     let names: Vec<String> = teleop
         .model()
@@ -622,7 +623,7 @@ fn table(cases: &[(Scene, Motor, f64, Option<f64>)]) -> Vec<(String, Out)> {
                     let Some(&(scene, m, dt, tool)) = cases.get(i) else {
                         break;
                     };
-                    let o = run(scene, m, dt, tool);
+                    let o = run(scene, m, dt, tool, Settings::default().smoothness);
                     let l = line(scene, &m, dt, tool, &o);
                     println!("ROW {l}");
                     done.lock().expect("rows").push((l, o));
@@ -860,6 +861,34 @@ fn the_sparks_arm_keeps_clear_of_a_box_it_sweeps_past() {
     for (line, out) in table(&cases) {
         assert!(out.clear >= 0.005 && out.real > 0.0, "{line}");
     }
+}
+
+/// An idle arm leaves free joints, but only the other hand's paced target is active.
+#[test]
+fn a_paced_counter_slide_keeps_clearance_without_an_operator_target() {
+    let slide = Scene::Counter {
+        slide: 0.15,
+        block: None,
+    };
+    let motor = Motor {
+        sag: 1.0,
+        noise: READING_JITTER,
+        ..SPARK_MOTOR
+    };
+    let without = run(slide, motor, 0.02, Some(0.2), 0.0);
+    let with = run(
+        slide,
+        motor,
+        0.02,
+        Some(0.2),
+        Settings::default().smoothness,
+    );
+    assert!(
+        (with.clear - without.clear).abs() < 1e-6,
+        "operator smoothing changed paced slide clearance: {:.3} to {:.3} mm",
+        without.clear * 1e3,
+        with.clear * 1e3,
+    );
 }
 
 /// A tool speed bounding only the tool point's motion, `m_s`; its turn is the joints' to bound.
