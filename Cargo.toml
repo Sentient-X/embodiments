@@ -53,3 +53,15 @@ opt-level = 3
 
 [profile.dev.package.sx-frames]
 opt-level = 3
+
+# The hand-teach controller's tests run its real 50 ms loop deadline against the simulated bus:
+# unoptimised, one tick's gravity solve and bus exchange took most of that budget, so a loaded
+# host tripped the deadline in about one run in eight. Optimised as in release, none did.
+[profile.dev.package.sx-embodiment-drivers]
+opt-level = 3
+
+[profile.dev.package.sx-damiao-can]
+opt-level = 3
+
+[profile.dev.package.sx-embodiment-commission]
+opt-level = 3
