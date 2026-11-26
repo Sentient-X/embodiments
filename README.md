@@ -596,6 +596,17 @@ saw it; QC refuses only where neither did for over 0.5 s. `write_solved_spool` w
 the seal reads for a side recorded without its encoder. Both sit behind the `calibrate` extra
 (NumPy, OpenCV).
 
+`sx_embodiments.jaw_unit` is one gripper unit's jaw, measured once against a caliper
+(`sx.jaw-unit-calibration/v1`, keyed by its encoder and wrist camera): the finger markers'
+reference fixed on the unit, the tags' map to the finger angle, the encoder's map in free motion
+(it reads the trigger, not the fingers), and the pads' compression per radian of squeeze. A
+protocol take (each calipered width held lightly then firmly, opening fully between) is
+segmented from the encoder's still stretches (`segment_protocol`), fitted (`fit_unit`) and judged
+three ways from the same data, tags alone, the encoder alone and fused (`evaluate`). On a
+simulated unit with the recorded faults (`tests/test_jaw_unit.py`) fused stays within 1 mm of the
+caliper, light and firm; tags alone read a firm hold short by the pads' compression; the encoder
+alone reads it short by the squeeze, which no model of the encoder alone can recover.
+
 Measured on yubi-0006's right hand (2026-11-25, intrinsics borrowed from the same camera
 model), grasps of a 34.7 mm calipered object: fused against the encoder p95 1.44 mm (Savitzky-Golay
 tags alone were 2.31 mm). With the closed-stop reference the fused holds read 37.4, 34.3, 33.1
