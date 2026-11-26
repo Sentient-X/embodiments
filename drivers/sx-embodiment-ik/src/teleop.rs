@@ -479,6 +479,77 @@ const fn human_reach() -> f64 {
     HUMAN_REACH_M
 }
 
+#[derive(Clone, Copy)]
+enum ElbowPreference {
+    Hanging,
+    Outward(OutwardTuning),
+}
+
+#[derive(Clone, Copy)]
+struct OutwardTuning {
+    mean_deg: f64,
+    gain_deg: f64,
+    transition_m: f64,
+    slack_rad: f64,
+    motion_ramp_m: f64,
+}
+
+const CONTROLLER_ELBOW: OutwardTuning = OutwardTuning {
+    mean_deg: 45.0,
+    gain_deg: 5.0,
+    transition_m: 0.110,
+    slack_rad: 0.27,
+    motion_ramp_m: 0.075,
+};
+
+#[derive(Clone, Copy)]
+struct ElbowEngage {
+    position: [f64; 3],
+    approach: [f64; 3],
+    blend: f64,
+}
+
+impl ElbowEngage {
+    fn advance(&mut self, position: [f64; 3], approach: [f64; 3], ramp_m: f64) -> f64 {
+        let travel = self
+            .position
+            .into_iter()
+            .zip(position)
+            .map(|(a, b)| (b - a).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let turn = self
+            .approach
+            .into_iter()
+            .zip(approach)
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            .clamp(-1.0, 1.0)
+            .acos();
+        // The orientation contribution uses the direction of approach, leaving pure roll free.
+        let t = (travel.hypot(0.10 * turn) / ramp_m).clamp(0.0, 1.0);
+        self.blend = self.blend.max(t * t * (3.0 - 2.0 * t));
+        self.blend
+    }
+}
+
+/// The jaws' approach toward the torso asks for a little extra outward bend. Roll about that
+/// axis leaves the preference alone. Fade to the hanging prior as the elbow straightens.
+fn outward_elbow(
+    approach: [f64; 3],
+    outward: [f64; 3],
+    radius_m: f64,
+    tuning: OutwardTuning,
+) -> ([f64; 3], f64) {
+    let inward = -(approach[0] * outward[0] + approach[1] * outward[1]);
+    let bend = ((radius_m - ELBOW_DEADBAND_M) / tuning.transition_m).clamp(0.0, 1.0);
+    let bend = bend * bend * (3.0 - 2.0 * bend);
+    let angle = (bend * (tuning.mean_deg + tuning.gain_deg * inward.clamp(-1.0, 1.0))).to_radians();
+    let (side, down) = angle.sin_cos();
+    let slack = ELBOW_PRIOR_SLACK_RAD + bend * (tuning.slack_rad - ELBOW_PRIOR_SLACK_RAD);
+    ([outward[0] * side, outward[1] * side, -down], slack)
+}
+
 /// One limb's arm as the solve reads it: its links' indices and its reach.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Arm {
@@ -901,6 +972,8 @@ pub struct Teleop {
     elbows: [Option<([f64; 3], f64, f64)>; MAX_HANDS],
     /// Per hand, the operator's arm last given and the seconds since ([`ARM_HOLD_S`]).
     operator_arms: [Option<(OperatorArm, f64)>; MAX_HANDS],
+    elbow_preference: ElbowPreference,
+    elbow_engage: [Option<ElbowEngage>; MAX_HANDS],
 }
 
 impl Teleop {
@@ -1152,6 +1225,8 @@ impl Teleop {
             arms,
             elbows: [None; MAX_HANDS],
             operator_arms: [None; MAX_HANDS],
+            elbow_preference: ElbowPreference::Hanging,
+            elbow_engage: [None; MAX_HANDS],
         })
     }
 
@@ -1168,11 +1243,75 @@ impl Teleop {
     /// Aim the elbow of each hand given with its operator's arm (an arm that stopped coming is
     /// kept for [`ARM_HOLD_S`]) and pull its posture home (see the module docs); every other
     /// limb's elbow goes unaimed and its posture weighs as before. The hand is never moved.
+    /// Horizontal torso side from the actual shoulder origins, in the solver's root frame.
+    fn leftward(&self) -> Option<[f64; 3]> {
+        let shoulder = |name| {
+            let limb = self
+                .config
+                .limbs
+                .iter()
+                .position(|limb| limb.name == name)?;
+            let arm = self.arms[limb]?;
+            Some(self.frames.links[arm.shoulder].t)
+        };
+        let left = shoulder("left")?;
+        let right = shoulder("right")?;
+        let lateral = [left[0] - right[0], left[1] - right[1], 0.0];
+        let width = lateral[0].hypot(lateral[1]);
+        (width > 1e-6).then(|| lateral.map(|x| x / width))
+    }
+
+    fn controller_elbow(
+        &mut self,
+        limb: usize,
+        arm: Arm,
+        hand: usize,
+        tool: Pose,
+        leftward: [f64; 3],
+        tuning: OutwardTuning,
+    ) -> Option<([f64; 3], f64)> {
+        let config = &self.config.limbs[limb];
+        let outward = match config.name.as_str() {
+            "left" => leftward,
+            "right" => leftward.map(|x| -x),
+            _ => return None,
+        };
+        let approach = tool.rotation.rotate(config.approach?);
+        let links = &self.frames.links;
+        let radius = elbow_direction(
+            links[arm.shoulder].t,
+            links[arm.elbow].t,
+            links[arm.wrist].t,
+        )
+        .map_or(0.0, |(_, radius)| radius);
+        let (direction, slack) = outward_elbow(approach, outward, radius, tuning);
+        if tuning.motion_ramp_m <= 0.0 {
+            return Some((direction, slack));
+        }
+        let engage = self.elbow_engage[hand].get_or_insert(ElbowEngage {
+            position: tool.translation_m,
+            approach,
+            blend: 0.0,
+        });
+        let gain = engage.advance(tool.translation_m, approach, tuning.motion_ramp_m);
+        let mixed = [0, 1, 2]
+            .map(|k| ELBOW_PRIOR_DIRECTION[k] + gain * (direction[k] - ELBOW_PRIOR_DIRECTION[k]));
+        let length = mixed.into_iter().map(|x| x * x).sum::<f64>().sqrt();
+        let slack = ELBOW_PRIOR_SLACK_RAD + gain * (slack - ELBOW_PRIOR_SLACK_RAD);
+        Some((mixed.map(|x| x / length), slack))
+    }
+
     fn aim_elbows(&mut self, targets: &Targets, dt: f64) {
+        let leftward = match self.elbow_preference {
+            ElbowPreference::Hanging => None,
+            ElbowPreference::Outward(tuning) => self.leftward().map(|left| (left, tuning)),
+        };
         let blend = 1.0 - (-dt / ELBOW_FILTER_S).exp();
         let human = self.config.human_reach_m;
-        for (limb, hand) in self.hand_of.iter().enumerate() {
-            let Some(hand) = *hand else { continue };
+        for limb in 0..self.hand_of.len() {
+            let Some(hand) = self.hand_of[limb] else {
+                continue;
+            };
             let kept = &mut self.operator_arms[hand];
             *kept = match (targets.tcp[hand], targets.arm[hand], *kept) {
                 (Some(_), Some(given), _) => Some((given, 0.0)),
@@ -1182,6 +1321,7 @@ impl Teleop {
                 // No hand, or an arm gone longer than the hold.
                 _ => None,
             };
+            let kept = *kept;
             let Some(arm) = self.arms[limb] else {
                 self.elbows[hand] = None;
                 self.ik.set_elbow_aim(limb, None);
@@ -1194,11 +1334,11 @@ impl Teleop {
             // pull is 10-20x weaker toward Ready than the preferred posture, and with it on for
             // the prior the desk (local view) tracked 65 % worse and an engage at rest jerked 2x
             // its cap (refute of embodiments b0aff0e).
-            let operator = (*kept)
+            let operator = kept
                 .and_then(|(o, _)| elbow_direction(o.shoulder_m, o.elbow_m, o.wrist_m))
                 .map(|(direction, radius)| (direction, elbow_weight(radius, human)))
                 .filter(|(_, weight)| *weight > 0.0);
-            let seen = match (targets.tcp[hand], *kept, operator) {
+            let seen = match (targets.tcp[hand], kept, operator) {
                 (_, _, Some((direction, weight))) => (direction, weight, 0.0),
                 // An operator arm held straight, or within the deadband, ramps weight smoothly to
                 // zero instead of snapping off in one tick; seed/keep weight 0.0 while `kept` is
@@ -1222,13 +1362,18 @@ impl Teleop {
                         continue;
                     }
                 }
-                (Some(_), None, None) => (
-                    ELBOW_PRIOR_DIRECTION,
-                    ELBOW_PRIOR_WEIGHT,
-                    ELBOW_PRIOR_SLACK_RAD,
-                ),
+                (Some(tool), None, None) => {
+                    let (direction, slack) = leftward
+                        .filter(|_| targets.tool_speed[hand].is_none() && !targets.free_roll[hand])
+                        .and_then(|(left, tuning)| {
+                            self.controller_elbow(limb, arm, hand, tool, left, tuning)
+                        })
+                        .unwrap_or((ELBOW_PRIOR_DIRECTION, ELBOW_PRIOR_SLACK_RAD));
+                    (direction, ELBOW_PRIOR_WEIGHT, slack)
+                }
                 // No hand: nothing to aim, and the limb is held as before.
                 (None, None, None) => {
+                    self.elbow_engage[hand] = None;
                     self.elbows[hand] = None;
                     self.ik.set_elbow_aim(limb, None);
                     self.ik.set_home_pull(limb, false);
@@ -1272,6 +1417,17 @@ impl Teleop {
             );
             self.ik.set_home_pull(limb, kept.is_some());
         }
+    }
+
+    /// Prefer outward, gripper-oriented elbows for controller-only bimanual following.
+    /// A supplied operator arm takes precedence. Enable on an operator's solver only.
+    /// This is off by default so each station and its matching preview can opt in together.
+    pub fn set_outward_elbows(&mut self, enabled: bool) {
+        self.elbow_preference = if enabled {
+            ElbowPreference::Outward(CONTROLLER_ELBOW)
+        } else {
+            ElbowPreference::Hanging
+        };
     }
 
     /// Whether each target passes its shaper ([`crate::shaper`], the default); `false` hands the
@@ -1468,6 +1624,7 @@ impl Teleop {
         self.gaze_resting = false;
         self.elbows = [None; MAX_HANDS];
         self.operator_arms = [None; MAX_HANDS];
+        self.elbow_engage = [None; MAX_HANDS];
     }
 
     /// Whether a shaped target still has motion to bring to rest: a caller whose targets went
@@ -2081,8 +2238,10 @@ impl Teleop {
                 *velocity = None;
             }
         }
-        // The operator's arm aims the elbow; the hand stays as given.
-        self.aim_elbows(&cleaned, dt);
+        let outward = matches!(self.elbow_preference, ElbowPreference::Outward(_));
+        if !outward {
+            self.aim_elbows(&cleaned, dt);
+        }
         let targets = &cleaned;
         // Filtered once the step is taken: a refused step leaves the filter and `taken` as
         // they were.
@@ -2102,6 +2261,13 @@ impl Teleop {
         self.take_reference(reference, measured, available, &asked, seeded, dt);
         self.seed = false;
         self.shape(targets, &mut asked, available, dt);
+        if outward {
+            if !self.shaping {
+                self.ik.body().model().poses_into(&self.q, &mut self.frames);
+            }
+            // Use the filtered gripper pose and the geometry the IK will solve.
+            self.aim_elbows(targets, dt);
+        }
         let targets = &asked;
         for (slot, (available, held)) in self
             .available
@@ -2213,7 +2379,40 @@ impl Teleop {
 
 #[cfg(test)]
 mod hand_tests {
-    use super::hand_of_side;
+    use super::{
+        CONTROLLER_ELBOW, ELBOW_PRIOR_DIRECTION, ELBOW_PRIOR_SLACK_RAD, hand_of_side, outward_elbow,
+    };
+
+    #[test]
+    fn stationary_tool_and_roll_do_not_activate_outward_aim() {
+        let mut engage = super::ElbowEngage {
+            position: [0.0; 3],
+            approach: [1.0, 0.0, 0.0],
+            blend: 0.0,
+        };
+        let forward = [1.0, 0.0, 0.0];
+        let ramp = CONTROLLER_ELBOW.motion_ramp_m;
+        assert!(engage.advance([0.0; 3], forward, ramp).abs() < 1e-12);
+        assert!((engage.advance([0.5 * ramp, 0.0, 0.0], forward, ramp) - 0.5).abs() < 1e-12);
+        assert!((engage.advance([0.0; 3], forward, ramp) - 0.5).abs() < 1e-12);
+        assert!((engage.advance([0.0; 3], [0.0, 1.0, 0.0], ramp) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn inward_approach_flares_the_elbow_and_a_straight_arm_uses_the_hanging_prior() {
+        let left = [0.0, 1.0, 0.0];
+        let right = [0.0, -1.0, 0.0];
+        let (left_inward, _) = outward_elbow(right, left, 0.12, CONTROLLER_ELBOW);
+        let (left_outward, _) = outward_elbow(left, left, 0.12, CONTROLLER_ELBOW);
+        let (right_inward, _) = outward_elbow(left, right, 0.12, CONTROLLER_ELBOW);
+        assert!(left_inward[1] > left_outward[1]);
+        assert!((left_inward[1] + right_inward[1]).abs() < 1e-12);
+        let (straight, slack) = outward_elbow(right, left, 0.0, CONTROLLER_ELBOW);
+        for (component, down) in straight.into_iter().zip(ELBOW_PRIOR_DIRECTION) {
+            assert!((component - down).abs() < 1e-12);
+        }
+        assert!((slack - ELBOW_PRIOR_SLACK_RAD).abs() < 1e-12);
+    }
 
     /// Each operator hand drives the body's hand of its side; a single unsided arm is the right
     /// hand's; nothing else maps.

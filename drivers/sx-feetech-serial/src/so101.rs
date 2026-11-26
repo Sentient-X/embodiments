@@ -36,7 +36,7 @@ pub const POSITION_LOOP: ServoConfiguration = ServoConfiguration {
     protection: None,
     approach: None,
 };
-/// The gripper's limits: half of its torque and current, and 25 % torque when overloaded.
+/// The gripper's configured torque ceiling, current protection and overload trip threshold.
 pub const GRIPPER_PROTECTION: TorqueProtection = TorqueProtection {
     max_torque_limit: 500,
     protection_current: 250,

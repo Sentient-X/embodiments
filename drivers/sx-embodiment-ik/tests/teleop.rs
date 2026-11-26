@@ -2634,3 +2634,110 @@ fn idle_none_target_and_rest_limb_keep_expected_smoothing() {
         "Target::Rest deceleration changed under high smoothing: 0 -> {rest_jerk_0:.3}, 0.5 -> {rest_jerk_high:.3}"
     );
 }
+
+#[test]
+fn e16_moves_both_arms_with_a_held_torso_and_keeps_head_only_tracking_stock() {
+    let files = static_files();
+    let config = held_torso_teleop_config();
+    let mut e16 = Teleop::new(files.urdf, files.collision, &config).expect("E16");
+    let mut stock = Teleop::new(files.urdf, files.collision, &config).expect("stock");
+    for solver in [&mut e16, &mut stock] {
+        solver.set_deadline(std::time::Duration::from_secs(10));
+    }
+    e16.set_outward_elbows(true);
+
+    let pose: BTreeMap<String, f64> =
+        serde_json::from_str(include_str!("fixtures/static-ready.json")).expect("ready pose");
+    let torso = index(&e16, "torso_joint");
+    let mut initial: Vec<f64> = e16
+        .model()
+        .axes()
+        .iter()
+        .map(|axis| pose.get(&axis.name).copied().unwrap_or(0.0))
+        .collect();
+    initial[torso] = 0.12;
+    let available = vec![true; initial.len()];
+    let mut q = start(&e16);
+    q[torso] = initial[torso];
+    let (forward, _) = camera_forward(&e16, &q);
+    let yaw = forward[1].atan2(forward[0]) + 0.5;
+    let head = Targets {
+        head: Some(Pose {
+            translation_m: [0.0, 0.0, 1.0],
+            rotation: QuaternionLayout::Xyzw.read([0.0, 0.0, (yaw / 2.0).sin(), (yaw / 2.0).cos()]),
+        }),
+        ..Targets::default()
+    };
+    for _ in 0..400 {
+        let measured: Vec<_> = q.iter().copied().map(Some).collect();
+        let old = stock
+            .step(&q, &measured, &available, &head, DT)
+            .expect("stock head");
+        let new = e16
+            .step(&q, &measured, &available, &head, DT)
+            .expect("E16 head");
+        assert_eq!(old.q, new.q);
+        assert_eq!(old.qdot, new.qdot);
+        assert_eq!(new.q[torso], initial[torso]);
+        assert_eq!(new.qdot[torso], 0.0);
+        q.copy_from_slice(&new.q);
+    }
+    let (look, _) = camera_forward(&e16, &q);
+    assert!(
+        look[0] * yaw.cos() + look[1] * yaw.sin() > 0.98,
+        "camera forward {look:?}"
+    );
+
+    q.copy_from_slice(&initial);
+    let mut stock_q = initial.clone();
+    e16.reset();
+    stock.reset();
+    let initial_tools = e16.tool_poses(&q);
+    for tick in 0..280 {
+        let phase = (f64::from(tick) / 160.0).min(1.0);
+        let mut targets = head;
+        for (hand, (start, target)) in initial_tools
+            .iter()
+            .zip(&mut targets.tcp)
+            .enumerate()
+            .take(2)
+        {
+            let mut tool = start.expect("registered gripper");
+            tool.translation_m[0] += 0.08 * phase;
+            let side = if hand == 0 { 1.0 } else { -1.0 };
+            tool.translation_m[1] -= 0.03 * phase * side;
+            *target = Some(tool);
+        }
+        let measured: Vec<_> = q.iter().copied().map(Some).collect();
+        let step = e16
+            .step(&q, &measured, &available, &targets, DT)
+            .expect("E16 arms");
+        assert_eq!(step.q[torso], initial[torso]);
+        assert_eq!(step.qdot[torso], 0.0);
+        q.copy_from_slice(&step.q);
+        let measured: Vec<_> = stock_q.iter().copied().map(Some).collect();
+        let step = stock
+            .step(&stock_q, &measured, &available, &targets, DT)
+            .expect("stock arms");
+        stock_q.copy_from_slice(&step.q);
+    }
+    let elbow = e16
+        .model()
+        .link("left_elbow_pitch_link")
+        .expect("left elbow");
+    let e16_elbow = e16.model().poses(&q).links[elbow].t;
+    let stock_elbow = stock.model().poses(&stock_q).links[elbow].t;
+    let squared_gap: f64 = e16_elbow
+        .iter()
+        .zip(stock_elbow)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum();
+    assert!(
+        squared_gap > 0.001_f64.powi(2),
+        "E16 left elbow followed the stock elbow"
+    );
+    for (goal, actual) in initial_tools.into_iter().zip(e16.tool_poses(&q)).take(2) {
+        let x = actual.expect("gripper").translation_m[0] - goal.expect("start").translation_m[0];
+        assert!(x > 0.06, "an arm failed to follow with torso held: {x}");
+    }
+}

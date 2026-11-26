@@ -563,6 +563,8 @@ pub struct FeetechChain<P> {
     command_readings: Option<Axes<AxisReading>>,
     /// The command's SYNC READ of every servo, its servos added at open and reused.
     reader: GroupSyncRead,
+    #[cfg(feature = "gripper-diagnostics")]
+    grasp: Option<crate::grasp::GraspDiagnostics>,
     /// The command's SYNC WRITE of every goal, refilled each command in buffers it keeps.
     writer: GroupSyncWrite,
     /// Per servo, whether its approach limit was written and read back.
@@ -758,6 +760,8 @@ impl<P: SerialPort> FeetechChain<P> {
             observed: None,
             command_readings: None,
             reader: GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH),
+            #[cfg(feature = "gripper-diagnostics")]
+            grasp: None,
             writer: GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2),
             approach_limited: Vec::new(),
             pulling_in: Vec::new(),
@@ -772,6 +776,13 @@ impl<P: SerialPort> FeetechChain<P> {
         for servo in &chain.servos {
             if !chain.reader.add_param(servo.scs_id()) {
                 return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
+            }
+        }
+        #[cfg(feature = "gripper-diagnostics")]
+        if !chain.axes.is_empty() && chain.axes.iter().all(|axis| axis.gripper) {
+            if let Some((reader, grasp)) = crate::grasp::open(&mut chain.sms.ph, &chain.axes) {
+                chain.reader = reader;
+                chain.grasp = Some(grasp);
             }
         }
         chain.observed = fresh_positions(&chain.present_positions()).map(Axes::from);
@@ -1064,6 +1075,10 @@ impl<P: SerialPort> FeetechChain<P> {
             .iter()
             .map(|reading| reading.position().unwrap_or(f64::NAN))
             .collect();
+        #[cfg(feature = "gripper-diagnostics")]
+        if let Some(grasp) = &mut self.grasp {
+            grasp.observe(reader, end, received);
+        }
         if powered && arrived {
             self.raise_pulled_in(&readings);
         }
@@ -1257,6 +1272,10 @@ impl<P: SerialPort> FeetechChain<P> {
         }
         self.observed = fresh_positions(&self.present_positions()).map(Axes::from);
         self.command_readings = None;
+        #[cfg(feature = "gripper-diagnostics")]
+        if let Some(grasp) = &mut self.grasp {
+            grasp.flush();
+        }
         report
     }
 
