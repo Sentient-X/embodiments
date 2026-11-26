@@ -21,8 +21,10 @@ This is one offline estimator over a whole take and one side, with no heuristics
   reading is ever gated away outright, so the smoother cannot lock onto its own mistake the
   way a gated causal filter did (2026-11-25: p95 103 mm).
 - Output, per sample: the angle, its posterior standard deviation and which sensors carried
-  it (:class:`JawSensors`). QC refuses only where the deviation stays above a bound for longer
-  than a duration (:meth:`FusedJaw.longest_unsupported_s`): neither sensor saw the jaw.
+  it (:class:`JawSensors`). Where neither did, the angle is linear between the trusted
+  readings either side and held at the take's ends: the smoother never invents motion
+  there. QC refuses only where the deviation stays above a bound for longer than a duration
+  (:meth:`FusedJaw.longest_unsupported_s`): neither sensor saw the jaw.
 
 A dead encoder leaves the tags alone (the bias is then unobservable and irrelevant); a stretch
 without tags rides the encoder and the bias learned elsewhere; with tags referenced to the
@@ -86,7 +88,8 @@ class JawSensors(StrEnum):
     ENCODER_AND_TAGS = "encoder_and_tags"
     TAGS = "tags"
     ENCODER = "encoder"
-    #: Neither: the motion model bridged it, and its deviation says how far.
+    #: Neither: interpolated linearly between the trusted readings either side (held at a
+    #: take's ends), and its deviation says how far the jaw could have gone.
     NEITHER = "neither"
 
 
@@ -325,6 +328,9 @@ def fuse_jaw(
     angle[out_index] = state[outputs, 0]
     std[out_index] = np.sqrt(np.maximum(cov[outputs, 0, 0], 0.0))
     bias[out_index] = state[outputs, 2]
+    trusted = measured & (weights >= TRUSTED_WEIGHT)
+    if not np.any(trusted):
+        raise JawTagError("the fused jaw trusted none of its readings")
     trusted_enc = weights[kinds == _ENCODER] >= TRUSTED_WEIGHT
     trusted_tag = weights[kinds == _TAG] >= TRUSTED_WEIGHT
     enc_ok = np.zeros(len(enc_t), bool)
@@ -343,6 +349,14 @@ def fuse_jaw(
         else JawSensors.NEITHER
         for e, t in zip((bool(v) for v in by_encoder), (bool(v) for v in by_tags), strict=True)
     )
+    # Where neither sensor saw the jaw, the smoother's mean is a cubic through the edges' rates,
+    # and past a take's last reading it runs on at the last rate (2026-11-26: 4 degrees of drift
+    # over a 1.5 s tail, 15 degrees at a hidden start). Nothing measured that motion, so the
+    # angle there is linear between the trusted readings either side, held at the take's ends;
+    # the deviation keeps the smoother's, which says how far the jaw could have gone.
+    gap = np.fromiter((s is JawSensors.NEITHER for s in sensors), bool, len(sensors))
+    if np.any(gap):
+        angle[gap] = np.interp(out_t[gap], times[trusted], state[trusted, 0])
     return FusedJaw(
         t_ns=out_t,
         angle_rad=angle,
