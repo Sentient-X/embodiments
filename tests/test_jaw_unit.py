@@ -119,8 +119,8 @@ def fitted(reference: JawReference) -> Fitted:
     holds = segment_protocol(encoder, OPEN_MM)
     unit, judged = fit_unit(
         side="right",
-        encoder_id="ec:da:3b:00:11:22",
-        camera="flash-uid-0001",
+        encoder_id="usb-serial:EC:DA:3B:00:11:22",
+        camera="0123456789abcdef0123456789abcdef",
         calibrated_at_utc="2026-11-27T01:00:00Z",
         take="20261127_010000",
         reference=reference,
@@ -167,11 +167,16 @@ def test_the_real_dropouts_are_judged_against_the_check_block(fitted: Fitted) ->
     checks = fitted.judged.checks
     covered = [c for c in checks if c.what == "tags_covered"]
     unplugged = [c for c in checks if c.what == "encoder_unplugged"]
-    assert len(covered) >= 2 and len(unplugged) >= 1
+    # Only the block is judged, never the open jaw between grasps.
+    assert len(covered) == 2 and len(unplugged) == 1, checks
     # Covered, the encoder carries the light hold; unplugged, the tags see light and firm as
     # one stretch (the pads move them 4 mm) and read it short by up to that compression.
     assert abs(covered[0].fused_mm) < 1.0
     assert -4.5 < unplugged[0].fused_mm < 0.5
+    # Covered and squeezed, nothing sees the fingers: the encoder reads the trigger past
+    # them, and the fused jaw is short by the whole squeeze. No map of the encoder alone
+    # recovers it; it takes the tags or a sensor on the finger joint.
+    assert covered[1].fused_mm < -10.0
 
 
 def test_the_document_round_trips_and_refuses_a_stray_field(fitted: Fitted) -> None:

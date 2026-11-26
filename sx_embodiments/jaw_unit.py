@@ -595,6 +595,10 @@ def evaluate(
     )
     checks: list[CheckResult] = []
     unseen = ~raw_tags.seen
+    # A dropout span also holds the jaw open between its grasps: a still stretch nearer the
+    # open stop than the check block is that, not the block.
+    opens = [hold.width_mm for hold in holds if hold.grip is Grip.OPEN]
+    past_mm = (max(opens) + PROTOCOL_CHECK_WIDTH_MM) / 2.0 if opens else math.inf
     for what, missing in (
         ("tags_covered", unseen),
         ("encoder_unplugged", ~_encoder_alive(t, encoder)),
@@ -605,13 +609,15 @@ def evaluate(
         inside = (t >= span[0]) & (t <= span[1])
         for start, end in _still(t[inside], gaps[Estimate.FUSED][inside]):
             window = inside & (t >= start) & (t <= end)
+            read_mm = float(np.median(gaps[Estimate.FUSED][window]) * 1000.0)
+            if read_mm > past_mm:
+                continue
             checks.append(
                 CheckResult(
                     cast("Literal['tags_covered', 'encoder_unplugged']", what),
                     start,
                     end,
-                    float(np.median(gaps[Estimate.FUSED][window]) * 1000.0)
-                    - PROTOCOL_CHECK_WIDTH_MM,
+                    read_mm - PROTOCOL_CHECK_WIDTH_MM,
                 )
             )
     return Evaluation(results, tuple(checks), gaps, t)
