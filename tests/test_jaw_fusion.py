@@ -161,3 +161,44 @@ def test_the_camera_lag_is_measured_against_the_encoder(
     assert lag is not None and abs(lag - late) <= 5_000_000
     fused = fuse_jaw(camera[0], encoder=_encoder(offset=0.05), tags=stamped, lag_ns=lag)
     assert _p95(camera[0], fused.angle_rad) < ONE_DEGREE
+
+
+def test_where_neither_sensor_saw_the_jaw_it_is_linear_between_readings_and_held_at_the_ends(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    # The owner, 2026-11-26: a stretch neither sensor saw is a hold or a line, never a motion
+    # the smoother made up. Hidden while the jaw moves (1.2 to 2.2 s), and from 6.5 s to the end.
+    t = camera[0]
+    seconds = t / 1e9
+    tags = _tags(reference, camera, hidden=(1.2, 2.2))
+    tags = TagReads(
+        tags.t_ns,
+        np.where(seconds >= 6.5, np.nan, tags.angle_rad),
+        tags.std_rad,
+        tags.mirror_rad,
+    )
+    fused = fuse_jaw(t, encoder=None, tags=tags)
+    gap = np.array([s is JawSensors.NEITHER for s in fused.sensors])
+    middle = np.flatnonzero(gap & (seconds < 3.0))
+    tail = np.flatnonzero(gap & (seconds > 6.0))
+    assert len(middle) > 20 and len(tail) > 30
+    before, after = middle[0] - 1, middle[-1] + 1
+    assert fused.sensors[before] is JawSensors.TAGS and fused.sensors[after] is JawSensors.TAGS
+    # On the line through the readings either side: no rate carried in, no cubic overshoot.
+    line = np.interp(t[middle], t[[before, after]], fused.angle_rad[[before, after]])
+    assert float(np.max(np.abs(fused.angle_rad[middle] - line))) < 0.005
+    low, high = sorted(fused.angle_rad[[before, after]])
+    inside = fused.angle_rad[middle]
+    assert np.all((inside >= low - 1e-9) & (inside <= high + 1e-9))
+    # Past the last reading it holds, however long the tail: no drift on the last rate.
+    assert float(np.ptp(fused.angle_rad[tail])) < 1e-9
+    assert abs(float(fused.angle_rad[tail[0]] - fused.angle_rad[tail[0] - 1])) < 0.005
+    # The deviation still says nothing saw it, so QC and training can tell.
+    assert np.all(np.diff(fused.std_rad[tail]) > 0)
+    assert float(fused.std_rad[tail[-1]]) > math.radians(2.0)
+    assert fused.longest_unsupported_s(math.radians(2.0)) > 1.0
+    # The hidden start of a take holds the first reading the same way.
+    head = fuse_jaw(t, encoder=None, tags=_tags(reference, camera, hidden=(0.0, 1.0)))
+    first = [s is JawSensors.NEITHER for s in head.sensors].index(False)
+    assert first > 20
+    assert float(np.ptp(head.angle_rad[:first])) < 1e-9
