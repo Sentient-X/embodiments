@@ -75,6 +75,8 @@ MAX_CAMERA_LAG_NS = 200_000_000
 CAMERA_LAG_STEP_NS = 2_500_000
 #: Tag frames needed, each with an encoder read beside it, to estimate the camera's lag.
 MIN_LAG_FRAMES = 60
+#: The share of those frames, closest to the line through the encoder, that judges a lag.
+LAG_KEPT = 0.9
 #: QC: a take is refused where the fused deviation stays above :data:`BLIND_STD_RAD` for
 #: longer than :data:`MAX_BLIND_S`, i.e. neither sensor saw the jaw for that long (the
 #: encoder's own stall bound). sx-seal's ``process::jaw`` holds the same two numbers.
@@ -198,8 +200,14 @@ def tag_reads(
 def camera_lag_ns(tags: TagReads, encoder: EncoderReads) -> int | None:
     """How far the camera's stamps trail the encoder's: the lag that best lines them up.
 
-    Judged up to a constant (the encoder's bias) by the median absolute deviation of their
-    difference, over frames with an encoder read beside them. None with too few such frames.
+    Judged by how far the tags stray from the best line through the encoder (a scale and an
+    offset): the root mean square of the residuals, less the largest tenth (a wrong frame or a
+    squeeze), over frames with an encoder read beside them. None with too few such frames. The
+    line, not a constant: a unit whose tags turn 0.77 of its encoder's angle
+    (the encoder reads the trigger, and a squeeze moves it past the fingers) was lined up by
+    the difference alone at +45 ms in one take and -17.5 ms in the next on one rig; through a
+    line, -2.5 and -5 ms, which the correlation of their changes confirms (2026-11-26, the
+    two-hand fusion recordings 214716 and 231306).
     """
     seen = tags.seen
     t, angle = tags.t_ns[seen], tags.angle_rad[seen]
@@ -215,8 +223,11 @@ def camera_lag_ns(tags: TagReads, encoder: EncoderReads) -> int | None:
         )
         if np.count_nonzero(near) < MIN_LAG_FRAMES:
             return math.inf
-        diff = angle[near] - np.interp(at[near], encoder.t_ns, encoder.angle_rad)
-        return float(np.median(np.abs(diff - np.median(diff))))
+        read = np.interp(at[near], encoder.t_ns, encoder.angle_rad)
+        line = np.vstack([read, np.ones(len(read))]).T
+        fit = np.linalg.lstsq(line, angle[near], rcond=None)[0]
+        residual = np.sort(np.abs(angle[near] - line @ fit))[: int(LAG_KEPT * len(read))]
+        return float(np.sqrt(np.mean(residual**2)))
 
     lags = range(-MAX_CAMERA_LAG_NS, MAX_CAMERA_LAG_NS + 1, CAMERA_LAG_STEP_NS)
     best = min(lags, key=spread)
