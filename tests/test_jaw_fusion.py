@@ -202,3 +202,17 @@ def test_where_neither_sensor_saw_the_jaw_it_is_linear_between_readings_and_held
     first = [s is JawSensors.NEITHER for s in head.sensors].index(False)
     assert first > 20
     assert float(np.ptp(head.angle_rad[:first])) < 1e-9
+
+
+def test_the_camera_lag_holds_when_the_encoder_reads_on_another_scale(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    # A unit whose tags turn 0.77 of its encoder's angle (the two-hand fusion recordings,
+    # 2026-11-26): the lag is still the one that lines their motion up.
+    late = 30_000_000
+    tags = _tags(reference, camera)
+    stamped = TagReads(tags.t_ns + late, tags.angle_rad, tags.std_rad, tags.mirror_rad)
+    clean = _encoder()
+    scaled = EncoderReads(clean.t_ns, clean.angle_rad / 0.77 + 0.1)
+    lag = camera_lag_ns(stamped, scaled)
+    assert lag is not None and abs(lag - late) <= 5_000_000
