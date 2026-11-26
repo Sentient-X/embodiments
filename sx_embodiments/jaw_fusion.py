@@ -225,8 +225,13 @@ def camera_lag_ns(tags: TagReads, encoder: EncoderReads) -> int | None:
             return math.inf
         read = np.interp(at[near], encoder.t_ns, encoder.angle_rad)
         line = np.vstack([read, np.ones(len(read))]).T
-        fit = np.linalg.lstsq(line, angle[near], rcond=None)[0]
-        residual = np.sort(np.abs(angle[near] - line @ fit))[: int(LAG_KEPT * len(read))]
+        seen_angle = angle[near]
+        fit = np.linalg.lstsq(line, seen_angle, rcond=None)[0]
+        # The line again through the frames it fits best: a blipping encoder's wild reads pull
+        # the first fit, and a pulled line favours whichever lag lands frames on the blips.
+        kept = np.argsort(np.abs(seen_angle - line @ fit))[: int(LAG_KEPT * len(read))]
+        fit = np.linalg.lstsq(line[kept], seen_angle[kept], rcond=None)[0]
+        residual = np.sort(np.abs(seen_angle - line @ fit))[: len(kept)]
         return float(np.sqrt(np.mean(residual**2)))
 
     lags = range(-MAX_CAMERA_LAG_NS, MAX_CAMERA_LAG_NS + 1, CAMERA_LAG_STEP_NS)
