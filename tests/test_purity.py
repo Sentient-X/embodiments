@@ -37,6 +37,7 @@ _EXTRAS = {
     # The YUBI jaw from its wrist tags and its encoder (the `calibrate` extra).
     "jaw_tags.py": frozenset({"numpy", "cv2"}),
     "jaw_fusion.py": frozenset({"numpy"}),
+    "jaw_unit.py": frozenset({"numpy"}),
     "frames.py": frozenset({"numpy", "sx_geometry"}),
 }
 
