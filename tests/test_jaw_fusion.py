@@ -216,3 +216,20 @@ def test_the_camera_lag_holds_when_the_encoder_reads_on_another_scale(
     scaled = EncoderReads(clean.t_ns, clean.angle_rad / 0.77 + 0.1)
     lag = camera_lag_ns(stamped, scaled)
     assert lag is not None and abs(lag - late) <= 5_000_000
+
+
+def test_the_camera_lag_holds_through_an_encoder_that_blips(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    # A tenth of the reads are 0.3 rad blips (five reads either way, twice a second): the line
+    # is fitted again through the frames it fits best, so the blips cannot pull it to a lag.
+    late = 30_000_000
+    tags = _tags(reference, camera)
+    stamped = TagReads(tags.t_ns + late, tags.angle_rad, tags.std_rad, tags.mirror_rad)
+    clean = _encoder()
+    angle = clean.angle_rad.copy()
+    step = max(1, round(0.5e9 / float(np.median(np.diff(clean.t_ns)))))
+    for start in range(step // 2, len(angle) - 5, step):
+        angle[start : start + 5] += 0.3 * np.array([1, -1, 1, -1, 1])
+    lag = camera_lag_ns(stamped, EncoderReads(clean.t_ns, angle))
+    assert lag is not None and abs(lag - late) <= 5_000_000, lag
