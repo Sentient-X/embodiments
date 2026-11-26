@@ -73,9 +73,11 @@ class YubiVariant(StrEnum):
 def managed_yubi_recording_variant(recorded: RecordedEmbodiment) -> YubiVariant | None:
     """Resolve the legacy managed collection cohort established in sx#1354.
 
-    The published `yubi` description carries the four-bar geometry and an empty
-    variant even though that cohort was recorded on parallel hardware. An
-    unregistered document or an explicitly named variant needs its own evidence.
+    The published `yubi` descriptions up to `description7` carry the four-bar geometry
+    and an empty variant even though that cohort was recorded on parallel hardware;
+    `description8` draws the parallel jaws on the same frames, still with an empty
+    variant. An unregistered document or an explicitly named variant needs its own
+    evidence.
     This projection never changes the recording's geometry or content identity.
     """
     from . import development_embodiments
