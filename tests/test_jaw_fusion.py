@@ -15,12 +15,15 @@ import pytest
 from numpy.typing import NDArray
 
 from sx_embodiments.jaw_fusion import (
+    EncoderLaw,
     EncoderReads,
     JawSensors,
     TagReads,
     camera_lag_ns,
     fuse_jaw,
+    solve_jaw,
     tag_reads,
+    unfold_encoder,
 )
 from sx_embodiments.jaw_tags import JawReference, TagPose, fit_reference, sight_tags
 from test_jaw_tags import LAYOUT, LENS, render_jaw, rendered_sweep
@@ -233,3 +236,54 @@ def test_the_camera_lag_holds_through_an_encoder_that_blips(
         angle[start : start + 5] += 0.3 * np.array([1, -1, 1, -1, 1])
     lag = camera_lag_ns(stamped, EncoderReads(clean.t_ns, angle))
     assert lag is not None and abs(lag - late) <= 5_000_000, lag
+
+
+def _relative(zero: float) -> EncoderReads:
+    """An encoder zeroed at ``zero`` when it powered up, read through the parser's fold."""
+    clean = _encoder()
+    signed = clean.angle_rad - zero
+    return EncoderReads(clean.t_ns, np.abs((signed + math.pi) % (2 * math.pi) - math.pi))
+
+
+def test_an_encoder_zeroed_mid_travel_is_unfolded_on_the_tags(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    # Zeroed at 0.3 rad, the jaw's 0.05-0.59 rad reads as |angle - 0.3|: every grasp folds.
+    tags = _tags(reference, camera)
+    unfolded = unfold_encoder(tags, _relative(0.3))
+    assert unfolded.law is EncoderLaw.UNFOLDED and unfolded.reflections >= 4, unfolded
+    assert unfolded.reads is not None
+    signed = unfolded.reads.angle_rad - (_encoder().angle_rad - 0.3)
+    assert float(np.percentile(np.abs(signed - np.median(signed)), 99)) < 0.01
+    t, frames = camera
+    fused, _ = solve_jaw(reference, t.tolist(), frames, _relative(0.3))
+    assert _p95(fused.t_ns, fused.angle_rad) < ONE_DEGREE
+
+
+def test_an_encoder_zeroed_far_off_is_carried_from_the_tags_level(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    # Zeroed 1.0 rad below the closed stop: no fold, an offset four times the old prior.
+    t, frames = camera
+    shifted = _encoder(offset=1.0)
+    assert unfold_encoder(_tags(reference, camera), shifted).law is EncoderLaw.AS_READ
+    fused, _ = solve_jaw(reference, t.tolist(), frames, shifted)
+    assert _p95(fused.t_ns, fused.angle_rad) < ONE_DEGREE
+    assert abs(float(np.median(fused.encoder_bias_rad)) - 1.0) < 0.02
+
+
+def test_an_absolute_encoder_is_read_as_is(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    clean = _encoder()
+    unfolded = unfold_encoder(_tags(reference, camera), clean)
+    assert unfolded.law is EncoderLaw.AS_READ and unfolded.reads is clean
+
+
+def test_an_encoder_out_of_line_with_the_tags_either_way_is_refused(
+    reference: JawReference, camera: tuple[NDArray[np.int64], list[dict[int, TagPose]]]
+) -> None:
+    clean = _encoder()
+    noise = np.random.default_rng(3).uniform(0.0, 0.9, len(clean.t_ns))
+    unfolded = unfold_encoder(_tags(reference, camera), EncoderReads(clean.t_ns, noise))
+    assert unfolded.law is EncoderLaw.REFUSED and unfolded.reads is None

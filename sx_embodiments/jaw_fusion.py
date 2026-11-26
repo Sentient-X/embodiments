@@ -37,6 +37,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -80,6 +81,22 @@ LAG_KEPT = 0.9
 #: QC: a take is refused where the fused deviation stays above :data:`BLIND_STD_RAD` for
 #: longer than :data:`MAX_BLIND_S`, i.e. neither sensor saw the jaw for that long (the
 #: encoder's own stall bound). sx-seal's ``process::jaw`` holds the same two numbers.
+#: A read this near 0 or pi may be one of the encoder parser's folds (:func:`unfold_encoder`).
+FOLD_BAND_RAD = 0.05
+#: Where no tag fixed a fold, the jaw reflected at it when it met and left it this fast.
+REFLECT_RATE_RAD_S = 0.5
+#: Reads either side of a fold its rate is judged over (100 Hz: 50 ms).
+REFLECT_WINDOW = 5
+#: An encoder in line with the tags: their robust RMS from the line, and its slope's band
+#: (the recordings' units turn 0.77-0.81; the tags carry no per-unit scale until calibrated).
+ALIGNED_RMS_RAD = 0.04
+ALIGNED_SCALE = (0.5, 2.0)
+#: Unfolded reads are kept when they cut the line's full RMS to this share of the reads' own.
+UNFOLD_GAIN = 0.8
+#: The fingers' travel in the tags' angle, with margin: closed is 0, the open stop under 0.8.
+TAG_TRAVEL_RAD = (-0.15, 1.1)
+#: A held stretch takes the sign whose level the tags saw it at only by this clear a margin.
+LEVEL_MARGIN_RAD = 0.02
 BLIND_STD_RAD = math.radians(2.0)
 MAX_BLIND_S = 0.5
 
@@ -110,7 +127,10 @@ class FusionModel:
     #: its error moves with the jaw. 0.01 lets the tags set the level within about a second
     #: (the closed hold reads 0.2 mm, not the encoder's 5 mm) and adds 0.4 mm of tag noise.
     bias_walk_rad: float = 0.01
-    #: The prior on the bias before any tag sees the jaw: a zero off by up to about 15 degrees.
+    #: The prior on the bias about its starting level: the encoder's reads less the tags' over
+    #: the frames both saw (:func:`fuse_jaw`), or 0 where they never overlap. Around a level
+    #: the tags set, a zero off by 15 degrees more still converges; an encoder zeroed wherever
+    #: it powered up (the historical relative units) starts at its own offset, not at 0.
     bias_prior_rad: float = 0.25
     #: One frame's reading from both tags, and from one; scaled up by poor reprojection.
     #: Measured on the grasp take against the fused track: 0.0087 and 0.0176 rad (robust
@@ -224,19 +244,258 @@ def camera_lag_ns(tags: TagReads, encoder: EncoderReads) -> int | None:
         if np.count_nonzero(near) < MIN_LAG_FRAMES:
             return math.inf
         read = np.interp(at[near], encoder.t_ns, encoder.angle_rad)
-        line = np.vstack([read, np.ones(len(read))]).T
-        seen_angle = angle[near]
-        fit = np.linalg.lstsq(line, seen_angle, rcond=None)[0]
-        # The line again through the frames it fits best: a blipping encoder's wild reads pull
-        # the first fit, and a pulled line favours whichever lag lands frames on the blips.
-        kept = np.argsort(np.abs(seen_angle - line @ fit))[: int(LAG_KEPT * len(read))]
-        fit = np.linalg.lstsq(line[kept], seen_angle[kept], rcond=None)[0]
-        residual = np.sort(np.abs(seen_angle - line @ fit))[: len(kept)]
-        return float(np.sqrt(np.mean(residual**2)))
+        return _line(read, angle[near])[0]
 
     lags = range(-MAX_CAMERA_LAG_NS, MAX_CAMERA_LAG_NS + 1, CAMERA_LAG_STEP_NS)
     best = min(lags, key=spread)
     return None if math.isinf(spread(best)) else best
+
+
+def _line(read: Vector, angle: Vector) -> tuple[float, float, float]:
+    """The best line through (read, angle): the residuals' RMS over its best nine tenths, and
+    its slope and offset. Fitted twice: a blipping encoder's wild reads pull the first fit, and
+    a pulled line favours whichever lag lands frames on the blips."""
+    line = np.vstack([read, np.ones(len(read))]).T
+    fit = np.linalg.lstsq(line, angle, rcond=None)[0]
+    kept = np.argsort(np.abs(angle - line @ fit))[: max(2, int(LAG_KEPT * len(read)))]
+    fit = np.linalg.lstsq(line[kept], angle[kept], rcond=None)[0]
+    residual = np.sort(np.abs(angle - line @ fit))[: len(kept)]
+    return float(np.sqrt(np.mean(residual**2))), float(fit[0]), float(fit[1])
+
+
+class EncoderLaw(StrEnum):
+    """How a take's encoder reads were taken (:func:`unfold_encoder`)."""
+
+    #: In line with the tags as read (an absolute zero), or nothing to judge them against.
+    AS_READ = "as_read"
+    #: Reflected back through the parser's folds (a zero wherever the unit powered up).
+    UNFOLDED = "unfolded"
+    #: Not in line with the tags even unfolded: the fusion runs without them.
+    REFUSED = "refused"
+
+
+@dataclass(frozen=True, slots=True)
+class UnfoldedEncoder:
+    """A take's encoder reads as the fusion takes them, and how they were made so."""
+
+    reads: EncoderReads | None
+    law: EncoderLaw
+    #: Folds the jaw passed through, and of those how many no tag saw (judged by the rate).
+    reflections: int
+    inferred: int
+    #: The tags' robust RMS from the best line through the reads (NaN with too few frames).
+    rms_rad: float
+
+
+def unfold_encoder(tags: TagReads, encoder: EncoderReads) -> UnfoldedEncoder:
+    """The encoder's reads with the parser's folds undone, judged against the tags.
+
+    Both YUBI parsers keep ``|wrap(raw)|`` (``yubi.YubiEncoder.parse``, ``sx-yubi``
+    ``encoder_line``): the firmware's signed difference from its zero, folded into [0, pi].
+    With the zero at the closed stop (saved in NVS since gripper-firmwares 7861284) nothing
+    folds. A unit zeroed wherever it powered up reads the jaw reflected about that zero, and
+    about pi past a wrap.
+
+    The reads are cut into stretches at each fold (reads within :data:`FOLD_BAND_RAD` of 0 or
+    pi). A stretch's sign comes, in order of trust, from the tags' slope against it (where the
+    jaw moved), from the level the tags saw it at on the line the sloped stretches fix (by a
+    clear margin), and from the travel: a sign that puts the fingers past their stops is not
+    theirs. A run of stretches no tag fixed between two that are fixed reflected an even or
+    odd number of times by the signs either side; within it, the rate across each fold says
+    which (a jaw passes a fold it reflects at, and stops at one it only reaches), and where the
+    rates disagree with that parity the least certain fold gives way. Unfolded reads are kept
+    only where they line up with the tags better than the reads as read; reads that line up
+    neither way are refused, and the fusion runs on the tags alone.
+    """
+    as_read = _aligned(tags, encoder)
+    if not math.isfinite(as_read[0]):
+        return UnfoldedEncoder(encoder, EncoderLaw.AS_READ, 0, 0, as_read[0])
+    t, e = encoder.t_ns, encoder.angle_rad
+    away = (e > FOLD_BAND_RAD) & (e < math.pi - FOLD_BAND_RAD)
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], away.astype(np.int8), [0]])))
+    runs: list[tuple[int, int]] = list(zip(edges[::2].tolist(), edges[1::2].tolist(), strict=True))
+    if not runs:
+        return _as_read_or_refused(encoder, as_read)
+    seen = tags.seen
+    tag_t, tag_z = tags.t_ns[seen], tags.angle_rad[seen]
+    tag_at = np.full(len(t), np.nan)
+    if len(tag_t) >= 2:
+        tag_at = np.interp(t, tag_t, tag_z)
+        tag_at[~_near(t, tag_t, TAG_REACH_NS)] = np.nan
+    folds = [
+        0.0 if float(np.median(e[runs[k - 1][1] - 1 : runs[k][0] + 1])) < math.pi / 2 else math.pi
+        for k in range(1, len(runs))
+    ]
+    pi_folds = any(fold == math.pi for fold in folds)
+
+    def tagged(k: int) -> NDArray[np.bool_]:
+        a, b = runs[k]
+        return np.asarray(np.isfinite(tag_at[a:b]), np.bool_)
+
+    # 1. Where the jaw moved under the tags, its slope against the reads is its sign.
+    signs: list[int | None] = []
+    for k, (a, b) in enumerate(runs):
+        both = tagged(k)
+        moved = np.count_nonzero(both) >= 10 and float(np.ptp(e[a:b][both])) >= 4 * FOLD_BAND_RAD
+        signs.append(
+            (1 if _line(e[a:b][both], tag_at[a:b][both])[1] > 0 else -1) if moved else None
+        )
+    first = next((sign for sign in signs if sign is not None), 1)
+    # 2. The sloped stretches fix the line; a held stretch the tags saw sits on one level of it,
+    # and (without wraps, where a stretch's level is its sign times its reads) an unseen one can
+    # hold only the sign that keeps the fingers inside their travel.
+    sloped = np.zeros(len(e), bool)
+    for k, (a, b) in enumerate(runs):
+        sloped[a:b] = signs[k] is not None
+    sloped &= np.isfinite(tag_at)
+    if np.count_nonzero(sloped) >= MIN_LAG_FRAMES and not pi_folds:
+        raw_sloped = np.zeros(len(e))
+        for k, (a, b) in enumerate(runs):
+            raw_sloped[a:b] = (signs[k] or 1) * e[a:b]
+        _, scale, offset = _line(raw_sloped[sloped], tag_at[sloped])
+        low, high = TAG_TRAVEL_RAD
+        for k, (a, b) in enumerate(runs):
+            if signs[k] is not None:
+                continue
+            both = tagged(k)
+            if np.count_nonzero(both) >= 10:
+                miss = [
+                    float(
+                        np.median(np.abs(scale * sign * e[a:b][both] + offset - tag_at[a:b][both]))
+                    )
+                    for sign in (1, -1)
+                ]
+                if abs(miss[0] - miss[1]) >= LEVEL_MARGIN_RAD:
+                    signs[k] = 1 if miss[0] < miss[1] else -1
+                continue
+            inside = [
+                bool(
+                    np.all(
+                        (scale * sign * e[a:b] + offset > low)
+                        & (scale * sign * e[a:b] + offset < high)
+                    )
+                )
+                for sign in (1, -1)
+            ]
+            if inside[0] != inside[1]:
+                signs[k] = 1 if inside[0] else -1
+    # 3. Each fold reflects or not: fixed signs either side say so; between them the rates do,
+    # held to the parity the fixed signs either side of an unfixed run require.
+    reflect = [False] * len(folds)
+    inferred_at: set[int] = set()
+    known = [k for k, sign in enumerate(signs) if sign is not None]
+    for i in range(1, len(runs)):
+        if signs[i - 1] is not None and signs[i] is not None:
+            reflect[i - 1] = signs[i] != signs[i - 1]
+    edges_known = [-1, *known, len(runs)]
+    for left, right in pairwise(edges_known):
+        between = [
+            f
+            for f in range(max(left, 0), min(right, len(runs) - 1))
+            if not (signs[f] is not None and signs[f + 1] is not None)
+        ]
+        if not between:
+            continue
+        rates = [_fold_rate(t, e, runs[f], runs[f + 1]) for f in between]
+        for f, rate in zip(between, rates, strict=True):
+            reflect[f] = rate >= REFLECT_RATE_RAD_S
+            inferred_at.add(f)
+        if left >= 0 and right < len(runs):
+            odd = signs[left] != signs[right]
+            if sum(reflect[f] for f in between) % 2 != int(odd):
+                weakest = min(
+                    between,
+                    key=lambda f: abs(
+                        math.log(max(rates[between.index(f)], 1e-6) / REFLECT_RATE_RAD_S)
+                    ),
+                )
+                reflect[weakest] = not reflect[weakest]
+    sigma, turns = first if signs[0] is None else signs[0], 0
+    raw = np.empty(len(e))
+    # A stretch ends at the fold itself: the read nearest 0 (or pi) between it and the next.
+    bounds = [0]
+    for k in range(1, len(runs)):
+        lo, hi = runs[k - 1][1], runs[k][0]
+        gap = e[lo:hi]
+        if len(gap) == 0:
+            bounds.append(hi)
+            continue
+        at = np.argmin(gap) if folds[k - 1] == 0.0 else np.argmax(gap)
+        bounds.append(lo + int(at))
+    bounds.append(len(e))
+    for k in range(len(runs)):
+        if k and reflect[k - 1]:
+            turns += sigma if folds[k - 1] == math.pi else 0
+            sigma = -sigma
+        # A read near a fold takes the nearer stretch's sign; at the fold both agree.
+        raw[bounds[k] : bounds[k + 1]] = (
+            sigma * e[bounds[k] : bounds[k + 1]] + 2.0 * math.pi * turns
+        )
+    reflections = sum(reflect)
+    inferred = sum(1 for f in inferred_at if reflect[f])
+    unfolded = EncoderReads(t, raw)
+    judged = _aligned(tags, unfolded)
+    if judged[1] < 0:
+        unfolded = EncoderReads(t, -raw)
+        judged = _aligned(tags, unfolded)
+    # Unfolded only where it explains the reads better: the line's full RMS, untrimmed, since a
+    # few folded reads hide in the tenth the trimmed fit drops.
+    better = _full_rms(tags, unfolded) < UNFOLD_GAIN * _full_rms(tags, encoder)
+    if _in_line(judged) and (better or not _in_line(as_read)):
+        return UnfoldedEncoder(unfolded, EncoderLaw.UNFOLDED, reflections, inferred, judged[0])
+    return _as_read_or_refused(encoder, as_read)
+
+
+def _fold_rate(t: Stamps, e: Vector, before: tuple[int, int], after: tuple[int, int]) -> float:
+    """How fast the jaw met and left a fold: the slower of the two, 0 if it lingered there."""
+
+    def rate(lo: int, hi: int) -> float:
+        if hi - lo < 2:
+            return 0.0
+        return abs(float(e[hi - 1] - e[lo])) / max(1e-9, float(t[hi - 1] - t[lo]) / 1e9)
+
+    entering = rate(max(before[0], before[1] - REFLECT_WINDOW), before[1])
+    leaving = rate(after[0], min(after[1], after[0] + REFLECT_WINDOW))
+    crossing_s = float(t[after[0]] - t[before[1] - 1]) / 1e9
+    if crossing_s > 2.0 * FOLD_BAND_RAD / REFLECT_RATE_RAD_S + 0.05:
+        return 0.0
+    return min(entering, leaving)
+
+
+def _as_read_or_refused(encoder: EncoderReads, as_read: tuple[float, float]) -> UnfoldedEncoder:
+    if _in_line(as_read):
+        return UnfoldedEncoder(encoder, EncoderLaw.AS_READ, 0, 0, as_read[0])
+    return UnfoldedEncoder(None, EncoderLaw.REFUSED, 0, 0, as_read[0])
+
+
+def _full_rms(tags: TagReads, encoder: EncoderReads) -> float:
+    """The tags' RMS from the best line through the reads, over every frame both saw."""
+    seen = tags.seen
+    t, angle = tags.t_ns[seen], tags.angle_rad[seen]
+    near = _near(t, encoder.t_ns, ENCODER_REACH_NS) & (t >= encoder.t_ns[0])
+    near &= t <= encoder.t_ns[-1]
+    read = np.interp(t[near], encoder.t_ns, encoder.angle_rad)
+    _, slope, offset = _line(read, angle[near])
+    return float(np.sqrt(np.mean((angle[near] - slope * read - offset) ** 2)))
+
+
+def _aligned(tags: TagReads, encoder: EncoderReads) -> tuple[float, float]:
+    """The tags' robust RMS from the best line through the encoder's reads, and its slope."""
+    seen = tags.seen
+    t, angle = tags.t_ns[seen], tags.angle_rad[seen]
+    if len(encoder.t_ns) < 2:
+        return math.nan, math.nan
+    near = _near(t, encoder.t_ns, ENCODER_REACH_NS) & (t >= encoder.t_ns[0])
+    near &= t <= encoder.t_ns[-1]
+    if np.count_nonzero(near) < MIN_LAG_FRAMES:
+        return math.nan, math.nan
+    rms, slope, _ = _line(np.interp(t[near], encoder.t_ns, encoder.angle_rad), angle[near])
+    return rms, slope
+
+
+def _in_line(judged: tuple[float, float]) -> bool:
+    rms, slope = judged
+    return rms <= ALIGNED_RMS_RAD and ALIGNED_SCALE[0] <= slope <= ALIGNED_SCALE[1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,15 +585,18 @@ def fuse_jaw(
     )
     measured = kinds != _OUTPUT
     weights = np.ones(len(times))
-    first = float(values[measured][0])
+    bias0 = _starting_bias(enc_t, enc_z, tag_t, tag_z)
+    first = float(values[measured][0]) - (bias0 if kinds[measured][0] == _ENCODER else 0.0)
     state = np.zeros((len(times), 3))
     cov = np.zeros((len(times), 3, 3))
     for scale in REWEIGHT_SCALES:
-        state, cov = _smooth(times, kinds, values, scale * stds / np.sqrt(weights), first, model)
+        state, cov = _smooth(
+            times, kinds, values, scale * stds / np.sqrt(weights), first, bias0, model
+        )
         predicted = state[:, 0] + np.where(kinds == _ENCODER, state[:, 2], 0.0)
         normalized = (values - predicted) / (scale * stds)
         weights = np.where(measured, (STUDENT_NU + 1.0) / (STUDENT_NU + normalized**2), 1.0)
-    state, cov = _smooth(times, kinds, values, stds / np.sqrt(weights), first, model)
+    state, cov = _smooth(times, kinds, values, stds / np.sqrt(weights), first, bias0, model)
 
     outputs = kinds == _OUTPUT
     out_index = origin[outputs]
@@ -385,6 +647,16 @@ def fuse_jaw(
     )
 
 
+def _starting_bias(enc_t: Stamps, enc_z: Vector, tag_t: Stamps, tag_z: Vector) -> float:
+    """The encoder's offset from the tags over the frames both saw (median), or 0 with too few."""
+    if len(enc_t) < 2 or len(tag_t) == 0:
+        return 0.0
+    near = _near(tag_t, enc_t, ENCODER_REACH_NS) & (tag_t >= enc_t[0]) & (tag_t <= enc_t[-1])
+    if np.count_nonzero(near) < MIN_LAG_FRAMES:
+        return 0.0
+    return float(np.median(np.interp(tag_t[near], enc_t, enc_z) - tag_z[near]))
+
+
 def _near(at: Stamps, stamps: Stamps, reach: int) -> NDArray[np.bool_]:
     if len(stamps) == 0:
         return np.zeros(len(at), bool)
@@ -400,6 +672,7 @@ def _smooth(
     values: Vector,
     stds: Vector,
     first_angle: float,
+    first_bias: float,
     model: FusionModel,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """A Kalman filter forward and a Rauch-Tung-Striebel pass back, one scalar read per epoch."""
@@ -410,7 +683,7 @@ def _smooth(
     p_filt = np.zeros((count, 3, 3))
     q_acc = model.acceleration_rad_s2**2
     q_bias = model.bias_walk_rad**2
-    x = np.array([first_angle, 0.0, 0.0])
+    x = np.array([first_angle, 0.0, first_bias])
     p = np.diag([0.5**2, 2.0**2, model.bias_prior_rad**2])
     seconds = (times - times[0]).astype(np.float64) / 1e9
     steps = np.diff(seconds, prepend=seconds[0])
@@ -464,6 +737,8 @@ def solve_jaw(
     earlier, so it sits on the delivered encoder topic as an encoder read would.
     """
     tags = tag_reads(reference, t_ns, frames, model)
+    if encoder is not None and len(encoder.t_ns):
+        encoder = unfold_encoder(tags, encoder).reads
     lag = camera_lag_ns(tags, encoder) if encoder is not None and len(encoder.t_ns) else None
     fused = fuse_jaw(tags.t_ns, encoder=encoder, tags=tags, lag_ns=lag or 0, model=model)
     return fused, tags
