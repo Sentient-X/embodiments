@@ -2,8 +2,8 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>yubi_description</name>
-  <version>0.2.0</version>
-  <description>Combined left and right YUBI gripper CAD descriptions.</description>
+  <version>0.3.0</version>
+  <description>Combined left and right YUBI gripper descriptions: parallel-jaw CAD meshes on the published frames.</description>
   <maintainer email="maintainer@sentientx.com">Sentient Industries</maintainer>
   <license>proprietary</license>
 

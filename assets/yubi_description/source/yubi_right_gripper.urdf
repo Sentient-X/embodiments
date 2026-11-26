@@ -24,7 +24,7 @@
   </joint>
   <link name="base_link">
     <visual>
-      <origin xyz="-0.00489252905942 -2.58e-10 -0.0549950786074" rpy="0 -0.174533 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_housing.stl" />
       </geometry>
@@ -33,7 +33,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.00489252905942 -2.58e-10 -0.0549950786074" rpy="0 -0.174533 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_housing.stl" />
       </geometry>
@@ -49,7 +49,7 @@
   </joint>
   <link name="controller_right">
     <visual>
-      <origin xyz="-0.0549569723485 0.0524019218098 -0.0970644383284" rpy="0.568188752244 0.378595907821 0.847209394003" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_controller_right.stl" />
       </geometry>
@@ -58,7 +58,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.0549569723485 0.0524019218098 -0.0970644383284" rpy="0.568188752244 0.378595907821 0.847209394003" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_controller_right.stl" />
       </geometry>
@@ -71,7 +71,7 @@
   </joint>
   <link name="link_right_finger">
     <visual>
-      <origin xyz="0.0113326046442 0.0148306803404 -0.0669952330119" rpy="5.88492431824e-09 -0.17453338727 -0.0150921626234" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_finger.stl" />
       </geometry>
@@ -80,7 +80,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.0113326046442 0.0148306803404 -0.0669952330119" rpy="5.88492431824e-09 -0.17453338727 -0.0150921626234" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_finger.stl" />
       </geometry>
@@ -97,7 +97,7 @@
   <link name="right_nail">
     <origin xyz="0 0 0" rpy="0 -0 0" />
     <visual>
-      <origin xyz="-0.0677906209271 0.0479170928351 0.00929985429325" rpy="-4.79711208805e-07 2.86391720998e-08 1.6466237384" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_nail.stl" />
       </geometry>
@@ -106,7 +106,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.0677906209271 0.0479170928351 0.00929985429325" rpy="-4.79711208805e-07 2.86391720998e-08 1.6466237384" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_right_nail.stl" />
       </geometry>
@@ -130,7 +130,7 @@
   </joint>
   <link name="link_left_finger">
     <visual>
-      <origin xyz="0.0113084521027 -0.0148491221103 -0.066995230193" rpy="1.62436999413e-09 -0.174533494391 0.0134716603278" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_finger.stl" />
       </geometry>
@@ -139,7 +139,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.0113084521027 -0.0148491221103 -0.066995230193" rpy="1.62436999413e-09 -0.174533494391 0.0134716603278" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_finger.stl" />
       </geometry>
@@ -156,7 +156,7 @@
   <link name="left_nail">
     <origin xyz="0 0 0" rpy="0 -0 0" />
     <visual>
-      <origin xyz="-0.0681932160561 -0.0473428470456 0.0118996380551" rpy="-3.14158967815 3.13551511213e-08 -1.65506953939" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_nail.stl" />
       </geometry>
@@ -165,7 +165,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.0681932160561 -0.0473428470456 0.0118996380551" rpy="-3.14158967815 3.13551511213e-08 -1.65506953939" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_left_nail.stl" />
       </geometry>
@@ -196,7 +196,7 @@
   </joint>
   <link name="link_connector_right">
     <visual>
-      <origin xyz="0.000742312681243 0.0549949759012 -0.00554514565935" rpy="-2.71742832906e-06 2.64835242635e-06 1.55713202059" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_right.stl" />
       </geometry>
@@ -205,7 +205,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.000742312681243 0.0549949759012 -0.00554514565935" rpy="-2.71742832906e-06 2.64835242635e-06 1.55713202059" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_right.stl" />
       </geometry>
@@ -221,7 +221,7 @@
   </joint>
   <link name="link_connector_left">
     <visual>
-      <origin xyz="0.0534155864371 -0.0616933264031 -0.0055450213667" rpy="-2.12421134947e-06 -2.59765254499e-06 -1.8206246026" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_left.stl" />
       </geometry>
@@ -230,7 +230,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.0534155864371 -0.0616933264031 -0.0055450213667" rpy="-2.12421134947e-06 -2.59765254499e-06 -1.8206246026" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://right_gripper_corrected_fixed/meshes/link_connector_left.stl" />
       </geometry>
@@ -243,5 +243,17 @@
     <axis xyz="0 0 1" />
     <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793" />
     <mimic joint="left_finger" multiplier="1" offset="0" />
+  </joint>
+  <link name="left_aruco" />
+  <joint name="left_aruco_frame" type="fixed">
+    <origin xyz="0.0531431042 0.00603300474 -0.00654796138" rpy="-4.12124426e-06 6.83553469e-06 -0.0959960562" />
+    <parent link="link_left_finger" />
+    <child link="left_aruco" />
+  </joint>
+  <link name="right_aruco" />
+  <joint name="right_aruco_frame" type="fixed">
+    <origin xyz="0.0531326825 -0.00612316071 -0.00654715604" rpy="-4.1156853e-06 -6.84273108e-06 0.0942434247" />
+    <parent link="link_right_finger" />
+    <child link="right_aruco" />
   </joint>
 </robot>

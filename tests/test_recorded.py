@@ -35,6 +35,11 @@ YUBI_SCHEMA_14 = {
 YUBI_SCHEMA_15 = {
     EmbodimentId("ccb5ffd83b5cd92236888361f380f8c138e3b31f91ee1cc1f79e914953a15490"),
 }
+# The four-bar ``description7`` package as schema 16 published it, until ``description8`` drew
+# the parallel jaws on the same frames. The pods' recordings up to then carry it.
+YUBI_DESCRIPTION_7 = {
+    EmbodimentId("26d1bc6e6da12fb995a675b3e032f76dcc66e65d5d6d9cca1a72e3a6adc226c0"),
+}
 
 
 def _historical_document(identity: EmbodimentId) -> dict[str, object]:
@@ -45,7 +50,7 @@ def _historical_document(identity: EmbodimentId) -> dict[str, object]:
 def test_historical_yubi_identities_are_the_published_earlier_packages() -> None:
     assert (
         historical_identities(EmbodimentName("yubi"))
-        == YUBI_SCHEMA_13 | YUBI_SCHEMA_14 | YUBI_SCHEMA_15
+        == YUBI_SCHEMA_13 | YUBI_SCHEMA_14 | YUBI_SCHEMA_15 | YUBI_DESCRIPTION_7
     )
     assert len(historical_identities(EmbodimentName("so101"))) == 2
     assert historical_identities(EmbodimentName("yubi")).isdisjoint(
