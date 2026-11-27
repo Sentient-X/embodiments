@@ -1,34 +1,40 @@
 """A YUBI unit's jaw calibration, fitted from a simulated protocol take with the faults the
 two-hand fusion recordings showed (2026-11-26): an encoder that reads the trigger 0.11 rad
 below the fingers' contact, tags that turn 0.8 of the finger, and pads that compress under a
-firm squeeze. The truth is the caliper."""
+firm squeeze. The truth is the caliper.
+
+The maps and the document are judged here; the unit judged through the solver's fusion (Rust,
+reached through `sx_seal`) is `packages/sx/tests/test_jaw_calibrate.py`'s."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import cast
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from sx_embodiments.jaw_fusion import EncoderReads, TagReads
-from sx_embodiments.jaw_tags import JawReference, fit_reference
 from sx_embodiments.jaw_unit import (
     PROTOCOL_CHECK_WIDTH_MM,
     PROTOCOL_WIDTHS_MM,
-    Evaluation,
+    EncoderReads,
     Grip,
+    JawReference,
+    JawTagLayout,
     JawUnitCalibration,
     JawUnitError,
+    LinearMap,
+    MarkerReference,
     ProtocolHold,
+    ReferenceOrigin,
+    TagReads,
     angle_at_gap,
-    fit_unit,
+    fit_maps,
+    hold_readings,
     rigid_gap_m,
     segment_protocol,
 )
-from test_jaw_tags import LAYOUT, rendered_sweep
 
 #: The simulated unit: finger = 1.25 * tags - 0.02; finger = encoder - 0.11 in free motion;
 #: a firm squeeze moves the trigger 0.10 rad past the fingers and compresses the pads 40 mm/rad.
@@ -88,7 +94,7 @@ def _take() -> tuple[TagReads, EncoderReads]:
     seen = np.isfinite(tag_angle)
     tags = TagReads(
         (frame_t * 1e9).astype(np.int64),
-        tag_angle,
+        np.asarray(tag_angle, np.float64),
         np.where(seen, 0.010, np.nan),
         np.full(len(frame_t), np.nan),
     )
@@ -96,39 +102,31 @@ def _take() -> tuple[TagReads, EncoderReads]:
     alive = state(read_t, 4)
     trigger = np.interp(read_t, times, finger) - np.interp(read_t, times, squeeze)
     reads = trigger - ENCODER_OFFSET + rng.normal(0.0, 0.002, len(read_t))
-    encoder = EncoderReads((read_t[alive] * 1e9).astype(np.int64), reads[alive])
+    encoder = EncoderReads((read_t[alive] * 1e9).astype(np.int64), np.asarray(reads[alive]))
     return tags, encoder
 
 
-@pytest.fixture(scope="module")
-def reference() -> JawReference:
-    theta, frames = rendered_sweep()
-    return cast("JawReference", fit_reference(LAYOUT, frames, theta.tolist()))
+REFERENCE = JawReference(
+    JawTagLayout(0, 1),
+    MarkerReference(0, (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 1.0), 0.0),
+    MarkerReference(1, (1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0), (0.0, 0.0, -1.0), 0.0),
+    ReferenceOrigin.CLOSED_STOP,
+)
 
 
 @dataclass(frozen=True)
 class Fitted:
     holds: list[ProtocolHold]
-    unit: JawUnitCalibration
-    judged: Evaluation
+    tag_map: LinearMap
+    encoder_map: LinearMap
+    pad_mm_per_rad: float
 
 
 @pytest.fixture(scope="module")
-def fitted(reference: JawReference) -> Fitted:
+def fitted() -> Fitted:
     tags, encoder = _take()
     holds = segment_protocol(encoder, OPEN_MM)
-    unit, judged = fit_unit(
-        side="right",
-        encoder_id="usb-serial:EC:DA:3B:00:11:22",
-        camera="0123456789abcdef0123456789abcdef",
-        calibrated_at_utc="2026-11-27T01:00:00Z",
-        take="20261127_010000",
-        reference=reference,
-        raw_tags=tags,
-        encoder=encoder,
-        holds=holds,
-    )
-    return Fitted(holds, unit, judged)
+    return Fitted(holds, *fit_maps(hold_readings(holds, tags, encoder)))
 
 
 def test_the_protocol_holds_are_found_in_order(fitted: Fitted) -> None:
@@ -139,7 +137,7 @@ def test_the_protocol_holds_are_found_in_order(fitted: Fitted) -> None:
 
 
 def test_the_three_maps_are_the_units(fitted: Fitted) -> None:
-    unit = fitted.unit
+    unit = fitted
     assert abs(unit.tag_map.scale - TAG_SCALE) < 0.03
     assert abs(unit.tag_map.offset_rad - TAG_OFFSET) < 0.01
     assert abs(unit.encoder_map.scale - 1.0) < 0.02
@@ -147,40 +145,19 @@ def test_the_three_maps_are_the_units(fitted: Fitted) -> None:
     assert abs(unit.pad_mm_per_rad - PAD_MM_PER_RAD) < 8.0
 
 
-def test_fused_reads_the_caliper_light_and_firm_and_each_sensor_alone_says_what_it_cannot(
-    fitted: Fitted,
-) -> None:
-    judged = fitted.judged
-    grasped = [h for h in judged.holds if h.grip is not Grip.OPEN]
-    assert max(abs(h.fused_mm) for h in grasped) < 1.0
-    light = [h for h in grasped if h.grip is Grip.LIGHT]
-    firm = [h for h in grasped if h.grip is Grip.FIRM]
-    # Tags alone see the fingers, not the squeeze: firm holds read short by the pads.
-    assert max(abs(h.tags_only_mm) for h in light) < 1.0
-    assert all(-5.5 < h.tags_only_mm < -2.5 for h in firm)
-    # The encoder alone sees the trigger: right when free, short by the squeeze when firm.
-    assert max(abs(h.encoder_only_mm) for h in light) < 1.0
-    assert all(h.encoder_only_mm < -5.0 for h in firm if h.width_mm > 0)
-
-
-def test_the_real_dropouts_are_judged_against_the_check_block(fitted: Fitted) -> None:
-    checks = fitted.judged.checks
-    covered = [c for c in checks if c.what == "tags_covered"]
-    unplugged = [c for c in checks if c.what == "encoder_unplugged"]
-    # Only the block is judged, never the open jaw between grasps.
-    assert len(covered) == 2 and len(unplugged) == 1, checks
-    # Covered, the encoder carries the light hold; unplugged, the tags see light and firm as
-    # one stretch (the pads move them 4 mm) and read it short by up to that compression.
-    assert abs(covered[0].fused_mm) < 1.0
-    assert -4.5 < unplugged[0].fused_mm < 0.5
-    # Covered and squeezed, nothing sees the fingers: the encoder reads the trigger past
-    # them, and the fused jaw is short by the whole squeeze. No map of the encoder alone
-    # recovers it; it takes the tags or a sensor on the finger joint.
-    assert covered[1].fused_mm < -10.0
-
-
 def test_the_document_round_trips_and_refuses_a_stray_field(fitted: Fitted) -> None:
-    unit = fitted.unit
+    unit = JawUnitCalibration(
+        side="right",
+        encoder="usb-serial:EC:DA:3B:00:11:22",
+        camera="0123456789abcdef0123456789abcdef",
+        calibrated_at_utc="2026-11-27T01:00:00Z",
+        take="20261127_010000",
+        reference=REFERENCE,
+        tag_map=fitted.tag_map,
+        encoder_map=fitted.encoder_map,
+        pad_mm_per_rad=fitted.pad_mm_per_rad,
+        holds=(),
+    )
     again = JawUnitCalibration.from_json(unit.to_json())
     assert again == unit and again.calibration_id == unit.calibration_id
     document = unit.to_dict()

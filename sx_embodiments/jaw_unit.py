@@ -17,7 +17,7 @@ things differ per unit (two-hand fusion recordings, 2026-11-26), and each is one
   so the rigid gap of the fingers reads less than the object. The pad surfaces' gap is the
   rigid gap plus ``pad_mm_per_rad * squeeze``.
 
-With both sensors, the fusion's encoder bias is that squeeze (:func:`fuse_jaw` reads every
+With both sensors, the fusion's encoder bias is that squeeze (the solver reads every
 mapped encoder read as ``angle + bias``), so the delivered gap is corrected under load. Tags
 alone see the fingers but not the squeeze, so a firm hold reads short by the pad compression.
 The encoder alone cannot see the object at all under load: at the trigger's stop it reads
@@ -33,22 +33,117 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
-from typing import Final, Literal, cast
+from typing import Final, Literal, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from sx_contracts.identity import JsonValue, content_digest
 
-from .jaw_fusion import EncoderReads, FusedJaw, FusionModel, TagReads, fuse_jaw, tag_reads
-from .jaw_tags import JawReference, JawTagLayout, MarkerReference, ReferenceOrigin, TagPose
 from .yubi import jaw_gap_m, yubi_jaw
 
 type Vector = NDArray[np.float64]
 type Stamps = NDArray[np.int64]
+
+# -- what the solver reads and returns ------------------------------------------------------------
+# The jaw solver itself is Rust (sx-embodiments `drivers/sx-jaw`, the one implementation the
+# headset runs while it records and the Library runs afterwards; Python reaches it through
+# `sx_seal`). This module fits a unit's maps from its readings and judges them with the
+# solver's fusion, passed in as `Fuse`.
+
+
+@dataclass(frozen=True, slots=True)
+class EncoderReads:
+    """An encoder's reads on the host clock, stamps strictly increasing."""
+
+    t_ns: Stamps
+    angle_rad: Vector
+
+
+@dataclass(frozen=True, slots=True)
+class TagReads:
+    """Per frame, the joint angle the tags read and its deviation; NaN where unseen."""
+
+    t_ns: Stamps
+    angle_rad: Vector
+    std_rad: Vector
+    mirror_rad: Vector
+
+    @property
+    def seen(self) -> NDArray[np.bool_]:
+        return np.isfinite(self.angle_rad)
+
+
+class Fused(Protocol):
+    """The solver's fused jaw at the requested stamps."""
+
+    @property
+    def angle_rad(self) -> Vector: ...
+
+    @property
+    def encoder_bias_rad(self) -> Vector: ...
+
+
+#: The solver's fusion: the jaw at ``at_ns`` from whichever of the encoder and the tags (moved
+#: onto the encoder's clock by the lag) are given.
+Fuse = Callable[[Stamps, EncoderReads | None, TagReads | None, int], Fused]
+
+#: OpenCV's 4x4 dictionaries share their first fifty codes; YUBI's markers are IDs 0 to 3.
+YUBI_JAW_DICTIONARY: Final = "DICT_4X4_50"
+
+
+@dataclass(frozen=True, slots=True)
+class JawTagLayout:
+    """Which markers are on the two fingers, and how big they are printed."""
+
+    first_id: int
+    second_id: int
+    marker_side_m: float = 0.015
+    dictionary: str = YUBI_JAW_DICTIONARY
+
+    def __post_init__(self) -> None:
+        if self.first_id == self.second_id or not 0 <= min(self.first_id, self.second_id):
+            raise JawUnitError("the two finger markers need distinct non-negative IDs")
+        if max(self.first_id, self.second_id) >= 50 or self.dictionary != YUBI_JAW_DICTIONARY:
+            raise JawUnitError("the finger markers are DICT_4X4_50 IDs 0 to 49")
+        if not (math.isfinite(self.marker_side_m) and 0.002 <= self.marker_side_m <= 0.1):
+            raise JawUnitError(f"marker side {self.marker_side_m!r} m is not a printed tag size")
+
+    @property
+    def ids(self) -> tuple[int, int]:
+        return (self.first_id, self.second_id)
+
+
+@dataclass(frozen=True, slots=True)
+class MarkerReference:
+    """Where one marker sits on its finger: its pose at ``angle_rad`` (row-major rotation)
+    and its hinge axis."""
+
+    marker_id: int
+    reference: tuple[float, ...]
+    axis: tuple[float, float, float]
+    angle_rad: float
+
+
+class ReferenceOrigin(StrEnum):
+    ENCODER = "encoder"
+    CLOSED_STOP = "closed_stop"
+
+
+@dataclass(frozen=True, slots=True)
+class JawReference:
+    """One rig side's two marker references, and how they were fixed."""
+
+    layout: JawTagLayout
+    first: MarkerReference
+    second: MarkerReference
+    origin: ReferenceOrigin
+
+    def markers(self) -> tuple[MarkerReference, MarkerReference]:
+        return (self.first, self.second)
 
 JAW_UNIT_SCHEMA: Final = "sx.jaw-unit-calibration/v1"
 Side = Literal["left", "right"]
@@ -148,31 +243,23 @@ class JawUnitCalibration:
 
     # -- applying it -------------------------------------------------------------------------
 
-    def tags(
-        self,
-        t_ns: Sequence[int],
-        frames: Sequence[Mapping[int, TagPose]],
-        model: FusionModel | None = None,
-    ) -> TagReads:
-        """Each frame's finger angle from this unit's tags (NaN where unseen)."""
-        raw = tag_reads(self.reference, t_ns, frames, model)
-        return self.map_tags(raw)
-
     def map_tags(self, raw: TagReads) -> TagReads:
         scale = abs(self.tag_map.scale)
-        return TagReads(raw.t_ns, self.tag_map(raw.angle_rad), raw.std_rad * scale, raw.mirror_rad)
+        return TagReads(
+            raw.t_ns, self.tag_map(raw.angle_rad), np.asarray(raw.std_rad * scale), raw.mirror_rad
+        )
 
     def map_encoder(self, encoder: EncoderReads) -> EncoderReads:
         """The encoder's reads as finger angles in free motion."""
         return EncoderReads(encoder.t_ns, self.encoder_map(encoder.angle_rad))
 
-    def gap_m(self, fused: FusedJaw) -> Vector:
+    def gap_m(self, fused: Fused) -> Vector:
         """The pad surfaces' gap: the fingers' rigid gap plus the pads' compression, which the
         squeeze (the encoder reading past the fingers, ``-bias``) says."""
         squeeze = np.maximum(0.0, -fused.encoder_bias_rad)
         return rigid_gap_m(fused.angle_rad) + self.pad_mm_per_rad * squeeze / 1000.0
 
-    def delivered_angle(self, fused: FusedJaw) -> Vector:
+    def delivered_angle(self, fused: Fused) -> Vector:
         """The joint angle the jaw law reads as :meth:`gap_m` (never below closed): what the
         encoder topic carries."""
         return angle_at_gap(np.maximum(0.0, self.gap_m(fused)))
@@ -562,6 +649,7 @@ def evaluate(
     raw_tags: TagReads,
     encoder: EncoderReads,
     holds: Sequence[ProtocolHold],
+    fuse: Fuse,
     lag_ns: int = 0,
 ) -> Evaluation:
     """The protocol take fused three ways from the same data (tags alone, the encoder alone,
@@ -571,9 +659,9 @@ def evaluate(
     reads = unit.map_encoder(encoder)
     t = raw_tags.t_ns
     runs = {
-        Estimate.TAGS_ONLY: fuse_jaw(t, encoder=None, tags=tags),
-        Estimate.ENCODER_ONLY: fuse_jaw(t, encoder=reads, tags=None),
-        Estimate.FUSED: fuse_jaw(t, encoder=reads, tags=tags, lag_ns=lag_ns),
+        Estimate.TAGS_ONLY: fuse(t, None, tags, 0),
+        Estimate.ENCODER_ONLY: fuse(t, reads, None, 0),
+        Estimate.FUSED: fuse(t, reads, tags, lag_ns),
     }
     gaps = {estimate: unit.gap_m(fused) for estimate, fused in runs.items()}
 
@@ -634,6 +722,7 @@ def fit_unit(
     raw_tags: TagReads,
     encoder: EncoderReads,
     holds: Sequence[ProtocolHold],
+    fuse: Fuse,
     lag_ns: int = 0,
 ) -> tuple[JawUnitCalibration, Evaluation]:
     """Fit one unit from its protocol take and judge it on the same take.
@@ -655,7 +744,7 @@ def fit_unit(
         pad_mm_per_rad=pad,
         holds=(),
     )
-    judged = evaluate(unit, raw_tags, encoder, holds, lag_ns)
+    judged = evaluate(unit, raw_tags, encoder, holds, fuse, lag_ns)
     return (
         JawUnitCalibration(
             side=side,

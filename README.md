@@ -576,25 +576,35 @@ existing clamping behavior; this migration adds no physical qualification.
 
 ## YUBI jaw angle from the wrist camera's tags
 
-`sx_embodiments.jaw_tags` reads the YUBI jaw angle from the two ArUco markers (DICT_4X4_50,
-15 mm, right IDs 0/1, left 2/3) each wrist camera sees, for a side whose encoder is dead,
-drifting or relative. Each marker's pose is IPPE PnP on corners undistorted through the
-rig's own lens (`calibrate.lens.Lens`); its turn about its hinge is the joint angle, with no
-per-unit calibration. A reference is fitted from encoder-alive frames (`fit_reference`) or,
-with no encoder, from the closed stop (`closed_stop_reference`). IPPE's planar ambiguity is
-chosen as one temporally continuous family; the two jaws mirroring within 6 degrees is the
-broken-gripper check.
+The jaw solver is one Rust crate, `drivers/sx-jaw`, run by the headset while it records and by
+the Library afterwards, from the same code (2026-11-27; it replaced the Python
+`sx_embodiments.jaw_tags` and `jaw_fusion`, matching them to 1e-11 rad on the same marker poses):
 
-`sx_embodiments.jaw_fusion` turns the tag readings, and whatever the encoder read, into one jaw
-angle per take and side: an offline robust smoother (Kalman filter, RTS pass, Cauchy-weighted
-and reweighted coarse to fine) whose state is the angle, its rate and the encoder's drifting
-bias, under a bound on finger acceleration. An encoder dropout, a spike train no finger could
-make, a zero offset or hidden tags each stay within 1 degree at p95 on rendered markers
-(`tests/test_jaw_fusion.py`). Every sample carries its posterior deviation and the sensors that
-saw it; QC refuses only where neither did for over 0.5 s. `write_solved_spool` writes
-`gripper_{side}.jaw_from_tags.csv` (`t_monotonic_ns,angle_rad,angle_std_rad,sensors`), the spool
-the seal reads for a side recorded without its encoder. Both sit behind the `calibrate` extra
-(NumPy, OpenCV).
+- `detect`: the two ArUco markers (DICT_4X4_50, 15 mm, right IDs 0/1, left 2/3) on an 8-bit luma
+  plane, OpenCV's `ArucoDetector` with sub-pixel corners (adaptive windows 13 and 23: the 3-pixel
+  window found no marker the others missed on the two-hand recordings and cost a quarter of the
+  time), in a region or a crop of the frame;
+- `track`: the headset's budget: every frame, but only a window around each marker it last saw,
+  a wider one for 15 frames after it is lost, the whole picture at most once in four frames
+  while one is missing, nothing after a tagless first 300 frames, and no whole-picture search
+  at all while the headset runs warm;
+- `sightings`: `gripper_{side}.jaw_tags.csv`, each analysed frame's marker corners at its
+  exposure, the record between detection and solve;
+- `lens`, `tags`: each marker's pose (IPPE-square through the rig's own fisheye) and its turn
+  about its hinge as the joint angle; the reference fitted from encoder-alive frames
+  (`fit_reference`) or the closed stop (`closed_stop_reference`); the IPPE ambiguity chosen as
+  one temporally continuous family; the two markers mirroring within 6 degrees;
+- `fusion`: one robust smoother per take and side (Kalman filter, RTS pass, Cauchy-reweighted
+  coarse to fine) over the angle, its rate and the encoder's stepping bias, the encoder's folds
+  undone and the camera's lag measured first; every sample carries its deviation and the sensors
+  that saw it;
+- `solve`, `unit`: one side of one take, its reference, a unit calibration applied, its QC
+  numbers and the rows of `gripper_{side}.jaw_from_tags.csv`
+  (`t_monotonic_ns,angle_rad,angle_std_rad,sensors`), the spool the seal reads.
+
+`tests/rendered.rs` renders the jaw through a lens and solves it end to end: an encoder dropout,
+a spike train no finger could make, a zero offset, hidden tags, a relative encoder's folds and a
+30 ms camera lag each stay within 1 degree at p95. Python reaches the solver through `sx_seal`.
 
 `sx_embodiments.jaw_unit` is one gripper unit's jaw, measured once against a caliper
 (`sx.jaw-unit-calibration/v1`, keyed by its encoder and wrist camera): the finger markers'
@@ -602,7 +612,8 @@ reference fixed on the unit, the tags' map to the finger angle, the encoder's ma
 (it reads the trigger, not the fingers), and the pads' compression per radian of squeeze. A
 protocol take (each calipered width held lightly then firmly, opening fully between) is
 segmented from the encoder's still stretches (`segment_protocol`), fitted (`fit_unit`) and judged
-three ways from the same data, tags alone, the encoder alone and fused (`evaluate`). On a
+three ways from the same data, tags alone, the encoder alone and fused (`evaluate`, with the
+solver's fusion passed in). On a
 simulated unit with the recorded faults (`tests/test_jaw_unit.py`) fused stays within 1 mm of the
 caliper, light and firm; tags alone read a firm hold short by the pads' compression; the encoder
 alone reads it short by the squeeze, which no model of the encoder alone can recover.
