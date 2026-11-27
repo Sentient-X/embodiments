@@ -91,8 +91,6 @@ REFLECT_WINDOW = 5
 #: (the recordings' units turn 0.77-0.81; the tags carry no per-unit scale until calibrated).
 ALIGNED_RMS_RAD = 0.04
 ALIGNED_SCALE = (0.5, 2.0)
-#: Unfolded reads are kept when they cut the line's full RMS to this share of the reads' own.
-UNFOLD_GAIN = 0.8
 #: The fingers' travel in the tags' angle, with margin: closed is 0, the open stop under 0.8.
 TAG_TRAVEL_RAD = (-0.15, 1.1)
 #: A held stretch takes the sign whose level the tags saw it at only by this clear a margin.
@@ -303,12 +301,17 @@ def unfold_encoder(tags: TagReads, encoder: EncoderReads) -> UnfoldedEncoder:
     theirs. A run of stretches no tag fixed between two that are fixed reflected an even or
     odd number of times by the signs either side; within it, the rate across each fold says
     which (a jaw passes a fold it reflects at, and stops at one it only reaches), and where the
-    rates disagree with that parity the least certain fold gives way. Unfolded reads are kept
-    only where they line up with the tags better than the reads as read; reads that line up
-    neither way are refused, and the fusion runs on the tags alone.
+    rates disagree with that parity the least certain fold gives way. Only reads out of line
+    with the tags as read are unfolded, and kept if they line up unfolded; reads that line up
+    neither way are refused, and the fusion runs on the tags alone. A take with a few folds in
+    otherwise sound reads stays as read: the smoother outweighs them where the tags see.
     """
     as_read = _aligned(tags, encoder)
-    if not math.isfinite(as_read[0]):
+    # In line as read is read as is. Near the closed stop a sound encoder leaves the tags' line
+    # (it reads the trigger, which a squeeze moves past the fingers), and a sign chosen by level
+    # there flips a real empty close to -15 mm (231306, 43.8 s): only an encoder that is out of
+    # line as a whole is unfolded.
+    if not math.isfinite(as_read[0]) or _in_line(as_read):
         return UnfoldedEncoder(encoder, EncoderLaw.AS_READ, 0, 0, as_read[0])
     t, e = encoder.t_ns, encoder.angle_rad
     away = (e > FOLD_BAND_RAD) & (e < math.pi - FOLD_BAND_RAD)
@@ -438,10 +441,7 @@ def unfold_encoder(tags: TagReads, encoder: EncoderReads) -> UnfoldedEncoder:
     if judged[1] < 0:
         unfolded = EncoderReads(t, -raw)
         judged = _aligned(tags, unfolded)
-    # Unfolded only where it explains the reads better: the line's full RMS, untrimmed, since a
-    # few folded reads hide in the tenth the trimmed fit drops.
-    better = _full_rms(tags, unfolded) < UNFOLD_GAIN * _full_rms(tags, encoder)
-    if _in_line(judged) and (better or not _in_line(as_read)):
+    if _in_line(judged):
         return UnfoldedEncoder(unfolded, EncoderLaw.UNFOLDED, reflections, inferred, judged[0])
     return _as_read_or_refused(encoder, as_read)
 
@@ -466,17 +466,6 @@ def _as_read_or_refused(encoder: EncoderReads, as_read: tuple[float, float]) -> 
     if _in_line(as_read):
         return UnfoldedEncoder(encoder, EncoderLaw.AS_READ, 0, 0, as_read[0])
     return UnfoldedEncoder(None, EncoderLaw.REFUSED, 0, 0, as_read[0])
-
-
-def _full_rms(tags: TagReads, encoder: EncoderReads) -> float:
-    """The tags' RMS from the best line through the reads, over every frame both saw."""
-    seen = tags.seen
-    t, angle = tags.t_ns[seen], tags.angle_rad[seen]
-    near = _near(t, encoder.t_ns, ENCODER_REACH_NS) & (t >= encoder.t_ns[0])
-    near &= t <= encoder.t_ns[-1]
-    read = np.interp(t[near], encoder.t_ns, encoder.angle_rad)
-    _, slope, offset = _line(read, angle[near])
-    return float(np.sqrt(np.mean((angle[near] - slope * read - offset) ** 2)))
 
 
 def _aligned(tags: TagReads, encoder: EncoderReads) -> tuple[float, float]:
