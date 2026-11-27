@@ -13,10 +13,12 @@ at camera open. Requested controls are checked against those bounds before USB w
 the driver reads controls back. No pod package is a dependency. Device descriptors stay
 borrowed: the caller keeps the fd valid until the driver releases its interfaces.
 
-On a normal UVC camera open, the driver enables firmware auto white balance and reads
+On every UVC camera open, the driver enables firmware auto white balance and reads
 the setting back. The stream report records the result as `auto_white_balance_at_open`.
-A camera that refuses the optional control can still stream. An explicit colour preset
-sets its own white balance, and the caller's exposure bounds govern the normal open.
+A camera that refuses the optional control can still stream. The caller's exposure bounds
+govern the open. No path locks white balance or exposure: the per-camera colour presets
+were removed on 2026-11-27, because a camera fixed to one room's light recorded blue, dark
+frames under any other.
 
 Recording policy stays in the pod: source-rate admission, frame selection, software
 exposure decisions, encoder liveness windows, receipt timestamps, CSV/media files,
