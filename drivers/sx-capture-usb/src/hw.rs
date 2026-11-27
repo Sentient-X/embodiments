@@ -18,7 +18,7 @@ use crate::source::{MonotonicClock, SourceFrame};
 use crate::usb::Control;
 use crate::usb::descriptor::{self, Descriptors};
 use crate::usb::usbfs::Device;
-use crate::uvc::controls::{self, ColourPreset, Entities, ExtensionUnit};
+use crate::uvc::controls::{self, Entities, ExtensionUnit};
 use crate::uvc::descriptors::{FormatKind, UvcCamera};
 use crate::uvc::probe;
 use crate::uvc::stream::Engine;
@@ -240,24 +240,6 @@ impl Port for UsbfsPort {
     }
 
     fn open_camera(&self, config: ExposureConfig) -> Result<Box<dyn CameraSource>, String> {
-        self.open_camera_with_colour(config, None)
-    }
-
-    fn open_camera_with_colour(
-        &self,
-        config: ExposureConfig,
-        colour: Option<&ColourPreset>,
-    ) -> Result<Box<dyn CameraSource>, String> {
-        if let Some(preset) = colour {
-            preset.validate()?;
-            if config != preset.exposure_config() {
-                return Err(format!(
-                    "colour preset {} holds the camera at its own exposure and gain; \
-                     it opens only with that locked range",
-                    preset.name
-                ));
-            }
-        }
         let (camera, entities) = self.camera.as_ref().ok_or("not a camera")?;
         self.claim(camera.control_interface)?;
         self.claim(camera.streaming_interface)?;
@@ -273,28 +255,18 @@ impl Port for UsbfsPort {
             interval,
         )
         .map_err(|e| format!("probe/commit: {}", io_detail(e)))?;
-        // Set the firmware's white balance mode once before streaming. A locked preset
-        // supplies its own white balance, exposure and gain.
-        let (colour, auto_white_balance) = match colour {
-            None => {
-                let (held, white_balance) =
-                    controls::apply_capture_controls(&self.device, entities, config)?;
-                if held != config.start {
-                    return Err(format!(
-                        "camera holds exposure/gain {}/{} after requesting the start setting",
-                        held.exposure_100us, held.gain
-                    ));
-                }
-                (None, Some(white_balance))
-            }
-            Some(preset) => {
-                let report = controls::apply_colour_preset(&self.device, entities, preset);
-                if let Some(refusal) = preset.refusal(&report) {
-                    return Err(refusal);
-                }
-                (Some(report), None)
-            }
-        };
+        // Turn the firmware's auto white balance on once before streaming, and start the
+        // bounded manual exposure the rig's controller steers. Nothing locks either: a camera
+        // fixed to one room's exposure and white balance records wrong colour under any other
+        // light (locked colour presets were removed on 2026-11-27).
+        let (held, auto_white_balance) =
+            controls::apply_capture_controls(&self.device, entities, config)?;
+        if held != config.start {
+            return Err(format!(
+                "camera holds exposure/gain {}/{} after requesting the start setting",
+                held.exposure_100us, held.gain
+            ));
+        }
         let high_speed = self.device.speed().map_err(io_detail)? >= 3;
         let engine = Engine::start(self.device, camera, &committed, high_speed, self.clock)
             .map_err(|e| format!("streaming: {}", io_detail(e)))?;
@@ -313,7 +285,6 @@ impl Port for UsbfsPort {
                 "max_payload_transfer_size": committed.max_payload_transfer_size,
                 "high_speed": high_speed,
             }),
-            colour,
             auto_white_balance,
         }))
     }
@@ -346,9 +317,8 @@ struct UsbfsCamera {
     engine: Option<Engine>,
     exposure: ExposureControl,
     negotiated: Value,
-    /// The colour preset written at open and what the camera read back; `None` without one.
-    colour: Option<Value>,
-    auto_white_balance: Option<Result<(), String>>,
+    /// Whether the camera read auto white balance back as on after the open's last write.
+    auto_white_balance: Result<(), String>,
 }
 
 impl CameraSource for UsbfsCamera {
@@ -378,17 +348,11 @@ impl CameraSource for UsbfsCamera {
             }),
             None => json!({"negotiated": self.negotiated}),
         };
-        if let Some(result) = &self.auto_white_balance {
-            report["auto_white_balance_at_open"] = match result {
-                Ok(()) => json!({"state": "enabled"}),
-                Err(detail) => json!({"state": "unverified", "detail": detail}),
-            };
-        }
+        report["auto_white_balance_at_open"] = match &self.auto_white_balance {
+            Ok(()) => json!({"state": "enabled"}),
+            Err(detail) => json!({"state": "unverified", "detail": detail}),
+        };
         report
-    }
-
-    fn colour_controls(&self) -> Option<Value> {
-        self.colour.clone()
     }
 
     fn close(mut self: Box<Self>) {
