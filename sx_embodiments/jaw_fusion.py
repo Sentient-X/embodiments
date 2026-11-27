@@ -8,16 +8,22 @@ sometimes hidden. Neither is the truth; each covers the other's faults.
 
 This is one offline estimator over a whole take and one side, with no heuristics:
 
-- State: the jaw angle, its rate, and the encoder's bias (its zero offset, a slow random walk
-  so a drifting zero is followed).
+- State: the jaw angle, its rate, and the encoder's bias: how far its read, mapped onto the
+  tags' angle by the take's line (:func:`_line`, a scale and an offset), sits from the jaw. The
+  bias is a step process: flat while the jaw moves freely, jumping where the load changes (a
+  grip, a release, the fingers meeting), because the encoder reads the trigger and the trigger
+  travels past fingers an object or each other stop (2026-11-27, 231306: 0 to 0.07 rad in a
+  tenth of a second, held for seconds).
 - Process: white acceleration of :attr:`FusionModel.acceleration_rad_s2` per root second, the
   physical bound on how fast a finger changes speed. A reading the motion cannot follow (a
   spike train, a wrong frame) leaves a large residual and loses its weight.
-- Measurements: every encoder read is ``angle + bias``; every tag frame is ``angle`` at its
+- Measurements: every mapped encoder read is ``angle + bias``; every tag frame is ``angle`` at its
   exposure less the camera's lag behind the encoder (:func:`camera_lag_ns`), with its own
   standard deviation from how many tags it saw and how well they reprojected.
 - Solver: a Rauch-Tung-Striebel smoother, iteratively reweighted with Student-t weights
-  (:data:`STUDENT_NU`). A dropout in either sensor is only missing measurements, and no
+  (:data:`STUDENT_NU`) on the readings and Cauchy weights on the bias's steps, so a step costs
+  about its logarithm: one large step where the load changed is cheap, a wander that follows
+  the tags' noise is not. A dropout in either sensor is only missing measurements, and no
   reading is ever gated away outright, so the smoother cannot lock onto its own mistake the
   way a gated causal filter did (2026-11-25: p95 103 mm).
 - Output, per sample: the angle, its posterior standard deviation and which sensors carried
@@ -120,11 +126,15 @@ class FusionModel:
     acceleration_rad_s2: float = 4.0
     #: The encoder's read noise (12-bit AS5601, 0.0015 rad steps, plus magnet wobble).
     encoder_std_rad: float = 0.003
-    #: The encoder bias's random walk (rad per root second). Not only a slow drift: yubi-0006's
-    #: encoder read 0.040 rad low on a 34.7 mm grasp and 0.038 rad high when squeezed shut, so
-    #: its error moves with the jaw. 0.01 lets the tags set the level within about a second
-    #: (the closed hold reads 0.2 mm, not the encoder's 5 mm) and adds 0.4 mm of tag noise.
-    bias_walk_rad: float = 0.01
+    #: The scale of the bias's steps (rad per root second), each Cauchy-weighted: under it the
+    #: bias drifts as a slow walk, over it a step is paid for by its logarithm. As a plain walk,
+    #: 0.01 wandered 1 to 2 degrees with the tags' noise on flat stretches and could not follow
+    #: a grip in time (2026-11-27, 231306: fused 70 mm where both sensors read 57 mm); 0.0035
+    #: holds a flat stretch flat and lets the tags set the level within a few seconds.
+    bias_walk_rad: float = 0.0035
+    #: The bias's walk on the first, coarsest fit, before any step has been found: free enough
+    #: to follow a grip, so the first fit does not take the squeeze for a wrong frame.
+    bias_free_rad: float = 0.5
     #: The prior on the bias about its starting level: the encoder's reads less the tags' over
     #: the frames both saw (:func:`fuse_jaw`), or 0 where they never overlap. Around a level
     #: the tags set, a zero off by 15 degrees more still converges; an encoder zeroed wherever
@@ -495,8 +505,12 @@ class FusedJaw:
     angle_rad: Vector
     std_rad: Vector
     sensors: tuple[JawSensors, ...]
-    #: The encoder's estimated bias (its reading less the jaw angle) at each sample.
+    #: The encoder's estimated bias (its read less the jaw angle, on the encoder's own scale)
+    #: at each sample.
     encoder_bias_rad: Vector
+    #: The take's line from the encoder's reads onto the tags' angle (1 and 0 without both).
+    encoder_scale: float
+    encoder_offset_rad: float
     #: The lag subtracted from the tag frames' stamps.
     camera_lag_ns: int
     #: Of each sensor's readings, the share the estimate trusted (weight at least 0.5).
@@ -573,19 +587,28 @@ def fuse_jaw(
         origin[order],
     )
     measured = kinds != _OUTPUT
-    weights = np.ones(len(times))
-    bias0 = _starting_bias(enc_t, enc_z, tag_t, tag_z)
+    is_enc = kinds == _ENCODER
+    scale_e, offset_e = _encoder_line(enc_t, enc_z, tag_t, tag_z)
+    values = np.where(is_enc, scale_e * values + offset_e, values)
+    stds = np.where(is_enc, scale_e * stds, stds)
+    bias0 = _starting_bias(times[is_enc], values[is_enc], tag_t, tag_z)
     first = float(values[measured][0]) - (bias0 if kinds[measured][0] == _ENCODER else 0.0)
-    state = np.zeros((len(times), 3))
-    cov = np.zeros((len(times), 3, 3))
+    seconds = (times - times[0]).astype(np.float64) / 1e9
+    steps = np.diff(seconds, prepend=seconds[0])
+    weights = np.ones(len(times))
+    walk = model.bias_free_rad**2 * steps
     for scale in REWEIGHT_SCALES:
-        state, cov = _smooth(
-            times, kinds, values, scale * stds / np.sqrt(weights), first, bias0, model
+        state, _ = _smooth(
+            times, kinds, values, scale * stds / np.sqrt(weights), first, bias0, walk, model
         )
-        predicted = state[:, 0] + np.where(kinds == _ENCODER, state[:, 2], 0.0)
+        predicted = state[:, 0] + np.where(is_enc, state[:, 2], 0.0)
         normalized = (values - predicted) / (scale * stds)
         weights = np.where(measured, (STUDENT_NU + 1.0) / (STUDENT_NU + normalized**2), 1.0)
-    state, cov = _smooth(times, kinds, values, stds / np.sqrt(weights), first, bias0, model)
+        # Cauchy on the bias's steps (iteratively reweighted: the variance is the scale's plus
+        # the step's own square), so it stays flat but where it really stepped.
+        step = np.diff(state[:, 2], prepend=state[0, 2])
+        walk = (scale * model.bias_walk_rad) ** 2 * steps + step**2
+    state, cov = _smooth(times, kinds, values, stds / np.sqrt(weights), first, bias0, walk, model)
 
     outputs = kinds == _OUTPUT
     out_index = origin[outputs]
@@ -594,7 +617,10 @@ def fuse_jaw(
     bias = np.empty(len(out_t))
     angle[out_index] = state[outputs, 0]
     std[out_index] = np.sqrt(np.maximum(cov[outputs, 0, 0], 0.0))
-    bias[out_index] = state[outputs, 2]
+    # On the encoder's own scale: its read less the angle.
+    bias[out_index] = (state[outputs, 0] + state[outputs, 2] - offset_e) / scale_e - state[
+        outputs, 0
+    ]
     trusted = measured & (weights >= TRUSTED_WEIGHT)
     if not np.any(trusted):
         raise JawTagError("the fused jaw trusted none of its readings")
@@ -630,10 +656,77 @@ def fuse_jaw(
         std_rad=std,
         sensors=sensors,
         encoder_bias_rad=bias,
+        encoder_scale=scale_e,
+        encoder_offset_rad=offset_e,
         camera_lag_ns=lag_ns,
         encoder_trusted=float(trusted_enc.mean()) if len(trusted_enc) else 0.0,
         tags_trusted=float(trusted_tag.mean()) if len(trusted_tag) else 0.0,
     )
+
+
+def _encoder_line(
+    enc_t: Stamps, enc_z: Vector, tag_t: Stamps, tag_z: Vector
+) -> tuple[float, float]:
+    """The take's line from the encoder's reads onto the tags' angle, or 1 and 0 where they
+    overlap too little or the slope is not a gripper's.
+
+    A unit whose tags turn 0.88 of its encoder's angle left a single offset wrong by 4 mm
+    between a half-open and an open hold, and the bias chased it at every move (2026-11-27,
+    231306). The line is the one the free motion lies on, not one through the squeezes: a
+    protocol take squeezes for a third of its frames, and a least-squares line through them read
+    a covered light hold 5 mm off. So it is a reweighted least-trimmed-squares line
+    (:func:`_trimmed_line`). A unit calibration maps the encoder first; its line is then about
+    1 and 0.
+    """
+    if len(enc_t) < 2 or len(tag_t) == 0:
+        return 1.0, 0.0
+    near = _near(tag_t, enc_t, ENCODER_REACH_NS) & (tag_t >= enc_t[0]) & (tag_t <= enc_t[-1])
+    if np.count_nonzero(near) < MIN_LAG_FRAMES:
+        return 1.0, 0.0
+    slope, offset = _trimmed_line(np.interp(tag_t[near], enc_t, enc_z), tag_z[near])
+    if not ALIGNED_SCALE[0] <= slope <= ALIGNED_SCALE[1]:
+        return 1.0, 0.0
+    return slope, offset
+
+
+#: The share of frames the trimmed line is fitted on: the free motion is at least half a take.
+TRIMMED_SHARE = 0.5
+#: Starting pairs tried for the trimmed line, and the concentration steps from each.
+TRIMMED_STARTS = 64
+TRIMMED_STEPS = 20
+
+
+def _trimmed_line(read: Vector, angle: Vector) -> tuple[float, float]:
+    """The least-trimmed-squares line through (read, angle) over :data:`TRIMMED_SHARE` of the
+    points, from :data:`TRIMMED_STARTS` deterministic starting pairs, then refitted through
+    every point within 2.5 robust deviations of it."""
+    count = len(read)
+    keep = max(2, int(TRIMMED_SHARE * count))
+    design = np.vstack([read, np.ones(count)]).T
+    order = np.argsort(read)
+    best, best_cost = np.array([1.0, 0.0]), math.inf
+    for i in range(TRIMMED_STARTS):
+        # Pairs spread across the encoder's range, so each start is a line, not a point.
+        lo = order[(i * 7919) % max(1, count // 2)]
+        hi = order[count // 2 + (i * 104729) % max(1, count - count // 2)]
+        if read[hi] - read[lo] < 1e-6:
+            continue
+        fit = np.linalg.lstsq(design[[lo, hi]], angle[[lo, hi]], rcond=None)[0]
+        for _ in range(TRIMMED_STEPS):
+            kept = np.argsort(np.abs(angle - design @ fit))[:keep]
+            refit = np.linalg.lstsq(design[kept], angle[kept], rcond=None)[0]
+            if np.allclose(refit, fit, atol=1e-9):
+                break
+            fit = refit
+        cost = float(np.sum(np.sort((angle - design @ fit) ** 2)[:keep]))
+        if cost < best_cost:
+            best, best_cost = fit, cost
+    residual = angle - design @ best
+    spread = 1.4826 * float(np.median(np.abs(residual))) + 1e-9
+    inside = np.abs(residual) <= 2.5 * spread
+    if np.count_nonzero(inside) >= 2:
+        best = np.linalg.lstsq(design[inside], angle[inside], rcond=None)[0]
+    return float(best[0]), float(best[1])
 
 
 def _starting_bias(enc_t: Stamps, enc_z: Vector, tag_t: Stamps, tag_z: Vector) -> float:
@@ -662,6 +755,7 @@ def _smooth(
     stds: Vector,
     first_angle: float,
     first_bias: float,
+    walk: Vector,
     model: FusionModel,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """A Kalman filter forward and a Rauch-Tung-Striebel pass back, one scalar read per epoch."""
@@ -671,21 +765,20 @@ def _smooth(
     x_filt = np.zeros((count, 3))
     p_filt = np.zeros((count, 3, 3))
     q_acc = model.acceleration_rad_s2**2
-    q_bias = model.bias_walk_rad**2
     x = np.array([first_angle, 0.0, first_bias])
     p = np.diag([0.5**2, 2.0**2, model.bias_prior_rad**2])
     seconds = (times - times[0]).astype(np.float64) / 1e9
     steps = np.diff(seconds, prepend=seconds[0])
     for k in range(count):
         dt = float(steps[k])
-        if dt > 0.0:
+        if dt > 0.0 or walk[k] > 0.0:
             x = np.array([x[0] + dt * x[1], x[1], x[2]])
             f = np.array([[1.0, dt, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
             q = np.array(
                 [
                     [q_acc * dt**3 / 3.0, q_acc * dt**2 / 2.0, 0.0],
                     [q_acc * dt**2 / 2.0, q_acc * dt, 0.0],
-                    [0.0, 0.0, q_bias * dt],
+                    [0.0, 0.0, float(walk[k])],
                 ]
             )
             p = f @ p @ f.T + q
