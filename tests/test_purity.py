@@ -34,9 +34,7 @@ _EXTRAS = {
     "render_pack.py": frozenset({"numpy", "sx_geometry"}),
     "collision_proxies.py": frozenset({"numpy", "scipy"}),
     "tool_frames.py": frozenset({"numpy"}),
-    # The YUBI jaw from its wrist tags and its encoder (the `calibrate` extra).
-    "jaw_tags.py": frozenset({"numpy", "cv2"}),
-    "jaw_fusion.py": frozenset({"numpy"}),
+    # A YUBI unit's jaw calibration, fitted from its protocol take (the `calibrate` extra).
     "jaw_unit.py": frozenset({"numpy"}),
     "frames.py": frozenset({"numpy", "sx_geometry"}),
 }

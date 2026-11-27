@@ -18,6 +18,7 @@ members = [
     "drivers/sx-embodiment-commission",
     "drivers/sx-embodiment-ik",
     "drivers/sx-frames",
+    "drivers/sx-jaw",
 ]
 
 [workspace.package]
@@ -52,6 +53,10 @@ pedantic = { level = "deny", priority = -1 }
 opt-level = 3
 
 [profile.dev.package.sx-frames]
+opt-level = 3
+
+# The jaw solver's tests render and solve whole takes: unoptimised they take minutes.
+[profile.dev.package.sx-jaw]
 opt-level = 3
 
 # The hand-teach controller's tests run its real 50 ms loop deadline against the simulated bus:
