@@ -93,6 +93,8 @@ Fuse = Callable[[Stamps, EncoderReads | None, TagReads | None, int], Fused]
 
 #: OpenCV's 4x4 dictionaries share their first fifty codes; YUBI's markers are IDs 0 to 3.
 YUBI_JAW_DICTIONARY: Final = "DICT_4X4_50"
+#: The two finger markers of each YUBI hand (the solver's ``sx_jaw::tags::Layout::yubi``).
+YUBI_JAW_MARKERS: Final[Mapping[str, tuple[int, int]]] = {"right": (0, 1), "left": (2, 3)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,9 +114,22 @@ class JawTagLayout:
         if not (math.isfinite(self.marker_side_m) and 0.002 <= self.marker_side_m <= 0.1):
             raise JawUnitError(f"marker side {self.marker_side_m!r} m is not a printed tag size")
 
+    @classmethod
+    def yubi(cls, side: str) -> JawTagLayout:
+        try:
+            first, second = YUBI_JAW_MARKERS[side]
+        except KeyError as error:
+            raise JawUnitError(f"YUBI has no {side!r} hand") from error
+        return cls(first, second)
+
     @property
     def ids(self) -> tuple[int, int]:
         return (self.first_id, self.second_id)
+
+    def corners_m(self) -> Vector:
+        """The marker's corners in its own frame, in OpenCV's detection order."""
+        h = self.marker_side_m / 2.0
+        return np.array([[-h, h, 0.0], [h, h, 0.0], [h, -h, 0.0], [-h, -h, 0.0]], np.float64)
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,8 +15,11 @@
 //! One row per marker sighted in an analysed frame, at the frame's exposure on the host's
 //! `CLOCK_MONOTONIC`, its corners in full-frame pixels in OpenCV's order; an analysed frame
 //! with no marker is one row with the ID and corners empty. A frame absent from the file was
-//! not analysed (skipped by the cadence, or dropped because the worker was busy). Stamps never
-//! decrease.
+//! not analysed (skipped by the cadence because no marker was in sight, or dropped because the
+//! sighter was busy). Stamps never decrease. A sighter that saw the take through ends the file
+//! with `# ended offered=<frames> dropped=<busy>`; one that stopped before the take ended (the
+//! headset ran hot, its battery fell) with `# stopped <reason>`, so no solve mistakes the rest
+//! for unseen. A file with neither was cut off.
 
 use crate::detect::Marker;
 
@@ -60,9 +63,39 @@ pub fn rows(sighting: &Sighting) -> String {
     out
 }
 
+/// The line a sighter that stopped early ends its file with, newline included.
+pub fn stopped(reason: &str) -> String {
+    format!("# stopped {reason}\n")
+}
+
+/// The line a sighter that saw the take through ends its file with: the frames it was offered
+/// and how many of them it dropped busy.
+pub fn ended(offered: u64, dropped: u64) -> String {
+    format!("# ended offered={offered} dropped={dropped}\n")
+}
+
+/// How a sightings file ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ending {
+    /// Seen through: the frames offered and dropped busy.
+    Ended { offered: u64, dropped: u64 },
+    /// Stopped before the take ended, and why.
+    Stopped(String),
+    /// Neither line: the file was cut off.
+    CutOff,
+}
+
+/// A sightings file read back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sightings {
+    pub sightings: Vec<Sighting>,
+    pub ids: [u32; 2],
+    pub ending: Ending,
+}
+
 /// The sightings in `text`, for `side`. A torn last line (a take cut off mid-write) is
 /// dropped; anything else malformed refuses the file.
-pub fn parse(text: &str, side: &str) -> Result<(Vec<Sighting>, [u32; 2]), String> {
+pub fn parse(text: &str, side: &str) -> Result<Sightings, String> {
     let mut lines = text.split_inclusive('\n');
     let first = lines.next().ok_or("the sightings file is empty")?;
     let body = first
@@ -99,8 +132,27 @@ pub fn parse(text: &str, side: &str) -> Result<(Vec<Sighting>, [u32; 2]), String
         return Err("the sightings file has no header".to_owned());
     }
     let mut out: Vec<Sighting> = Vec::new();
+    let mut ending = Ending::CutOff;
     for line in lines {
         if !line.ends_with('\n') {
+            break;
+        }
+        if let Some(reason) = line.trim_end().strip_prefix("# stopped ") {
+            ending = Ending::Stopped(reason.to_owned());
+            break;
+        }
+        if let Some(counts) = line.trim_end().strip_prefix("# ended ") {
+            let count = |key: &str| {
+                counts
+                    .split_whitespace()
+                    .find_map(|kv| kv.strip_prefix(key)?.strip_prefix('='))
+                    .and_then(|v| v.parse().ok())
+                    .ok_or_else(|| format!("the sightings file's end {counts:?} has no {key}"))
+            };
+            ending = Ending::Ended {
+                offered: count("offered")?,
+                dropped: count("dropped")?,
+            };
             break;
         }
         let fields: Vec<&str> = line.trim_end().split(',').collect();
@@ -144,7 +196,11 @@ pub fn parse(text: &str, side: &str) -> Result<(Vec<Sighting>, [u32; 2]), String
             last.markers.push(Marker { id, corners });
         }
     }
-    Ok((out, ids))
+    Ok(Sightings {
+        sightings: out,
+        ids,
+        ending,
+    })
 }
 
 #[cfg(test)]
@@ -176,10 +232,17 @@ mod tests {
         for s in &sightings {
             text.push_str(&rows(s));
         }
+        let whole = text.clone();
         text.push_str("166,0,1.0");
-        let (back, ids) = parse(&text, "right").unwrap();
-        assert_eq!(ids, [0, 1]);
-        assert_eq!(back, sightings);
+        let back = parse(&text, "right").unwrap();
+        assert_eq!(back.ids, [0, 1]);
+        assert_eq!(back.sightings, sightings);
+        assert_eq!(back.ending, Ending::CutOff);
         assert!(parse(&text, "left").is_err());
+        let hot = parse(&(whole.clone() + &stopped("thermal_moderate")), "right").unwrap();
+        assert_eq!(hot.sightings, sightings);
+        assert_eq!(hot.ending, Ending::Stopped("thermal_moderate".into()));
+        let seen = parse(&(whole + &ended(3, 1)), "right").unwrap();
+        assert_eq!(seen.ending, Ending::Ended { offered: 3, dropped: 1 });
     }
 }

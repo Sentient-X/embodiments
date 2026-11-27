@@ -54,8 +54,9 @@ fn main() {
             &d,
         )
         .unwrap();
-        let (sightings, _) =
-            sx_jaw::sightings::parse(&std::fs::read_to_string(path).unwrap(), "right").unwrap();
+        let sightings = sx_jaw::sightings::parse(&std::fs::read_to_string(path).unwrap(), "right")
+            .unwrap()
+            .sightings;
         let (analysed, sighted) = coverage(&t, &sightings, &layout);
         eprintln!(
             "sightings: {analysed} of {} frames analysed, {sighted} with a marker",

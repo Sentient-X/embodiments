@@ -24,7 +24,7 @@ fn cpu_ms() -> f64 {
 }
 
 use sx_jaw::detect::{Detector, Luma, Region};
-use sx_jaw::sightings::{Sighting, preamble, rows};
+use sx_jaw::sightings::{Sighting, ended, preamble, rows};
 use sx_jaw::tags::Layout;
 use sx_jaw::track::{Cadence, Tracker, crop_for};
 
@@ -107,6 +107,7 @@ fn main() {
         )
         .unwrap();
     }
+    out.write_all(ended(count as u64, 0).as_bytes()).unwrap();
     let wall = started.elapsed().as_secs_f64();
     times.sort_by(f64::total_cmp);
     let p = |q: f64| times[((times.len() - 1) as f64 * q) as usize];
