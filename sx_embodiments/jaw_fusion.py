@@ -133,8 +133,10 @@ class FusionModel:
     #: holds a flat stretch flat and lets the tags set the level within a few seconds.
     bias_walk_rad: float = 0.0035
     #: The bias's walk on the first, coarsest fit, before any step has been found: free enough
-    #: to follow a grip, so the first fit does not take the squeeze for a wrong frame.
-    bias_free_rad: float = 0.5
+    #: to follow a grip (231306's releases read within 0.3 mm of the tags from 0.03 to 0.5),
+    #: tight enough that an encoder blip loses its weight rather than becoming two steps (at 0.5
+    #: every blip of sx test_jaw_solve's encoder was trusted).
+    bias_free_rad: float = 0.03
     #: The prior on the bias about its starting level: the encoder's reads less the tags' over
     #: the frames both saw (:func:`fuse_jaw`), or 0 where they never overlap. Around a level
     #: the tags set, a zero off by 15 degrees more still converges; an encoder zeroed wherever
@@ -596,7 +598,10 @@ def fuse_jaw(
     seconds = (times - times[0]).astype(np.float64) / 1e9
     steps = np.diff(seconds, prepend=seconds[0])
     weights = np.ones(len(times))
-    walk = model.bias_free_rad**2 * steps
+    # Without tags nothing observes the bias: it stays at its start, or it would soak up the
+    # encoder's own blips as steps and wander off with them.
+    observed = 1.0 if len(tag_t) else 0.0
+    walk = observed * model.bias_free_rad**2 * steps
     for scale in REWEIGHT_SCALES:
         state, _ = _smooth(
             times, kinds, values, scale * stds / np.sqrt(weights), first, bias0, walk, model
@@ -607,7 +612,7 @@ def fuse_jaw(
         # Cauchy on the bias's steps (iteratively reweighted: the variance is the scale's plus
         # the step's own square), so it stays flat but where it really stepped.
         step = np.diff(state[:, 2], prepend=state[0, 2])
-        walk = (scale * model.bias_walk_rad) ** 2 * steps + step**2
+        walk = observed * ((scale * model.bias_walk_rad) ** 2 * steps + step**2)
     state, cov = _smooth(times, kinds, values, stds / np.sqrt(weights), first, bias0, walk, model)
 
     outputs = kinds == _OUTPUT
