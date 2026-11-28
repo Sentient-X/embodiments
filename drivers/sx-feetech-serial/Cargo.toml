@@ -12,7 +12,7 @@ publish.workspace = true
 # A simulated Feetech bus answering as STS3215 firmware does, for the suites of every crate
 # that drives a Feetech body (`sim`).
 sim = []
-# Opt-in station build for nonblocking grasp measurements.
+# Opt-in station build for nonblocking grasp measurements and the Spark hold trial.
 gripper-diagnostics = []
 
 [dependencies]

@@ -176,6 +176,8 @@ use sx_embodiment_drivers::{
 pub use sx_embodiment_drivers::{ApproachLimit, BRING_UP_APPROACH};
 use thiserror::Error;
 
+#[cfg(feature = "gripper-diagnostics")]
+use crate::grasp_hold::{Finger as GraspFinger, RUNTIME_CAP, Sample as GraspSample};
 use crate::scservo_sdk::{
     CommResult, GroupSyncRead, GroupSyncWrite, MAX_ID, ProtocolPacketHandler, SMS_STS_ACC,
     SMS_STS_GOAL_POSITION_L, SMS_STS_GOAL_SPEED_L, SMS_STS_MAX_ANGLE_LIMIT_L,
@@ -518,6 +520,16 @@ pub enum FeetechChainError {
     Comm { bus_id: u16, result: CommResult },
     #[error("the goal-position SYNC WRITE failed: {0:?}")]
     SyncWrite(CommResult),
+    #[cfg(feature = "gripper-diagnostics")]
+    #[error("bus_id {0}: invalid Spark gripper hold configuration or unavailable effort feedback")]
+    GraspHoldConfiguration(u16),
+    #[cfg(feature = "gripper-diagnostics")]
+    #[error("bus_id {bus_id}: gripper effort cap readback {actual:?}, expected {expected}")]
+    GraspCapUnconfirmed {
+        bus_id: u16,
+        actual: Option<u16>,
+        expected: u16,
+    },
     #[error("bus_id {bus_id} reported error flags {error:#04x}")]
     ServoError { bus_id: u16, error: u8 },
     #[error(
@@ -565,6 +577,8 @@ pub struct FeetechChain<P> {
     reader: GroupSyncRead,
     #[cfg(feature = "gripper-diagnostics")]
     grasp: Option<crate::grasp::GraspDiagnostics>,
+    #[cfg(feature = "gripper-diagnostics")]
+    grasp_hold: Vec<GraspFinger>,
     /// The command's SYNC WRITE of every goal, refilled each command in buffers it keeps.
     writer: GroupSyncWrite,
     /// Per servo, whether its approach limit was written and read back.
@@ -762,6 +776,8 @@ impl<P: SerialPort> FeetechChain<P> {
             reader: GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, SYNC_READ_LENGTH),
             #[cfg(feature = "gripper-diagnostics")]
             grasp: None,
+            #[cfg(feature = "gripper-diagnostics")]
+            grasp_hold: Vec::new(),
             writer: GroupSyncWrite::new(SMS_STS_GOAL_POSITION_L, 2),
             approach_limited: Vec::new(),
             pulling_in: Vec::new(),
@@ -784,9 +800,87 @@ impl<P: SerialPort> FeetechChain<P> {
                 chain.reader = reader;
                 chain.grasp = Some(grasp);
             }
+            if matches!(
+                chain.axes[0].port.as_str(),
+                "left_gripper" | "right_gripper"
+            ) && let Some(setting) = std::env::var_os("SX_FEETECH_GRASP_HOLD_CAP")
+            {
+                let cap = setting
+                    .to_str()
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .ok_or(FeetechChainError::GraspHoldConfiguration(
+                        chain.axes[0].binding.bus_id,
+                    ))?;
+                chain.configure_grasp_hold(cap)?;
+            }
         }
         chain.observed = fresh_positions(&chain.present_positions()).map(Axes::from);
         Ok(chain)
+    }
+
+    #[cfg(feature = "gripper-diagnostics")]
+    fn configure_grasp_hold(&mut self, cap: u16) -> Result<(), FeetechChainError> {
+        let first_id = self.axes[0].binding.bus_id;
+        if !(1..=200).contains(&cap) {
+            return Err(FeetechChainError::GraspHoldConfiguration(first_id));
+        }
+        if self.grasp.is_none() {
+            self.reader = crate::grasp::qualified_reader(&mut self.sms.ph, &self.axes)
+                .ok_or(FeetechChainError::GraspHoldConfiguration(first_id))?;
+        }
+        let end = self.sms.ph.scs_getend();
+        for servo in &self.servos {
+            let id = servo.scs_id();
+            let bus_id = servo.axis.binding.bus_id;
+            let invalid = FeetechChainError::GraspHoldConfiguration(bus_id);
+            // Raw closing direction from the Spark's confirmed gripper endpoints in
+            // allisa_bot_feetech.json. The opt-in is scoped to these exact fingers.
+            let close =
+                match (servo.axis.joint.as_str(), bus_id) {
+                    ("right_gripper_left_finger_joint", 1)
+                    | ("left_gripper_right_finger_joint", 4) => -1,
+                    ("right_gripper_right_finger_joint", 2)
+                    | ("left_gripper_left_finger_joint", 3) => 1,
+                    _ => return Err(invalid),
+                };
+            let protection = servo.configuration.protection.ok_or(invalid)?;
+            let (threshold, result, error) = self.sms.ph.read1_byte_tx_rx(id, OVERLOAD_TORQUE);
+            expect(bus_id, (result, error))?;
+            let baseline = protection.max_torque_limit;
+            let actual = self.reader.get_data2(end, id, RUNTIME_CAP);
+            if threshold != protection.overload_torque
+                || cap + 30 > u16::from(threshold) * 10
+                || cap >= baseline
+                || !matches!(actual, Some(value) if value == baseline || value == cap)
+            {
+                return Err(FeetechChainError::GraspHoldConfiguration(bus_id));
+            }
+            let mut finger = GraspFinger::new(close, baseline, cap);
+            finger.expected_cap = actual.unwrap_or(baseline);
+            self.grasp_hold.push(finger);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "gripper-diagnostics")]
+    fn write_grasp_cap(&mut self, index: usize, cap: u16) -> Result<(), FeetechChainError> {
+        let servo = &self.servos[index];
+        let bus_id = servo.axis.binding.bus_id;
+        let id = servo.scs_id();
+        self.grasp_hold[index].cap_write_unconfirmed = true;
+        expect(bus_id, self.sms.ph.write2_byte_tx_rx(id, RUNTIME_CAP, cap))?;
+        let (actual, result, error) = self.sms.ph.read2_byte_tx_rx(id, RUNTIME_CAP);
+        expect(bus_id, (result, error))?;
+        if actual != cap {
+            return Err(FeetechChainError::GraspCapUnconfirmed {
+                bus_id,
+                actual: Some(actual),
+                expected: cap,
+            });
+        }
+        self.grasp_hold[index].expected_cap = cap;
+        self.grasp_hold[index].cap_write_unconfirmed = false;
+        Ok(())
     }
 
     fn read2(&mut self, bus_id: u16, scs_id: u8, address: u8) -> Result<u16, FeetechChainError> {
@@ -1024,12 +1118,16 @@ impl<P: SerialPort> FeetechChain<P> {
             self.retried += 1;
             let _ = self.reader.tx_rx_lost(&mut self.sms.ph);
         }
-        let reader = &self.reader;
         let received = Instant::now();
         let end = self.sms.ph.scs_getend();
         let mut readings: Axes<AxisReading> = Axes::new();
         let mut arrived = false;
+        #[cfg(feature = "gripper-diagnostics")]
+        if let Some(grasp) = &mut self.grasp {
+            grasp.observe(&self.reader, end, received);
+        }
         for index in 0..self.servos.len() {
+            let reader = &self.reader;
             let servo = &self.servos[index];
             let id = servo.scs_id();
             let torque = reader.get_data1(id, SMS_STS_TORQUE_ENABLE);
@@ -1059,10 +1157,16 @@ impl<P: SerialPort> FeetechChain<P> {
                     received,
                 },
             };
+            #[cfg(feature = "gripper-diagnostics")]
+            let reading = if powered {
+                self.observe_grasp(index, reading, received)?
+            } else {
+                reading
+            };
             arrived |= self.pulling_in[index]
                 && reading
                     .position()
-                    .is_some_and(|joint| servo.within_limits(joint));
+                    .is_some_and(|joint| self.servos[index].within_limits(joint));
             if !approach {
                 self.approach_limited[index] = false;
             }
@@ -1075,15 +1179,63 @@ impl<P: SerialPort> FeetechChain<P> {
             .iter()
             .map(|reading| reading.position().unwrap_or(f64::NAN))
             .collect();
-        #[cfg(feature = "gripper-diagnostics")]
-        if let Some(grasp) = &mut self.grasp {
-            grasp.observe(reader, end, received);
-        }
         if powered && arrived {
             self.raise_pulled_in(&readings);
         }
         self.command_readings = Some(readings);
         Ok(observed)
+    }
+
+    #[cfg(feature = "gripper-diagnostics")]
+    fn observe_grasp(
+        &mut self,
+        index: usize,
+        reading: AxisReading,
+        received: Instant,
+    ) -> Result<AxisReading, FeetechChainError> {
+        let Some(finger) = self.grasp_hold.get_mut(index) else {
+            return Ok(reading);
+        };
+        let servo = &self.servos[index];
+        let id = servo.scs_id();
+        let end = self.sms.ph.scs_getend();
+        let read = |address| self.reader.get_data2(end, id, address);
+        let status = self.reader.get_data1(id, crate::grasp::HARDWARE_STATUS);
+        let reading = match (reading, status) {
+            (AxisReading::Fresh { .. }, Some(error)) if error != 0 => AxisReading::Faulted(error),
+            (AxisReading::Fresh { .. }, None) => AxisReading::Missing(MissingReason::Timeout),
+            (reading, _) => reading,
+        };
+        if !reading.is_fresh() || self.pulling_in[index] {
+            finger.observe(None);
+            return Ok(reading);
+        }
+        let cap = read(RUNTIME_CAP);
+        if cap != Some(finger.expected_cap) {
+            finger.cap_write_unconfirmed = true;
+            self.torque_state = TorqueState::Disabled;
+            return Err(FeetechChainError::GraspCapUnconfirmed {
+                bus_id: servo.axis.binding.bus_id,
+                actual: cap,
+                expected: finger.expected_cap,
+            });
+        }
+        let sample = || {
+            let position = read(SMS_STS_PRESENT_POSITION_L)?;
+            let goal = read(SMS_STS_GOAL_POSITION_L)?;
+            let stroke = servo.calibration.range_min..=servo.calibration.range_max;
+            if !stroke.contains(&position) || !stroke.contains(&goal) {
+                return None;
+            }
+            Some(GraspSample {
+                at: received,
+                position: i32::from(position),
+                goal: i32::from(goal),
+                load: read(crate::scservo_sdk::SMS_STS_PRESENT_LOAD_L)? & 0x03ff,
+            })
+        };
+        finger.observe(sample());
+        Ok(reading)
     }
 
     /// Raise every servo being pulled in whose `reading` is inside its limits to its declared
@@ -1177,6 +1329,7 @@ impl<P: SerialPort> FeetechChain<P> {
     /// `Torque_Enable` 0, then `Lock` 0 (`sms_sts.unLockEprom`), each acknowledged, on every
     /// servo whatever an earlier one answered, then each `Torque_Enable` read back; a servo is
     /// proven released only when it reads 0.
+    #[allow(clippy::too_many_lines)] // Holding and releasing each servo share the stop proof.
     fn settle(&mut self, hold: &[bool]) -> StopReport {
         fn note(bus_id: u16, error: u8, faults: &mut Vec<(u16, u8)>) {
             if error != 0 && !faults.contains(&(bus_id, error)) {
@@ -1199,6 +1352,19 @@ impl<P: SerialPort> FeetechChain<P> {
         for (index, bus_id, scs_id) in &ids {
             if !hold.get(*index).copied().unwrap_or(false) {
                 continue;
+            }
+            #[cfg(feature = "gripper-diagnostics")]
+            if self.grasp_hold.get(*index).is_some() {
+                let (status, result, error) = self
+                    .sms
+                    .ph
+                    .read1_byte_tx_rx(*scs_id, crate::grasp::HARDWARE_STATUS);
+                if result != CommResult::Success || error != 0 || status != 0 {
+                    if result == CommResult::Success {
+                        note(*bus_id, error | status, &mut report.faults);
+                    }
+                    continue;
+                }
             }
             let (present, result, error) = self
                 .sms
@@ -1262,8 +1428,26 @@ impl<P: SerialPort> FeetechChain<P> {
             if !proven && !report.unproven.contains(&bus_id) {
                 report.unproven.push(bus_id);
             }
+            #[cfg(feature = "gripper-diagnostics")]
+            if proven
+                && error == 0
+                && let Some(finger) = self.grasp_hold.get(index)
+                && finger.needs_cap_restore()
+                && let Err(error) = self.write_grasp_cap(index, finger.baseline_cap)
+            {
+                if let FeetechChainError::ServoError { error, .. } = error {
+                    note(bus_id, error, &mut report.faults);
+                }
+                if !report.unproven.contains(&bus_id) {
+                    report.unproven.push(bus_id);
+                }
+            }
         }
         self.holding.copy_from_slice(&keeps);
+        #[cfg(feature = "gripper-diagnostics")]
+        for finger in &mut self.grasp_hold {
+            finger.reset();
+        }
         self.stop_pending = !report.is_proven();
         for fault in &report.faults {
             if !self.faults.contains(fault) {
@@ -1348,6 +1532,16 @@ impl<P: SerialPort> FeetechChain<P> {
             .iter()
             .map(|servo| (servo.axis.binding.bus_id, servo.scs_id()))
             .collect();
+        #[cfg(feature = "gripper-diagnostics")]
+        for (index, &(bus_id, id)) in ids.iter().take(self.grasp_hold.len()).enumerate() {
+            // The old closing goal has been replaced with the measured rest goal.
+            let cap = self.grasp_hold[index].reenable();
+            if self.read2(bus_id, id, RUNTIME_CAP)? != cap {
+                self.write_grasp_cap(index, cap)?;
+            }
+            self.grasp_hold[index].expected_cap = cap;
+            self.grasp_hold[index].cap_write_unconfirmed = false;
+        }
         for (bus_id, scs_id) in ids {
             let enabled = self.retried_once(
                 |sms| sms.ph.write1_byte_tx_rx(scs_id, SMS_STS_TORQUE_ENABLE, 1),
@@ -1422,15 +1616,6 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 servo.goal_position(goal)
             })
             .collect::<Result<Axes<u16>, _>>()?;
-        self.writer.clear_param();
-        for (servo, goal) in self.servos.iter().zip(goals) {
-            if !self.writer.add_param(
-                servo.scs_id(),
-                &[self.sms.ph.scs_lobyte(goal), self.sms.ph.scs_hibyte(goal)],
-            ) {
-                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
-            }
-        }
         // From here the servos may move: what open or the last stop read no longer holds.
         if self.torque_state == TorqueState::Released {
             self.torque_state = TorqueState::Disabled;
@@ -1440,6 +1625,39 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         if self.torque_state != TorqueState::Position {
             self.enable_torque()?;
             self.torque_state = TorqueState::Position;
+        }
+        #[cfg(feature = "gripper-diagnostics")]
+        let goals = {
+            let mut goals = goals;
+            let now = Instant::now();
+            for (index, finger) in (0..self.grasp_hold.len()).zip(goals.iter_mut()) {
+                let requested =
+                    ProtocolPacketHandler::<()>::scs_tohost(*finger, GOAL_POSITION_SIGN_BIT);
+                let (goal, cap) = self.grasp_hold[index].plan(requested, now);
+                if let Some(cap) = cap
+                    && let Err(error) = self.write_grasp_cap(index, cap)
+                {
+                    self.torque_state = TorqueState::Disabled;
+                    return Err(error);
+                }
+                *finger = u16::try_from(ProtocolPacketHandler::<()>::scs_toscs(
+                    goal,
+                    GOAL_POSITION_SIGN_BIT,
+                ))
+                .map_err(|_| {
+                    FeetechChainError::Unencodable(self.servos[index].axis.binding.bus_id)
+                })?;
+            }
+            goals
+        };
+        self.writer.clear_param();
+        for (servo, goal) in self.servos.iter().zip(goals) {
+            if !self.writer.add_param(
+                servo.scs_id(),
+                &[self.sms.ph.scs_lobyte(goal), self.sms.ph.scs_hibyte(goal)],
+            ) {
+                return Err(FeetechChainError::GroupParam(servo.axis.binding.bus_id));
+            }
         }
         // Driven now: no servo is held where a stop left it.
         self.holding.fill(false);
@@ -1588,15 +1806,15 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
         self.observed
     }
 
-    /// The longest [`ActuatorChain::stop`] takes on this chain: four exchanges per servo,
-    /// each bounded by the link's [`SerialPort::timeout`].
+    /// The stop's serial time budget, including the opted-in gripper status check and,
+    /// when the cap has changed, its restore and readback after torque-off.
     fn stop_budget(&self) -> Duration {
         let servos = u32::try_from(self.servos.len()).unwrap_or(u32::MAX);
-        self.sms
-            .ph
-            .port()
-            .timeout()
-            .saturating_mul(STOP_EXCHANGES_PER_SERVO.saturating_mul(servos))
+        let exchanges = STOP_EXCHANGES_PER_SERVO.saturating_mul(servos);
+        #[cfg(feature = "gripper-diagnostics")]
+        let exchanges =
+            exchanges.saturating_add(3 * u32::try_from(self.grasp_hold.len()).unwrap_or(2));
+        self.sms.ph.port().timeout().saturating_mul(exchanges)
     }
 
     /// Release the latched stop faults, letting motion resume. Whoever calls this has decided
@@ -1640,6 +1858,161 @@ impl<P: SerialPort> ActuatorChain for FeetechChain<P> {
                 ))
             })
             .collect()
+    }
+}
+
+#[cfg(all(test, feature = "gripper-diagnostics"))]
+mod hold_tests {
+    use super::*;
+    use crate::{sim::SimBus, static_upper_body::RIGHT_GRIPPER};
+    use sx_embodiment_drivers::BodyBindings;
+
+    fn trial_gripper() -> (SimBus, FeetechChain<SimBus>, [f64; 2]) {
+        let calibration = MotorCalibration {
+            drive_mode: false,
+            homing_offset: 0,
+            range_min: 1000,
+            range_max: 2500,
+        };
+        let bus = SimBus::sts3215(&[(1, calibration), (2, calibration)]);
+        for registers in bus.state().servos.values_mut() {
+            registers[48..50].copy_from_slice(&500_u16.to_le_bytes());
+        }
+        let axes = RIGHT_GRIPPER
+            .axes(BodyBindings::parse(RIGHT_GRIPPER.bindings).unwrap())
+            .unwrap();
+        let axes = axes
+            .into_iter()
+            .map(|axis| axis.calibrated(0.0, 1).unwrap())
+            .collect();
+        let servos = RIGHT_GRIPPER.servos(axes, &[calibration; 2]).unwrap();
+        let wanted = [
+            servos[0].joint_from_raw(1750),
+            servos[1].joint_from_raw(1900),
+        ];
+        let mut chain = FeetechChain::open(bus.clone(), servos).unwrap();
+        chain.configure_grasp_hold(180).unwrap();
+        chain.command(&wanted).unwrap();
+        (bus, chain, wanted)
+    }
+
+    #[test]
+    fn an_unconfirmed_contact_cap_refuses_the_next_goal() {
+        let (bus, mut chain, wanted) = trial_gripper();
+        let start = Instant::now()
+            .checked_sub(Duration::from_millis(100))
+            .unwrap();
+        for step in 0..=10 {
+            chain.grasp_hold[1].observe(Some(GraspSample {
+                at: start + Duration::from_millis(step * 10),
+                position: 1750,
+                goal: 1900,
+                load: 380,
+            }));
+        }
+        bus.state().ignored.insert((2, RUNTIME_CAP));
+        let error = chain.command(&wanted).unwrap_err();
+        assert!(matches!(
+            error,
+            FeetechChainError::GraspCapUnconfirmed {
+                bus_id: 2,
+                expected: 180,
+                actual: Some(500)
+            }
+        ));
+        assert_eq!(bus.state().goal(2), 1900);
+        bus.state().ignored.remove(&(2, RUNTIME_CAP));
+        assert!(chain.stop().is_proven());
+        assert_eq!(bus.state().torque(2), 0);
+    }
+
+    #[test]
+    fn stop_releases_a_hardware_fault_and_restores_only_the_released_cap() {
+        let (bus, mut chain, _) = trial_gripper();
+        chain.write_grasp_cap(0, 180).unwrap();
+        chain.write_grasp_cap(1, 180).unwrap();
+        bus.state().servos.get_mut(&2).unwrap()[usize::from(crate::grasp::HARDWARE_STATUS)] = 32;
+        let stop = chain.settle(&[true, true]);
+        assert!(stop.is_proven());
+        assert_eq!(stop.faults, [(2, 32)]);
+        let state = bus.state();
+        assert_eq!(state.torque(1), 1);
+        assert_eq!(state.torque(2), 0);
+        assert_eq!(state.servos[&1][48..50], 180_u16.to_le_bytes());
+        assert_eq!(state.servos[&2][48..50], 500_u16.to_le_bytes());
+        let torque_off = state
+            .written
+            .iter()
+            .rposition(|packet| packet.get(2) == Some(&2) && packet.get(4..7) == Some(&[3, 40, 0]))
+            .unwrap();
+        let restored = state
+            .written
+            .iter()
+            .rposition(|packet| {
+                packet.get(2) == Some(&2) && packet.get(4..8) == Some(&[3, 48, 244, 1])
+            })
+            .unwrap();
+        assert!(torque_off < restored);
+        drop(state);
+        assert!(chain.stop().is_proven());
+        assert_eq!(bus.state().servos[&1][48..50], 500_u16.to_le_bytes());
+    }
+
+    #[test]
+    fn an_unexpected_runtime_cap_is_restored_after_torque_off() {
+        let (bus, mut chain, wanted) = trial_gripper();
+        bus.state().servos.get_mut(&2).unwrap()[48..50].copy_from_slice(&160_u16.to_le_bytes());
+        assert!(matches!(
+            chain.command(&wanted),
+            Err(FeetechChainError::GraspCapUnconfirmed {
+                bus_id: 2,
+                expected: 500,
+                actual: Some(160),
+            })
+        ));
+        assert!(chain.stop().is_proven());
+        assert_eq!(bus.state().torque(2), 0);
+        assert_eq!(bus.state().servos[&2][48..50], 500_u16.to_le_bytes());
+    }
+
+    #[test]
+    fn teaching_release_restores_contact_effort_and_keeps_later_ticks_read_only() {
+        let (bus, mut chain, wanted) = trial_gripper();
+        chain.write_grasp_cap(1, 180).unwrap();
+        let released = [Some(CompliantCommand::Released); 2];
+        let feedforward = [Feedforward::default(); 2];
+        chain
+            .command_compliant(&wanted, &feedforward, &released)
+            .unwrap();
+        {
+            let state = bus.state();
+            assert_eq!(state.torque(2), 0);
+            assert_eq!(state.servos[&2][48..50], 500_u16.to_le_bytes());
+        }
+        bus.rest_at(2, 1710);
+        // A torque-off sample still answers when the servo's RAM cap has changed.
+        bus.state().servos.get_mut(&2).unwrap()[48..50].copy_from_slice(&160_u16.to_le_bytes());
+        let before = bus.state().written.len();
+        chain
+            .command_compliant(&wanted, &feedforward, &released)
+            .unwrap();
+        assert!(
+            chain
+                .command_readings()
+                .unwrap()
+                .iter()
+                .all(AxisReading::is_fresh)
+        );
+        assert!(
+            bus.state().written[before..]
+                .iter()
+                .all(|packet| packet[4] == 0x82)
+        );
+        let manual_pose = chain.last_observed().unwrap();
+        chain.command(&manual_pose).unwrap();
+        let state = bus.state();
+        assert_eq!(state.torque(2), 1);
+        assert_eq!(state.servos[&2][48..50], 500_u16.to_le_bytes());
     }
 }
 
