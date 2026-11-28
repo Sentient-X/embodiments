@@ -56,6 +56,25 @@ it on an SO-101's serial adapter once a serial device binding exists there.
   and converted at float32, as the station's earlier
   Python follower (`sx_drivers.feetech.radians_to_wire`) did.
 
+## Spark gripper contact-hold trial
+
+The `gripper-diagnostics` build can run an attended contact-hold trial on the Spark's four
+commissioned STS3215 fingers. Set `SX_FEETECH_GRASP_HOLD_CAP=180` for the 18% output duty
+candidate. The driver checks this cap against the firmware overload setting and the normal
+cap at open. Output duty is a motor limit and does not measure jaw force.
+
+Sustained load with little change in position during a close reduces the RAM torque limit.
+The driver verifies the new limit before applying a bounded contact goal. Opening passes
+through and restores normal effort once the servo confirms an opening goal past contact.
+Firmware faults still stop the chain. A finger held under torque keeps its reduced cap.
+On release, the driver restores the baseline after a successful torque-off readback.
+Subsequent hand-guided ticks read encoders at zero torque.
+
+Confirm grip retention, opening, re-grasp and sustained effort with the actual task objects
+before commissioning the cap. If a servo fault prevents verified restoration, unload the
+gripper and verify its normal cap before resuming work after a rollback. A servo power cycle
+reloads its RAM cap from the stored limit.
+
 ## Parity
 
 `tests/fixtures/scservo/mint.py` runs `scservo_sdk` against a recording port, with `LeRobot`'s

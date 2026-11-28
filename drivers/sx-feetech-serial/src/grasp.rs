@@ -14,8 +14,9 @@ use crate::scservo_sdk::{
     SMS_STS_PRESENT_VOLTAGE, SMS_STS_TORQUE_ENABLE,
 };
 
-const RUNTIME_TORQUE_LIMIT: u8 = 48;
-const HARDWARE_STATUS: u8 = 65;
+use crate::grasp_hold::RUNTIME_CAP;
+
+pub(crate) const HARDWARE_STATUS: u8 = 65;
 const EEPROM_CAP: u8 = 16;
 const UNLOAD_CONDITIONS: u8 = 19;
 const PROTECTION_CURRENT: u8 = 28;
@@ -133,7 +134,7 @@ fn sample(reader: &GroupSyncRead, end: u8, id: u8) -> Option<Sample> {
         two(SMS_STS_PRESENT_CURRENT_L)?,
         one(SMS_STS_PRESENT_VOLTAGE)?,
         one(SMS_STS_PRESENT_TEMPERATURE)?,
-        two(RUNTIME_TORQUE_LIMIT)?,
+        two(RUNTIME_CAP)?,
         one(HARDWARE_STATUS)?,
         u32::from(reader.get_error(id)?),
         one(SMS_STS_TORQUE_ENABLE)?,
@@ -147,7 +148,7 @@ fn read_limits<P: SerialPort>(
     axes: &[BoundAxis],
     output: &mut impl Write,
 ) -> io::Result<()> {
-    let mut reader = GroupSyncRead::new(EEPROM_CAP, RUNTIME_TORQUE_LIMIT + 2 - EEPROM_CAP);
+    let mut reader = GroupSyncRead::new(EEPROM_CAP, RUNTIME_CAP + 2 - EEPROM_CAP);
     for axis in axes {
         if let Ok(id) = u8::try_from(axis.binding.bus_id) {
             reader.add_param(id);
@@ -165,7 +166,7 @@ fn read_limits<P: SerialPort>(
             axis.joint,
             reader.get_error(id),
             reader.get_data2(end, id, EEPROM_CAP),
-            reader.get_data2(end, id, RUNTIME_TORQUE_LIMIT),
+            reader.get_data2(end, id, RUNTIME_CAP),
             reader.get_data1(id, UNLOAD_CONDITIONS),
             reader.get_data2(end, id, PROTECTION_CURRENT),
             reader.get_data1(id, POST_TRIP_OUTPUT),
@@ -218,11 +219,10 @@ fn evidence_file(port: &str) -> Option<BufWriter<File>> {
 /// Enable the extended reply only after the unpowered chain has demonstrated
 /// that every servo can answer it. The caller keeps its position-only reader
 /// if this probe or diagnostic worker initialization fails.
-pub(crate) fn open<P: SerialPort>(
+pub(crate) fn qualified_reader<P: SerialPort>(
     handler: &mut ProtocolPacketHandler<P>,
     axes: &[BoundAxis],
-) -> Option<(GroupSyncRead, GraspDiagnostics)> {
-    let mut output = evidence_file(&axes.first()?.port)?;
+) -> Option<GroupSyncRead> {
     let mut reader = GroupSyncRead::new(SMS_STS_TORQUE_ENABLE, READ_LENGTH);
     for axis in axes {
         if !reader.add_param(u8::try_from(axis.binding.bus_id).ok()?) {
@@ -230,18 +230,28 @@ pub(crate) fn open<P: SerialPort>(
         }
     }
     let _ = reader.tx_rx_packet(handler);
-    if !axes.iter().all(|axis| {
-        u8::try_from(axis.binding.bus_id)
-            .ok()
-            .and_then(|id| sample(&reader, handler.scs_getend(), id))
-            .is_some_and(|row| row[9] == 0)
-    }) {
+    axes.iter()
+        .all(|axis| {
+            u8::try_from(axis.binding.bus_id)
+                .ok()
+                .and_then(|id| sample(&reader, handler.scs_getend(), id))
+                .is_some_and(|row| row[9] == 0)
+        })
+        .then_some(reader)
+}
+
+pub(crate) fn open<P: SerialPort>(
+    handler: &mut ProtocolPacketHandler<P>,
+    axes: &[BoundAxis],
+) -> Option<(GroupSyncRead, GraspDiagnostics)> {
+    let mut output = evidence_file(&axes.first()?.port)?;
+    let Some(reader) = qualified_reader(handler, axes) else {
         let _ = writeln!(
             output,
             "# extended reply unavailable; using position-only feedback"
         );
         return None;
-    }
+    };
     read_limits(handler, axes, &mut output).ok()?;
     writeln!(output, "{COLUMNS}").ok()?;
     output.flush().ok()?;

@@ -12,6 +12,8 @@ pub mod body;
 pub mod chain;
 #[cfg(feature = "gripper-diagnostics")]
 mod grasp;
+#[cfg(feature = "gripper-diagnostics")]
+mod grasp_hold;
 pub mod observe;
 pub mod scan;
 pub mod scservo_sdk;
